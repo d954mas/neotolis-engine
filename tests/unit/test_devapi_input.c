@@ -328,6 +328,23 @@ static void test_input_text_at_char_max_ok(void) {
     cJSON_Delete(root);
 }
 
+/* The cap is per frame, not per command: a second batch that would not fit the same frame is rejected,
+   so a reply's queued is always what the game reads. */
+static void test_input_text_second_batch_over_frame_cap_bad_params(void) {
+    char *req = make_text_request(NT_INPUT_CHAR_MAX);
+    cJSON_Delete(parse_ok(nt_devapi_submit(req)));
+    assert_bad_params(nt_devapi_submit("{\"method\":\"input.text\",\"params\":{\"text\":\"x\"}}"));
+    advance();
+    cJSON_Delete(parse_ok(nt_devapi_submit(req))); /* the next frame has room again */
+    free(req);
+    uint32_t n = 0;
+    uint32_t cp = 0;
+    while (nt_input_pop_char(&cp)) {
+        n++;
+    }
+    TEST_ASSERT_EQUAL_UINT32(NT_INPUT_CHAR_MAX, n);
+}
+
 /* ---- hold / frame_stride strict integral+sign parse (not silent valueint truncation) ---- */
 
 static void test_input_key_hold_fractional_bad_params(void) { assert_bad_params(nt_devapi_submit("{\"method\":\"input.key\",\"params\":{\"key\":\"A\",\"hold\":2.9}}")); }
@@ -870,6 +887,7 @@ int main(void) {
     RUN_TEST(test_input_text_empty_queued_zero);
     RUN_TEST(test_input_text_exceeds_char_max_bad_params);
     RUN_TEST(test_input_text_at_char_max_ok);
+    RUN_TEST(test_input_text_second_batch_over_frame_cap_bad_params);
     RUN_TEST(test_input_key_hold_fractional_bad_params);
     RUN_TEST(test_input_key_hold_negative_fractional_bad_params);
     RUN_TEST(test_input_gesture_frame_stride_fractional_bad_params);

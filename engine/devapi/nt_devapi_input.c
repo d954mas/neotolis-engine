@@ -570,6 +570,13 @@ static bool cmd_input_text(const cJSON *params, cJSON *result, nt_devapi_error *
     if (!nt_devapi_input_sched_can_reserve(n)) {
         return nt_devapi_fail(err, "input.text: inject schedule overflow");
     }
+    uint32_t due = 0; /* text already scheduled for the same frame: the cap is per frame */
+    for (uint32_t i = 0; i < s_sched_count; i++) {
+        due += (s_sched[i].ev.kind == NT_INPUT_EV_CHAR && s_sched[i].frames_remaining == 0) ? 1U : 0U;
+    }
+    if (due + n > NT_INPUT_CHAR_MAX) {
+        return nt_devapi_fail(err, "input.text: the next frame already holds text; at most " NT_DEVAPI_STR(NT_INPUT_CHAR_MAX) " codepoints per frame");
+    }
     for (uint32_t i = 0; i < n; i++) {
         nt_devapi_input_sched((nt_input_event_t){.kind = NT_INPUT_EV_CHAR, .cp = cps[i]}, 0);
     }
@@ -676,7 +683,8 @@ static const nt_devapi_command k_input_cmds[] = {
     },
     {
         .method = "input.text",
-        .summary = "decode a UTF-8 string -> codepoints and enqueue them as typed text (at most " NT_DEVAPI_STR(NT_INPUT_CHAR_MAX) ", released on the next sim-advance)",
+        .summary =
+            "decode a UTF-8 string -> codepoints and enqueue them as typed text (at most " NT_DEVAPI_STR(NT_INPUT_CHAR_MAX) " per frame, all commands together; released on the next sim-advance)",
         .params_shape = "{text:string}",
         .result_shape = "{queued:number}",
         .fn = cmd_input_text,

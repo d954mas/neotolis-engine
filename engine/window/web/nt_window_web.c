@@ -259,12 +259,15 @@ EM_JS(void, nt_window_web_register_input, (const char *const *codes, int count),
         }
     });
 
-    /* Blur: held input releases in order with the events around it */
-    canvas.addEventListener("blur", function() {
+    /* Blur: held input releases in order with the events around it. The window too: a browser that
+       keeps the canvas focused across an app or tab switch still blurs the window; a second loss is a no-op. */
+    function focusLost() {
         ev(EV_FOCUS_LOST);
         pressedWithMeta.length = 0;
         mouseOwned = false; /* the release may land outside; a held capture or the next wheel must not press again */
-    });
+    }
+    canvas.addEventListener("blur", focusLost);
+    window.addEventListener("blur", focusLost);
 
     /* Pointer events — pass CSS-relative coords, C maps with engine DPR. Every mouse press, release and
        move is a move with the buttons (a release keeps the mouse), a leave is its own event; touch and

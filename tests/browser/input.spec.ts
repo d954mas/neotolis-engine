@@ -218,6 +218,24 @@ test('keys: punctuation and numpad map, and Cmd up releases what macOS never rel
   expect(afterCmd.keys.every((k) => k[0] === 0)).toBe(true);
 });
 
+test('blur: a window blur releases held keys even when the canvas keeps focus', async ({ page }) => {
+  await page.goto('/index.html');
+  await page.waitForFunction(() => window.__nt?.ready === true, null, { timeout: 30_000 });
+  const { held, after } = await page.evaluate(() => {
+    const canvas = document.querySelector('canvas')!;
+    canvas.focus();
+    window.__nt!.input_poll();
+    canvas.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyW', key: 'w', bubbles: true }));
+    const held = window.__nt!.input_poll();
+    window.dispatchEvent(new FocusEvent('blur'));
+    const after = window.__nt!.input_poll();
+    return { held, after };
+  });
+  expect(held.keys.filter((k) => k[0] === 1).length).toBe(1);
+  expect(after.keys.every((k) => k[0] === 0)).toBe(true);
+  expect(after.keys.filter((k) => k[2] === 1).length).toBe(1);
+});
+
 test.describe('at DPR 2', () => {
   // A DPR other than 1 makes the CSS -> framebuffer mapping observable.
   test.use({ deviceScaleFactor: 2 });

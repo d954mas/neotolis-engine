@@ -19,8 +19,10 @@ readable. `g_nt_input` is the whole published frame (pointers, primary, key stat
 typed characters); it and the query functions are read-only for their consumers.
 
 A focus loss is applied in that order: it releases all held input (while the bot drives, the gate
-drops it and the bot's input stays), and events after it apply after it. A release and a new press of one button in one frame therefore read pressed and released
-together, like any fast press and release inside one frame.
+drops it and the bot's input stays), and events after it apply after it. A release and a new press
+of one button in one frame therefore read pressed and released together, like any fast press and
+release inside one frame. On web a focus loss is a blur of the canvas or of the window: a browser
+may keep the canvas focused across an app or tab switch.
 
 ## Keys
 
