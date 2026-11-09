@@ -23,8 +23,8 @@ void game_shutdown(void);
 ## Engine frame order
 
 ```text
-platform_step         ← nt_window_poll: the platform pump applies device events to the
-                        next input frame
+platform_step         ← nt_window_poll: native pumps device events into the next input
+                        frame (web DOM listeners already did); publishes window sizes
 nt_devapi_update      ← optional, dev-only: between frames, before nt_gfx_begin_frame
                         (stores the last finished capture, commands, injected input)
 nt_gfx_begin_frame    ← closes the previous frame into g_nt_gfx.last_frame, syncs

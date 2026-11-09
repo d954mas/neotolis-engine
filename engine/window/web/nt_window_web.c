@@ -31,13 +31,7 @@ EM_JS(void, nt_window_js_set_backing_size, (int w, int h), {
 
 /* ---- CSS → framebuffer coordinate mapping ---- */
 
-static void map_css_to_fb(float css_x, float css_y, float *fb_x, float *fb_y) {
-    float scale = g_nt_window.dpr; /* effective DPR = min(device_dpr, max_dpr) */
-    *fb_x = css_x * scale;         /* fractional, like native: a sub-pixel move is kept */
-    *fb_y = css_y * scale;
-}
-
-/* ---- Input events (one ordered JS queue, see nt_window_web_register_input) ---- */
+/* ---- Input events (the DOM listeners in nt_window_web_register_input call the dispatcher) ---- */
 
 /* The JS listeners below write these enum values as numbers. */
 _Static_assert(NT_INPUT_EV_KEY == 0 && NT_INPUT_EV_CHAR == 1 && NT_INPUT_EV_MOUSE_MOVE == 2 && NT_INPUT_EV_MOUSE_LEAVE == 4 && NT_INPUT_EV_CONTACT_DOWN == 5 && NT_INPUT_EV_CONTACT_MOVE == 6 &&
@@ -48,11 +42,11 @@ _Static_assert(NT_KEY_A == 0 && NT_KEY_0 == 26 && NT_KEY_ARROW_UP == 36 && NT_KE
                "codes (nt_key_t order) and the contact type in nt_window_web_register_input");
 _Static_assert(NT_TEXT_INPUT_URL == 3 && NT_TEXT_INPUT_PASSWORD == 4, "modes in nt_window_js_set_text_input_mode");
 
-/* One stride-7 record [kind, a, b, c, d, e, f], kind = nt_input_event_kind_t. */
-EMSCRIPTEN_KEEPALIVE void nt_window_web_on_input(int kind, double a, double b, double c, double d, double e, double f) {
+/* One DOM event: kind = nt_input_event_kind_t, a..f its fields, dpr the devicePixelRatio when it fired.
+   Coordinates map with that DPR, like native at arrival; fractional, so a sub-pixel move is kept. */
+EMSCRIPTEN_KEEPALIVE void nt_window_web_on_input(int kind, double a, double b, double c, double d, double e, double f, double dpr) {
+    const float scale = nt_window_effective_dpr((float)dpr);
     nt_input_event_t ev = {.kind = (uint8_t)kind};
-    float fx = 0.0F;
-    float fy = 0.0F;
     switch ((nt_input_event_kind_t)kind) {
     case NT_INPUT_EV_KEY:
         ev.key.key = (uint8_t)a;
@@ -62,18 +56,16 @@ EMSCRIPTEN_KEEPALIVE void nt_window_web_on_input(int kind, double a, double b, d
         ev.cp = (uint32_t)a;
         break;
     case NT_INPUT_EV_MOUSE_MOVE:
-        map_css_to_fb((float)a, (float)b, &fx, &fy);
-        ev.mouse.x = fx;
-        ev.mouse.y = fy;
+        ev.mouse.x = (float)a * scale;
+        ev.mouse.y = (float)b * scale;
         ev.mouse.buttons = (uint8_t)c;
         break;
     case NT_INPUT_EV_CONTACT_DOWN:
     case NT_INPUT_EV_CONTACT_MOVE:
     case NT_INPUT_EV_CONTACT_UP:
-        map_css_to_fb((float)b, (float)c, &fx, &fy);
         ev.contact.id = (uint32_t)(int32_t)a; /* pointerId is a signed long */
-        ev.contact.x = fx;
-        ev.contact.y = fy;
+        ev.contact.x = (float)b * scale;
+        ev.contact.y = (float)c * scale;
         ev.contact.pressure = (float)d;
         ev.contact.type = (uint8_t)e;
         ev.contact.buttons = (uint8_t)f;
@@ -125,15 +117,14 @@ EM_JS(void, nt_window_web_register_input, (void), {
         rect = canvas.getBoundingClientRect();
     }).observe(canvas);
 
-    /* One ordered queue of stride-7 records (decoded by nt_window_web_on_input), drained by nt_window_poll like the
-       native event pump. Listeners only push, so C never runs inside a DOM callback. */
-    var q = [];
-    Module['_ntInputEvents'] = q;
+    /* Each event applies to nt_input's next frame as it fires; the published frame changes only at
+       nt_input_poll. */
+    var onInput = Module['_nt_window_web_on_input'];
     /* nt_input_event_kind_t (input/nt_input_feed.h) */
     var EV_KEY = 0, EV_CHAR = 1, EV_MOUSE_MOVE = 2, EV_MOUSE_LEAVE = 4, EV_CONTACT_DOWN = 5, EV_CONTACT_MOVE = 6,
         EV_CONTACT_UP = 7, EV_WHEEL = 8, EV_FOCUS_LOST = 9;
     function ev(t, a, b, c, d, e, f) {
-        q.push(t, a || 0, b || 0, c || 0, d || 0, e || 0, f || 0);
+        onInput(t, a || 0, b || 0, c || 0, d || 0, e || 0, f || 0, window.devicePixelRatio || 1.0);
     }
 
     /* Keyboard events */
@@ -271,14 +262,6 @@ EM_JS(void, nt_window_web_register_input, (void), {
     canvas.style.touchAction = "none";
 })
 
-EM_JS(void, nt_window_web_pump_input, (void), {
-    var q = Module['_ntInputEvents'];
-    var on_event = Module['_nt_window_web_on_input'];
-    for (var i = 0; i < q.length; i += 7) {
-        on_event(q[i], q[i + 1], q[i + 2], q[i + 3], q[i + 4], q[i + 5], q[i + 6]);
-    }
-    q.length = 0;
-})
 /* clang-format on */
 
 /* ---- Helpers ---- */
@@ -311,10 +294,7 @@ void nt_window_init(void) {
     nt_window_web_register_input();
 }
 
-void nt_window_poll(void) {
-    sync_sizes();
-    nt_window_web_pump_input(); /* after the size sync: coordinates map with the current DPR */
-}
+void nt_window_poll(void) { sync_sizes(); }
 
 void nt_window_shutdown(void) { /* No-op on web */ }
 
