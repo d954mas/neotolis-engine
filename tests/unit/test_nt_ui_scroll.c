@@ -2011,6 +2011,7 @@ typedef struct {
     void (*outside_after)(void);
     nt_ui_scroll_style_t style;
     float content_h;
+    float content_w; /* 0 = the list width */
     float px_per_dp; /* 0 = keep the identity viewport */
 } arb_scene_t;
 
@@ -2027,7 +2028,8 @@ static void arb_frame(const nt_pointer_t *pointers, uint32_t count) {
     }
     CLAY({.id = CLAY_ID("arb_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(200)}}}) {
         nt_ui_scroll_begin(s_fx.ctx, NULL, SCROLL_ID, &s_scene.style, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(200)}}});
-        CLAY({.id = CLAY_ID("arb_content"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(s_scene.content_h)}, .layoutDirection = CLAY_TOP_TO_BOTTOM}}) {
+        CLAY({.id = CLAY_ID("arb_content"),
+              .layout = {.sizing = {CLAY_SIZING_FIXED((s_scene.content_w > 0.0F) ? s_scene.content_w : 200.0F), CLAY_SIZING_FIXED(s_scene.content_h)}, .layoutDirection = CLAY_TOP_TO_BOTTOM}}) {
             if (s_scene.body != NULL) {
                 s_scene.body();
             }
@@ -2519,6 +2521,31 @@ static void test_arb_content_take_keeps_last_thumb_move(void) {
     TEST_ASSERT_TRUE(float_near(arb_list()->pos[1], after_thumb - 32.0F, 0.5F));
 }
 
+/* Two fingers press both bars of one list in one frame: one takes it, and a still frame moves nothing. */
+static void test_arb_both_bars_pressed_together(void) {
+    arb_scene_reset();
+    s_scene.style = bar_style(NT_UI_SCROLLBAR_ALWAYS);
+    s_scene.style.scroll_x = true;
+    s_scene.content_w = 1000.0F;
+    nt_pointer_t ps[2] = {arb_pointer(30.0F, 195.0F), arb_pointer(195.0F, 10.0F)};
+    ps[1].id = 7U;
+    arb_frame(ps, 2);
+    arb_frame(ps, 2);
+    arb_press(&ps[0]);
+    arb_press(&ps[1]);
+    arb_frame(ps, 2);
+    const float x0 = arb_list()->pos[0];
+    const float y0 = arb_list()->pos[1];
+    arb_hold(&ps[0]);
+    arb_hold(&ps[1]);
+    arb_frame(ps, 2);
+    const uint32_t held0 = s_fx.ctx->captures[0].active_id;
+    const uint32_t held1 = s_fx.ctx->captures[1].active_id;
+    TEST_ASSERT_TRUE(held0 == 0U || held1 == 0U);
+    TEST_ASSERT_TRUE(float_near(arb_list()->pos[0], x0, 0.001F));
+    TEST_ASSERT_TRUE(float_near(arb_list()->pos[1], y0, 0.001F));
+}
+
 /* A second finger pressing a held thumb takes it (newest pointer wins). */
 static void test_arb_second_finger_takes_held_bar(void) {
     arb_scene_reset();
@@ -2651,6 +2678,7 @@ int main(void) {
     RUN_TEST(test_arb_wheel_over_bar_scrolls_list);
     RUN_TEST(test_arb_content_take_keeps_last_thumb_move);
     RUN_TEST(test_arb_second_finger_takes_held_bar);
+    RUN_TEST(test_arb_both_bars_pressed_together);
     RUN_TEST(test_release_and_press_in_one_frame);
     RUN_TEST(test_hard_edge_drag_reversal_has_no_dead_zone);
     RUN_TEST(test_scroll_momentum_decays_monotonic);

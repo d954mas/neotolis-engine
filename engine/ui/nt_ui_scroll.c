@@ -633,6 +633,13 @@ static void scrollbar_interact(nt_ui_context_t *ctx, uint32_t scroll_id, uint32_
     const float press_a = (axis == 1) ? in.press_pos[1] : in.press_pos[0];
 
     if (in.pressed_now) {
+        /* Presses on both bars in one frame: the later capture takes the scroll (the arbiter only
+         * freed holders from earlier frames). */
+        for (uint32_t j = 0; j < ctx->frame_pointer_count; ++j) {
+            if (ctx->captures[j].active_id == bar_id) {
+                scroll_take(ctx, scroll_id, j);
+            }
+        }
         const float thumb_lo = bar_origin + thumb_off;
         const bool on_thumb = press_a >= thumb_lo && press_a <= (thumb_lo + thumb_len);
         if (on_thumb) {

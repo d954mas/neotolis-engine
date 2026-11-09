@@ -159,6 +159,32 @@ static void test_input_in_scroll_focuses_on_tap_release(void) {
     TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, id));
 }
 
+/* Esc while a focused field's press is held inside a list: the release does not refocus it. */
+static void test_input_in_scroll_esc_during_press_stays_unfocused(void) {
+    char buf[32] = "hello";
+    const uint32_t id = 0x1F00D03U;
+    const float x = IN_X + 50.0F;
+    const float y = IN_Y + (IN_H * 0.5F);
+    nt_pointer_t p = make_pointer(x, y, false, false, false);
+    field_in_scroll_frame(&p, id, buf, sizeof buf);
+    field_in_scroll_frame(&p, id, buf, sizeof buf);
+    p = make_pointer(x, y, true, true, false);
+    field_in_scroll_frame(&p, id, buf, sizeof buf);
+    p = make_pointer(x, y, false, false, true);
+    field_in_scroll_frame(&p, id, buf, sizeof buf);
+    TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, id));
+    p = make_pointer(x, y, true, true, false);
+    field_in_scroll_frame(&p, id, buf, sizeof buf);
+    nt_input_feed(nt_test_key(NT_KEY_ESCAPE, true));
+    p = make_pointer(x, y, true, false, false);
+    field_in_scroll_frame(&p, id, buf, sizeof buf);
+    nt_input_feed(nt_test_key(NT_KEY_ESCAPE, false));
+    TEST_ASSERT_FALSE(nt_ui_input_focused(s_fx.ctx, id));
+    p = make_pointer(x, y, false, false, true);
+    field_in_scroll_frame(&p, id, buf, sizeof buf);
+    TEST_ASSERT_FALSE(nt_ui_input_focused(s_fx.ctx, id));
+}
+
 /* A list drag that starts on an unfocused field scrolls and leaves the field unfocused. */
 static void test_input_in_scroll_drag_never_focuses(void) {
     char buf[32] = "hello";
@@ -1545,6 +1571,7 @@ int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_input_in_scroll_focuses_on_tap_release);
     RUN_TEST(test_input_in_scroll_drag_never_focuses);
+    RUN_TEST(test_input_in_scroll_esc_during_press_stays_unfocused);
     RUN_TEST(test_insert_cyrillic_codepoints);
     RUN_TEST(test_backspace_one_codepoint);
     RUN_TEST(test_arrow_left_codepoint);
