@@ -38,9 +38,7 @@ EM_JS(void, nt_window_js_set_backing_size, (int w, int h), {
 _Static_assert(NT_INPUT_EV_KEY == 0 && NT_INPUT_EV_CHAR == 1 && NT_INPUT_EV_MOUSE_MOVE == 2 && NT_INPUT_EV_MOUSE_LEAVE == 4 && NT_INPUT_EV_CONTACT_DOWN == 5 && NT_INPUT_EV_CONTACT_MOVE == 6 &&
                    NT_INPUT_EV_CONTACT_UP == 7 && NT_INPUT_EV_WHEEL == 8 && NT_INPUT_EV_FOCUS_LOST == 9,
                "EV_* in nt_window_web_register_input");
-_Static_assert(NT_KEY_A == 0 && NT_KEY_0 == 26 && NT_KEY_ARROW_UP == 36 && NT_KEY_SPACE == 40 && NT_KEY_LSHIFT == 45 && NT_KEY_F1 == 51 && NT_KEY_DELETE == 63 && NT_KEY_COUNT == 69 &&
-                   NT_POINTER_TOUCH == 1 && NT_POINTER_PEN == 2,
-               "codes (nt_key_t order) and the contact type in nt_window_web_register_input");
+_Static_assert(NT_POINTER_TOUCH == 1 && NT_POINTER_PEN == 2, "the contact type in nt_window_web_register_input");
 _Static_assert(NT_TEXT_INPUT_URL == 3 && NT_TEXT_INPUT_PASSWORD == 4, "modes in nt_window_js_set_text_input_mode");
 
 /* One DOM event: kind = nt_input_event_kind_t, a..f its fields. CSS coordinates map with the last
@@ -83,26 +81,89 @@ EMSCRIPTEN_KEEPALIVE void nt_window_web_on_input(int kind, double a, double b, d
 
 /* ---- Input event registration ---- */
 
+/* KeyboardEvent.code (the physical key, layout-independent) of each nt_key_t. */
+static const char *const k_dom_codes[NT_KEY_COUNT] = {
+    [NT_KEY_A] = "KeyA",
+    [NT_KEY_B] = "KeyB",
+    [NT_KEY_C] = "KeyC",
+    [NT_KEY_D] = "KeyD",
+    [NT_KEY_E] = "KeyE",
+    [NT_KEY_F] = "KeyF",
+    [NT_KEY_G] = "KeyG",
+    [NT_KEY_H] = "KeyH",
+    [NT_KEY_I] = "KeyI",
+    [NT_KEY_J] = "KeyJ",
+    [NT_KEY_K] = "KeyK",
+    [NT_KEY_L] = "KeyL",
+    [NT_KEY_M] = "KeyM",
+    [NT_KEY_N] = "KeyN",
+    [NT_KEY_O] = "KeyO",
+    [NT_KEY_P] = "KeyP",
+    [NT_KEY_Q] = "KeyQ",
+    [NT_KEY_R] = "KeyR",
+    [NT_KEY_S] = "KeyS",
+    [NT_KEY_T] = "KeyT",
+    [NT_KEY_U] = "KeyU",
+    [NT_KEY_V] = "KeyV",
+    [NT_KEY_W] = "KeyW",
+    [NT_KEY_X] = "KeyX",
+    [NT_KEY_Y] = "KeyY",
+    [NT_KEY_Z] = "KeyZ",
+    [NT_KEY_0] = "Digit0",
+    [NT_KEY_1] = "Digit1",
+    [NT_KEY_2] = "Digit2",
+    [NT_KEY_3] = "Digit3",
+    [NT_KEY_4] = "Digit4",
+    [NT_KEY_5] = "Digit5",
+    [NT_KEY_6] = "Digit6",
+    [NT_KEY_7] = "Digit7",
+    [NT_KEY_8] = "Digit8",
+    [NT_KEY_9] = "Digit9",
+    [NT_KEY_ARROW_UP] = "ArrowUp",
+    [NT_KEY_ARROW_DOWN] = "ArrowDown",
+    [NT_KEY_ARROW_LEFT] = "ArrowLeft",
+    [NT_KEY_ARROW_RIGHT] = "ArrowRight",
+    [NT_KEY_SPACE] = "Space",
+    [NT_KEY_ENTER] = "Enter",
+    [NT_KEY_ESCAPE] = "Escape",
+    [NT_KEY_TAB] = "Tab",
+    [NT_KEY_BACKSPACE] = "Backspace",
+    [NT_KEY_LSHIFT] = "ShiftLeft",
+    [NT_KEY_RSHIFT] = "ShiftRight",
+    [NT_KEY_LCTRL] = "ControlLeft",
+    [NT_KEY_RCTRL] = "ControlRight",
+    [NT_KEY_LALT] = "AltLeft",
+    [NT_KEY_RALT] = "AltRight",
+    [NT_KEY_F1] = "F1",
+    [NT_KEY_F2] = "F2",
+    [NT_KEY_F3] = "F3",
+    [NT_KEY_F4] = "F4",
+    [NT_KEY_F5] = "F5",
+    [NT_KEY_F6] = "F6",
+    [NT_KEY_F7] = "F7",
+    [NT_KEY_F8] = "F8",
+    [NT_KEY_F9] = "F9",
+    [NT_KEY_F10] = "F10",
+    [NT_KEY_F11] = "F11",
+    [NT_KEY_F12] = "F12",
+    [NT_KEY_DELETE] = "Delete",
+    [NT_KEY_INSERT] = "Insert",
+    [NT_KEY_HOME] = "Home",
+    [NT_KEY_END] = "End",
+    [NT_KEY_PAGE_UP] = "PageUp",
+    [NT_KEY_PAGE_DOWN] = "PageDown",
+};
+
+EM_JS_DEPS(nt_window_web, "$UTF8ToString")
+
 /* clang-format off */
-EM_JS(void, nt_window_web_register_input, (void), {
+EM_JS(void, nt_window_web_register_input, (const char *const *codes, int count), {
     var canvas = Module['canvas'];
 
-    /* KeyboardEvent.code in nt_key_t order: keyMap[code] is the enum value */
-    var codes = [];
-    for (var i = 0; i < 26; i++) {
-        codes.push("Key" + String.fromCharCode(65 + i));
+    var keyMap = {}; /* KeyboardEvent.code -> nt_key_t */
+    for (var k = 0; k < count; k++) {
+        keyMap[UTF8ToString(HEAPU32[(codes >> 2) + k])] = k;
     }
-    for (var d = 0; d < 10; d++) {
-        codes.push("Digit" + d);
-    }
-    codes.push("ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space", "Enter", "Escape", "Tab", "Backspace",
-               "ShiftLeft", "ShiftRight", "ControlLeft", "ControlRight", "AltLeft", "AltRight");
-    for (var f = 1; f <= 12; f++) {
-        codes.push("F" + f);
-    }
-    codes.push("Delete", "Insert", "Home", "End", "PageUp", "PageDown");
-    var keyMap = {};
-    codes.forEach(function(c, k) { keyMap[c] = k; });
 
     /* Keys that need preventDefault to avoid browser defaults */
     var preventSet = {
@@ -276,7 +337,10 @@ void nt_window_init(void) {
     NT_ASSERT(!s_registered && "the DOM listeners are never removed: init once per page");
     s_registered = true;
     sync_sizes();
-    nt_window_web_register_input();
+    for (int k = 0; k < NT_KEY_COUNT; k++) {
+        NT_ASSERT(k_dom_codes[k] != NULL && "every nt_key_t has a DOM code");
+    }
+    nt_window_web_register_input(k_dom_codes, NT_KEY_COUNT);
 }
 
 void nt_window_poll(void) { sync_sizes(); }
