@@ -4,7 +4,7 @@
  * an eps helper.
  *
  * Hover model: nt_ui_query_interaction reports hovered only for a widget in the front-most arbitration
- * registry, which is populated by step_interaction (NOT query). A tooltip therefore attaches to an
+ * registry, which is populated by nt_ui_step (NOT query). A tooltip therefore attaches to an
  * INTERACTIVE target that steps itself; the tooltip read stays idempotent (query) so it never adds a
  * second mutating step on the target id. Arbitration reads the PREV-frame registry, so the
  * target is stepped each frame and the cursor needs one warm frame before hover registers. */
@@ -69,17 +69,17 @@ static nt_ui_tooltip_style_t test_style(void) {
  * popup edge-flips ABOVE (caret-flip). x stays 0 so the centered tooltip stays in the viewport. */
 #define TGT_BOTTOM_Y 560.0F
 
-/* One full frame: declare the INTERACTIVE target (step_interaction registers it for arbitration +
+/* One full frame: declare the INTERACTIVE target (nt_ui_step registers it for arbitration +
  * bakes its bbox) + declare the tooltip after it; returns whether the tooltip panel was declared. */
 static bool tooltip_frame_at(const nt_pointer_t *p, nt_ui_tooltip_style_t *st, bool at_bottom) {
     nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, DT, p, 1, 0);
     if (at_bottom) {
         /* Float the target near the bottom border (mirrors the dropdown edge-flip fixture). */
         CLAY({.floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = 0.0F, .y = TGT_BOTTOM_Y}}}) {
-            CLAY({.id = (Clay_ElementId){.id = TGT_ID}, .layout = {.sizing = {CLAY_SIZING_FIXED(TGT_W), CLAY_SIZING_FIXED(TGT_H)}}}) { (void)nt_ui_step_interaction(s_fx.ctx, TGT_ID); }
+            CLAY({.id = (Clay_ElementId){.id = TGT_ID}, .layout = {.sizing = {CLAY_SIZING_FIXED(TGT_W), CLAY_SIZING_FIXED(TGT_H)}}}) { (void)nt_ui_step(s_fx.ctx, TGT_ID, NULL); }
         }
     } else {
-        CLAY({.id = (Clay_ElementId){.id = TGT_ID}, .layout = {.sizing = {CLAY_SIZING_FIXED(TGT_W), CLAY_SIZING_FIXED(TGT_H)}}}) { (void)nt_ui_step_interaction(s_fx.ctx, TGT_ID); }
+        CLAY({.id = (Clay_ElementId){.id = TGT_ID}, .layout = {.sizing = {CLAY_SIZING_FIXED(TGT_W), CLAY_SIZING_FIXED(TGT_H)}}}) { (void)nt_ui_step(s_fx.ctx, TGT_ID, NULL); }
     }
     const bool shown = nt_ui_tooltip(s_fx.ctx, NT_UI_DATA_LAYER(1), 2U, TGT_ID, "hint text", st);
     nt_ui_end(s_fx.ctx);
@@ -177,13 +177,13 @@ static void test_tooltip_declares_no_catcher(void) {
 }
 
 /* ---- No double-mutation: the tooltip reads the target via an IDEMPOTENT query, so the game's own
- *      mutating step_interaction on the SAME target id sees an unperturbed capture machine. A press on
+ *      mutating nt_ui_step on the SAME target id sees an unperturbed capture machine. A press on
  *      the target still produces pressed_now/clicked exactly as if the tooltip were not present. ---- */
 static nt_ui_interaction_t target_frame_with_tooltip(const nt_pointer_t *p, nt_ui_tooltip_style_t *st) {
     nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, DT, p, 1, 0);
     nt_ui_interaction_t in;
     CLAY({.id = (Clay_ElementId){.id = TGT_ID}, .layout = {.sizing = {CLAY_SIZING_FIXED(TGT_W), CLAY_SIZING_FIXED(TGT_H)}}}) {
-        in = nt_ui_step_interaction(s_fx.ctx, TGT_ID); /* the game's single mutating step */
+        in = nt_ui_step(s_fx.ctx, TGT_ID, NULL); /* the game's single mutating step */
     }
     (void)nt_ui_tooltip(s_fx.ctx, NT_UI_DATA_LAYER(1), 2U, TGT_ID, "hint text", st); /* idempotent read on the same id */
     nt_ui_end(s_fx.ctx);

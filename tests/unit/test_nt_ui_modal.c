@@ -397,7 +397,7 @@ static nt_ui_interaction_t modal_gate_base_frame(const nt_ui_modal_style_t *st, 
     ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, p, 1, 0);
     nt_ui_interaction_t in;
     CLAY({.id = (Clay_ElementId){.id = nt_ui_id("gated_base_btn")}, .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(120)}}}) {
-        in = nt_ui_step_interaction(s_fx.ctx, nt_ui_id("gated_base_btn"));
+        in = nt_ui_step(s_fx.ctx, nt_ui_id("gated_base_btn"), NULL);
     }
     const bool declared = nt_ui_modal_visible(s_fx.ctx, MODAL_A, st, &open);
     if (declared) {
@@ -436,7 +436,7 @@ static nt_ui_interaction_t modal_button_frame(const nt_ui_modal_style_t *st, con
     s_frame_close_reason = nt_ui_modal_begin(s_fx.ctx, MODAL_A, st, true).reason;
     nt_ui_interaction_t in;
     CLAY({.id = (Clay_ElementId){.id = nt_ui_id("modal_btn")}, .layout = {.sizing = {CLAY_SIZING_FIXED(MODAL_BTN_W), CLAY_SIZING_FIXED(MODAL_BTN_H)}}}) {
-        in = nt_ui_step_interaction(s_fx.ctx, nt_ui_id("modal_btn"));
+        in = nt_ui_step(s_fx.ctx, nt_ui_id("modal_btn"), NULL);
     }
     nt_ui_modal_end(s_fx.ctx);
     nt_ui_end(s_fx.ctx);
@@ -506,7 +506,7 @@ static nt_ui_interaction_t closed_modal_base_frame(const nt_ui_modal_style_t *st
     ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, p, 1, 0);
     nt_ui_interaction_t in;
     CLAY({.id = (Clay_ElementId){.id = nt_ui_id("closed_base_btn")}, .layout = {.sizing = {CLAY_SIZING_FIXED(CLOSED_BTN_W), CLAY_SIZING_FIXED(CLOSED_BTN_H)}}}) {
-        in = nt_ui_step_interaction(s_fx.ctx, nt_ui_id("closed_base_btn"));
+        in = nt_ui_step(s_fx.ctx, nt_ui_id("closed_base_btn"), NULL);
     }
     /* Settled-closed modal called every frame (the showcase Modals-tab pattern). */
     const bool declared = nt_ui_modal_visible(s_fx.ctx, MODAL_A, st, &open);

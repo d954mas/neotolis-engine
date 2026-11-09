@@ -947,7 +947,7 @@ static void test_menu_item_begin_activatable_false_child_owns_click(void) {
             declared = true;
             /* Inner interactive child owns the click; lay out a fixed button-sized element + step it. */
             CLAY({.id = (Clay_ElementId){.id = inner_btn}, .layout = {.sizing = {CLAY_SIZING_FIXED(60), CLAY_SIZING_FIXED(20)}}}) {}
-            const nt_ui_interaction_t in = nt_ui_step_interaction(s_fx.ctx, inner_btn);
+            const nt_ui_interaction_t in = nt_ui_step(s_fx.ctx, inner_btn, NULL);
             if (in.clicked) {
                 btn_clicked = true;
             }

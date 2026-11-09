@@ -340,7 +340,7 @@ static void test_overlay_noop_without_highlight(void) {
 
 /* ---- Test 13: inspector sidebar consumes pointer ----
  * When inspector_active and pointer is in the right-attached sidebar footprint
- * (panel_width wide), step_interaction returns zeroed for every user widget
+ * (panel_width wide), nt_ui_step returns zeroed for every user widget
  * AND nt_ui_inspector_pointer_consumed must be true
  * AND nt_ui_wants_pointer must be true. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -365,7 +365,7 @@ static void test_inspector_intercepts_pointer_over_sidebar(void) {
     nt_ui_end(s_fx.ctx);
 
     /* Frame 2: pointer over button center (inside sidebar) with left pressed_now;
-     * step_interaction must return zeroed (sidebar gate consumes the pointer). */
+     * nt_ui_step must return zeroed (sidebar gate consumes the pointer). */
     nt_pointer_t f2 = {0};
     f2.x = btn_cx; /* 680 -- well past sidebar left edge at 400 */
     f2.y = btn_cy;
@@ -381,7 +381,7 @@ static void test_inspector_intercepts_pointer_over_sidebar(void) {
 
     /* Both the unpadded and padded query MUST return zeroed: no hover, no
      * press, no clicked, no capture. */
-    nt_ui_interaction_t in = nt_ui_step_interaction(s_fx.ctx, nt_ui_id("hidden_btn"));
+    nt_ui_interaction_t in = nt_ui_step(s_fx.ctx, nt_ui_id("hidden_btn"), NULL);
     TEST_ASSERT_FALSE(in.hovered);
     TEST_ASSERT_FALSE(in.pressed);
     TEST_ASSERT_FALSE(in.pressed_now);
@@ -390,7 +390,7 @@ static void test_inspector_intercepts_pointer_over_sidebar(void) {
     TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_test_capture_active_id(s_fx.ctx, 0));
 
     const int16_t pad[4] = {32, 32, 32, 32};
-    nt_ui_interaction_t in_pad = nt_ui_step_interaction_padded(s_fx.ctx, nt_ui_id("hidden_btn"), pad);
+    nt_ui_interaction_t in_pad = nt_ui_step(s_fx.ctx, nt_ui_id("hidden_btn"), &(nt_ui_step_desc_t){.pad_lrtb = pad});
     TEST_ASSERT_FALSE(in_pad.hovered);
     TEST_ASSERT_FALSE(in_pad.pressed);
     TEST_ASSERT_FALSE(in_pad.pressed_now);
@@ -426,7 +426,7 @@ static void test_inspector_pointer_outside_sidebar_normal(void) {
     nt_ui_begin(s_fx.ctx, screen_w, screen_h, 0.0F, &f1, 1, 0);
     CLAY(
         {.id = CLAY_ID("visible_btn"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = btn_x, .y = btn_y}}, .layout = {.sizing = {CLAY_SIZING_FIXED(btn_w), CLAY_SIZING_FIXED(btn_h)}}}) {
-        (void)nt_ui_step_interaction(s_fx.ctx, nt_ui_id("visible_btn"));
+        (void)nt_ui_step(s_fx.ctx, nt_ui_id("visible_btn"), NULL);
     }
     nt_ui_end(s_fx.ctx);
 
@@ -446,7 +446,7 @@ static void test_inspector_pointer_outside_sidebar_normal(void) {
     TEST_ASSERT_FALSE(nt_ui_inspector_pointer_consumed(s_fx.ctx));
 
     /* Normal interaction must fire. */
-    nt_ui_interaction_t in = nt_ui_step_interaction(s_fx.ctx, nt_ui_id("visible_btn"));
+    nt_ui_interaction_t in = nt_ui_step(s_fx.ctx, nt_ui_id("visible_btn"), NULL);
     TEST_ASSERT_TRUE(in.hovered);
     TEST_ASSERT_TRUE(in.pressed);
     TEST_ASSERT_TRUE(in.pressed_now);
@@ -1058,7 +1058,7 @@ static void test_overlay_projects_through_accum_for_transformed_id(void) {
     baked.scale_x = 1.15F;
     baked.scale_y = 0.85F;
 
-    /* Frame 1: declare with the transform so tree_baked carries it. step_interaction
+    /* Frame 1: declare with the transform so tree_baked carries it. nt_ui_step
      * in frame 2 reads PREV-frame tree_baked → must include the rotation already. */
     nt_pointer_t f1 = make_pointer(0.0F, 0.0F);
     nt_ui_begin(s_fx.ctx, screen_w, screen_h, 0.0F, &f1, 1, 0);
@@ -1074,7 +1074,7 @@ static void test_overlay_projects_through_accum_for_transformed_id(void) {
           .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = btn_x, .y = btn_y}},
           .layout = {.sizing = {CLAY_SIZING_FIXED(btn_w), CLAY_SIZING_FIXED(btn_h)}},
           .userData = (void *)NT_UI_DATA_XFORM(0U, &baked, 1.0F)}) {
-        (void)nt_ui_step_interaction(s_fx.ctx, nt_ui_id("xform_btn"));
+        (void)nt_ui_step(s_fx.ctx, nt_ui_id("xform_btn"), NULL);
     }
 
     /* Zone must be recorded; composed affine differs from identity (rotation+scale). */
@@ -1797,7 +1797,7 @@ static void test_inspector_hover_transformed_widget(void) {
           .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = btn_x, .y = btn_y}},
           .layout = {.sizing = {CLAY_SIZING_FIXED(btn_w), CLAY_SIZING_FIXED(btn_h)}},
           .userData = (void *)NT_UI_DATA_XFORM(0U, &baked, 1.0F)}) {
-        (void)nt_ui_step_interaction(s_fx.ctx, nt_ui_id("xf_btn"));
+        (void)nt_ui_step(s_fx.ctx, nt_ui_id("xf_btn"), NULL);
     }
     nt_ui_end(s_fx.ctx);
 
@@ -1822,7 +1822,7 @@ static void test_inspector_hover_transformed_widget(void) {
           .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = btn_x, .y = btn_y}},
           .layout = {.sizing = {CLAY_SIZING_FIXED(btn_w), CLAY_SIZING_FIXED(btn_h)}},
           .userData = (void *)NT_UI_DATA_XFORM(0U, &baked, 1.0F)}) {
-        (void)nt_ui_step_interaction(s_fx.ctx, nt_ui_id("xf_btn"));
+        (void)nt_ui_step(s_fx.ctx, nt_ui_id("xf_btn"), NULL);
     }
     nt_ui_end(s_fx.ctx);
 

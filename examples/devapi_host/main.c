@@ -99,7 +99,7 @@ static void declare_hud(void) {
     /* Register AFTER declare so the ids exist this frame; enabled reflects the current toggle. */
     nt_ui_widget_register(s_hud_ctx, nt_ui_id("hud_btn"), &NT_UI_BUTTON_DEF, NULL, s_hud_btn_on);
     nt_ui_widget_register(s_hud_ctx, nt_ui_id("hud_btn_b"), &NT_UI_BUTTON_DEF, NULL, true);
-    if (nt_ui_step_interaction(s_hud_ctx, nt_ui_id("hud_btn")).clicked) {
+    if (nt_ui_step(s_hud_ctx, nt_ui_id("hud_btn"), NULL).clicked) {
         s_hud_btn_on = !s_hud_btn_on;
     }
     nt_ui_end(s_hud_ctx);
@@ -107,7 +107,7 @@ static void declare_hud(void) {
 
 /* Scaled hud: same layout, but the ctx viewport is the nt_ui_scale content rect so the ctx maps the
    device pointer device->layout internally. The viewport MUST be set after nt_ui_begin and before the
-   first hit-test (step_interaction). */
+   first hit-test (nt_ui_step). */
 static void declare_hud_scaled(void) {
     const float fb_w = (float)(g_nt_window.fb_width > 0 ? g_nt_window.fb_width : 800);
     const float fb_h = (float)(g_nt_window.fb_height > 0 ? g_nt_window.fb_height : 600);
@@ -120,7 +120,7 @@ static void declare_hud_scaled(void) {
         CLAY({.id = CLAY_ID("scaled_btn"), .layout = {.sizing = {CLAY_SIZING_FIXED(80), CLAY_SIZING_FIXED(30)}}}) {}
     }
     nt_ui_widget_register(s_hud_scaled_ctx, nt_ui_id("scaled_btn"), &NT_UI_BUTTON_DEF, NULL, s_scaled_btn_on);
-    if (nt_ui_step_interaction(s_hud_scaled_ctx, nt_ui_id("scaled_btn")).clicked) {
+    if (nt_ui_step(s_hud_scaled_ctx, nt_ui_id("scaled_btn"), NULL).clicked) {
         s_scaled_btn_on = !s_scaled_btn_on;
     }
     nt_ui_end(s_hud_scaled_ctx);

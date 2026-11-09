@@ -321,7 +321,7 @@ void nt_ui_context_layout_size(const nt_ui_context_t *ctx, float *out_w, float *
 bool nt_ui_context_has_frame(const nt_ui_context_t *ctx);
 
 /* REQUIRED for ctx with use_raycast_input=true. Call IMMEDIATELY after nt_ui_begin and BEFORE
- * any widget hit-test (nt_ui_button_begin, nt_ui_step_interaction*, nt_ui_test_hit etc.). The
+ * any widget hit-test (nt_ui_button_begin, nt_ui_step, nt_ui_test_hit etc.). The
  * setter copies into ctx and pre-computes the inverse for raycast; `nt_ui_begin` resets the
  * view_proj_set flag so a forgotten setter trips the per-frame assert instead of silently
  * raycasting through last frame's stale camera. ctx is non-NULL, use_raycast_input is true,
@@ -584,17 +584,23 @@ typedef struct {
 
 /* Idempotent until the step: same result N times per frame; safe outside begin/end. Side effects are
  * frame-scoped only (hover observability + the once-per-frame arbitration resolve), never capture or
- * button-edge state — those live in step_interaction. Once the step has run, read one-shot edges
+ * button-edge state — those live in nt_ui_step. Once the step has run, read one-shot edges
  * from its result: the capture it committed changes what a later query sees. */
 nt_ui_interaction_t nt_ui_query_interaction(nt_ui_context_t *ctx, uint32_t id);
 
-/* MUTATING — call ONCE per widget per frame from the widget's begin.
- * Sidebar-consumed pointer returns zeroed struct (see nt_ui_inspector_pointer_consumed). */
-nt_ui_interaction_t nt_ui_step_interaction(nt_ui_context_t *ctx, uint32_t id);
+/* Drag axes a widget consumes itself (slider, thumb, custom draggable): a drag along them stays with
+ * the widget instead of being taken by an enclosing scroll. */
+#define NT_UI_DRAG_X ((uint8_t)1U)
+#define NT_UI_DRAG_Y ((uint8_t)2U)
 
-/* Inflates bbox BEFORE the inverse-affine for mobile touch-friendly hit areas.
- * Asserts each component >= 0; NULL = unpadded. */
-nt_ui_interaction_t nt_ui_step_interaction_padded(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lrtb[4]);
+typedef struct {
+    const int16_t *pad_lrtb; /* inflates the bbox BEFORE the inverse-affine (touch targets); NULL = none, each >= 0 */
+    uint8_t drag_axes;       /* NT_UI_DRAG_X | NT_UI_DRAG_Y; 0 = taps only (a scroll may take the drag) */
+} nt_ui_step_desc_t;
+
+/* MUTATING — call ONCE per widget per frame from the widget's begin. desc NULL = unpadded, no drag axes.
+ * Sidebar-consumed pointer returns zeroed struct (see nt_ui_inspector_pointer_consumed). */
+nt_ui_interaction_t nt_ui_step(nt_ui_context_t *ctx, uint32_t id, const nt_ui_step_desc_t *desc);
 
 /* One-shot long press: true on the frame the hold crosses secs > 0. secs must stay constant for the
  * whole hold. Compares stored values: subtracting dt could round across secs and fire twice. */
@@ -621,13 +627,13 @@ bool nt_ui_wants_pointer(const nt_ui_context_t *ctx);
 /* 3D ctx only (asserts use_raycast_input): max world distance the pointer's ray may travel before UI
  * stops registering. Feed the nearest world-geometry hit (so the player can't click UI through a
  * wall) and/or an interaction range. Default +inf = no cutoff. Reset each nt_ui_begin; feed it BEFORE
- * this frame's first step_interaction / query / nt_ui_pointer_hot (the per-frame resolve latches once). */
+ * this frame's first step / query / nt_ui_pointer_hot (the per-frame resolve latches once). */
 void nt_ui_set_pointer_occlusion(nt_ui_context_t *ctx, uint32_t pointer_index, float max_world_distance);
 
 /* Front-most interactive widget under the pointer this frame (3D: nearest within the cutoff; 2D:
- * highest effective zIndex, tie → last-registered = later step_interaction call, which equals
+ * highest effective zIndex, tie → last-registered = later nt_ui_step call, which equals
  * declaration/paint order when widgets step in declaration order). Resolved lazily from the prev-frame registry on the
- * first step/query (mutating). Only widgets that called step_interaction last frame are candidates. In 3D ctx call
+ * first step/query (mutating). Only widgets that called nt_ui_step last frame are candidates. In 3D ctx call
  * nt_ui_set_view_proj first — the lazy resolve hit-tests, which asserts view_proj is set. id 0 = none. */
 nt_ui_hot_t nt_ui_pointer_hot(nt_ui_context_t *ctx, uint32_t pointer_index);
 // #endregion

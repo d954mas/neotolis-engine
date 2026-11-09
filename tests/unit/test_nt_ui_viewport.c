@@ -87,7 +87,7 @@ static void warm_btn_frame(const nt_pointer_t *p, bool set_vp) {
         nt_ui_set_viewport(s_fx.ctx, letterbox_vp());
     }
     declare_btn_element();
-    (void)nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btn"));
+    (void)nt_ui_step(s_fx.ctx, nt_ui_id("btn"), NULL);
     nt_ui_end(s_fx.ctx);
 }
 
@@ -97,7 +97,7 @@ static nt_ui_interaction_t query_btn_frame(const nt_pointer_t *p, bool set_vp) {
         nt_ui_set_viewport(s_fx.ctx, letterbox_vp());
     }
     declare_btn_element();
-    nt_ui_interaction_t in = nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btn"));
+    nt_ui_interaction_t in = nt_ui_step(s_fx.ctx, nt_ui_id("btn"), NULL);
     nt_ui_end(s_fx.ctx);
     return in;
 }
@@ -180,7 +180,7 @@ static void warm_btn_frame_aniso(const nt_pointer_t *p) {
     nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, p, 1, 0);
     nt_ui_set_viewport(s_fx.ctx, aniso_vp());
     declare_btn_element();
-    (void)nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btn"));
+    (void)nt_ui_step(s_fx.ctx, nt_ui_id("btn"), NULL);
     nt_ui_end(s_fx.ctx);
 }
 
@@ -188,7 +188,7 @@ static nt_ui_interaction_t query_btn_frame_aniso(const nt_pointer_t *p) {
     nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, p, 1, 0);
     nt_ui_set_viewport(s_fx.ctx, aniso_vp());
     declare_btn_element();
-    nt_ui_interaction_t in = nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btn"));
+    nt_ui_interaction_t in = nt_ui_step(s_fx.ctx, nt_ui_id("btn"), NULL);
     nt_ui_end(s_fx.ctx);
     return in;
 }
@@ -270,7 +270,7 @@ static void test_scaled_inspector_uses_layout_pointer(void) {
     CLAY({.id = CLAY_ID("insp_target"),
           .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = ins_btn_x, .y = ins_btn_y}},
           .layout = {.sizing = {CLAY_SIZING_FIXED(ins_btn_w), CLAY_SIZING_FIXED(ins_btn_h)}}}) {
-        (void)nt_ui_step_interaction(s_fx.ctx, nt_ui_id("insp_target"));
+        (void)nt_ui_step(s_fx.ctx, nt_ui_id("insp_target"), NULL);
     }
     /* Layout-space gate: device 490 maps to layout 300 (< 400) -> NOT over the sidebar, so normal
      * interaction is not spuriously suppressed (the raw 490 >= 400 path would consume it). */

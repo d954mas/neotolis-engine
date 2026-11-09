@@ -276,7 +276,7 @@ static void test_hittest_survives_layout_idx_shift_between_frames(void) {
           .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = BBOX_X, .y = BBOX_Y}},
           .layout = {.sizing = {CLAY_SIZING_FIXED(BBOX_W), CLAY_SIZING_FIXED(BBOX_H)}},
           .userData = (void *)NT_UI_DATA_XFORM(0U, &rot, 1.0F)}) {
-        /* step_interaction AFTER htbtn's CLAY — layout idx shifted, but hashmap
+        /* nt_ui_step AFTER htbtn's CLAY — layout idx shifted, but hashmap
          * slot for "htbtn" is stable, so hit_baked still has frame 1's rotation. */
         const uint32_t id = nt_ui_id("htbtn");
         const float cx = BBOX_X + (BBOX_W * 0.5F);

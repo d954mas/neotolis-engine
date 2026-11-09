@@ -283,7 +283,7 @@ static float slider_core(nt_ui_context_t *ctx, const nt_ui_element_data_t *data,
     slider_effective_pad(style, pad);
     nt_ui_interaction_t in;
     if (enabled) {
-        in = nt_ui_step_interaction_padded(ctx, id, pad);
+        in = nt_ui_step(ctx, id, &(nt_ui_step_desc_t){.pad_lrtb = pad});
     } else {
         in = (nt_ui_interaction_t){0};
         nt_ui_block_pointer(ctx, id, pad); /* inert occluder: disabled slider still blocks input behind it */

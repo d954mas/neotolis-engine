@@ -146,7 +146,7 @@ typedef struct nt_ui_menu_ctx {
         bool open_frame; /* this frame's menu is OPEN: false = present-only, item/submenu calls no-op */
     } pending_menu;
     struct {
-        uint32_t id;      /* the open custom-content row's id (for item_end's step_interaction) */
+        uint32_t id;      /* the open custom-content row's id (for item_end's nt_ui_step) */
         bool enabled;     /* false = a disabled row: item_end never steps/activates (mirrors item_ex's enabled gate) */
         bool activatable; /* false = an interactive child owns the click (the row never latches activate) */
         bool active;      /* a custom-content row element is open (between item_begin/item_end) */
@@ -214,7 +214,7 @@ void nt_ui_menu_end(nt_ui_menu_ctx_t *menu);
 
 /* Open trigger: arms the menu at the cursor on a right-click OR a caller-supplied long-press this frame.
  * Does ONLY idempotent reads — NO mutating interaction step (so it never double-steps the caller's
- * widget; nt_ui_step_interaction is the one mutating step per widget per frame). `menu_id` is the menu's
+ * widget; nt_ui_step is the one mutating step per widget per frame). `menu_id` is the menu's
  * stable id (drives every level's salted state). `target_id` optionally binds the right-click to a widget:
  * 0 = arm anywhere (any right-click); non-zero = arm over that widget's bbox via a GEOMETRY hit-test (NOT
  * arbitrated hover, so a right-click RE-opens the menu through its own occluder; does not respect z-order).

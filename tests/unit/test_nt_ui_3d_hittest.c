@@ -90,7 +90,7 @@ static nt_ui_interaction_t step_bbox_3d(float px, float py, float occlusion) {
         nt_ui_set_pointer_occlusion(s_fx.ctx, 0U, occlusion);
     }
     CLAY({.id = CLAY_ID("hit3d"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = BBOX_X, .y = BBOX_Y}}, .layout = {.sizing = {CLAY_SIZING_FIXED(BBOX_W), CLAY_SIZING_FIXED(BBOX_H)}}}) {}
-    nt_ui_interaction_t in = nt_ui_step_interaction(s_fx.ctx, nt_ui_id("hit3d"));
+    nt_ui_interaction_t in = nt_ui_step(s_fx.ctx, nt_ui_id("hit3d"), NULL);
     nt_ui_end(s_fx.ctx);
     return in;
 }

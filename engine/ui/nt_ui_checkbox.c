@@ -221,7 +221,7 @@ static void cb_core(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint
     /* Disabled skips hit-test but still records a zone so the overlay can show why. */
     nt_ui_interaction_t in;
     if (enabled) {
-        in = nt_ui_step_interaction_padded(ctx, id, NULL);
+        in = nt_ui_step(ctx, id, NULL);
     } else {
         in = (nt_ui_interaction_t){0};
         nt_ui_block_pointer(ctx, id, NULL); /* inert occluder: disabled widget still blocks input behind it */

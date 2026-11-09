@@ -735,7 +735,7 @@ static void focus_step(input_frame_t *f) {
      * off this single result; the dbl window + move radius come from the context. */
     nt_ui_interaction_t in;
     if (enabled) {
-        in = nt_ui_step_interaction(ctx, id);
+        in = nt_ui_step(ctx, id, NULL);
     } else {
         in = (nt_ui_interaction_t){0};
         nt_ui_block_pointer(ctx, id, NULL);

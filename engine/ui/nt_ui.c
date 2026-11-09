@@ -511,7 +511,7 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt,
     ctx->hot_resolved = false;
 
     /* Swap the interactive registry: this frame's resolve reads last frame's set (now _prev); _cur is
-     * refilled by this frame's step_interaction calls. */
+     * refilled by this frame's nt_ui_step calls. */
     nt_ui_interactive_t *interactive_swap = ctx->interactive_prev;
     ctx->interactive_prev = ctx->interactive_cur;
     ctx->interactive_cur = interactive_swap;
@@ -2526,7 +2526,7 @@ static void resolve_hot_if_needed(nt_ui_context_t *ctx); /* defined below; query
 /* Compute-pure: same returned struct N calls per frame. Side effects are idempotent and frame-scoped:
  * an OR of pointer_over_any (observability for nt_ui_wants_pointer) and the once-per-frame hot resolve
  * (so a query-only frame still arbitrates); state-machine writes (capture, button edges) live in
- * step_interaction_padded. */
+ * nt_ui_step. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static nt_ui_interaction_t query_interaction_padded(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lrtb[4], bool *out_owner_over) {
     NT_ASSERT(ctx != NULL && "nt_ui_query_interaction: ctx must be non-NULL");
@@ -2614,7 +2614,7 @@ nt_ui_interaction_t nt_ui_query_interaction(nt_ui_context_t *ctx, uint32_t id) {
 /* Lazy once-per-frame resolve of the front-most interactive widget per pointer, from LAST frame's
  * registry (this frame's transforms/bboxes are still prev-frame until nt_ui_end). 3D: nearest world
  * distance within the occlusion cutoff; 2D: highest effective zIndex (tie → last-registered, i.e.
- * later step_interaction call). Registry holds game-layer widgets only, so their distances share one
+ * later nt_ui_step call). Registry holds game-layer widgets only, so their distances share one
  * view_proj and compare cleanly. */
 
 /* Convert this frame's RAW DEVICE pointers to LAYOUT space via ctx->viewport, in place, once per frame.
@@ -2688,7 +2688,7 @@ static void resolve_hot_if_needed(nt_ui_context_t *ctx) {
                 }
             } else {
                 /* 2D: highest effective zIndex wins; >= so a later-registered tie overwrites. Registry
-                 * order = step_interaction call order = declaration (paint) order when the game steps in
+                 * order = nt_ui_step call order = declaration (paint) order when the game steps in
                  * declaration order — the normal pattern. */
                 if (!found || zi >= best_zindex) {
                     best.id = rec->id;
@@ -2714,12 +2714,15 @@ static bool press_pairs_with_last(const nt_ui_context_t *ctx, uint32_t id, float
 
 /* Same compute as query_padded plus state-machine commits; ONCE per widget per frame. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-nt_ui_interaction_t nt_ui_step_interaction_padded(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lrtb[4]) {
-    NT_ASSERT(ctx != NULL && "nt_ui_step_interaction_padded: ctx must be non-NULL");
-    NT_ASSERT(ctx->in_frame && ctx == g_nt_ui_inframe_ctx && "nt_ui_step_interaction_padded: must be called between nt_ui_begin and nt_ui_end on the active ctx");
-    NT_ASSERT(id != 0U && "nt_ui_step_interaction_padded: id must be non-zero (0 = no widget)");
-    NT_ASSERT(ctx->frame_pointer_count > 0U && "nt_ui_step_interaction_padded: no frame pointer snapshot");
-    NT_ASSERT((pad_lrtb == NULL || (pad_lrtb[0] >= 0 && pad_lrtb[1] >= 0 && pad_lrtb[2] >= 0 && pad_lrtb[3] >= 0)) && "nt_ui_step_interaction_padded: pad_lrtb components must be >= 0");
+nt_ui_interaction_t nt_ui_step(nt_ui_context_t *ctx, uint32_t id, const nt_ui_step_desc_t *desc) {
+    NT_ASSERT(ctx != NULL && "nt_ui_step: ctx must be non-NULL");
+    NT_ASSERT(ctx->in_frame && ctx == g_nt_ui_inframe_ctx && "nt_ui_step: must be called between nt_ui_begin and nt_ui_end on the active ctx");
+    NT_ASSERT(id != 0U && "nt_ui_step: id must be non-zero (0 = no widget)");
+    NT_ASSERT(ctx->frame_pointer_count > 0U && "nt_ui_step: no frame pointer snapshot");
+    const int16_t *pad_lrtb = (desc != NULL) ? desc->pad_lrtb : NULL;
+    const uint8_t drag_axes = (desc != NULL) ? desc->drag_axes : 0U;
+    NT_ASSERT((pad_lrtb == NULL || (pad_lrtb[0] >= 0 && pad_lrtb[1] >= 0 && pad_lrtb[2] >= 0 && pad_lrtb[3] >= 0)) && "nt_ui_step: pad_lrtb components must be >= 0");
+    NT_ASSERT((drag_axes & (uint8_t)~(NT_UI_DRAG_X | NT_UI_DRAG_Y)) == 0U && "nt_ui_step: drag_axes takes only NT_UI_DRAG_X | NT_UI_DRAG_Y");
 
     /* query_padded triggers the once-per-frame hot resolve; step reaches resolve_widget_pidx_state
      * (which reads pointer_hot) only when query did NOT early-return, i.e. after that resolve ran. */
@@ -2776,6 +2779,7 @@ nt_ui_interaction_t nt_ui_step_interaction_padded(nt_ui_context_t *ctx, uint32_t
         }
         cap->pos[0] = p->x;
         cap->pos[1] = p->y;
+        cap->drag_axes = drag_axes;
         /* Marks not-orphan for next begin's cleanup. */
         ctx->capture_seen[pidx] = 1U;
         if (btn.is_released) {
@@ -2830,8 +2834,6 @@ nt_ui_interaction_t nt_ui_step_interaction_padded(nt_ui_context_t *ctx, uint32_t
 
     return out;
 }
-
-nt_ui_interaction_t nt_ui_step_interaction(nt_ui_context_t *ctx, uint32_t id) { return nt_ui_step_interaction_padded(ctx, id, NULL); }
 
 bool nt_ui_hold_crossed(const nt_ui_interaction_t *in, float secs) {
     NT_ASSERT(in != NULL && secs > 0.0F && "nt_ui_hold_crossed: in must be non-NULL, secs must be > 0");

@@ -262,7 +262,7 @@ bool nt_ui_menu_open_trigger(nt_ui_context_t *ctx, uint32_t menu_id, uint32_t ta
     NT_ASSERT(ctx->in_frame && ctx == nt_ui_internal_get_inframe_ctx() && "nt_ui_menu_open_trigger: call between nt_ui_begin/end");
     NT_ASSERT(menu_id != 0U && st != NULL && "nt_ui_menu_open_trigger: menu_id non-zero, st non-NULL");
 
-    /* Idempotent reads only — no mutating step here (nt_ui_step_interaction is the caller's one step per
+    /* Idempotent reads only — no mutating step here (nt_ui_step is the caller's one step per
      * widget). Right-click is the desktop trigger: bound (target_id != 0) it arms over the target; target_id
      * == 0 arms anywhere. long_pressed is the touch trigger, supplied by the caller from its target widget's
      * own step. */
@@ -456,7 +456,7 @@ static void menu_record_append(nt_ui_menu_ctx_t *menu, uint8_t depth, uint32_t i
 /* Declare one immediate row (icon gutter + label + optional submenu marker) carrying the scope-stack id,
  * register + record it, move keyboard focus on hover. Driven by opts (the immediate row codepath).
  * Leaves the row CLOSED (single-shot rows); item_begin opens its own custom-content element.
- * The row interaction is returned; the caller does the ONE step_interaction (so item_begin can defer it
+ * The row interaction is returned; the caller does the ONE nt_ui_step (so item_begin can defer it
  * to item_end). Returns the row id via *out_id. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) — icon + eased hover + marker branch, not deep nesting
 static nt_ui_interaction_t menu_im_row(nt_ui_menu_ctx_t *menu, uint32_t key, const char *label, const nt_ui_menu_item_opts_t *opts, bool has_sub, bool open_element, uint32_t *out_id) {
@@ -645,7 +645,7 @@ bool nt_ui_menu_item_ex(nt_ui_menu_ctx_t *menu, uint32_t key, const char *label,
     uint32_t row_id = 0U;
     const nt_ui_interaction_t in = menu_im_row(menu, key, label, &opts, false, false, &row_id);
     if (!opts.disabled) {
-        (void)nt_ui_step_interaction(ctx, row_id);
+        (void)nt_ui_step(ctx, row_id, NULL);
     }
     /* The inline bool is the SINGLE activation idiom: mouse clicks same-frame; a keyboard Enter arrives via
      * rt->kbd_activated (set in the PREVIOUS frame's menu_end, 1-frame latency). Both latch pending_menu.chosen
@@ -695,13 +695,13 @@ bool nt_ui_menu_item_end(nt_ui_menu_ctx_t *menu) {
     /* A disabled row never steps/activates — mirror item_ex's enabled gate (a disabled custom row must not
      * capture the pointer nor fire on a stashed keyboard activation). */
     if (!menu->pending_menu_item.enabled || !menu->pending_menu_item.activatable) {
-        /* activatable=false: the inner interactive child owns the click. The row must NOT step_interaction —
+        /* activatable=false: the inner interactive child owns the click. The row must NOT nt_ui_step —
          * a row step would capture the pointer and starve the child. Hover highlight still works via the
          * read-only query_interaction in menu_im_row (prev-frame geometry, no capture). Never activates. */
         return false;
     }
     nt_ui_context_t *ctx = menu->ui;
-    const nt_ui_interaction_t in = nt_ui_step_interaction(ctx, row_id); /* the ONE mutating step per id */
+    const nt_ui_interaction_t in = nt_ui_step(ctx, row_id, NULL); /* the ONE mutating step per id */
     /* Same single-idiom activation as item_ex: mouse same-frame, keyboard via rt->kbd_activated (1-frame).
      * Returned to the caller (item_end == "activated"); also latches the internal close-chain signal. */
     const nt_ui_menu_runtime_t *rt = menu_runtime(ctx, menu->pending_menu.menu_id);
@@ -729,7 +729,7 @@ bool nt_ui_menu_submenu_begin_ex(nt_ui_menu_ctx_t *menu, uint32_t key, const cha
     if (opts.disabled) {
         return false; /* a disabled parent never steps, never flies out, never opens */
     }
-    (void)nt_ui_step_interaction(ctx, row_id);
+    (void)nt_ui_step(ctx, row_id, NULL);
     if (in.clicked) {
         menu->pending_menu.pending_open[depth] = (int16_t)running_idx; /* mouse-open this parent (committed in menu_end) */
     }

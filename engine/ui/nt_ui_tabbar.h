@@ -93,7 +93,7 @@ void nt_ui_tabbar_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
  * for the game's content children. Returns true the frame this tab was clicked. */
 bool nt_ui_tab_begin(nt_ui_context_t *ctx, int index, bool active);
 
-/* Runs the open tab's step_interaction, closes the element. Pair with each nt_ui_tab_begin. */
+/* Runs the open tab's nt_ui_step, closes the element. Pair with each nt_ui_tab_begin. */
 void nt_ui_tab_end(nt_ui_context_t *ctx);
 
 /* Closes the bar container opened by nt_ui_tabbar_begin. */

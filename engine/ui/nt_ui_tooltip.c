@@ -124,7 +124,7 @@ bool nt_ui_tooltip(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8
     nt_ui_tooltip_cell_t *c = nt_ui_state(ctx, tooltip_timer_id(target_id), sizeof *c, NT_UI_STATE_TAG('t', 'i', 'p', ' '));
 
     /* IDEMPOTENT read of the target's hover — must NOT become a second mutating step on the target id.
-     * The game's own step_interaction stays the sole capture mutator. */
+     * The game's own nt_ui_step stays the sole capture mutator. */
     const nt_ui_interaction_t in = nt_ui_query_interaction(ctx, target_id);
     if (in.hovered) {
         c->hover += ctx->frame_dt;

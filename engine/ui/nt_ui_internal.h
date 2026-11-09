@@ -146,7 +146,7 @@ static inline nt_ui_baked_xform_t nt_ui_internal_identity_baked(void) {
     return bx;
 }
 
-/* Per-frame record of an interactive widget (one per step_interaction), used next frame by the
+/* Per-frame record of an interactive widget (one per nt_ui_step), used next frame by the
  * front-most hot-widget resolve. The transform/bbox are re-fetched by id at resolve time. */
 typedef struct {
     uint32_t id;
@@ -187,7 +187,8 @@ typedef struct {
     float pos[2];       /* current UI-space pos; drag = pos - press_pos */
     float hold_secs;    /* dt accumulated since the press */
     float hold_prev_secs;
-    bool hold_live; /* false once the pointer left the hitbox; only a new press restarts the hold */
+    bool hold_live;    /* false once the pointer left the hitbox; only a new press restarts the hold */
+    uint8_t drag_axes; /* NT_UI_DRAG_* the capturing widget drags along itself (from its step desc) */
 } nt_ui_capture_t;
 
 /* Lives at arena head; hot fields first. Per-ctx — no module globals. Field order is deliberately
@@ -283,7 +284,7 @@ struct nt_ui_context {
 
     /* Tab-bar begin/end core. The bar holds the per-call style ptr + layers + base_id so tab_begin can
      * emit the per-state bg + accent without re-passing them; the tab sub-state carries the open tab's id
-     * (for tab_end's step_interaction) + its click result. Bars/tabs do not nest (asserted). */
+     * (for tab_end's nt_ui_step) + its click result. Bars/tabs do not nest (asserted). */
     struct {
         const void *style; /* nt_ui_tabbar_style_t* (void to keep the internal header widget-agnostic) */
         uint32_t base_id;
@@ -371,7 +372,7 @@ struct nt_ui_context {
     uint32_t *hit_clip_parent_id;
     uint32_t *hit_generation;
 
-    /* Double-buffered interactive-widget registry (always-on). step_interaction appends to _cur this
+    /* Double-buffered interactive-widget registry (always-on). nt_ui_step appends to _cur this
      * frame; the hot resolve reads _prev (last frame). Buffers swap each begin. Arena-allocated. */
     nt_ui_interactive_t *interactive_prev;
     nt_ui_interactive_t *interactive_cur;
@@ -455,7 +456,7 @@ struct nt_ui_context {
     bool inspector_active;
     uint32_t inspector_highlight_id;
     uint32_t inspector_selected_id;
-    /* Pointer inside sidebar footprint — gates step_interaction to zeroed return. */
+    /* Pointer inside sidebar footprint — gates nt_ui_step to zeroed return. */
     bool inspector_pointer_consumed;
     /* Prev-frame tree truncation state — warn only on the OFF->ON edge, not every frame. */
     bool inspector_was_truncated;

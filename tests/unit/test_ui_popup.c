@@ -169,9 +169,7 @@ static nt_ui_interaction_t closed_popup_base_frame(const nt_ui_popup_style_t *st
     bool open = false;
     nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, 1.0F / 60.0F, p, 1, 0);
     nt_ui_interaction_t in;
-    CLAY({.id = (Clay_ElementId){.id = nt_ui_id("closed_base")}, .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(120)}}}) {
-        in = nt_ui_step_interaction(s_fx.ctx, nt_ui_id("closed_base"));
-    }
+    CLAY({.id = (Clay_ElementId){.id = nt_ui_id("closed_base")}, .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(120)}}}) { in = nt_ui_step(s_fx.ctx, nt_ui_id("closed_base"), NULL); }
     const bool declared = nt_ui_popup_visible(s_fx.ctx, POP_A, st, anc, &open);
     if (declared) {
         nt_ui_popup_end(s_fx.ctx);

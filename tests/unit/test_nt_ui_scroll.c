@@ -162,7 +162,7 @@ static nt_ui_interaction_t scroll_child_frame(nt_pointer_t *p, const nt_ui_scrol
     CLAY({.id = CLAY_ID("root"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(200)}}}) {
         nt_ui_scroll_begin(s_fx.ctx, NULL, SCROLL_ID, style, NULL);
         CLAY({.id = CLAY_ID("interactive_content"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(1000)}}}) {
-            interaction = nt_ui_step_interaction(s_fx.ctx, CLAY_ID("interactive_content").id);
+            interaction = nt_ui_step(s_fx.ctx, CLAY_ID("interactive_content").id, NULL);
         }
         nt_ui_scroll_end(s_fx.ctx);
     }

@@ -247,7 +247,7 @@ measured peak.
 ## Interaction model
 
 Game ids interact via `nt_ui_query_interaction`
-(idempotent until the step, multiple calls per frame OK) and `nt_ui_step_interaction`
+(idempotent until the step, multiple calls per frame OK) and `nt_ui_step`
 (mutating, exactly one call per id per frame). The step commits capture, so a later
 query that frame can read different edges: read one-shot edges from the step's
 result, and `double_clicked` only from there. Capture is per-pointer:
@@ -264,15 +264,15 @@ frame's bbox); no stuck input on widget disappearance.
 
 When interactive widgets overlap a pointer, only
 the front-most may react; the rest are gated off. The hot widget per pointer
-is resolved once per frame — lazily, on the first `step_interaction` /
+is resolved once per frame — lazily, on the first `nt_ui_step` /
 `query_interaction` / `nt_ui_pointer_hot` — from the PREVIOUS frame's
-interactive registry; only widgets that called `nt_ui_step_interaction` last
+interactive registry; only widgets that called `nt_ui_step` last
 frame are candidates. 3D ctx (`use_raycast_input`): nearest world ray-distance
 within a game-fed occlusion cutoff (`nt_ui_set_pointer_occlusion`, reset each
 begin) so UI can't be clicked through world geometry — the game owns the
 raycast, the engine only takes the cutoff distance; `nt_ui_interaction_t.distance`
 reports the hit distance. 2D ctx: highest effective Clay zIndex (tie →
-last-registered, i.e. the later `step_interaction` call; widget code should step
+last-registered, i.e. the later `nt_ui_step` call; widget code should step
 in declaration order so this matches paint order). A free pointer drives a
 widget only if it is the resolved hot
 widget or already holds capture; `nt_ui_pointer_hot` exposes the resolved id.
@@ -285,7 +285,7 @@ frame stays a hot candidate for that ONE transition frame (it can gate widgets
 beneath it but itself reacts to nothing), then orphan cleanup drops it next frame.
 A statically-disabled widget never registers, so never gates — unless it opts in via
 `nt_ui_block_pointer(ctx, id, pad_lrtb)`, which writes an INERT hit-registry entry (the
-same record `step_interaction` makes, minus any interaction). It blocks input to widgets
+same record `nt_ui_step` makes, minus any interaction). It blocks input to widgets
 behind it but never captures, clicks, or reports hover — the stock disabled widgets
 (button/checkbox/slider) call it so a disabled overlay or modal can't leak clicks through.
 
@@ -475,7 +475,7 @@ the buffer or `max_length` (both count the NUL byte). A codepoint is never split
 
 ## Gestures
 
-`nt_ui_step_interaction` also reports the gestures of a press; `nt_ui_button_begin`
+`nt_ui_step` also reports the gestures of a press; `nt_ui_button_begin`
 returns the same result. Gesture state follows the press, not the widget, and uses no
 state-pool cell:
 

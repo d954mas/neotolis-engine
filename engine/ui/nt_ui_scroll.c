@@ -431,7 +431,7 @@ static void scroll_drag_check(nt_ui_context_t *ctx, uint32_t id, const nt_ui_scr
     bool any_free_press = false;
     const float dt = ctx->frame_dt;
     /* The inspector floats on top: when its sidebar has consumed a pointer, a game container under it
-     * must not arm/steal/own that pointer (topmost owns input — same gate step_interaction uses). The
+     * must not arm/steal/own that pointer (topmost owns input — same gate nt_ui_step uses). The
      * inspector's own panes pass inspector_owned and bypass this. OFF builds have no inspector. */
 #if NT_UI_DEBUG_TOOLS
     const bool pane_blocked = !inspector_owned && ctx->inspector_pointer_consumed;
@@ -662,10 +662,10 @@ static void scrollbar_interact(nt_ui_context_t *ctx, uint32_t scroll_id, uint32_
     scrollbar_hit_pad(axis, style->bar_thickness, pad);
     const float over = content - container;
     if (over <= 0.0F || track_len - thumb_len <= 0.0F) {
-        (void)nt_ui_step_interaction_padded(ctx, bar_id, pad); /* keep the id registered (consistent hit-test) */
+        (void)nt_ui_step(ctx, bar_id, &(nt_ui_step_desc_t){.pad_lrtb = pad}); /* keep the id registered (consistent hit-test) */
         return;
     }
-    const nt_ui_interaction_t in = nt_ui_step_interaction_padded(ctx, bar_id, pad);
+    const nt_ui_interaction_t in = nt_ui_step(ctx, bar_id, &(nt_ui_step_desc_t){.pad_lrtb = pad});
     const float pointer_a = (axis == 1) ? in.pos[1] : in.pos[0];
     const float press_a = (axis == 1) ? in.press_pos[1] : in.press_pos[0];
 

@@ -79,7 +79,7 @@ static void test_debug_recording_off_no_capture(void) {
     TEST_ASSERT_FALSE(nt_ui_debug_get_recording(s_fx.ctx));
     /* Many queries; none should be recorded. */
     for (uint32_t i = 0; i < 5U; ++i) {
-        (void)nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btnA"));
+        (void)nt_ui_step(s_fx.ctx, nt_ui_id("btnA"), NULL);
     }
     TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_debug_get_zone_count(s_fx.ctx));
     nt_ui_end(s_fx.ctx);
@@ -95,10 +95,10 @@ static void test_debug_recording_on_records_zones(void) {
     declare_btn("btnA", BTN_X, BTN_Y);
     declare_btn("btnB", BTN_X + 200.0F, BTN_Y);
     declare_btn("btnC", BTN_X, BTN_Y + 100.0F);
-    (void)nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btnA"));
-    (void)nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btnB"));
+    (void)nt_ui_step(s_fx.ctx, nt_ui_id("btnA"), NULL);
+    (void)nt_ui_step(s_fx.ctx, nt_ui_id("btnB"), NULL);
     const int16_t pad_warm[4] = {8, 8, 8, 8};
-    (void)nt_ui_step_interaction_padded(s_fx.ctx, nt_ui_id("btnC"), pad_warm);
+    (void)nt_ui_step(s_fx.ctx, nt_ui_id("btnC"), &(nt_ui_step_desc_t){.pad_lrtb = pad_warm});
     nt_ui_end(s_fx.ctx);
 
     /* Frame 2: turn recording on, query all 3. */
@@ -109,10 +109,10 @@ static void test_debug_recording_on_records_zones(void) {
     declare_btn("btnA", BTN_X, BTN_Y);
     declare_btn("btnB", BTN_X + 200.0F, BTN_Y);
     declare_btn("btnC", BTN_X, BTN_Y + 100.0F);
-    (void)nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btnA"));
-    (void)nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btnB"));
+    (void)nt_ui_step(s_fx.ctx, nt_ui_id("btnA"), NULL);
+    (void)nt_ui_step(s_fx.ctx, nt_ui_id("btnB"), NULL);
     const int16_t pad[4] = {8, 8, 8, 8};
-    (void)nt_ui_step_interaction_padded(s_fx.ctx, nt_ui_id("btnC"), pad);
+    (void)nt_ui_step(s_fx.ctx, nt_ui_id("btnC"), &(nt_ui_step_desc_t){.pad_lrtb = pad});
     TEST_ASSERT_EQUAL_UINT32(3U, nt_ui_debug_get_zone_count(s_fx.ctx));
 
     /* IDs come back in query order. */
@@ -148,7 +148,7 @@ static void test_debug_recording_clears_each_begin(void) {
     nt_ui_debug_set_recording(s_fx.ctx, true);
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f1, 1, 0);
     declare_btn("btnA", BTN_X, BTN_Y);
-    (void)nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btnA"));
+    (void)nt_ui_step(s_fx.ctx, nt_ui_id("btnA"), NULL);
     TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_debug_get_zone_count(s_fx.ctx));
     nt_ui_end(s_fx.ctx);
 
@@ -179,7 +179,7 @@ static void test_debug_draw_off_mode_silent(void) {
     nt_ui_end(s_fx.ctx);
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f1, 1, 0);
     declare_btn("btnA", BTN_X, BTN_Y);
-    (void)nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btnA"));
+    (void)nt_ui_step(s_fx.ctx, nt_ui_id("btnA"), NULL);
     TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_debug_get_zone_count(s_fx.ctx));
     nt_ui_end(s_fx.ctx);
 
@@ -197,8 +197,8 @@ static void test_debug_mode_filter(void) {
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f1, 1, 0);
     declare_btn("btnA", BTN_X, BTN_Y);
     declare_btn("btnB", BTN_X + 300.0F, BTN_Y);
-    (void)nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btnA"));
-    (void)nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btnB"));
+    (void)nt_ui_step(s_fx.ctx, nt_ui_id("btnA"), NULL);
+    (void)nt_ui_step(s_fx.ctx, nt_ui_id("btnB"), NULL);
     nt_ui_end(s_fx.ctx);
 
     nt_ui_debug_set_recording(s_fx.ctx, true);
@@ -206,8 +206,8 @@ static void test_debug_mode_filter(void) {
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f2, 1, 0);
     declare_btn("btnA", BTN_X, BTN_Y);
     declare_btn("btnB", BTN_X + 300.0F, BTN_Y);
-    (void)nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btnA"));
-    (void)nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btnB"));
+    (void)nt_ui_step(s_fx.ctx, nt_ui_id("btnA"), NULL);
+    (void)nt_ui_step(s_fx.ctx, nt_ui_id("btnB"), NULL);
 
     /* Inspect the recorded flags directly (drawing is a sink, not a return). */
     uint32_t hover_match = 0U;
@@ -237,7 +237,7 @@ static void test_debug_emit_matches_walker_coord_space(void) {
     nt_ui_debug_set_recording(s_fx.ctx, true);
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f1, 1, 0);
     declare_btn("btnA", BTN_X, BTN_Y);
-    (void)nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btnA"));
+    (void)nt_ui_step(s_fx.ctx, nt_ui_id("btnA"), NULL);
     nt_ui_end(s_fx.ctx);
 
     TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_debug_get_zone_count(s_fx.ctx));
@@ -285,8 +285,8 @@ static void test_debug_labels_draw_after_all_fills(void) {
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f1, 1, 0);
     declare_btn("btnA", BTN_X, BTN_Y);
     declare_btn("btnB", BTN_X + 200.0F, BTN_Y);
-    (void)nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btnA"));
-    (void)nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btnB"));
+    (void)nt_ui_step(s_fx.ctx, nt_ui_id("btnA"), NULL);
+    (void)nt_ui_step(s_fx.ctx, nt_ui_id("btnB"), NULL);
     nt_ui_end(s_fx.ctx);
     TEST_ASSERT_EQUAL_UINT32(2U, nt_ui_debug_get_zone_count(s_fx.ctx));
 
@@ -389,7 +389,7 @@ static void test_debug_cap_saturates_silently(void) {
     const uint32_t cap = s_fx.ctx->debug_zone_cap;
     const uint32_t over = cap + 10U;
     for (uint32_t i = 0; i < over; ++i) {
-        (void)nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btnA"));
+        (void)nt_ui_step(s_fx.ctx, nt_ui_id("btnA"), NULL);
     }
     TEST_ASSERT_EQUAL_UINT32(cap, nt_ui_debug_get_zone_count(s_fx.ctx));
     nt_ui_end(s_fx.ctx);

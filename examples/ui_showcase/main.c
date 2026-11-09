@@ -1539,7 +1539,7 @@ static void render_vlist(nt_ui_context_t *ctx, tab_state_t *st) {
         for (uint32_t i = ry.first; i <= ry.last; ++i) {
             const uint32_t row_id = nt_ui_vlist_item_id(ctx, i);
             const uint32_t hit_id = nt_ui_child_id(row_id, "row_hit"); /* recycles WITH the row; no magic salt */
-            const nt_ui_interaction_t ev = nt_ui_step_interaction(ctx, hit_id);
+            const nt_ui_interaction_t ev = nt_ui_step(ctx, hit_id, NULL);
             if (ev.clicked) {
                 vlist_sel_toggle(i); /* dispatch by ABSOLUTE index, NEVER by the recycled id */
             }
@@ -3200,7 +3200,7 @@ static void render_menu(nt_ui_context_t *ctx, tab_state_t *st) {
           .border = {.color = g_current->border, .width = {1, 1, 1, 1, 0}}}) {
         nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Zone menu: right-click the panel = (re)open here", g_current->body);
     }
-    const nt_ui_interaction_t zone_ev = nt_ui_step_interaction(ctx, s_id_menu_panel);
+    const nt_ui_interaction_t zone_ev = nt_ui_step(ctx, s_id_menu_panel, NULL);
 
     /* Mutually exclusive arming: a right-click over the zone panel must arm ONLY the zone menu, anywhere
      * else ONLY the global. Same cursor + bbox snapshot the trigger reads (prev-frame bbox vs this-frame

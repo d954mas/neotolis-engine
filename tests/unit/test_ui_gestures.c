@@ -1,4 +1,4 @@
-/* Gestures of nt_ui_step_interaction: hold, long press and double-click.
+/* Gestures of nt_ui_step: hold, long press and double-click.
  *
  * Frames drive UI time through the nt_ui_begin dt arg. Exact binary fractions keep the inclusive
  * window, radius and threshold checks deterministic. */
@@ -62,7 +62,7 @@ static void declare_btn_element(void) {
 static nt_ui_interaction_t pointers_frame(const nt_pointer_t *pointers, uint32_t count, float dt) {
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, dt, pointers, count, 0);
     declare_btn_element();
-    const nt_ui_interaction_t e = nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btn"));
+    const nt_ui_interaction_t e = nt_ui_step(s_fx.ctx, nt_ui_id("btn"), NULL);
     nt_ui_end(s_fx.ctx);
     return e;
 }
@@ -294,8 +294,8 @@ static nt_ui_interaction_t two_btn_frame(nt_pointer_t p, bool want_other) {
     CLAY({.id = CLAY_ID("other"),
           .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = BTN_X, .y = BTN_Y + BTN_H}},
           .layout = {.sizing = {CLAY_SIZING_FIXED(BTN_W), CLAY_SIZING_FIXED(BTN_H)}}}) {}
-    const nt_ui_interaction_t other = nt_ui_step_interaction(s_fx.ctx, nt_ui_id("other"));
-    const nt_ui_interaction_t btn = nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btn"));
+    const nt_ui_interaction_t other = nt_ui_step(s_fx.ctx, nt_ui_id("other"), NULL);
+    const nt_ui_interaction_t btn = nt_ui_step(s_fx.ctx, nt_ui_id("btn"), NULL);
     nt_ui_end(s_fx.ctx);
     return want_other ? other : btn;
 }
@@ -339,7 +339,7 @@ static nt_ui_interaction_t query_around_step(nt_pointer_t p, nt_ui_interaction_t
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &p, 1, 0);
     declare_btn_element();
     const nt_ui_interaction_t before = nt_ui_query_interaction(s_fx.ctx, nt_ui_id("btn"));
-    const nt_ui_interaction_t st = nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btn"));
+    const nt_ui_interaction_t st = nt_ui_step(s_fx.ctx, nt_ui_id("btn"), NULL);
     TEST_ASSERT_FALSE(before.double_clicked);
     *after = nt_ui_query_interaction(s_fx.ctx, nt_ui_id("btn"));
     nt_ui_end(s_fx.ctx);
@@ -370,7 +370,7 @@ static void test_query_reads_hold(void) {
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.25F, &hold, 1, 0);
     declare_btn_element();
     const nt_ui_interaction_t before = nt_ui_query_interaction(s_fx.ctx, nt_ui_id("btn"));
-    (void)nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btn"));
+    (void)nt_ui_step(s_fx.ctx, nt_ui_id("btn"), NULL);
     const nt_ui_interaction_t after = nt_ui_query_interaction(s_fx.ctx, nt_ui_id("btn"));
     nt_ui_end(s_fx.ctx);
     TEST_ASSERT_TRUE(float_near(before.hold_secs, 0.25F));
