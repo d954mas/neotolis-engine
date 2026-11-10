@@ -62,7 +62,7 @@ typedef struct {
     float m[16];
     float opacity;
     uint16_t hierarchy_depth;
-    uint16_t _pad_u16;
+    uint16_t _pad16;
     /* Stacking order for painting and hit: (tree root index in Clay's sorted root order: band, then
      * declaration) << 16 | layout element index (declaration order, preorder inside one root). */
     uint32_t order;
@@ -145,8 +145,7 @@ static inline int nt_ui_clampi(int v, int lo, int hi) {
 
 /* Identity baked xform — DFS seed + walker OOB fallback. */
 static inline nt_ui_baked_xform_t nt_ui_internal_identity_baked(void) {
-    nt_ui_baked_xform_t bx = {
-        .m = {1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F}, .opacity = 1.0F, .hierarchy_depth = 0U, ._pad_u16 = 0U, .order = 0U, ._pad = 0.0F};
+    nt_ui_baked_xform_t bx = {.m = {1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F}, .opacity = 1.0F};
     return bx;
 }
 

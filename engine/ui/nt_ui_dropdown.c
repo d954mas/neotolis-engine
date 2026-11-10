@@ -517,9 +517,8 @@ bool nt_ui_combo_selectable_end(nt_ui_context_t *ctx) {
 
     const uint32_t row_id = ctx->pending_combo.row_id;
     nt_ui_clay_priv_close_element();
-    /* A combo custom row is whole-row-clickable (no activatable=false opt-out like the menu): the combo list
-     * is a flat pick list, so a custom row's content is decoration around the choice, never a rival hit
-     * target. The ONE nt_ui_step owns the click; on click the combo clears *open (game writes *selected). */
+    /* The ONE nt_ui_step picks the row; an interactive child, declared later, wins the press over its own
+     * area. On click the combo clears *open (game writes *selected). */
     const nt_ui_interaction_t step = nt_ui_step(ctx, row_id, NULL);
     if (step.clicked) {
         *(ctx->pending_combo.open) = false; /* the game writes *selected; the combo clears *open */

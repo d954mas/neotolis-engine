@@ -2746,8 +2746,9 @@ static void test_front_most_is_structural_not_by_layer(void) {
     TEST_ASSERT_FALSE(s_layer_a.clicked);
 }
 
-/* Inside one tree root the later-declared element takes the press, whatever order the steps run in:
- * a child over the parent stepped after it, a later sibling's hit padding over an earlier descendant. */
+/* Inside one tree root the later-declared element takes the press, whatever order the steps run in and
+ * whatever the layers: a child over the parent stepped after it on a higher layer, a later sibling's hit
+ * padding over an earlier descendant. */
 static nt_ui_interaction_t s_decl_card;
 static nt_ui_interaction_t s_decl_child;
 static nt_ui_interaction_t s_decl_late;
@@ -2756,7 +2757,7 @@ static void decl_frame(const nt_pointer_t *p) {
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .dt = 1.0F / 60.0F, .pointers = p, .pointer_count = 1});
     s_decl_late = nt_ui_step(s_fx.ctx, CLAY_ID("decl_late").id, &(nt_ui_step_desc_t){.pad_lrtb = k_late_pad});
     CLAY({.id = CLAY_ID("decl_root"), .layout = {.layoutDirection = CLAY_TOP_TO_BOTTOM, .sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(200)}}}) {
-        CLAY({.id = CLAY_ID("decl_card"), .layout = {.sizing = {CLAY_SIZING_FIXED(100), CLAY_SIZING_FIXED(100)}}}) {
+        CLAY({.id = CLAY_ID("decl_card"), .layout = {.sizing = {CLAY_SIZING_FIXED(100), CLAY_SIZING_FIXED(100)}}, .userData = NT_UI_CLAY_DATA(1)}) {
             CLAY({.id = CLAY_ID("decl_child"), .layout = {.sizing = {CLAY_SIZING_FIXED(50), CLAY_SIZING_FIXED(50)}}}) { s_decl_child = nt_ui_step(s_fx.ctx, CLAY_ID("decl_child").id, NULL); }
             s_decl_card = nt_ui_step(s_fx.ctx, CLAY_ID("decl_card").id, NULL);
         }

@@ -293,7 +293,10 @@ ranking is the stacking order (see "Floating zIndex is relative"): the later tre
 (band, then declaration), and inside one root the later-declared element wins, so a child is
 over its parent and a later sibling over an earlier one. The order `nt_ui_step` is called in
 does not matter. The draw `layer` is not part of it: it reorders painting inside one root for
-batching and never changes which element gets the pointer. Elements of one root overlap only
+batching and never changes which element gets the pointer. A child overlaps its parent: a
+parent on a higher layer than its interactive child, or the parent's border (Clay emits it
+after the children), paints over the child while the child gets the pointer, so keep an
+interactive child's layer at or above its parent's. Siblings of one root overlap only
 through a transform, overflow without a clip, or hit padding; put such interactive parts on
 one layer or make the upper one floating. `nt_ui_wants_pointer` is true
 while a pointer of the current frame holds a capture or a pending scroll gesture, or its front-most record is declared again this frame (a
@@ -606,8 +609,12 @@ A custom-content row (`item_begin..item_end`, `selectable_begin..selectable_end`
 `preview_begin..preview_end`, and a tab's `nt_ui_tab_begin..nt_ui_tab_end`) steps
 in its `_end`, after its children, but the stacking order is declaration, so an
 interactive child declared inside the row wins the press over its own area; the
-rest of the row activates it. A menu row with `non_activatable` has no action of
-its own (for a row that only hosts a control) and never steps.
+rest of the row activates it. Over the child the child is the front-most record,
+so the row reports no hover there (no highlight, no hover focus). A rich-text block
+with links is one record over its whole box, so inside a row it takes the press
+over all of its text, not only over the links. A menu row with `non_activatable`
+has no action of its own (for a row that only hosts a control): it never steps,
+only blocks the pointer, so it hovers but never captures or activates.
 
 Per-frame menu scratch is GAME-owned (`nt_ui_menu_ctx_t`, allocated by the
 game — static / app field / arena slice — and init via `nt_ui_menu_init`), so

@@ -529,7 +529,6 @@ void nt_ui_internal_build_tree(nt_ui_context_t *ctx) {
     // #endregion
 
     // #region elem-to-root-map
-    NT_ASSERT(R <= (int32_t)UINT16_MAX && N <= (int32_t)UINT16_MAX && "build_tree: tree roots or elements exceed a 16-bit half of the stacking order");
     for (int32_t k = 0; k < R; ++k) {
         Clay__LayoutElementTreeRoot *root = Clay__LayoutElementTreeRootArray_Get(&cc->layoutElementTreeRoots, k);
         ctx->tree_root_for_elem[root->layoutElementIndex] = k;
@@ -1469,7 +1468,9 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
     // #endregion
 
     // #region viewport-hover-scan
-    /* No sidebar row picked → scan viewport for a user element under the cursor. */
+    /* No sidebar row picked → scan viewport for a user element under the cursor. Zones, not the pointer's
+     * hot: only stepped widgets record one, so the pick sees through inert gates (menu occluder, idle popup
+     * catchers, scroll surfaces) to the element under them. */
     if (highlightedElementId == 0U && !ctx->inspector_pointer_consumed) {
         const float panel_left_x = context->layoutDimensions.width - ctx->inspector_metrics.panel_width;
 
@@ -1484,7 +1485,7 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
                 highlightedElementId = nt_ui_internal_pick_zone_3d(ctx, px, py);
             }
         } else {
-            /* Transform-aware; the hit with the highest stacking order wins, as in pointer arbitration. */
+            /* Transform-aware; the hit with the highest stacking order wins. */
             uint32_t best_order = 0U;
             for (uint32_t zi = 0U; zi < ctx->debug_zone_count; ++zi) {
                 const nt_ui_debug_zone_t *z = &ctx->debug_zones[zi];

@@ -173,7 +173,7 @@ static inline uint32_t nt_ui_next_pow2_u32(uint32_t x) {
 size_t nt_ui_min_arena_size(const nt_ui_create_desc_t *desc) {
     NT_ASSERT(desc != NULL && "nt_ui_min_arena_size: desc must be non-NULL");
     NT_ASSERT(desc->max_elements > 0U && "nt_ui_min_arena_size: desc->max_elements must be > 0");
-    NT_ASSERT(desc->max_elements <= UINT16_MAX && "nt_ui_min_arena_size: desc->max_elements exceeds uint16 sorted-index range");
+    NT_ASSERT(desc->max_elements <= UINT16_MAX && "nt_ui_min_arena_size: desc->max_elements exceeds uint16 sorted-index range (and the 16-bit halves of the stacking order)");
     /* SetMaxElementCount also writes word_cache_count = N*2; restore via the same call. */
     Clay_Context *saved_ctx = Clay_GetCurrentContext();
     const int32_t saved_default = nt_ui_clay_priv_default_max_element_count();
@@ -2435,7 +2435,7 @@ uint32_t nt_ui_internal_pick_zone_3d(const nt_ui_context_t *ctx, float px, float
     }
     const float screen_w = nt_ui_clay_priv_layout_width(ctx->clay);
     const float screen_h = nt_ui_clay_priv_layout_height(ctx->clay);
-    /* The hit with the highest stacking order wins, matching the 2D scan and pointer arbitration. */
+    /* Highest stacking order among the zones the ray hits, like the 2D scan; no distance band, unlike resolve_hot. */
     uint32_t picked = 0U;
     uint32_t best_order = 0U;
     for (uint32_t zi = 0U; zi < ctx->debug_zone_count; ++zi) {
@@ -2635,8 +2635,7 @@ static void resolve_hot(nt_ui_context_t *ctx) {
         float nearest_t = INFINITY;
         for (uint32_t k = 0; ctx->use_raycast_input && k < ctx->interactive_prev_count; ++k) {
             float t = 0.0F;
-            uint32_t order = 0U;
-            if (hot_candidate(ctx, &ctx->interactive_prev[k], pidx, &t, &order) == NT_UI_HIT) {
+            if (hot_candidate(ctx, &ctx->interactive_prev[k], pidx, &t, NULL) == NT_UI_HIT) {
                 nearest_t = fminf(nearest_t, t);
             }
         }
