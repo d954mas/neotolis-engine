@@ -62,7 +62,8 @@ typedef struct {
     float opacity;
     uint16_t hierarchy_depth;
     int16_t zindex;      /* effective Clay zIndex (the owning floating tree-root's); 0 for base content. */
-    uint32_t paint_rank; /* place of the element's last command in the walker's paint order; 0 = draws nothing */
+    uint16_t paint_root; /* the owning tree root's place in paint order: band, then declaration */
+    uint16_t _pad16;
     float _pad;
 } nt_ui_baked_xform_t;
 _Static_assert(sizeof(nt_ui_baked_xform_t) == 80, "nt_ui_baked_xform_t fixed at 80B");
@@ -142,15 +143,14 @@ static inline int nt_ui_clampi(int v, int lo, int hi) {
 
 /* Identity baked xform — DFS seed + walker OOB fallback. */
 static inline nt_ui_baked_xform_t nt_ui_internal_identity_baked(void) {
-    nt_ui_baked_xform_t bx = {
-        .m = {1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F}, .opacity = 1.0F, .hierarchy_depth = 0U, .zindex = 0, .paint_rank = 0U, ._pad = 0.0F};
+    nt_ui_baked_xform_t bx = {.m = {1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F},
+                              .opacity = 1.0F,
+                              .hierarchy_depth = 0U,
+                              .zindex = 0,
+                              .paint_root = 0U,
+                              ._pad16 = 0U,
+                              ._pad = 0.0F};
     return bx;
-}
-
-/* The walker reorders by layer only inside a run of these commands in one band; any other command
- * (scissor, custom) is a barrier. build_tree ranks elements by the same rule. */
-static inline bool nt_ui_internal_cmd_segmentable(Clay_RenderCommandType cmd_type) {
-    return cmd_type == CLAY_RENDER_COMMAND_TYPE_RECTANGLE || cmd_type == CLAY_RENDER_COMMAND_TYPE_BORDER || cmd_type == CLAY_RENDER_COMMAND_TYPE_IMAGE || cmd_type == CLAY_RENDER_COMMAND_TYPE_TEXT;
 }
 
 /* Per-frame record of a step, blocker, scroll surface or scrollbar, used next frame by the
@@ -211,7 +211,7 @@ struct nt_ui_context {
     /* capture_seen[] tracks who touched the capture this frame — orphans cleared on begin. */
     nt_ui_capture_t captures[NT_INPUT_MAX_POINTERS];
     /* Per-pointer front-most interactive widget + game-fed occlusion cutoff (3D), resolved by
-     * nt_ui_begin from prev-frame layout (3D: nearest ray-t within cutoff; then paint order). Ordered here
+     * nt_ui_begin from prev-frame layout (3D: nearest ray-t within cutoff; then paint order of the tree root). Ordered here
      * by alignment (after the 4B-aligned captures) to avoid adding struct padding. */
     nt_ui_hot_t pointer_hot[NT_INPUT_MAX_POINTERS];
     float pointer_occlusion[NT_INPUT_MAX_POINTERS]; /* max world ray distance; default +inf = no cutoff */

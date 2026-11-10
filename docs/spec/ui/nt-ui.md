@@ -281,13 +281,15 @@ nearest world ray-distance within a game-fed occlusion cutoff
 (`nt_ui_frame_desc_t.occlusion`) so UI can't be clicked through
 world geometry — the game owns the raycast, the engine only takes the cutoff distance;
 `nt_ui_interaction_t.distance` reports the hit distance. Hits within 1e-5 of the nearest
-distance (relative, floored at one unit) are coplanar and compete like 2D. 2D ctx: the hit
-that is painted last. `nt_ui_end` gives every element its place in the walker's paint order
-(band; inside a run of commands with no scissor or custom command between them, `layer`
-ascending, then command order), so a floating element is over the content it floats on and
-a higher layer is over a lower one, whatever order the two were stepped in. An element
-that draws nothing stands where its parent does; among elements that share a place the
-later record wins, i.e. the later `nt_ui_step` call. `nt_ui_wants_pointer` is true
+distance (relative, floored at one unit) are coplanar and compete like 2D. 2D ctx: the
+ranking is structural. Clay orders its tree roots (the document and every floating element)
+by band, then by declaration, and the later root wins: a floating element is over the
+content it floats on, whatever order the two were stepped in. Inside one root the later
+record wins, i.e. the later `nt_ui_step` call; widget code should step in declaration
+order. The draw `layer` is not part of it: layers order batches inside a band and are not
+a way to say which of two interactive elements is on top. Where two interactive elements
+overlap in one band with different layers, the walker may paint the earlier one over the
+later; give the upper one a band (a floating `zIndex`). `nt_ui_wants_pointer` is true
 while a pointer of the current frame holds a capture or a pending scroll gesture, or its front-most record is declared again this frame (a
 record that vanished this frame is not UI under the pointer). A free pointer drives a
 widget only if it is the resolved hot
@@ -571,7 +573,7 @@ would dismiss. The cost is real and accepted: two catcher-bearing popups on
 one band with different draw layers paint by layer but dismiss by
 declaration, so an outside click can close the one underneath. Ranking the
 slot by paint order requires making the pointer arbiter layer-aware first
-(`resolve_hot` ranks drawn elements by paint order, a catcher draws nothing) — until then the two must use
+(`resolve_hot` ranks by band and tree root, not by layer) — until then the two must use
 one key, and this is that key. The agreement is a 2D-context property: a 3D
 ctx arbitrates the pointer by ray distance and does not rank overlays by
 band at all. A catcher-less
