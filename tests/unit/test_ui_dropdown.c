@@ -777,6 +777,20 @@ static void test_dropdown_custom_selectable_click_selects(void) {
 
 /* A custom row with an interactive child: the row steps in _end, after the child, but the child is
  * declared later, so a press over the child is the child's, not the row's. */
+/* The custom row's fill in the last frame: its hover fill (0xFF4A4A4A) shows while the pointer is on
+ * its interactive child, since the row is hovered within; idle rows draw no fill. */
+static bool combo_custom_row_hover_lit(void) {
+    const uint32_t row_id = nt_ui_dropdown_test_combo_row_id(DD_A, ROW_KEY(0));
+    const Clay_RenderCommandArray *arr = &s_fx.ctx->frozen_cmds;
+    for (int32_t i = 0; i < arr->length; ++i) {
+        const Clay_RenderCommand *c = &arr->internalArray[i];
+        if (c->id == row_id && c->commandType == CLAY_RENDER_COMMAND_TYPE_RECTANGLE) {
+            return c->renderData.rectangle.backgroundColor.r == 74.0F;
+        }
+    }
+    return false;
+}
+
 static void test_dropdown_custom_row_interactive_child_takes_the_press(void) {
     bool open = true;
     bool clicked = false;
@@ -787,8 +801,10 @@ static void test_dropdown_custom_row_interactive_child_takes_the_press(void) {
     TEST_ASSERT_TRUE(bb.found);
     const float cx = bb.x + (bb.width * 0.5F);
     const float cy = bb.y + (bb.height * 0.5F);
+    TEST_ASSERT_FALSE(combo_custom_row_hover_lit());
     nt_pointer_t pr = pointer_at(cx, cy, true, true, false);
     combo_im_frame_custom(&pr, &open, &clicked, true);
+    TEST_ASSERT_TRUE(combo_custom_row_hover_lit());
     nt_pointer_t rl = pointer_at(cx, cy, false, false, true);
     combo_im_frame_custom(&rl, &open, &clicked, true);
     TEST_ASSERT_TRUE(s_row_child.clicked);

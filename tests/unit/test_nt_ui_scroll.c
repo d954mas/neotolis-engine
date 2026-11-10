@@ -163,11 +163,9 @@ static void scroll_frame_dt(nt_pointer_t *p, const nt_ui_scroll_style_t *style, 
 
 static void scroll_frame(nt_pointer_t *p, const nt_ui_scroll_style_t *style) { scroll_frame_dt(p, style, 1.0F / 60.0F); }
 
-static bool s_child_within; /* nt_ui_hovered_within(interactive_content) right after nt_ui_begin */
 static nt_ui_interaction_t scroll_child_frame(nt_pointer_t *p, const nt_ui_scroll_style_t *style) {
     nt_ui_interaction_t interaction = {0};
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .dt = 1.0F / 60.0F, .pointers = p, .pointer_count = 1});
-    s_child_within = nt_ui_hovered_within(s_fx.ctx, CLAY_ID("interactive_content").id);
     CLAY({.id = CLAY_ID("root"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(200)}}}) {
         nt_ui_scroll_begin(s_fx.ctx, NULL, SCROLL_ID, style, NULL);
         CLAY({.id = CLAY_ID("interactive_content"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(1000)}}}) {
@@ -235,13 +233,13 @@ static void test_scroll_takes_real_child_and_tracks_the_pointer(void) {
     scroll_child_frame(&p, &style);
     TEST_ASSERT_EQUAL_UINT32(CLAY_ID("interactive_content").id, s_fx.ctx->captures[0].active_id);
 
-    TEST_ASSERT_TRUE(s_child_within);
+    TEST_ASSERT_TRUE(nt_ui_hovered_within(s_fx.ctx, CLAY_ID("interactive_content").id));
 
     p.buttons[NT_BUTTON_LEFT].is_pressed = false;
     p.y = 80.0F;
     scroll_child_frame(&p, &style);
     TEST_ASSERT_EQUAL_UINT32(SCROLL_ID, s_fx.ctx->captures[0].active_id);
-    TEST_ASSERT_FALSE(s_child_within); /* the list took the pointer this frame: the row is no longer its target */
+    TEST_ASSERT_FALSE(nt_ui_hovered_within(s_fx.ctx, CLAY_ID("interactive_content").id)); /* the list holds the pointer now */
     const nt_ui_scroll_state_t *s = nt_ui_state_find(s_fx.ctx, SCROLL_ID);
     TEST_ASSERT_NOT_NULL(s);
     TEST_ASSERT_TRUE(float_near(s->raw[1], -12.0F, 0.001F)); /* the 20 px move minus the 8 dp slop */
@@ -2793,16 +2791,9 @@ static void test_front_most_inside_a_root_is_declaration_order(void) {
     TEST_ASSERT_FALSE(s_decl_card.clicked);
 }
 
-/* Hover within: a row holding a control and a floating part, then an unrelated row. Each frame records
- * which elements the pointer's target is inside of. */
-static bool s_in_row;
-static bool s_in_ctl;
-static bool s_in_other;
+/* Hover within: a row holding a control and a floating part, then an unrelated row. */
 static void within_frame(const nt_pointer_t *p) {
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .dt = 1.0F / 60.0F, .pointers = p, .pointer_count = 1});
-    s_in_row = nt_ui_hovered_within(s_fx.ctx, CLAY_ID("w_row").id);
-    s_in_ctl = nt_ui_hovered_within(s_fx.ctx, CLAY_ID("w_ctl").id);
-    s_in_other = nt_ui_hovered_within(s_fx.ctx, CLAY_ID("w_other").id);
     CLAY({.id = CLAY_ID("w_root"), .layout = {.layoutDirection = CLAY_TOP_TO_BOTTOM}}) {
         CLAY({.id = CLAY_ID("w_row"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(40)}}}) {
             CLAY({.id = CLAY_ID("w_ctl"), .layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(40)}}}) { (void)nt_ui_step(s_fx.ctx, CLAY_ID("w_ctl").id, NULL); }
@@ -2826,35 +2817,36 @@ static void within_at(nt_pointer_t *p, float x, float y) {
 static void test_hovered_within_follows_declaration(void) {
     nt_pointer_t p = arb_pointer(0.0F, 0.0F);
     within_at(&p, 20.0F, 20.0F); /* the row's control: inside the row, not the other row */
-    TEST_ASSERT_TRUE(s_in_row);
-    TEST_ASSERT_TRUE(s_in_ctl);
-    TEST_ASSERT_FALSE(s_in_other);
+    TEST_ASSERT_TRUE(nt_ui_hovered_within(s_fx.ctx, CLAY_ID("w_row").id));
+    TEST_ASSERT_TRUE(nt_ui_hovered_within(s_fx.ctx, CLAY_ID("w_ctl").id));
+    TEST_ASSERT_FALSE(nt_ui_hovered_within(s_fx.ctx, CLAY_ID("w_other").id));
     within_at(&p, 120.0F, 120.0F); /* the row's floating part, outside the row's box */
-    TEST_ASSERT_TRUE(s_in_row);
-    TEST_ASSERT_FALSE(s_in_ctl);
+    TEST_ASSERT_TRUE(nt_ui_hovered_within(s_fx.ctx, CLAY_ID("w_row").id));
+    TEST_ASSERT_FALSE(nt_ui_hovered_within(s_fx.ctx, CLAY_ID("w_ctl").id));
     within_at(&p, 20.0F, 60.0F);
-    TEST_ASSERT_FALSE(s_in_row);
-    TEST_ASSERT_TRUE(s_in_other);
+    TEST_ASSERT_FALSE(nt_ui_hovered_within(s_fx.ctx, CLAY_ID("w_row").id));
+    TEST_ASSERT_TRUE(nt_ui_hovered_within(s_fx.ctx, CLAY_ID("w_other").id));
     within_at(&p, 500.0F, 500.0F);
-    TEST_ASSERT_FALSE(s_in_row);
-    TEST_ASSERT_FALSE(s_in_other);
+    TEST_ASSERT_FALSE(nt_ui_hovered_within(s_fx.ctx, CLAY_ID("w_row").id));
+    TEST_ASSERT_FALSE(nt_ui_hovered_within(s_fx.ctx, CLAY_ID("w_other").id));
 }
 
+/* A held pointer hovers within its holder only while it is over it. */
 static void test_hovered_within_follows_capture(void) {
     nt_pointer_t p = arb_pointer(0.0F, 0.0F);
     within_at(&p, 20.0F, 20.0F);
     arb_press(&p);
     within_frame(&p);
     arb_hold(&p);
-    within_at(&p, 20.0F, 60.0F); /* dragged onto the other row: still the control's */
-    TEST_ASSERT_TRUE(s_in_row);
-    TEST_ASSERT_FALSE(s_in_other);
+    within_at(&p, 20.0F, 60.0F); /* dragged onto the other row: neither */
+    TEST_ASSERT_EQUAL_UINT32(CLAY_ID("w_ctl").id, nt_ui_test_capture_active_id(s_fx.ctx, 0U));
+    TEST_ASSERT_FALSE(nt_ui_hovered_within(s_fx.ctx, CLAY_ID("w_row").id));
+    TEST_ASSERT_FALSE(nt_ui_hovered_within(s_fx.ctx, CLAY_ID("w_other").id));
+    within_at(&p, 20.0F, 20.0F); /* back over the holder, still held */
+    TEST_ASSERT_TRUE(nt_ui_hovered_within(s_fx.ctx, CLAY_ID("w_row").id));
     arb_release(&p);
-    within_frame(&p);
-    p.buttons[NT_BUTTON_LEFT].is_released = false;
     within_at(&p, 20.0F, 60.0F); /* released: the other row again */
-    TEST_ASSERT_FALSE(s_in_row);
-    TEST_ASSERT_TRUE(s_in_other);
+    TEST_ASSERT_TRUE(nt_ui_hovered_within(s_fx.ctx, CLAY_ID("w_other").id));
 }
 
 /* A pointer slot the game stops passing holds no pending gesture. */

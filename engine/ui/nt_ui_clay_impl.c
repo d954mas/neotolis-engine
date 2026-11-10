@@ -456,8 +456,6 @@ static void bt_dfs_subtree(nt_ui_context_t *ctx, Clay_Context *cc, int32_t root_
     while (sp > 0) {
         nt_ui_dfs_frame_t *f = &S[sp - 1];
         Clay_LayoutElement *elem = Clay_LayoutElementArray_Get(&cc->layoutElements, f->elem_idx);
-        /* Text leaves have no .children, and never close, so their nt_last_index stays 0. */
-        const bool is_text = Clay__ElementHasConfig(elem, CLAY__ELEMENT_CONFIG_TYPE_TEXT);
 
         if (f->children_cursor == 0) {
             nt_ui_element_data_t *ad = bt_scan_userdata(elem);
@@ -482,11 +480,13 @@ static void bt_dfs_subtree(nt_ui_context_t *ctx, Clay_Context *cc, int32_t root_
             ctx->tree_baked[f->elem_idx].opacity = op;
             ctx->tree_baked[f->elem_idx].hierarchy_depth = f->hierarchy_depth;
             ctx->tree_baked[f->elem_idx].order = ((uint32_t)root_idx << 16U) | (uint32_t)f->elem_idx;
-            ctx->tree_baked[f->elem_idx].last_inside = (uint16_t)(is_text ? f->elem_idx : elem->nt_last_index);
+            ctx->tree_baked[f->elem_idx].last_inside = (uint16_t)elem->nt_last_index; /* 0 for text: never a target */
             memcpy(f->m, m_cur, sizeof m_cur);
             f->opacity = op;
         }
 
+        /* Text leaves have no .children. */
+        const bool is_text = Clay__ElementHasConfig(elem, CLAY__ELEMENT_CONFIG_TYPE_TEXT);
         const int32_t child_count = is_text ? 0 : elem->childrenOrTextContent.children.length;
 
         if (f->children_cursor < child_count) {
@@ -1470,8 +1470,8 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
 
     // #region viewport-hover-scan
     /* No sidebar row picked → scan viewport for a user element under the cursor. Zones, not the pointer's
-     * hot: only stepped widgets record one, so the pick sees through inert gates (menu occluder, idle popup
-     * catchers, scroll surfaces) to the element under them. */
+     * hot: only stepped widgets record one, so the pick sees through block-only gates (menu occluder, a
+     * non-top popup's catcher) and scroll surfaces to the element under them. */
     if (highlightedElementId == 0U && !ctx->inspector_pointer_consumed) {
         const float panel_left_x = context->layoutDimensions.width - ctx->inspector_metrics.panel_width;
 

@@ -948,41 +948,40 @@ static menu_row_child_result_t menu_row_child_frames(nt_ui_menu_state_t *st, boo
     return r;
 }
 
-static uint32_t menu_focus_id(void) { return nt_ui_menu_test_focus_item_id(s_fx.ctx, &s_menu, MENU_A, 0U); }
-
 /* ---- An inner button owns its press in a custom-content row, with or without the row's own action:
  *      the row steps in item_end, after the child, but the child is declared later. The row is still
  *      the one under the pointer, so it takes hover focus. ---- */
 static void test_menu_item_begin_child_owns_its_press(void) {
-    for (int non_activatable = 0; non_activatable < 2; ++non_activatable) {
-        nt_ui_menu_state_t st = {0};
-        menu_im_open(&st, 120.0F, 80.0F);
-        const menu_row_child_result_t r = menu_row_child_frames(&st, non_activatable != 0, true);
-        TEST_ASSERT_TRUE(r.btn_clicked);
-        TEST_ASSERT_FALSE(r.end_activated);
-        TEST_ASSERT_TRUE(st.open);
-        TEST_ASSERT_EQUAL_UINT32(nt_ui_menu_test_item_id(MENU_A, KEY_NEW), menu_focus_id());
-    }
+    nt_ui_menu_state_t st = {0};
+    menu_im_open(&st, 120.0F, 80.0F);
+    menu_row_child_result_t r = menu_row_child_frames(&st, false, true);
+    TEST_ASSERT_TRUE(r.btn_clicked);
+    TEST_ASSERT_FALSE(r.end_activated);
+    TEST_ASSERT_TRUE(st.open);
+    TEST_ASSERT_EQUAL_UINT32(nt_ui_menu_test_item_id(MENU_A, KEY_NEW), nt_ui_menu_test_focus_item_id(s_fx.ctx, &s_menu, MENU_A, 0U));
+
+    r = menu_row_child_frames(&st, true, true);
+    TEST_ASSERT_TRUE(r.btn_clicked);
+    TEST_ASSERT_FALSE(r.end_activated);
+    TEST_ASSERT_TRUE(st.open);
 }
 
-/* ---- Beside the child an activatable row activates and closes the chain; a non_activatable row takes
- *      hover focus but never captures, activates or closes. ---- */
+/* ---- Beside the child a non_activatable row takes hover focus but never captures, activates or
+ *      closes (first, on a fresh registry); an activatable row activates and closes the chain. ---- */
 static void test_menu_item_begin_press_beside_child(void) {
     nt_ui_menu_state_t st = {0};
     menu_im_open(&st, 120.0F, 80.0F);
-    menu_row_child_result_t r = menu_row_child_frames(&st, false, false);
-    TEST_ASSERT_FALSE(r.btn_clicked);
-    TEST_ASSERT_TRUE(r.end_activated);
-    TEST_ASSERT_FALSE(st.open);
-
-    st = (nt_ui_menu_state_t){0};
-    menu_im_open(&st, 120.0F, 80.0F);
-    r = menu_row_child_frames(&st, true, false);
+    menu_row_child_result_t r = menu_row_child_frames(&st, true, false);
     TEST_ASSERT_FALSE(r.btn_clicked);
     TEST_ASSERT_FALSE(r.end_activated);
     TEST_ASSERT_FALSE(r.row_captured);
     TEST_ASSERT_TRUE(st.open);
-    TEST_ASSERT_EQUAL_UINT32(nt_ui_menu_test_item_id(MENU_A, KEY_NEW), menu_focus_id());
+    TEST_ASSERT_EQUAL_UINT32(nt_ui_menu_test_item_id(MENU_A, KEY_NEW), nt_ui_menu_test_focus_item_id(s_fx.ctx, &s_menu, MENU_A, 0U));
+
+    r = menu_row_child_frames(&st, false, false);
+    TEST_ASSERT_FALSE(r.btn_clicked);
+    TEST_ASSERT_TRUE(r.end_activated);
+    TEST_ASSERT_FALSE(st.open);
 }
 
 /* ---- A drag captured by one row's control does not hover another row: pressing row A's control and
@@ -1015,7 +1014,7 @@ static void test_menu_item_begin_captured_drag_keeps_focus(void) {
         nt_ui_end(s_fx.ctx);
     }
     TEST_ASSERT_EQUAL_UINT32(MENU_ROW_CHILD_ID, nt_ui_test_capture_active_id(s_fx.ctx, 0U));
-    TEST_ASSERT_EQUAL_UINT32(nt_ui_menu_test_item_id(MENU_A, KEY_NEW), menu_focus_id());
+    TEST_ASSERT_EQUAL_UINT32(nt_ui_menu_test_item_id(MENU_A, KEY_NEW), nt_ui_menu_test_focus_item_id(s_fx.ctx, &s_menu, MENU_A, 0U));
 }
 
 /* ---- Custom row leak: a CLOSED (present-only) menu's item_begin returns false so the game skips

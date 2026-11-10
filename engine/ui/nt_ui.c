@@ -2898,24 +2898,48 @@ nt_ui_hot_t nt_ui_pointer_hot(const nt_ui_context_t *ctx, uint32_t pointer_index
     return ctx->pointer_hot[pointer_index];
 }
 
-bool nt_ui_hovered_within(const nt_ui_context_t *ctx, uint32_t id) {
-    NT_ASSERT(ctx != NULL && "nt_ui_hovered_within: ctx must be non-NULL");
+/* id's declaration range in last frame's hit layout: Clay indexes elements in open order, so everything
+ * declared inside id is [its index, last_inside]. False when id was not declared last frame. */
+static bool hit_range(const nt_ui_context_t *ctx, uint32_t id, uint32_t *out_first, uint32_t *out_last) {
     const int32_t slot = (id != 0U) ? nt_ui_clay_priv_hashmap_slot_for_id(ctx->clay, id) : -1;
     if (slot < 0 || ctx->hit_generation[slot] != ctx->current_generation) {
         return false;
     }
-    /* Clay indexes elements in open order, so everything declared inside id is [id's index, last_inside]. */
-    const uint32_t first = ctx->hit_baked[slot].order & 0xFFFFU;
-    const uint32_t last = ctx->hit_baked[slot].last_inside;
+    *out_first = ctx->hit_baked[slot].order & 0xFFFFU;
+    *out_last = ctx->hit_baked[slot].last_inside;
+    return true;
+}
+
+bool nt_ui_hovered_within(const nt_ui_context_t *ctx, uint32_t id) {
+    NT_ASSERT(ctx != NULL && "nt_ui_hovered_within: ctx must be non-NULL");
+#if NT_UI_DEBUG_TOOLS
+    if (ctx->inspector_active && ctx->inspector_pointer_consumed) {
+        return false; /* the sidebar consumes the pointer, as in every query */
+    }
+#endif
+    uint32_t first = 0U;
+    uint32_t last = 0U;
+    if (!hit_range(ctx, id, &first, &last)) {
+        return false;
+    }
     for (uint32_t i = 0; i < ctx->frame_pointer_count; ++i) {
-        /* The live target: a held pointer stays its holder's, wherever it moves. */
-        const uint32_t target = (ctx->captures[i].active_id != 0U) ? ctx->captures[i].active_id : ctx->pointer_hot[i].id;
-        const int32_t t_slot = (ctx->frame_pointers[i].active && target != 0U) ? nt_ui_clay_priv_hashmap_slot_for_id(ctx->clay, target) : -1;
-        if (t_slot >= 0 && ctx->hit_generation[t_slot] == ctx->current_generation) {
-            const uint32_t t = ctx->hit_baked[t_slot].order & 0xFFFFU;
-            if (t >= first && t <= last) {
-                return true;
+        uint32_t t = 0U;
+        uint32_t t_last = 0U;
+        if (!ctx->frame_pointers[i].active || !hit_range(ctx, ctx->pointer_hot[i].id, &t, &t_last)) {
+            continue;
+        }
+        /* A held pointer targets its holder, and only while it is over it (its hot is the holder or inside
+         * it): a control dragged off does not hover anything, its holder included. */
+        uint32_t h = 0U;
+        uint32_t h_last = 0U;
+        if (ctx->captures[i].active_id != 0U) {
+            if (!hit_range(ctx, ctx->captures[i].active_id, &h, &h_last) || t < h || t > h_last) {
+                continue;
             }
+            t = h;
+        }
+        if (t >= first && t <= last) {
+            return true;
         }
     }
     return false;

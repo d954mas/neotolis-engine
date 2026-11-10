@@ -304,15 +304,6 @@ record that vanished this frame is not UI under the pointer). A free pointer dri
 widget only if it is the resolved hot
 widget or already holds capture; `nt_ui_pointer_hot` exposes the resolved id.
 
-Two hover questions have two answers. `hovered` means "this record is the pointer's
-target and the pointer is over it": it is exclusive, like the press. `nt_ui_hovered_within(ctx, id)`
-means "the pointer's target is `id` or an element declared inside `id`" (CSS `:hover` on an
-ancestor), where the target is the pointer's capture holder if it has one, else its hot.
-Clay indexes elements in open order, so what is declared inside an element is the range
-from its index to the last index opened before it closed (NT patch 10), floating children
-included; `nt_ui` bakes that end per element, so the test is two compares. `id` need not be
-interactive. A held pointer stays its holder's: dragging one row's control over another row
-hovers only the first.
 Consequence: a freshly-shown widget registers on its first step and only
 becomes eligible the NEXT frame; on the first frame (empty registry) nothing
 reacts — reliability over instant first-frame response, no raw-hit fallback
@@ -326,6 +317,24 @@ same record `nt_ui_step` makes, minus any interaction). It blocks input to widge
 behind it but never captures or clicks; a query on a blocked id reports hover while
 it is front-most. The stock disabled widgets (button/checkbox/slider) call it so a
 disabled overlay or modal can't leak clicks through.
+
+Two hover questions have two answers. `hovered` means "this record is the pointer's
+target and the pointer is over it": it is exclusive, like the press. `nt_ui_hovered_within(ctx, id)`
+means "the pointer's target is `id` or an element declared inside `id`" (CSS `:hover` on an
+ancestor). The target is the pointer's hot; a held pointer targets its capture holder
+instead, and only while its hot is the holder or inside it, so a control dragged off hovers
+nothing, its holder included, and dragging one row's control over another row hovers neither.
+Clay indexes elements in open order, so what is declared inside an element is the range
+from its index to the last index opened before it closed (NT patch 10); `nt_ui` bakes that end
+per element, and the query looks up the queried id and each pointer's hot (and holder).
+`id` need not be interactive, but only records are targets: the empty area of a plain
+container is not inside it, so a container that should hover over its gaps blocks the
+pointer itself (`nt_ui_block_pointer`; its children are declared later and still win).
+Floating children count as inside, overlays too: a combo or menu opened inside a container
+puts its full-viewport catcher or occluder inside that container, so the container reads
+hovered within over the whole screen while the overlay is open (as CSS does for a fixed
+overlay inside a hovered element). Combo rows, the combo trigger, tabs, custom menu rows and
+tooltips read hover within; a sidebar-consumed pointer hovers nothing, as in every query.
 
 ## Anim cache
 
@@ -622,9 +631,7 @@ in its `_end`, after its children, but the stacking order is declaration, so an
 interactive child declared inside the row wins the press over its own area; the
 rest of the row activates it. Over the child the row's own `hovered` is false,
 but it is hovered within: combo rows, the combo trigger and tabs keep their hover
-look, and a menu row keeps highlight, hover focus and the leaf collapse. A tooltip
-also reads hover within, so a tooltip on a container stays up over the
-interactive elements inside it. A rich-text block
+look, and a menu row keeps highlight, hover focus and the leaf collapse. A rich-text block
 with links is one record over its whole box, so inside a row it takes the press
 over all of its text, not only over the links. A menu row with `non_activatable`
 has no action of its own (for a row that only hosts a control): it never steps,

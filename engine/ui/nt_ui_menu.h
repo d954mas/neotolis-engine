@@ -193,8 +193,8 @@ bool nt_ui_menu_item_ex(nt_ui_menu_ctx_t *menu, uint32_t key, const char *label,
 /* item_begin returns DECLARE-BODY (true while the menu is OPEN), NOT clicked — guard the custom body with it
  * (a closed/present-only menu returns false so the body is skipped, no scene leak). The row's ACTIVATION is
  * reported by item_end (parallel to item/item_ex returning clicked), so the two bools never mean the same
- * thing: item_begin = "declare the body", item_end = "the row was activated". An activatable=false row never
- * activates (item_end returns false) — its inner child owns the click.
+ * thing: item_begin = "declare the body", item_end = "the row was activated". A non_activatable row has no
+ * action of its own and never activates (item_end returns false).
  * item_end is a NO-OP when item_begin returned false (closed menu opened no row), so BOTH placements are safe:
  *   if (item_begin(...)) { ...body...; item_end(...); }   // item_end inside the guard
  *   if (item_begin(...)) { ...body...; }  item_end(...);  // item_end unconditional

@@ -264,9 +264,9 @@ static bool dropdown_declare_row(nt_ui_context_t *ctx, uint8_t fill_layer, uint8
 /* ---- Immediate combo (begin/selectable/end) ---- */
 
 /* Combo render layers come from the CALL (data->layer for fills, label_layer for text), NOT the style —
- * mirrors menu/checkbox/tabbar so the game owns the render band. The scrollbar floats on the SAME fill
- * layer as the panel (nt_ui_scroll draws its bar on the container's data->layer); floating-over-same-layer
- * keeps it above the panel fill at ANY base, so no fixed +1 offset is needed. data NULL => fills fall to 0. */
+ * mirrors menu/checkbox/tabbar so the game owns the render band. The scrollbar floats on the panel's fill
+ * layer (nt_ui_scroll draws its bar on the container's data->layer); as a later tree root it paints over
+ * the panel at any layer. data NULL => fills fall to 0. */
 #define NT_UI_COMBO_TRIGGER_H 32.0F /* default trigger control height: combo_begin owns sizing (no caller decl), the list anchors to trigger bottom */
 
 /* Emit the trigger element + harvest the toggle. When `leave_open` the element stays OPEN (the game declares
