@@ -2747,8 +2747,8 @@ static void test_front_most_is_structural_not_by_layer(void) {
 }
 
 /* Inside one tree root the later-declared element takes the press, whatever order the steps run in and
- * whatever the layers: a child over the parent stepped after it on a higher layer, a later sibling's hit
- * padding over an earlier descendant. */
+ * whatever the layers: a child over its parent, which steps after it and sits on a higher layer; a
+ * later sibling's hit padding over an earlier descendant. */
 static nt_ui_interaction_t s_decl_card;
 static nt_ui_interaction_t s_decl_child;
 static nt_ui_interaction_t s_decl_late;

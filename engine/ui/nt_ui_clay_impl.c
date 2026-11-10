@@ -442,7 +442,7 @@ static void compose_transform_level(const nt_ui_transform_t *t, float cx, float 
 
 /* Floating descendants skipped (handled by outer roots loop). Text leaves have no .children. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void bt_dfs_subtree(nt_ui_context_t *ctx, Clay_Context *cc, int32_t root_elem_idx, const nt_ui_baked_xform_t *seed, uint16_t paint_root) {
+static void bt_dfs_subtree(nt_ui_context_t *ctx, Clay_Context *cc, int32_t root_elem_idx, const nt_ui_baked_xform_t *seed, uint16_t root_idx) {
     nt_ui_dfs_frame_t *S = ctx->tree_dfs_stack;
     int32_t sp = 0;
     NT_ASSERT(sp < NT_UI_TREE_DFS_DEPTH_CAP);
@@ -479,7 +479,7 @@ static void bt_dfs_subtree(nt_ui_context_t *ctx, Clay_Context *cc, int32_t root_
             memcpy(ctx->tree_baked[f->elem_idx].m, m_cur, sizeof m_cur);
             ctx->tree_baked[f->elem_idx].opacity = op;
             ctx->tree_baked[f->elem_idx].hierarchy_depth = f->hierarchy_depth;
-            ctx->tree_baked[f->elem_idx].order = ((uint32_t)paint_root << 16U) | (uint32_t)f->elem_idx;
+            ctx->tree_baked[f->elem_idx].order = ((uint32_t)root_idx << 16U) | (uint32_t)f->elem_idx;
             memcpy(f->m, m_cur, sizeof m_cur);
             f->opacity = op;
         }

@@ -2379,6 +2379,23 @@ bool nt_ui_internal_hit_test_padded(nt_ui_context_t *ctx, uint32_t id, float px,
     return hit;
 }
 
+bool nt_ui_internal_pointer_within(nt_ui_context_t *ctx, uint32_t id) {
+    NT_ASSERT(ctx != NULL && "nt_ui_internal_pointer_within: ctx must be non-NULL");
+    Clay_Context *saved = Clay_GetCurrentContext();
+    Clay_SetCurrentContext(ctx->clay);
+    bool within = false;
+    for (uint32_t i = 0; i < ctx->frame_pointer_count && !within; ++i) {
+        const nt_pointer_t *p = &ctx->frame_pointers[i];
+        const uint32_t hot = ctx->pointer_hot[i].id;
+        const int32_t hot_slot = (hot != 0U) ? nt_ui_clay_priv_hashmap_slot_for_id(ctx->clay, hot) : -1;
+        uint32_t order = 0U;
+        within = p->active && hot_slot >= 0 && ctx->hit_generation[hot_slot] == ctx->current_generation && ui_hit_test(ctx, id, p->x, p->y, NULL, NULL, &order) &&
+                 (order >> 16U) == (ctx->hit_baked[hot_slot].order >> 16U);
+    }
+    Clay_SetCurrentContext(saved);
+    return within;
+}
+
 /* Inner resolve for nt_ui_internal_pointer_to_local — caller owns the Clay current-ctx scope.
  * Same id-resolve + staleness + clip-chain gate as ui_hit_test, then maps the pointer to local. */
 static bool pointer_to_local_resolved(const nt_ui_context_t *ctx, uint32_t id, float px, float py, float *out_lx, float *out_ly) {
@@ -2757,14 +2774,9 @@ nt_ui_interaction_t nt_ui_step(nt_ui_context_t *ctx, uint32_t id, const nt_ui_st
         z->center_y = d.boundingBox.y + (d.boundingBox.height * 0.5F);
         /* Snapshot composed mat4 — same source as walker/hit-test. */
         const int32_t e_slot = nt_ui_clay_priv_hashmap_slot_for_id(ctx->clay, id);
-        if (e_slot >= 0 && ctx->hit_generation[e_slot] == ctx->current_generation) {
-            memcpy(z->m, ctx->hit_baked[e_slot].m, sizeof z->m);
-            z->order = ctx->hit_baked[e_slot].order;
-        } else {
-            const nt_ui_baked_xform_t b = nt_ui_internal_identity_baked();
-            memcpy(z->m, b.m, sizeof z->m);
-            z->order = 0U;
-        }
+        const nt_ui_baked_xform_t b = (e_slot >= 0 && ctx->hit_generation[e_slot] == ctx->current_generation) ? ctx->hit_baked[e_slot] : nt_ui_internal_identity_baked();
+        memcpy(z->m, b.m, sizeof z->m);
+        z->order = b.order;
         uint16_t flags = 0U;
         if (out.hovered) {
             flags |= (uint16_t)NT_UI_DEBUG_FLAG_HOVERED;
@@ -2804,9 +2816,9 @@ void nt_ui_set_gesture_constants(nt_ui_context_t *ctx, float dbl_window_secs, fl
     ctx->gesture_move_radius_dp = move_radius_dp;
 }
 
-/* Inert registry entry: the id wins next-frame hot arbitration over anything ranked behind it,
- * but never captures, clicks, or reports hover. Disabled widgets call this so the pointer can't leak
- * through to widgets underneath them (modal-overlay correctness) while staying visually inert. */
+/* Inert registry entry: the id wins next-frame hot arbitration over anything ranked behind it, but
+ * never captures or clicks; a query on it reports hover while it is front-most. Disabled widgets call
+ * this so the pointer can't leak through to widgets underneath them (modal-overlay correctness). */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) — count is all NT_ASSERT guards, not logic
 void nt_ui_block_pointer(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lrtb[4]) {
     NT_ASSERT(ctx != NULL && "nt_ui_block_pointer: ctx must be non-NULL");
@@ -2868,14 +2880,9 @@ void nt_ui_debug_record_disabled_zone(nt_ui_context_t *ctx, uint32_t id, const i
     z->center_x = d.boundingBox.x + (d.boundingBox.width * 0.5F);
     z->center_y = d.boundingBox.y + (d.boundingBox.height * 0.5F);
     const int32_t e_slot = nt_ui_clay_priv_hashmap_slot_for_id(ctx->clay, id);
-    if (e_slot >= 0 && ctx->hit_generation[e_slot] == ctx->current_generation) {
-        memcpy(z->m, ctx->hit_baked[e_slot].m, sizeof z->m);
-        z->order = ctx->hit_baked[e_slot].order;
-    } else {
-        const nt_ui_baked_xform_t b = nt_ui_internal_identity_baked();
-        memcpy(z->m, b.m, sizeof z->m);
-        z->order = 0U;
-    }
+    const nt_ui_baked_xform_t b = (e_slot >= 0 && ctx->hit_generation[e_slot] == ctx->current_generation) ? ctx->hit_baked[e_slot] : nt_ui_internal_identity_baked();
+    memcpy(z->m, b.m, sizeof z->m);
+    z->order = b.order;
     z->state_flags = (uint16_t)NT_UI_DEBUG_FLAG_DISABLED;
 }
 #endif /* NT_UI_DEBUG_TOOLS */

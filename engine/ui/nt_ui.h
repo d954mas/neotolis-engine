@@ -615,8 +615,8 @@ float nt_ui_hold_progress(const nt_ui_interaction_t *in, float secs);
 void nt_ui_set_gesture_constants(nt_ui_context_t *ctx, float dbl_window_secs, float move_radius_dp);
 
 /* Inert occluder: enters id into the interactive registry so it wins next-frame front-most
- * arbitration over widgets behind it (the pointer can't leak through), but never captures,
- * clicks, or reports hover. Disabled widgets call this so a modal/overlay blocks input to
+ * arbitration over widgets behind it (the pointer can't leak through), but never captures or
+ * clicks; nt_ui_query_interaction on it reports hover while it is front-most. Disabled widgets call this so a modal/overlay blocks input to
  * whatever sits underneath. pad_lrtb inflates the block area (NULL = none, asserts >= 0). */
 void nt_ui_block_pointer(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lrtb[4]);
 
@@ -624,8 +624,8 @@ void nt_ui_block_pointer(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lr
 bool nt_ui_wants_pointer(const nt_ui_context_t *ctx);
 
 /* Front-most interactive record under the pointer this frame (3D: nearest within the occlusion
- * cutoff first; then the later tree root — band, then declaration; then the later nt_ui_step call).
- * The draw layer is not consulted: an element that must be on top of another in one band gets a band.
+ * cutoff first; then the later tree root — band, then declaration; then the later-declared element
+ * in that root). Neither the draw layer nor the nt_ui_step call order is consulted.
  * Resolved by nt_ui_begin from the prev-frame registry: stepped widgets, blockers, scroll surfaces
  * (a scroll id over its empty area) and scrollbars. id 0 = none. */
 nt_ui_hot_t nt_ui_pointer_hot(const nt_ui_context_t *ctx, uint32_t pointer_index);

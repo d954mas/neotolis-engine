@@ -224,6 +224,8 @@ The UI walker has **three independent ordering axes** — do not conflate them:
    and every floating element) by accumulated zIndex, then declaration; a later
    root paints whole over an earlier one, in the same order the pointer is
    arbitrated ([Front-most arbitration](../ui/nt-ui.md#front-most-arbitration)).
+   A 3D ctx with depth-writing panels is the exception: there the depth test
+   decides what is drawn on top ([Render-time pipeline](../ui/nt-ui.md#render-time-pipeline), #875).
 2. **Scissor / custom commands** — hard barriers. A segment is a run of
    segmentable commands of one tree root; a root change, SCISSOR and CUSTOM
    cut it. Sprites and text record at the call, so neither crosses it.

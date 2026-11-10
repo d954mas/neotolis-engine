@@ -313,8 +313,9 @@ beneath it but itself reacts to nothing), then orphan cleanup drops it next fram
 A statically-disabled widget never registers, so never gates — unless it opts in via
 `nt_ui_block_pointer(ctx, id, pad_lrtb)`, which writes an INERT hit-registry entry (the
 same record `nt_ui_step` makes, minus any interaction). It blocks input to widgets
-behind it but never captures, clicks, or reports hover — the stock disabled widgets
-(button/checkbox/slider) call it so a disabled overlay or modal can't leak clicks through.
+behind it but never captures or clicks; a query on a blocked id reports hover while
+it is front-most. The stock disabled widgets (button/checkbox/slider) call it so a
+disabled overlay or modal can't leak clicks through.
 
 ## Anim cache
 
@@ -610,7 +611,10 @@ A custom-content row (`item_begin..item_end`, `selectable_begin..selectable_end`
 in its `_end`, after its children, but the stacking order is declaration, so an
 interactive child declared inside the row wins the press over its own area; the
 rest of the row activates it. Over the child the child is the front-most record,
-so the row reports no hover there (no highlight, no hover focus). A rich-text block
+so a query on the row reports no hover there: a combo or tab row drops its hover
+look. A menu row instead counts the pointer inside its box while the front-most
+record is in the row's tree root, so it keeps highlight, hover focus and the leaf
+collapse over its own control. A rich-text block
 with links is one record over its whole box, so inside a row it takes the press
 over all of its text, not only over the links. A menu row with `non_activatable`
 has no action of its own (for a row that only hosts a control): it never steps,

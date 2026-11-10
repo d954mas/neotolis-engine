@@ -578,6 +578,10 @@ void nt_ui_internal_register_interactive(nt_ui_context_t *ctx, uint32_t id, cons
  * L/R/T/B padding. Sets the Clay current-ctx internally. Used by the modal close-on-backdrop guard. */
 bool nt_ui_internal_hit_test_padded(nt_ui_context_t *ctx, uint32_t id, float px, float py, const int16_t pad_lrtb[4]);
 
+/* A pointer is over id's box and its front-most record lies in id's tree root, so id is under the
+ * pointer even while a record declared inside it (its own child) is hot. Last frame's layout. */
+bool nt_ui_internal_pointer_within(nt_ui_context_t *ctx, uint32_t id);
+
 /* Map device pointer (px,py) into element `id`'s LOCAL Clay-layout coords via the element's baked
  * transform — the SAME inverse-affine / raycast path as the standard widget hit-test. Sets the Clay
  * current-ctx internally. false => not resolvable this frame / clipped out / 3D ray misses the plane

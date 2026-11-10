@@ -271,9 +271,7 @@ static void card_child_frame_3d(const nt_pointer_t *p) {
 
 static void test_coplanar_child_beats_parent_stepped_later(void) {
     nt_pointer_t p = {.x = BBOX_X + 20.0F, .y = BBOX_Y + 20.0F, .active = true};
-#if NT_UI_DEBUG_TOOLS
     nt_ui_debug_set_recording(s_fx.ctx, true);
-#endif
     card_child_frame_3d(&p);
     card_child_frame_3d(&p);
     card_child_frame_3d(&p);
