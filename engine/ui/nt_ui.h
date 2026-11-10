@@ -572,7 +572,7 @@ typedef struct {
     float distance;         /* 3D ctx: world distance (near-plane-relative) to this widget; 0 in 2D */
 } nt_ui_interaction_t;
 
-/* Front-most interactive widget under a pointer, resolved per frame (3D: nearest; 2D: top zIndex). */
+/* Front-most interactive record under a pointer, resolved per frame (3D: nearest; then paint order). */
 typedef struct {
     uint32_t id;    /* 0 = none under the pointer */
     float distance; /* world distance in 3D ctx; 0 in 2D */
@@ -614,7 +614,7 @@ float nt_ui_hold_progress(const nt_ui_interaction_t *in, float secs);
  * leaving the widget's hitbox. Asserts each is finite and >= 0. Defaults: 0.5 s, 16 dp. */
 void nt_ui_set_gesture_constants(nt_ui_context_t *ctx, float dbl_window_secs, float move_radius_dp);
 
-/* Inert occluder: enters id into the interactive registry so it wins next-frame topmost-z
+/* Inert occluder: enters id into the interactive registry so it wins next-frame front-most
  * arbitration over widgets behind it (the pointer can't leak through), but never captures,
  * clicks, or reports hover. Disabled widgets call this so a modal/overlay blocks input to
  * whatever sits underneath. pad_lrtb inflates the block area (NULL = none, asserts >= 0). */

@@ -74,6 +74,10 @@ static inline float scroll_min_bound(float content, float container) {
     return (over > 0.0F) ? -over : 0.0F;
 }
 
+/* Engine-internal inspector pane: a scroll cell flag next to NT_UI_SCROLL_FLAG_SCROLL_TO (it floats
+ * above the game and takes the sidebar's pointer). */
+#define NT_UI_SCROLL_FLAG_PANE ((uint8_t)(1U << 1))
+
 /* True when an axis overflows; the half unit absorbs layout rounding, so a fitting list never turns
  * scrollable (or shows an AUTO bar) by noise. */
 static bool overflows(float content, float container) { return content > container + 0.5F; }
@@ -249,10 +253,6 @@ static float scroll_sample_vel(float prev_vel, float delta, float dt) {
 }
 
 // #region gesture arbiter
-/* Engine-internal inspector pane: a scroll cell flag (it floats above the game and takes the
- * sidebar's pointer). Bit 0 is NT_UI_SCROLL_FLAG_SCROLL_TO. */
-#define NT_UI_SCROLL_FLAG_PANE ((uint8_t)(1U << 1))
-
 /* A tap on a flinging scroll faster than this (dp/s) stops the fling and is swallowed (iOS). */
 #define NT_UI_SCROLL_FLING_STOP_DP 50.0F
 

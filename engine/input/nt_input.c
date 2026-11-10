@@ -18,6 +18,7 @@ static bool s_player_enabled = true;
 static uint8_t s_waiting_press[NT_INPUT_MAX_POINTERS];
 static uint8_t s_waiting_down[NT_INPUT_MAX_POINTERS]; /* that press is still held */
 static float s_held_pos[NT_INPUT_MAX_POINTERS][2];    /* where the pointer is since its release edge */
+static uint8_t s_held_jump;                           /* bit i: pointer i came back untracked while held: catching up is no motion */
 
 /* ---- Pointer helpers ---- */
 
@@ -76,10 +77,10 @@ static void move_pointer(nt_pointer_t *ptr, float x, float y, bool delta) {
         }
         s_held_pos[i][0] = x;
         s_held_pos[i][1] = y;
-        if (delta) {
-            return;
+        if (!delta) {
+            s_held_jump |= (uint8_t)(1U << i);
         }
-        /* An untracked reposition (the mouse came back) ends the hold: no delta may cover that jump. */
+        return;
     }
     if (delta) {
         ptr->dx += x - ptr->x;
@@ -103,6 +104,7 @@ void nt_input_init(void) {
     memset(&s_next, 0, sizeof(s_next));
     memset(s_waiting_press, 0, sizeof(s_waiting_press));
     memset(s_waiting_down, 0, sizeof(s_waiting_down));
+    s_held_jump = 0U;
     s_char_read = 0;
     s_player_enabled = true;
 }
@@ -158,8 +160,10 @@ void nt_input_poll(void) {
         p->dx = 0.0F;
         p->dy = 0.0F;
         if (held && p->active) { /* the motion the release edge held back */
-            p->dx = s_held_pos[i][0] - p->x;
-            p->dy = s_held_pos[i][1] - p->y;
+            if ((s_held_jump & (1U << i)) == 0U) {
+                p->dx = s_held_pos[i][0] - p->x;
+                p->dy = s_held_pos[i][1] - p->y;
+            }
             p->x = s_held_pos[i][0];
             p->y = s_held_pos[i][1];
         }
@@ -177,6 +181,7 @@ void nt_input_poll(void) {
         s_waiting_press[i] = 0U;
         s_waiting_down[i] = 0U;
     }
+    s_held_jump = 0U;
 }
 
 /* ---- Queries (the published frame) ---- */

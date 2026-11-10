@@ -29,7 +29,7 @@ extern const nt_ui_widget_def_t NT_UI_SCROLLBAR_DEF;
 
 /* Scroll-to active: ease pos toward target, clear on arrival. */
 #define NT_UI_SCROLL_FLAG_SCROLL_TO ((uint8_t)(1U << 0))
-/* Bit 1 is engine-internal (nt_ui_internal.h). */
+/* Bit 1 is taken: NT_UI_SCROLL_FLAG_PANE (nt_ui_scroll.c). */
 
 /* Per-container retained state in the nt_ui_state pool. pos/vel/target in Clay's
  * negative-down sign convention. 44B; under NT_UI_STATE_PAYLOAD_MAX. */
@@ -59,7 +59,8 @@ typedef struct {
     nt_ui_scrollbar_visibility_t bar_visibility;
     float bar_thickness;
     float bar_hit_pad; /* extra hit width from the visual bar toward the content (touch target); 0 = the bar only.
-                        * A bar takes presses only while it shows a thumb that can move (thumb art, overflow). */
+                        * A bar takes presses only while it shows a thumb that can move (thumb art, thickness,
+                        * overflow, room to travel). */
     float bar_thumb_min_px;
     float bar_fade_speed; /* AUTO_HIDE fade via nt_ui_anim value_t */
     float bar_hide_delay; /* AUTO_HIDE: seconds of idle before the bar fades out (iOS/macOS overlay linger ~1.2s) */

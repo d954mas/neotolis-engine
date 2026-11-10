@@ -173,8 +173,8 @@ void test_waiting_tap_keeps_its_point(void) {
     TEST_ASSERT_EQUAL_INT(40, (int)m->y);
 }
 
-/* A mouse that left after its release and came back in the same frame is at its new place with no
-   delta, in that frame and the next. */
+/* A mouse that left after its release and came back in the same frame: the release is still published
+   where it happened, the new place one frame later with no delta for the jump. */
 void test_mouse_back_after_release_reports_no_delta(void) {
     nt_input_feed(nt_test_mouse(10.0F, 10.0F, 1));
     nt_input_poll();
@@ -184,10 +184,14 @@ void test_mouse_back_after_release_reports_no_delta(void) {
     nt_input_poll();
     const nt_pointer_t *m = &g_nt_input.pointers[0];
     TEST_ASSERT_TRUE(m->active && m->buttons[NT_BUTTON_LEFT].is_released);
+    TEST_ASSERT_EQUAL_INT(10, (int)m->x);
     TEST_ASSERT_EQUAL_INT(0, (int)m->dx);
     nt_input_poll();
     TEST_ASSERT_EQUAL_INT(500, (int)m->x);
     TEST_ASSERT_EQUAL_INT(0, (int)m->dx);
+    nt_input_feed(nt_test_mouse(510.0F, 10.0F, 0));
+    nt_input_poll();
+    TEST_ASSERT_EQUAL_INT(10, (int)m->dx); /* tracked again */
 }
 
 /* A waiting tap is published before a mouse that left in the same frame is gone. */

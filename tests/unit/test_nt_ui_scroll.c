@@ -2572,6 +2572,38 @@ static void test_arb_bar_without_a_movable_thumb_takes_no_press(void) {
     arb_press(&p);
     arb_frame(&p, 1);
     TEST_ASSERT_TRUE(s_child_in.pressed_now);
+
+    arb_release(&p);
+    arb_frame(&p, 1);
+    p.buttons[NT_BUTTON_LEFT] = (nt_button_state_t){0};
+    s_scene.style = bar_style(NT_UI_SCROLLBAR_ALWAYS);
+    s_scene.style.bar_thickness = 0.0F; /* nothing to see: the pad alone takes no press */
+    arb_warm(&p);
+    p.x = 190.0F;
+    arb_warm(&p);
+    arb_press(&p);
+    arb_frame(&p, 1);
+    TEST_ASSERT_TRUE(s_child_in.pressed_now);
+}
+
+/* A thumb is not driven on an axis the style stopped scrolling, and its owner is dropped. */
+static void test_arb_thumb_stops_when_its_axis_is_disabled(void) {
+    nt_pointer_t p = arb_pointer(195.0F, 20.0F);
+    arb_warm(&p);
+    arb_press(&p);
+    arb_frame(&p, 1);
+    arb_hold(&p);
+    p.y = 60.0F;
+    arb_frame(&p, 1);
+    const float held = arb_list()->pos[1];
+    TEST_ASSERT_TRUE(held < -100.0F);
+    s_scene.style.scroll_y = false;
+    s_scene.style.scroll_x = true;
+    p.y = 100.0F;
+    arb_frame(&p, 1);
+    arb_frame(&p, 1);
+    TEST_ASSERT_TRUE(float_near(arb_list()->pos[1], held, 0.001F));
+    TEST_ASSERT_EQUAL_UINT32(0U, s_fx.ctx->captures[0].active_id);
 }
 
 /* Nested lists with aligned right edges: the inner bar paints over the outer one and takes the press. */
@@ -2612,6 +2644,7 @@ static void test_arb_equal_crossings_go_to_the_widget_then_the_inner_scroll(void
     arb_warm(&p);
     arb_press(&p);
     arb_frame(&p, 1);
+    TEST_ASSERT_TRUE(s_child_in.gesture_pending); /* the list could still take it */
     arb_hold(&p);
     p.x += 20.0F;
     p.y -= 20.0F;
@@ -2627,6 +2660,7 @@ static void test_arb_equal_crossings_go_to_the_widget_then_the_inner_scroll(void
     arb_warm(&p);
     arb_press(&p);
     arb_frame(&p, 1);
+    TEST_ASSERT_EQUAL_UINT32(SCROLL_ID + 1U, s_fx.ctx->captures[0].pending_scroll); /* the chain starts at the inner list */
     arb_hold(&p);
     p.y -= 30.0F;
     arb_frame(&p, 1);
@@ -2660,6 +2694,13 @@ static void test_arb_dropped_pointer_slot_holds_no_gesture(void) {
     TEST_ASSERT_TRUE(nt_ui_wants_pointer(s_fx.ctx));
     arb_frame(ps, 1);
     TEST_ASSERT_FALSE(nt_ui_wants_pointer(s_fx.ctx));
+    /* Back, held and moved, with no press edge: the list saw no press, so it takes nothing. */
+    arb_hold(&ps[1]);
+    ps[1].y = 100.0F;
+    arb_frame(ps, 2);
+    TEST_ASSERT_EQUAL_UINT32(0U, s_fx.ctx->captures[1].pending_scroll);
+    TEST_ASSERT_EQUAL_UINT32(0U, s_fx.ctx->captures[1].active_id);
+    TEST_ASSERT_TRUE(float_near(arb_list()->raw[1], 0.0F, 0.001F));
 }
 
 /* A pending press keeps the pointer for the UI after it leaves the list: the list may still take it. */
@@ -2829,6 +2870,7 @@ int main(void) {
     RUN_TEST(test_arb_bar_without_a_movable_thumb_takes_no_press);
     RUN_TEST(test_arb_inner_bar_over_outer_bar_takes_the_press);
     RUN_TEST(test_arb_wheel_does_not_move_a_held_thumb);
+    RUN_TEST(test_arb_thumb_stops_when_its_axis_is_disabled);
     RUN_TEST(test_arb_dropped_pointer_slot_holds_no_gesture);
     RUN_TEST(test_arb_equal_crossings_go_to_the_widget_then_the_inner_scroll);
     RUN_TEST(test_arb_vanished_scroll_takes_nothing);

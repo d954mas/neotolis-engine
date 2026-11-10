@@ -288,7 +288,7 @@ whatever order the two were stepped in. Inside one root the later record wins, i
 later `nt_ui_step` call; widget code should step in declaration order. This follows paint
 order except for the draw `layer`: an unclipped same-band element on a higher layer is
 painted over one on a lower layer, and the resolve does not look at layers. `nt_ui_wants_pointer` is true
-while a pointer holds a capture or a pending scroll gesture, or its front-most record is declared again this frame (a
+while a pointer of the current frame holds a capture or a pending scroll gesture, or its front-most record is declared again this frame (a
 record that vanished this frame is not UI under the pointer). A free pointer drives a
 widget only if it is the resolved hot
 widget or already holds capture; `nt_ui_pointer_hot` exposes the resolved id.
@@ -426,7 +426,8 @@ reaches a scroll behind it (a scroll declared inside the popup, a dropdown list,
 chain of its own content); the same holds for a game's own unclipped floating element
 declared inside a scroll: neither a drag nor the wheel over it reaches that scroll.
 Scrollbars clip to their scroll, so they belong to its chain (the wheel over a bar
-scrolls it). A bar has a hit record only while it shows a thumb that can move: thumb art,
+scrolls it). A thumb is not driven on an axis the style stopped scrolling (its owner is dropped the next
+frame). A bar has a hit record only while it shows a thumb that can move: thumb art,
 a non-zero thickness, an overflowing axis, room for the thumb to travel, and not faded out; otherwise its strip belongs to the content under
 it. `nt_ui_scroll_begin` / `_end` must balance: `nt_ui_end` asserts that no element is left
 open. A scroll's own id is its surface and must not be stepped as a widget (checked under

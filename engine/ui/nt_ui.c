@@ -505,6 +505,9 @@ void nt_ui_begin(nt_ui_context_t *ctx, const nt_ui_frame_desc_t *frame) {
         if (ctx->captures[i].active_id != 0U && ctx->capture_seen[i] == 0U) {
             ctx->captures[i].active_id = 0U;
         }
+        if (i >= count) {
+            ctx->captures[i].pending_scroll = 0U; /* a slot the game stopped passing holds no gesture when it returns */
+        }
         if (ctx->captures[i].active_id != 0U) {
             ctx->captures[i].hold_prev_secs = ctx->captures[i].hold_secs;
             ctx->captures[i].hold_secs += dt;
@@ -2798,7 +2801,7 @@ void nt_ui_set_gesture_constants(nt_ui_context_t *ctx, float dbl_window_secs, fl
     ctx->gesture_move_radius_dp = move_radius_dp;
 }
 
-/* Inert registry entry: the id wins next-frame hot arbitration over anything behind it (topmost-z),
+/* Inert registry entry: the id wins next-frame hot arbitration over anything painted behind it,
  * but never captures, clicks, or reports hover. Disabled widgets call this so the pointer can't leak
  * through to widgets underneath them (modal-overlay correctness) while staying visually inert. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) — count is all NT_ASSERT guards, not logic
