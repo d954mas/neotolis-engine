@@ -2319,7 +2319,7 @@ static bool map_pointer_to_local(const nt_ui_context_t *ctx, const nt_ui_baked_x
 }
 
 /* out_t / out_paint (both nullable, valid only when this returns true): out_t = world distance from
- * the near plane to the hit in 3D ctx (0 in 2D); out_paint = the paint order of the hit element's tree root
+ * the near plane to the hit in 3D ctx (0 in 2D); out_paint = the hit element's tree root in Clay's sorted root order
  * (its floating tree-root's), used for 2D front-most arbitration. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static bool ui_hit_test(const nt_ui_context_t *ctx, uint32_t id, float px, float py, const int16_t pad_lrtb[4], float *out_t, int32_t *out_paint) {
@@ -2614,10 +2614,10 @@ static nt_ui_hit_kind_t hot_candidate(nt_ui_context_t *ctx, const nt_ui_interact
     return kind;
 }
 
-/* nt_ui_begin's front-most record per pointer, from LAST frame's registry and layout: the hit that
- * is painted last. 3D: nearest world distance within the occlusion cutoff first. Then the later tree
- * root in paint order (band, then declaration: a floating element is over the content it floats on),
- * then the later record inside one root. Game records share one view_proj; inspector panes win outright. */
+/* nt_ui_begin's front-most record per pointer, from LAST frame's registry and layout. 3D: nearest
+ * world distance within the occlusion cutoff first. Then structural: the later tree root (band, then
+ * declaration), then the later record inside one root; the draw layer is not consulted. Game records
+ * share one view_proj; inspector panes win outright. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void resolve_hot(nt_ui_context_t *ctx) {
     for (uint32_t pidx = 0; pidx < ctx->frame_pointer_count; ++pidx) {
@@ -2801,7 +2801,7 @@ void nt_ui_set_gesture_constants(nt_ui_context_t *ctx, float dbl_window_secs, fl
     ctx->gesture_move_radius_dp = move_radius_dp;
 }
 
-/* Inert registry entry: the id wins next-frame hot arbitration over anything painted behind it,
+/* Inert registry entry: the id wins next-frame hot arbitration over anything ranked behind it,
  * but never captures, clicks, or reports hover. Disabled widgets call this so the pointer can't leak
  * through to widgets underneath them (modal-overlay correctness) while staying visually inert. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) — count is all NT_ASSERT guards, not logic

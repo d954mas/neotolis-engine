@@ -62,7 +62,7 @@ typedef struct {
     float opacity;
     uint16_t hierarchy_depth;
     int16_t zindex;      /* effective Clay zIndex (the owning floating tree-root's); 0 for base content. */
-    uint16_t paint_root; /* the owning tree root's place in paint order: band, then declaration */
+    uint16_t paint_root; /* the owning tree root's index in Clay's sorted root order: band, then declaration */
     uint16_t _pad16;
     float _pad;
 } nt_ui_baked_xform_t;
@@ -211,7 +211,7 @@ struct nt_ui_context {
     /* capture_seen[] tracks who touched the capture this frame — orphans cleared on begin. */
     nt_ui_capture_t captures[NT_INPUT_MAX_POINTERS];
     /* Per-pointer front-most interactive widget + game-fed occlusion cutoff (3D), resolved by
-     * nt_ui_begin from prev-frame layout (3D: nearest ray-t within cutoff; then paint order of the tree root). Ordered here
+     * nt_ui_begin from prev-frame layout (3D: nearest ray-t within cutoff; then tree root, then record). Ordered here
      * by alignment (after the 4B-aligned captures) to avoid adding struct padding. */
     nt_ui_hot_t pointer_hot[NT_INPUT_MAX_POINTERS];
     float pointer_occlusion[NT_INPUT_MAX_POINTERS]; /* max world ray distance; default +inf = no cutoff */

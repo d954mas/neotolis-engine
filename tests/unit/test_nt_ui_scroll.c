@@ -2688,18 +2688,18 @@ static void test_arb_vanished_scroll_takes_nothing(void) {
  * layer does not change who takes the press. A higher band does. */
 static nt_ui_interaction_t s_layer_a;
 static nt_ui_interaction_t s_layer_b;
-static void layers_frame(const nt_pointer_t *p, uint8_t layer_button, int16_t z_button) {
+static void layers_frame(const nt_pointer_t *p, uint8_t layer_button, int16_t z_floating, bool button_floats) {
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .dt = 1.0F / 60.0F, .pointers = p, .pointer_count = 1});
     CLAY({.id = CLAY_ID("lay_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(200)}}}) {
         CLAY({.id = CLAY_ID("lay_floating"),
-              .floating = {.attachTo = CLAY_ATTACH_TO_ROOT},
+              .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .zIndex = z_floating},
               .layout = {.sizing = {CLAY_SIZING_FIXED(100), CLAY_SIZING_FIXED(100)}},
               .backgroundColor = {255.0F, 0, 0, 255.0F},
               .userData = NT_UI_CLAY_DATA(0)}) {
             s_layer_a = nt_ui_step(s_fx.ctx, CLAY_ID("lay_floating").id, NULL);
         }
         CLAY({.id = CLAY_ID("lay_button"),
-              .floating = {.attachTo = (z_button != 0) ? CLAY_ATTACH_TO_ROOT : CLAY_ATTACH_TO_NONE, .zIndex = z_button},
+              .floating = {.attachTo = button_floats ? CLAY_ATTACH_TO_ROOT : CLAY_ATTACH_TO_NONE},
               .layout = {.sizing = {CLAY_SIZING_FIXED(100), CLAY_SIZING_FIXED(100)}},
               .backgroundColor = {0, 255.0F, 0, 255.0F},
               .userData = NT_UI_CLAY_DATA(layer_button)}) {
@@ -2709,24 +2709,29 @@ static void layers_frame(const nt_pointer_t *p, uint8_t layer_button, int16_t z_
     nt_ui_end(s_fx.ctx);
 }
 
-static void layers_press(uint8_t layer_button, int16_t z_button) {
+static void layers_press(uint8_t layer_button, int16_t z_floating, bool button_floats) {
     nt_pointer_t p = arb_pointer(50.0F, 50.0F);
-    layers_frame(&p, layer_button, z_button);
-    layers_frame(&p, layer_button, z_button);
+    layers_frame(&p, layer_button, z_floating, button_floats);
+    layers_frame(&p, layer_button, z_floating, button_floats);
     arb_press(&p);
-    layers_frame(&p, layer_button, z_button);
+    layers_frame(&p, layer_button, z_floating, button_floats);
     arb_release(&p);
-    layers_frame(&p, layer_button, z_button);
+    layers_frame(&p, layer_button, z_floating, button_floats);
 }
 
 static void test_front_most_is_structural_not_by_layer(void) {
-    layers_press(0U, 0);
-    TEST_ASSERT_TRUE(s_layer_a.clicked); /* the floating element, though the button stepped later */
-    layers_press(1U, 0);
+    layers_press(0U, 0, false);
+    TEST_ASSERT_TRUE(s_layer_a.clicked); /* the floating element, though the document button stepped later */
+    TEST_ASSERT_FALSE(s_layer_b.clicked);
+    layers_press(1U, 0, false);
     TEST_ASSERT_TRUE(s_layer_a.clicked); /* a higher draw layer on the button changes nothing */
-    layers_press(0U, 5);
-    TEST_ASSERT_TRUE(s_layer_b.clicked); /* a higher band does */
+    TEST_ASSERT_FALSE(s_layer_b.clicked);
+    layers_press(0U, 0, true);
+    TEST_ASSERT_TRUE(s_layer_b.clicked); /* two floating roots of one band: the later declared */
     TEST_ASSERT_FALSE(s_layer_a.clicked);
+    layers_press(0U, 5, true);
+    TEST_ASSERT_TRUE(s_layer_a.clicked); /* a higher band beats the later root */
+    TEST_ASSERT_FALSE(s_layer_b.clicked);
 }
 
 /* A pointer slot the game stops passing holds no pending gesture. */

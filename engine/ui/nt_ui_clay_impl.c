@@ -563,7 +563,7 @@ void nt_ui_internal_build_tree(nt_ui_context_t *ctx) {
             seed = ctx->tree_baked[p_elem_idx];
             seed.hierarchy_depth = (uint16_t)(seed.hierarchy_depth + 1U);
         }
-        /* Clay sorted the tree roots by band, stably: the index is the paint order. */
+        /* Clay sorted the tree roots by band, stably: the index orders the roots for the front-most resolve. */
         bt_dfs_subtree(ctx, cc, elem_idx, &seed, root_zindex, (uint16_t)root_idx);
     }
     // #endregion

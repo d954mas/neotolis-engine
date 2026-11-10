@@ -283,7 +283,7 @@ world geometry — the game owns the raycast, the engine only takes the cutoff d
 `nt_ui_interaction_t.distance` reports the hit distance. Hits within 1e-5 of the nearest
 distance (relative, floored at one unit) are coplanar and compete like 2D. 2D ctx: the
 ranking is structural. Clay orders its tree roots (the document and every floating element)
-by band, then by declaration, and the later root wins: a floating element is over the
+by band, then by declaration, and the later root wins: a floating element of the same or a higher band is over the
 content it floats on, whatever order the two were stepped in. Inside one root the later
 record wins, i.e. the later `nt_ui_step` call; widget code should step in declaration
 order. The draw `layer` is not part of it: layers order batches inside a band and are not

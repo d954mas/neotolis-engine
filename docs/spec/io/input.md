@@ -60,8 +60,8 @@ position and deltas in framebuffer pixels (fractional, never rounded), wheel not
 - **A release is published where it happened.** After a button's release edge the pointer holds
   its position for the rest of that frame; where it goes afterwards is published next frame, and
   that frame's `dx`/`dy` cover the motion. So the frame of a release never shows a later hover. A
-  mouse that left and came back in that frame is published at its new position next frame too, with
-  no delta for that untracked jump.
+  mouse that left and came back in that frame is published at its new position next frame too, and
+  that frame carries no delta at all: the untracked jump and any tracked motion around it.
 - **A frame never reads a release together with a newer press.** A press of the released button
   that arrives before the poll waits for the next frame, where it is published at the pointer's
   new position, as a whole tap when the button was lifted again meanwhile; a pointer that leaves or

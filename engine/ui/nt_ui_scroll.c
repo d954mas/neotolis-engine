@@ -765,7 +765,7 @@ static void scrollbar_emit_axis(nt_ui_context_t *ctx, uint32_t scroll_id, int ax
         thumb_style.color_packed = style->thumb_tint;
         nt_ui_image(ctx, scrollbar_make_data(layer, opacity), &thumb_ref, &thumb_style, &thumb_decl);
         /* The bar takes presses only while it shows a thumb that can move; the front-most resolve ranks
-         * it by paint order, over the content it floats on. */
+         * its floating root over the content it floats on. */
         if (overflows(ccontent, clen) && track_len > thumb_len && thickness > 0.0F) {
             nt_ui_internal_register_interactive(ctx, bar_id, reg_pad);
         }
