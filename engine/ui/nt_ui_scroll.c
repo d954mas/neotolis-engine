@@ -219,7 +219,6 @@ nt_ui_scroll_style_t nt_ui_scroll_style_defaults(void) {
 
 // #region last-fed clip offset (test readback)
 #ifdef NT_TEST_ACCESS
-static float s_last_child_offset[2] = {0.0F, 0.0F};
 static uint32_t s_last_scroll_id = 0U;
 static uint8_t s_last_bar_emitted_axes = 0U;       /* bit0 = x, bit1 = y */
 static float s_last_bar_thumb_len[2] = {0.0F};     /* per-axis thumb length */
@@ -357,7 +356,7 @@ static void scroll_take(nt_ui_context_t *ctx, uint32_t id, uint32_t self) {
     for (uint32_t j = 0; j < ctx->frame_pointer_count; ++j) {
         if (j != self && ctx->captures[j].active_id == id) {
             ctx->captures[j].active_id = 0U;
-            ctx->captures[j].scroll_scope = 0U;
+            ctx->captures[j].pending_scroll = 0U;
         }
     }
 }
@@ -365,27 +364,26 @@ static void scroll_take(nt_ui_context_t *ctx, uint32_t id, uint32_t self) {
 /* Press edge. A press on a bar that can move owns its scroll at once (a thumb has no slop; the bar
  * code drives the thumb); a flinging, unowned scroll on the chain stops and swallows the tap (iOS);
  * a chain that cannot scroll decides at once, so widgets in fitting panels are never pending. */
-static void gesture_press(nt_ui_context_t *ctx, uint32_t i, gesture_link_t scope_link) {
+static void gesture_press(nt_ui_context_t *ctx, uint32_t i, gesture_link_t start) {
     nt_ui_capture_t *cap = &ctx->captures[i];
     const nt_pointer_t *p = &ctx->frame_pointers[i];
-    const uint32_t scope = scope_link.id;
-    cap->scroll_scope = 0U;
+    cap->pending_scroll = 0U;
     cap->press_pos[0] = p->x;
     cap->press_pos[1] = p->y;
     cap->pos[0] = p->x;
     cap->pos[1] = p->y;
     const uint32_t hot = ctx->pointer_hot[i].id;
-    for (int a = 0; a < 2 && scope_link.s != NULL; ++a) {
-        if (hot == scrollbar_id(scope, a) && (scope_link.axes & (1U << a)) != 0U) {
-            scroll_take(ctx, scope, i);
-            cap->active_id = scope;
+    for (int a = 0; a < 2 && start.s != NULL; ++a) {
+        if (hot == scrollbar_id(start.id, a) && (start.axes & (1U << a)) != 0U) {
+            scroll_take(ctx, start.id, i);
+            cap->active_id = start.id;
             cap->hold_live = false; /* owning a scroll is not a widget press */
-            scope_link.s->bar_axis = (uint8_t)(a + 1);
+            start.s->bar_axis = (uint8_t)(a + 1);
             return;
         }
     }
     bool can_scroll = false;
-    for (gesture_link_t link = scope_link; link.s != NULL; link = gesture_chain(ctx, clip_parent(ctx, link.id))) {
+    for (gesture_link_t link = start; link.s != NULL; link = gesture_chain(ctx, clip_parent(ctx, link.id))) {
         if (link.axes == 0U) {
             continue;
         }
@@ -408,7 +406,7 @@ static void gesture_press(nt_ui_context_t *ctx, uint32_t i, gesture_link_t scope
         }
     }
     if (can_scroll) {
-        cap->scroll_scope = scope;
+        cap->pending_scroll = start.id;
     }
 }
 
@@ -433,16 +431,16 @@ static void gesture_claim(nt_ui_context_t *ctx, uint32_t i, gesture_link_t link,
 
 /* Pending gesture: the strongest crossing wins; on a tie the pressed widget, then the inner scroll.
  * Nothing crossed keeps it pending, through a release too: the widget sees a pending release, a tap
- * (nt_ui_end drops the scope). */
+ * (nt_ui_end ends it). */
 static void gesture_decide(nt_ui_context_t *ctx, uint32_t i, const float slop[2]) {
     nt_ui_capture_t *cap = &ctx->captures[i];
     const nt_pointer_t *p = &ctx->frame_pointers[i];
     const float d[2] = {p->x - cap->press_pos[0], p->y - cap->press_pos[1]};
     float best = (cap->active_id != 0U) ? gesture_crossing(d, slop, cap->drag_axes) : 0.0F;
     gesture_link_t win = {0};
-    const gesture_link_t first = gesture_chain(ctx, cap->scroll_scope);
+    const gesture_link_t first = gesture_chain(ctx, cap->pending_scroll);
     if (first.s == NULL) {
-        cap->scroll_scope = 0U; /* the chain vanished: nothing can take the press any more */
+        cap->pending_scroll = 0U; /* the chain vanished: nothing can take the press any more */
         return;
     }
     for (gesture_link_t link = first; link.s != NULL; link = gesture_chain(ctx, clip_parent(ctx, link.id))) {
@@ -455,7 +453,7 @@ static void gesture_decide(nt_ui_context_t *ctx, uint32_t i, const float slop[2]
     if (best == 0.0F) {
         return;
     }
-    cap->scroll_scope = 0U;
+    cap->pending_scroll = 0U;
     if (win.s != NULL) {
         gesture_claim(ctx, i, win, d, slop);
     }
@@ -494,8 +492,8 @@ void nt_ui_internal_scroll_arbitrate(nt_ui_context_t *ctx) {
             if (gesture_link(ctx, cap->active_id).s != NULL && !gesture_is_pane(ctx, cap->active_id)) {
                 cap->active_id = 0U;
             }
-            if (!gesture_is_pane(ctx, cap->scroll_scope)) {
-                cap->scroll_scope = 0U;
+            if (!gesture_is_pane(ctx, cap->pending_scroll)) {
+                cap->pending_scroll = 0U;
             }
         }
 #endif
@@ -505,9 +503,9 @@ void nt_ui_internal_scroll_arbitrate(nt_ui_context_t *ctx) {
         if (btn.is_pressed) {
             gesture_press(ctx, i, gesture_hover(ctx, i));
             if (!btn.is_down) {
-                cap->scroll_scope = 0U; /* pressed and released within one frame: a tap */
+                cap->pending_scroll = 0U; /* pressed and released within one frame: a tap */
             }
-        } else if (cap->scroll_scope != 0U) {
+        } else if (cap->pending_scroll != 0U) {
             gesture_decide(ctx, i, slop);
         }
     }
@@ -877,8 +875,6 @@ void nt_ui_scroll_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
     scrollbar_emit(ctx, id, style, s, content, container, thumb_drag, bar_layer);
 
 #ifdef NT_TEST_ACCESS
-    s_last_child_offset[0] = s->pos[0];
-    s_last_child_offset[1] = s->pos[1];
     s_last_scroll_id = id;
     s_last_bar_emitted_axes = 0U;
     if (style->scroll_x && scrollbar_was_emitted(style, content[0], container[0])) {
@@ -943,14 +939,6 @@ void nt_ui_scroll_test_integrate(nt_ui_scroll_state_t *s, const float wheel[2], 
     scroll_integrate(s, wheel, dt, content, container, style, dragging);
 }
 float nt_ui_scroll_test_rubber_band(float d, float dim) { return nt_ui_rubber_band(d, dim, 0.55F); }
-void nt_ui_scroll_test_last_child_offset(float *out_x, float *out_y) {
-    if (out_x != NULL) {
-        *out_x = s_last_child_offset[0];
-    }
-    if (out_y != NULL) {
-        *out_y = s_last_child_offset[1];
-    }
-}
 uint32_t nt_ui_scroll_test_last_scroll_id(void) { return s_last_scroll_id; }
 uint8_t nt_ui_scroll_test_last_bar_emitted_axes(void) { return s_last_bar_emitted_axes; }
 void nt_ui_scroll_test_last_bar_geometry(int axis, float *thumb_len, float *thumb_off, float *track_len, float *opacity) {

@@ -178,9 +178,10 @@ typedef struct {
     float pos[2];       /* the press point, then a scroll owner's last routed position */
     float hold_secs;    /* dt accumulated since the press */
     float hold_prev_secs;
-    /* Scroll gesture of this press: the scope chain still deciding it (0 = decided or none). Lives
-     * from the press edge to the release, independent of active_id (an empty-area press has none). */
-    uint32_t scroll_scope;
+    /* Where the scroll chain of this press starts while a scroll may still take it (0 = decided or
+     * none). Lives from the press edge to the release, independent of active_id (an empty-area press
+     * has none). */
+    uint32_t pending_scroll;
     bool hold_live;    /* false once the pointer left the hitbox; only a new press restarts the hold */
     uint8_t drag_axes; /* NT_UI_DRAG_* the capturing widget drags along itself (from its step desc) */
 } nt_ui_capture_t;

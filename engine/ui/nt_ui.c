@@ -490,7 +490,7 @@ void nt_ui_begin(nt_ui_context_t *ctx, const nt_ui_frame_desc_t *frame) {
             /* Frames without nt_ui_begin swallow edges. A press always starts a new gesture, and a button
              * that is up with no release edge ended one unseen. */
             cap->active_id = 0U;
-            cap->scroll_scope = 0U;
+            cap->pending_scroll = 0U;
         }
     }
 
@@ -500,7 +500,7 @@ void nt_ui_begin(nt_ui_context_t *ctx, const nt_ui_frame_desc_t *frame) {
             ctx->captures[i].active_id = 0U;
         }
         if (i >= count) {
-            ctx->captures[i].scroll_scope = 0U; /* a slot the game no longer passes holds no gesture */
+            ctx->captures[i].pending_scroll = 0U; /* a slot the game no longer passes holds no gesture */
         }
         if (ctx->captures[i].active_id != 0U) {
             ctx->captures[i].hold_prev_secs = ctx->captures[i].hold_secs;
@@ -630,7 +630,7 @@ void nt_ui_end(nt_ui_context_t *ctx) {
      * found held after skipped frames never continues it. */
     for (uint32_t i = 0; i < ctx->frame_pointer_count; ++i) {
         if (!ctx->frame_pointers[i].buttons[NT_BUTTON_LEFT].is_down) {
-            ctx->captures[i].scroll_scope = 0U;
+            ctx->captures[i].pending_scroll = 0U;
         }
     }
 
@@ -2557,7 +2557,7 @@ static nt_ui_interaction_t query_interaction_padded(nt_ui_context_t *ctx, uint32
         out.pressed_now = s.new_capture;
         out.clicked = btn.is_released && over;
         out.pointer_id = p->id;
-        out.gesture_pending = cap->scroll_scope != 0U;
+        out.gesture_pending = cap->pending_scroll != 0U;
         if (s.new_capture) {
             out.press_pos[0] = p->x;
             out.press_pos[1] = p->y;
@@ -2878,7 +2878,7 @@ bool nt_ui_wants_pointer(const nt_ui_context_t *ctx) {
     }
 #endif
     for (uint32_t i = 0; i < NT_INPUT_MAX_POINTERS; ++i) {
-        if (ctx->captures[i].active_id != 0U || ctx->captures[i].scroll_scope != 0U) {
+        if (ctx->captures[i].active_id != 0U || ctx->captures[i].pending_scroll != 0U) {
             return true; /* a pending press may still become a scroll */
         }
         /* Over a widget: the front-most record under the pointer was declared again this frame. */

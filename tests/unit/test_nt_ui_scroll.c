@@ -2,8 +2,8 @@
  *
  * Physics (momentum decay, clamp, rubber-band, scroll-to, Clay sign) drive the
  * static integrator directly via the NT_TEST_ACCESS probe — no Clay frame needed.
- * Container + capture-steal cases declare a real scroll element and read back the
- * fed childOffset. UNITY_EXCLUDE_FLOAT: compare via int32 casts / eps. */
+ * Container and gesture cases declare a real scroll element and read back its state
+ * or the laid-out content. UNITY_EXCLUDE_FLOAT: compare via int32 casts / eps. */
 
 #include <math.h>
 #include <stdalign.h>
@@ -36,9 +36,12 @@ static const nt_ui_scroll_style_t s_physics_style = {
     .wheel_step_px = 40.0F,
 };
 
+static void arb_scene_reset(void);
+
 void setUp(void) {
     nt_test_assert_install();
     ui_walker_fixture_init(&s_fx, s_arena, sizeof s_arena, UI_WALKER_FX_BIND_ALL);
+    arb_scene_reset();
 }
 
 void tearDown(void) { ui_walker_fixture_shutdown(&s_fx); }
@@ -217,7 +220,7 @@ static void test_scroll_hard_edges_stop_release_fling(void) {
     TEST_ASSERT_TRUE(float_near(s.vel[1], 0.0F, 0.001F));
 }
 
-static void test_scroll_steal_real_child_tracks_current_pointer(void) {
+static void test_scroll_takes_real_child_and_tracks_the_pointer(void) {
     nt_ui_scroll_style_t style = nt_ui_scroll_style_defaults();
     style.rubber_band_c = 0.0F;
     nt_pointer_t p = {.x = 100.0F, .y = 100.0F, .active = true};
@@ -276,21 +279,18 @@ static void test_scroll_wheel_applied_once(void) {
     p.x = 100.0F; /* inside the 200x200 container */
     p.y = 100.0F;
     p.active = true;
-    /* Frame 1 solves the bbox; frame 2's end-of-frame resolve then grants this pointer's wheel owner
-     * (innermost-wins routing has a 1-frame ownership lag, same as every prev-frame bbox hit-test). */
+    /* Two frames: the list must be laid out and registered before the pointer can be over it. */
     scroll_frame(&p, &style);
     scroll_frame(&p, &style);
-    /* Frame 3: one wheel notch down — the owner resolved at frame 2's end now lets us consume it. */
+    /* Frame 3: one wheel notch down, consumed the same frame. */
     p.wheel_dy = 1.0F; /* input-edge negates to Clay -1 -> target -40 */
     scroll_frame(&p, &style);
 
-    float ox = 0.0F;
-    float oy = 0.0F;
-    nt_ui_scroll_test_last_child_offset(&ox, &oy);
+    const nt_ui_scroll_state_t *st = (const nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, SCROLL_ID);
     TEST_ASSERT_EQUAL_UINT32(SCROLL_ID, nt_ui_scroll_test_last_scroll_id());
     /* Exactly ONE wheel contribution (-1 * 40); a Clay double-drive would be -80. */
-    TEST_ASSERT_TRUE(float_near(oy, -40.0F, 0.5F));
-    TEST_ASSERT_TRUE(float_near(ox, 0.0F, 0.001F)); /* y-only style */
+    TEST_ASSERT_TRUE(float_near(st->pos[1], -40.0F, 0.5F));
+    TEST_ASSERT_TRUE(float_near(st->pos[0], 0.0F, 0.001F)); /* y-only style */
 }
 
 /* ---- Test 7: childOffset fed from our pos (scroll_to drives the emitted offset) ---- */
@@ -305,9 +305,8 @@ static void test_scroll_childoffset_from_our_pos(void) {
     nt_ui_scroll_to(s_fx.ctx, SCROLL_ID, 0.0F, -150.0F);
     scroll_frame(&p, &style); /* integrate eases pos toward target, feeds childOffset */
 
-    float oy = 0.0F;
-    nt_ui_scroll_test_last_child_offset(NULL, &oy);
-    TEST_ASSERT_TRUE(float_near(oy, -150.0F, 1.0F)); /* emitted offset == our pos */
+    const nt_ui_bbox_t content = nt_ui_get_bbox(s_fx.ctx, CLAY_ID("content").id);
+    TEST_ASSERT_TRUE(content.found && float_near(content.y, -150.0F, 1.0F)); /* the layout got our pos */
 }
 
 /* ---- a scroll claim is not a gesture press: it must not report the hold left in its pointer slot ---- */
@@ -322,7 +321,7 @@ static void leave_stale_hold_in_slot(void) {
     s_fx.ctx->captures[0].hold_live = true;
 }
 
-static void test_scroll_free_press_claims_report_no_hold(void) {
+static void test_scroll_empty_press_claims_report_no_hold(void) {
     nt_ui_scroll_style_t style = nt_ui_scroll_style_defaults();
     nt_pointer_t p = {0};
     p.x = 100.0F;
@@ -522,10 +521,8 @@ static void test_scrollbar_track_click_scroll_to(void) {
     for (int i = 0; i < 120; ++i) {
         scrollbar_frame(&p, &style, 800.0F);
     }
-    float oy = 0.0F;
-    nt_ui_scroll_test_last_child_offset(NULL, &oy);
     /* Clicked near the bottom -> scrolled the offset substantially negative (down). */
-    TEST_ASSERT_TRUE(oy < -50.0F);
+    TEST_ASSERT_TRUE(((const nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, SCROLL_ID))->pos[1] < -50.0F);
 }
 
 /* ---- Test 15: AUTO_HIDE fades toward 0 after idle (the eased fade opacity drops). ---- */
@@ -555,7 +552,7 @@ static void test_scrollbar_id_derivation_distinct(void) {
     TEST_ASSERT_TRUE(vy != vx); /* the two axes never collide */
 }
 
-/* ================= UX-fix round (free-press drag + scroll-to-from-button) ================= */
+/* ================= UX-fix round (empty-area press drag + scroll-to-from-button) ================= */
 
 static const uint32_t SCROLL_ID_A = 0x5C00A1U;
 static const uint32_t SCROLL_ID_B = 0x5C00B2U;
@@ -623,10 +620,10 @@ static void test_scroll_to_top_from_button_sequence(void) {
     TEST_ASSERT_TRUE(float_near(sb->pos[1], 0.0F, 1.0F));
 }
 
-/* ---- Test 18: free-press drag (no inner widget capture) scrolls the container, and the
+/* ---- Test 18: empty-area press drag (no inner widget capture) scrolls the container, and the
  *      release leaves momentum so a fling continues past the lifted finger. ---- */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void test_scroll_free_press_drag_and_fling(void) {
+static void test_scroll_empty_press_drag_and_fling(void) {
     nt_ui_scroll_style_t style = nt_ui_scroll_style_defaults();
     nt_pointer_t p = {0};
     p.x = 100.0F;
@@ -652,7 +649,7 @@ static void test_scroll_free_press_drag_and_fling(void) {
     TEST_ASSERT_TRUE(s->pos[1] < -1.0F);         /* dragged the content */
     TEST_ASSERT_TRUE(fabsf(s->vel[1]) > 100.0F); /* drag built velocity for a fling */
 
-    /* Finger UP: free press ends; momentum carries on. */
+    /* Finger UP: empty-area press ends; momentum carries on. */
     const float pos_at_release = s->pos[1];
     p.buttons[NT_BUTTON_LEFT].is_down = false;
     p.buttons[NT_BUTTON_LEFT].is_released = true;
@@ -666,8 +663,8 @@ static void test_scroll_free_press_drag_and_fling(void) {
     TEST_ASSERT_TRUE(s->pos[1] < pos_at_release - 1.0F); /* flung further than the release point */
 }
 
-/* ---- Test 19: a free-press TAP (below threshold) does NOT scroll the container. ---- */
-static void test_scroll_free_press_tap_no_scroll(void) {
+/* ---- Test 19: a empty-area press TAP (below threshold) does NOT scroll the container. ---- */
+static void test_scroll_empty_press_tap_no_scroll(void) {
     nt_ui_scroll_style_t style = nt_ui_scroll_style_defaults();
     nt_pointer_t p = {0};
     p.x = 100.0F;
@@ -704,7 +701,7 @@ static void assert_thumb_owner(uint32_t pidx, uint32_t id, int axis) {
 /* ---- Test 20: the container does NOT take its OWN scrollbar's thumb drag: a real press on the
  *      thumb dragged past the slop stays a thumb drag, which moves the content. ---- */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void test_scroll_does_not_steal_own_scrollbar(void) {
+static void test_scroll_does_not_take_own_scrollbar(void) {
     nt_ui_scroll_style_t style = bar_style(NT_UI_SCROLLBAR_ALWAYS);
 
     nt_pointer_t p = {0};
@@ -752,7 +749,7 @@ static void excl_nested_frame2(nt_pointer_t *p, const nt_ui_scroll_style_t *oute
 /* ---- Test 20b: a parent scroll does NOT take a nested scroll's thumb drag along its own axis:
  *      a thumb press owns its own scroll at once. ---- */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void test_scroll_does_not_steal_nested_scrollbar(void) {
+static void test_scroll_does_not_take_nested_scrollbar(void) {
     /* The outer bar is drawn before the inner scroll declares: the inner still reads its own dims. */
     const nt_ui_scroll_style_t outer = bar_style(NT_UI_SCROLLBAR_ALWAYS);
     const nt_ui_scroll_style_t inner = bar_style(NT_UI_SCROLLBAR_ALWAYS);
@@ -773,11 +770,11 @@ static void test_scroll_does_not_steal_nested_scrollbar(void) {
     assert_thumb_owner(0U, EXCL_INNER_ID, 1);
 }
 
-/* ---- Test 21: free-press drag must NOT hijack a click on a non-scrolling tap. A press inside
+/* ---- Test 21: empty-area press drag must NOT hijack a click on a non-scrolling tap. A press inside
  *      the container that releases before crossing the threshold scrolls nothing AND a free
  *      press that started OUTSIDE the bbox never scrolls (anchor gate). ---- */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void test_scroll_free_press_outside_bbox_ignored(void) {
+static void test_scroll_empty_press_outside_bbox_ignored(void) {
     nt_ui_scroll_style_t style = nt_ui_scroll_style_defaults();
     nt_pointer_t p = {0};
     p.active = true;
@@ -786,7 +783,7 @@ static void test_scroll_free_press_outside_bbox_ignored(void) {
     scroll_frame(&p, &style);
 
     /* Press began outside the bbox, then the finger moves over the container and drags. The
-     * anchor must never latch (press did not begin inside) -> no scroll. */
+     * anchor must never claim (press did not begin inside) -> no scroll. */
     p.buttons[NT_BUTTON_LEFT].is_down = true;
     p.buttons[NT_BUTTON_LEFT].is_pressed = true;
     scroll_frame(&p, &style);
@@ -801,10 +798,10 @@ static void test_scroll_free_press_outside_bbox_ignored(void) {
     TEST_ASSERT_TRUE(float_near(s->pos[1], 0.0F, 0.5F)); /* press-outside never scrolls */
 }
 
-/* ---- Test 22: free-press drag tracks the finger 1:1 — pos must equal the TOTAL finger
+/* ---- Test 22: empty-area press drag tracks the finger 1:1 — pos must equal the TOTAL finger
  *      displacement after each frame (no threshold-crossing jump, no cumulative runaway). ---- */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void test_scroll_free_press_tracks_finger_1to1(void) {
+static void test_scroll_empty_press_tracks_finger_1to1(void) {
     nt_ui_scroll_style_t style = nt_ui_scroll_style_defaults();
     style.rubber_band_c = 0.0F; /* isolate tracking from overscroll compression */
     nt_pointer_t p = {0};
@@ -813,7 +810,7 @@ static void test_scroll_free_press_tracks_finger_1to1(void) {
     p.active = true;
     scroll_frame(&p, &style); /* establish bbox + state cell */
 
-    /* Finger DOWN inside the container (empty content -> free press, no widget capture). */
+    /* Finger DOWN inside the container (empty content -> empty-area press, no widget capture). */
     p.buttons[NT_BUTTON_LEFT].is_down = true;
     p.buttons[NT_BUTTON_LEFT].is_pressed = true;
     p.x = 100.0F;
@@ -825,7 +822,7 @@ static void test_scroll_free_press_tracks_finger_1to1(void) {
     /* Drag UP -3 px/frame for 10 frames (into the valid negative offset range, away from the
      * top overscroll edge). The threshold (8 px) is crossed mid-sequence. Once scrolling has
      * started, the content offset must equal the finger displacement MINUS the dead-zone
-     * threshold consumed before the drag latched — i.e. it tracks 1:1 with no extra jump.
+     * threshold consumed before the drag claimed — i.e. it tracks 1:1 with no extra jump.
      * The frame-over-frame offset delta must never exceed the 3 px the finger actually moved. */
     float prev_pos = 0.0F;
     bool scrolling = false;
@@ -846,10 +843,10 @@ static void test_scroll_free_press_tracks_finger_1to1(void) {
     }
 }
 
-/* ---- Test 23: a SLOW free-press drag that crosses the threshold in tiny steps must not
+/* ---- Test 23: a SLOW empty-area press drag that crosses the threshold in tiny steps must not
  *      spike velocity from the accumulated threshold gap (no runaway fling on release). ---- */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void test_scroll_free_press_slow_cross_no_velocity_spike(void) {
+static void test_scroll_empty_press_slow_cross_no_velocity_spike(void) {
     nt_ui_scroll_style_t style = nt_ui_scroll_style_defaults();
     style.rubber_band_c = 0.0F;
     nt_pointer_t p = {0};
@@ -881,7 +878,7 @@ static void test_scroll_free_press_slow_cross_no_velocity_spike(void) {
 /* ---- Held-drag physics (defect 1): a finger held DOWN that owns the gesture moves content
  *      as a PURE FUNCTION of finger displacement; momentum integrates only AFTER release.
  *      Helper: press inside, drag to a target y over a few frames, return with the finger
- *      still DOWN at that y (latched). ---- */
+ *      still DOWN at that y (claimed). ---- */
 static nt_ui_scroll_state_t *held_drag_to(nt_pointer_t *p, const nt_ui_scroll_style_t *style, float drag_to_y) {
     p->x = 100.0F;
     p->y = 100.0F;
@@ -891,7 +888,7 @@ static nt_ui_scroll_state_t *held_drag_to(nt_pointer_t *p, const nt_ui_scroll_st
     p->buttons[NT_BUTTON_LEFT].is_pressed = true;
     scroll_frame(p, style); /* press frame: anchor set */
     p->buttons[NT_BUTTON_LEFT].is_pressed = false;
-    /* Drag toward the target in a few steps so the gesture latches (crosses the threshold). */
+    /* Drag toward the target in a few steps so the gesture claims (crosses the threshold). */
     const float step = (drag_to_y - 100.0F) / 4.0F;
     for (int i = 1; i <= 4; ++i) {
         p->y = 100.0F + (step * (float)i);
@@ -1339,7 +1336,7 @@ static void test_scroll_velocity_clamp_on_dt_hitch(void) {
     TEST_ASSERT_TRUE(fabsf(s->vel[1]) <= 8000.0F + 0.5F); /* clamped to the velocity cap */
 }
 
-/* ---- Test 38 (fix 5): a container whose content FITS (no overflow) takes no gesture — a free-press
+/* ---- Test 38 (fix 5): a container whose content FITS (no overflow) takes no gesture — a empty-area press
  *      drag across it never claims a capture and never scrolls (inner widgets stay clickable). ---- */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_scroll_no_overflow_takes_no_gesture(void) {
@@ -1420,7 +1417,7 @@ static void test_scroll_tap_on_resting_does_not_swallow(void) {
     p.buttons[NT_BUTTON_LEFT].is_down = true;
     p.buttons[NT_BUTTON_LEFT].is_pressed = true;
     scroll_frame(&p, &style);
-    /* No fling -> the press only arms a free-press (does not claim a capture this frame). */
+    /* No fling -> the press only arms a empty-area press (does not claim a capture this frame). */
     TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_test_capture_active_id(s_fx.ctx, 0U));
 }
 
@@ -1547,7 +1544,7 @@ static void test_scroll_fling_survives_release_on_zero_delta_frame(void) {
     p.active = true;
     scroll_frame_dt(&p, &style, dt); /* establish bbox + state cell */
 
-    /* Press inside the container (empty content -> free press, no widget capture). */
+    /* Press inside the container (empty content -> empty-area press, no widget capture). */
     p.buttons[NT_BUTTON_LEFT].is_down = true;
     p.buttons[NT_BUTTON_LEFT].is_pressed = true;
     scroll_frame_dt(&p, &style, dt);
@@ -1752,7 +1749,7 @@ static void test_scroll_wheel_nested_innermost_wins(void) {
     p.x = 100.0F; /* inside the inner ([0,200]x[0,200]) AND the outer */
     p.y = 100.0F;
 
-    /* Warm-up: frame 1 solves the bboxes, frame 2's end-of-frame resolve grants the owner (1-frame
+    /* Warm-up: frame 1 solves the bboxes, frame 2 registers them, so the pointer is over the list from frame 3 (1-frame
      * ownership lag — same as every prev-frame bbox hit-test). */
     nested_scroll_frame(&p);
     nested_scroll_frame(&p);
@@ -1833,7 +1830,7 @@ static void test_scroll_wheel_front_most_sibling_wins(void) {
     p.x = 60.0F; /* inside the overlap [0,120]x[0,120] of both BIG and the floating SMALL */
     p.y = 60.0F;
 
-    /* Warm-up so the bboxes solve and the end-of-frame resolve grants the owner (1-frame lag). */
+    /* Warm-up so the bboxes solve and the lists are registered (1-frame lag). */
     tie_break_frame(&p);
     tie_break_frame(&p);
 
@@ -1846,7 +1843,7 @@ static void test_scroll_wheel_front_most_sibling_wins(void) {
     nt_ui_scroll_state_t *small = (nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, TIE_SMALL_ID);
     TEST_ASSERT_NOT_NULL(big);
     TEST_ASSERT_NOT_NULL(small);
-    TEST_ASSERT_TRUE(small->pos[1] < -1.0F);               /* the smaller-area overlapping container won */
+    TEST_ASSERT_TRUE(small->pos[1] < -1.0F);               /* the front-most of the two overlapping containers took it */
     TEST_ASSERT_TRUE(float_near(big->pos[1], 0.0F, 0.5F)); /* the bigger sibling never received it */
 }
 
@@ -2113,9 +2110,8 @@ static void arb_warm(nt_pointer_t *p) {
     arb_frame(p, 1);
 }
 
-/* A widget declared outside a list, floating over it, keeps its drag (#862). */
+/* A widget declared outside a list, floating over it, keeps its drag. */
 static void test_arb_foreground_outside_list_not_stolen(void) {
-    arb_scene_reset();
     s_scene.outside_before = outside_fg_button;
     nt_pointer_t p = arb_pointer(90.0F, 90.0F);
     arb_warm(&p);
@@ -2131,7 +2127,6 @@ static void test_arb_foreground_outside_list_not_stolen(void) {
 
 /* An inert modal over a flinging list: the press neither stops the fling nor scrolls the list. */
 static void test_arb_modal_blocks_tap_to_stop_and_drag(void) {
-    arb_scene_reset();
     s_scene.outside_after = outside_modal_blocker;
     nt_pointer_t p = arb_pointer(100.0F, 100.0F);
     arb_warm(&p);
@@ -2149,7 +2144,6 @@ static void test_arb_modal_blocks_tap_to_stop_and_drag(void) {
 
 /* A drag that starts on a disabled row (an inert blocker inside the list) still scrolls. */
 static void test_arb_drag_from_disabled_row_scrolls(void) {
-    arb_scene_reset();
     s_scene.body = body_disabled_row;
     nt_pointer_t p = arb_pointer(100.0F, 30.0F);
     arb_warm(&p);
@@ -2164,7 +2158,6 @@ static void test_arb_drag_from_disabled_row_scrolls(void) {
 
 /* A thumb arc (14, 10): the list takes it once its own axis crosses the slop, despite more x. */
 static void test_arb_diagonal_arc_scrolls_vertical_list(void) {
-    arb_scene_reset();
     s_scene.body = body_button_row;
     nt_pointer_t p = arb_pointer(100.0F, 30.0F);
     arb_warm(&p);
@@ -2183,7 +2176,6 @@ static void test_arb_diagonal_arc_scrolls_vertical_list(void) {
 /* Both axes cross in one frame: the stronger crossing wins — a mostly-vertical flick scrolls the
  * list, a mostly-horizontal one stays with the x-draggable row. */
 static void test_arb_strongest_crossing_wins(void) {
-    arb_scene_reset();
     s_scene.body = body_x_draggable_row;
     nt_pointer_t p = arb_pointer(100.0F, 40.0F);
     arb_warm(&p);
@@ -2198,7 +2190,6 @@ static void test_arb_strongest_crossing_wins(void) {
 }
 
 static void test_arb_strongest_crossing_keeps_horizontal_with_row(void) {
-    arb_scene_reset();
     s_scene.body = body_x_draggable_row;
     nt_pointer_t p = arb_pointer(100.0F, 40.0F);
     arb_warm(&p);
@@ -2214,7 +2205,6 @@ static void test_arb_strongest_crossing_keeps_horizontal_with_row(void) {
 
 /* A second finger dragging the same list takes it over; the first finger lets go of it. */
 static void test_arb_newest_pointer_takes_list(void) {
-    arb_scene_reset();
     nt_pointer_t ps[2] = {arb_pointer(50.0F, 150.0F), arb_pointer(150.0F, 150.0F)};
     ps[1].id = 7U;
     arb_frame(ps, 2);
@@ -2236,7 +2226,6 @@ static void test_arb_newest_pointer_takes_list(void) {
 
 /* A list whose content fits is see-through; an overflowing one counts as UI over its empty area. */
 static void test_arb_fitting_list_is_see_through(void) {
-    arb_scene_reset();
     s_scene.content_h = 100.0F;
     nt_pointer_t p = arb_pointer(100.0F, 150.0F);
     arb_warm(&p);
@@ -2250,7 +2239,6 @@ static void test_arb_fitting_list_is_see_through(void) {
 
 /* The slop is physical: at 3 device px per dp the 8 dp slop is 24 layout units here. */
 static void test_arb_slop_is_in_dp(void) {
-    arb_scene_reset();
     s_scene.px_per_dp = 3.0F;
     nt_pointer_t p = arb_pointer(100.0F, 150.0F);
     arb_warm(&p);
@@ -2279,7 +2267,6 @@ static void body_x_track(void) {
 }
 
 static void test_arb_nested_axes_route_to_their_scroll(void) {
-    arb_scene_reset();
     s_scene.body = body_x_track;
     s_scene.style.wheel_ease_speed = 0.0F;
     nt_pointer_t p = arb_pointer(100.0F, 50.0F);
@@ -2293,7 +2280,6 @@ static void test_arb_nested_axes_route_to_their_scroll(void) {
 }
 
 static void test_arb_nested_horizontal_drag_goes_to_track(void) {
-    arb_scene_reset();
     s_scene.body = body_x_track;
     nt_pointer_t p = arb_pointer(100.0F, 50.0F);
     arb_warm(&p);
@@ -2306,7 +2292,6 @@ static void test_arb_nested_horizontal_drag_goes_to_track(void) {
 }
 
 static void test_arb_nested_vertical_wheel_passes_to_list(void) {
-    arb_scene_reset();
     s_scene.body = body_x_track;
     s_scene.style.wheel_ease_speed = 0.0F;
     nt_pointer_t p = arb_pointer(100.0F, 50.0F);
@@ -2319,7 +2304,6 @@ static void test_arb_nested_vertical_wheel_passes_to_list(void) {
 
 /* A tap below the slop on a row inside a list clicks it and leaves the list at rest. */
 static void test_arb_tap_below_slop_clicks(void) {
-    arb_scene_reset();
     s_scene.body = body_button_row;
     nt_pointer_t p = arb_pointer(100.0F, 30.0F);
     arb_warm(&p);
@@ -2338,7 +2322,6 @@ static void test_arb_tap_below_slop_clicks(void) {
 
 /* A scroll claim is not a press: it reports no hold left in its pointer slot. */
 static void test_arb_claim_reports_no_hold(void) {
-    arb_scene_reset();
     s_scene.body = body_button_row;
     nt_pointer_t p = arb_pointer(100.0F, 30.0F);
     arb_warm(&p);
@@ -2353,7 +2336,6 @@ static void test_arb_claim_reports_no_hold(void) {
 
 /* A drag on dt == 0 frames samples no velocity: the release does not fling. */
 static void test_arb_dt_zero_drag_no_phantom_fling(void) {
-    arb_scene_reset();
     s_scene.body = body_button_row;
     nt_pointer_t p = arb_pointer(100.0F, 150.0F);
     arb_warm(&p);
@@ -2374,7 +2356,6 @@ static void test_arb_dt_zero_drag_no_phantom_fling(void) {
 /* The slop first crossed on the release frame, outside every hitbox: the list takes it, flings, and
  * the game does not see a world release that frame. */
 static void test_arb_release_crossing_outside_flings(void) {
-    arb_scene_reset();
     nt_pointer_t p = arb_pointer(100.0F, 150.0F);
     arb_warm(&p);
     arb_press(&p);
@@ -2394,7 +2375,6 @@ static void test_arb_release_crossing_outside_flings(void) {
 
 /* A press on the thumb of a flinging list grabs the thumb (no tap-to-stop claim on the list). */
 static void test_arb_thumb_press_during_fling_grabs_bar(void) {
-    arb_scene_reset();
     s_scene.style = bar_style(NT_UI_SCROLLBAR_ALWAYS);
     nt_pointer_t p = arb_pointer(195.0F, 20.0F);
     arb_warm(&p);
@@ -2406,7 +2386,6 @@ static void test_arb_thumb_press_during_fling_grabs_bar(void) {
 
 /* A thumb press by a second finger takes the list from the finger dragging its content. */
 static void test_arb_thumb_press_takes_list_from_content_drag(void) {
-    arb_scene_reset();
     s_scene.style = bar_style(NT_UI_SCROLLBAR_ALWAYS);
     nt_pointer_t ps[2] = {arb_pointer(80.0F, 150.0F), arb_pointer(195.0F, 20.0F)};
     ps[1].id = 7U;
@@ -2434,7 +2413,6 @@ static void body_barrier_panel(void) {
 }
 
 static void test_arb_unclipped_floating_keeps_drag_from_list(void) {
-    arb_scene_reset();
     s_scene.body = body_barrier_panel;
     nt_pointer_t p = arb_pointer(90.0F, 90.0F);
     arb_warm(&p);
@@ -2459,7 +2437,6 @@ static void body_real_popup(void) {
 }
 
 static void test_arb_popup_in_list_keeps_drag_from_list(void) {
-    arb_scene_reset();
     s_scene.body = body_real_popup;
     nt_pointer_t p = arb_pointer(80.0F, 90.0F);
     arb_warm(&p);
@@ -2476,8 +2453,7 @@ static void test_arb_popup_in_list_keeps_drag_from_list(void) {
 
 /* A tap's pending gesture ends with its frame: a button found held when the context runs again
  * (frames skipped, no edges) is not that press and drags nothing. */
-static void test_arb_tap_scope_does_not_outlive_its_frame(void) {
-    arb_scene_reset();
+static void test_arb_tap_gesture_does_not_outlive_its_frame(void) {
     nt_pointer_t p = arb_pointer(100.0F, 150.0F);
     arb_warm(&p);
     arb_press(&p);
@@ -2493,7 +2469,6 @@ static void test_arb_tap_scope_does_not_outlive_its_frame(void) {
 
 /* A thumb press over a full-width row takes the thumb, not the row under it. */
 static void test_arb_thumb_over_row_takes_the_thumb(void) {
-    arb_scene_reset();
     s_scene.body = body_button_row;
     nt_pointer_t p = arb_pointer(195.0F, 20.0F);
     arb_warm(&p);
@@ -2506,7 +2481,6 @@ static void test_arb_thumb_over_row_takes_the_thumb(void) {
 /* bar_hit_pad widens the bar's touch target toward the content and wins over the row under it; 0
  * leaves that strip to the row. The bar is 188..200; 180 is inside a 12 pad. */
 static void test_arb_bar_hit_pad_is_the_style_s(void) {
-    arb_scene_reset();
     s_scene.body = body_button_row;
     nt_pointer_t p = arb_pointer(180.0F, 20.0F);
     arb_warm(&p);
@@ -2526,7 +2500,6 @@ static void test_arb_bar_hit_pad_is_the_style_s(void) {
 /* A thumb drag moves the content in the frame of the move: grabbed 20 into a 40 thumb on a 200 track,
  * the pointer at 60 is frac (60 - 20) / 160 of the 800 overflow. */
 static void test_arb_thumb_drag_moves_content_the_same_frame(void) {
-    arb_scene_reset();
     nt_pointer_t p = arb_pointer(195.0F, 20.0F);
     arb_warm(&p);
     arb_press(&p);
@@ -2542,7 +2515,6 @@ static void test_arb_thumb_drag_moves_content_the_same_frame(void) {
 /* A bar takes presses only while it shows a thumb that can move: over a list that fits, and over a
  * bar with no art, the strip belongs to the row under it. */
 static void test_arb_bar_without_a_movable_thumb_takes_no_press(void) {
-    arb_scene_reset();
     s_scene.body = body_button_row;
     s_scene.content_h = 100.0F; /* fits */
     nt_pointer_t p = arb_pointer(195.0F, 20.0F);
@@ -2570,7 +2542,6 @@ static void body_inner_list_with_bar(void) {
     nt_ui_scroll_end(s_fx.ctx);
 }
 static void test_arb_inner_bar_over_outer_bar_takes_the_press(void) {
-    arb_scene_reset();
     s_scene.body = body_inner_list_with_bar;
     nt_pointer_t p = arb_pointer(195.0F, 10.0F);
     arb_warm(&p);
@@ -2581,7 +2552,6 @@ static void test_arb_inner_bar_over_outer_bar_takes_the_press(void) {
 
 /* The wheel does not move the axis a thumb holds. */
 static void test_arb_wheel_does_not_move_a_held_thumb(void) {
-    arb_scene_reset();
     nt_pointer_t p = arb_pointer(195.0F, 20.0F);
     arb_warm(&p);
     arb_press(&p);
@@ -2597,7 +2567,6 @@ static void test_arb_wheel_does_not_move_a_held_thumb(void) {
 
 /* A pointer slot the game stops passing holds no pending gesture. */
 static void test_arb_dropped_pointer_slot_holds_no_gesture(void) {
-    arb_scene_reset();
     nt_pointer_t ps[2] = {arb_pointer(700.0F, 500.0F), arb_pointer(100.0F, 150.0F)};
     arb_frame(ps, 2);
     arb_frame(ps, 2);
@@ -2610,7 +2579,6 @@ static void test_arb_dropped_pointer_slot_holds_no_gesture(void) {
 
 /* The container clips its bar: a press past its edge is not a thumb press. */
 static void test_arb_bar_is_clipped_to_its_container(void) {
-    arb_scene_reset();
     nt_pointer_t p = arb_pointer(203.0F, 20.0F);
     arb_warm(&p);
     arb_press(&p);
@@ -2620,7 +2588,6 @@ static void test_arb_bar_is_clipped_to_its_container(void) {
 
 /* A pending press keeps the pointer for the UI after it leaves the list: the list may still take it. */
 static void test_arb_pending_press_wants_pointer_off_the_list(void) {
-    arb_scene_reset();
     nt_pointer_t p = arb_pointer(100.0F, 150.0F);
     arb_warm(&p);
     arb_press(&p);
@@ -2634,7 +2601,6 @@ static void test_arb_pending_press_wants_pointer_off_the_list(void) {
 /* A track tap centers the thumb under the pointer, like a held track press: 150 on a 200 track with a
  * 40 thumb is frac (150 - 20) / 160 of the 800 overflow. */
 static void test_arb_track_tap_centers_the_thumb(void) {
-    arb_scene_reset();
     nt_pointer_t p = arb_pointer(195.0F, 150.0F);
     arb_warm(&p);
     p.buttons[NT_BUTTON_LEFT] = (nt_button_state_t){.is_pressed = true, .is_released = true};
@@ -2648,7 +2614,6 @@ static void test_arb_track_tap_centers_the_thumb(void) {
 
 /* The wheel over a scrollbar scrolls its list. */
 static void test_arb_wheel_over_bar_scrolls_list(void) {
-    arb_scene_reset();
     s_scene.style = bar_style(NT_UI_SCROLLBAR_ALWAYS);
     s_scene.style.wheel_ease_speed = 0.0F;
     nt_pointer_t p = arb_pointer(195.0F, 100.0F);
@@ -2661,7 +2626,6 @@ static void test_arb_wheel_over_bar_scrolls_list(void) {
 
 /* A second finger takes a list whose thumb just moved: the content drag starts from the thumb's position. */
 static void test_arb_content_take_keeps_last_thumb_move(void) {
-    arb_scene_reset();
     s_scene.style = bar_style(NT_UI_SCROLLBAR_ALWAYS);
     s_scene.style.rubber_band_c = 0.0F;
     nt_pointer_t ps[2] = {arb_pointer(195.0F, 10.0F), arb_pointer(80.0F, 150.0F)};
@@ -2687,7 +2651,6 @@ static void test_arb_content_take_keeps_last_thumb_move(void) {
 
 /* Two fingers press both bars of one list in one frame: one takes it, and a still frame moves nothing. */
 static void test_arb_both_bars_pressed_together(void) {
-    arb_scene_reset();
     s_scene.style = bar_style(NT_UI_SCROLLBAR_ALWAYS);
     s_scene.style.scroll_x = true;
     s_scene.content_w = 1000.0F;
@@ -2710,7 +2673,6 @@ static void test_arb_both_bars_pressed_together(void) {
 
 /* A tap on the second bar while the first is held: a still frame moves nothing. */
 static void test_arb_tap_on_other_bar_while_held(void) {
-    arb_scene_reset();
     s_scene.style = bar_style(NT_UI_SCROLLBAR_ALWAYS);
     s_scene.style.scroll_x = true;
     s_scene.content_w = 1000.0F;
@@ -2733,7 +2695,6 @@ static void test_arb_tap_on_other_bar_while_held(void) {
 
 /* A second finger pressing a held thumb takes it (newest pointer wins). */
 static void test_arb_second_finger_takes_held_bar(void) {
-    arb_scene_reset();
     s_scene.style = bar_style(NT_UI_SCROLLBAR_ALWAYS);
     nt_pointer_t ps[2] = {arb_pointer(195.0F, 10.0F), arb_pointer(195.0F, 12.0F)};
     ps[1].id = 7U;
@@ -2794,7 +2755,7 @@ int main(void) {
     RUN_TEST(test_arb_inner_bar_over_outer_bar_takes_the_press);
     RUN_TEST(test_arb_wheel_does_not_move_a_held_thumb);
     RUN_TEST(test_arb_dropped_pointer_slot_holds_no_gesture);
-    RUN_TEST(test_arb_tap_scope_does_not_outlive_its_frame);
+    RUN_TEST(test_arb_tap_gesture_does_not_outlive_its_frame);
     RUN_TEST(test_arb_thumb_over_row_takes_the_thumb);
     RUN_TEST(test_arb_pending_press_wants_pointer_off_the_list);
     RUN_TEST(test_arb_track_tap_centers_the_thumb);
@@ -2824,7 +2785,7 @@ int main(void) {
     RUN_TEST(test_arb_tap_on_other_bar_while_held);
     RUN_TEST(test_hard_edge_drag_reversal_has_no_dead_zone);
     RUN_TEST(test_scroll_momentum_decays_monotonic);
-    RUN_TEST(test_scroll_steal_real_child_tracks_current_pointer);
+    RUN_TEST(test_scroll_takes_real_child_and_tracks_the_pointer);
     RUN_TEST(test_scroll_release_crossing_threshold_allows_next_press);
     RUN_TEST(test_scroll_hard_edges_stop_release_fling);
     RUN_TEST(test_scroll_threshold_ignores_disabled_axis);
@@ -2834,7 +2795,7 @@ int main(void) {
     RUN_TEST(test_scroll_wheel_sign);
     RUN_TEST(test_scroll_wheel_applied_once);
     RUN_TEST(test_scroll_childoffset_from_our_pos);
-    RUN_TEST(test_scroll_free_press_claims_report_no_hold);
+    RUN_TEST(test_scroll_empty_press_claims_report_no_hold);
     RUN_TEST(test_scrollbar_auto_only_on_overflow);
     RUN_TEST(test_scrollbar_always_shows);
     RUN_TEST(test_scrollbar_standalone_no_z_lift);
@@ -2844,13 +2805,13 @@ int main(void) {
     RUN_TEST(test_scrollbar_auto_hide_fades);
     RUN_TEST(test_scrollbar_id_derivation_distinct);
     RUN_TEST(test_scroll_to_top_from_button_sequence);
-    RUN_TEST(test_scroll_free_press_drag_and_fling);
-    RUN_TEST(test_scroll_free_press_tap_no_scroll);
-    RUN_TEST(test_scroll_does_not_steal_own_scrollbar);
-    RUN_TEST(test_scroll_does_not_steal_nested_scrollbar);
-    RUN_TEST(test_scroll_free_press_outside_bbox_ignored);
-    RUN_TEST(test_scroll_free_press_tracks_finger_1to1);
-    RUN_TEST(test_scroll_free_press_slow_cross_no_velocity_spike);
+    RUN_TEST(test_scroll_empty_press_drag_and_fling);
+    RUN_TEST(test_scroll_empty_press_tap_no_scroll);
+    RUN_TEST(test_scroll_does_not_take_own_scrollbar);
+    RUN_TEST(test_scroll_does_not_take_nested_scrollbar);
+    RUN_TEST(test_scroll_empty_press_outside_bbox_ignored);
+    RUN_TEST(test_scroll_empty_press_tracks_finger_1to1);
+    RUN_TEST(test_scroll_empty_press_slow_cross_no_velocity_spike);
     RUN_TEST(test_scroll_held_still_in_bounds_frozen);
     RUN_TEST(test_scroll_held_still_past_edge_frozen);
     RUN_TEST(test_scroll_release_after_hold_no_fling);

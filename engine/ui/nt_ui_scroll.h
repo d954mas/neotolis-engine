@@ -14,7 +14,6 @@
 #include "atlas/nt_atlas.h" /* nt_atlas_region_ref_t */
 #include "clay.h"
 #include "ui/nt_ui.h" /* nt_ui_element_data_t, nt_ui_widget_def_t */
-#include "ui/nt_ui_state.h"
 
 typedef struct nt_ui_context nt_ui_context_t;
 
@@ -93,8 +92,6 @@ void nt_ui_scroll_to(nt_ui_context_t *ctx, uint32_t id, float x, float y);
  * Reads physics settings from style for the duration of the call. */
 void nt_ui_scroll_test_integrate(nt_ui_scroll_state_t *s, const float wheel[2], float dt, const float content[2], const float container[2], const nt_ui_scroll_style_t *style, bool dragging);
 float nt_ui_scroll_test_rubber_band(float d, float dim);
-/* Reads back the last clip.childOffset fed to Clay by scroll_begin (Clay sign). */
-void nt_ui_scroll_test_last_child_offset(float *out_x, float *out_y);
 uint32_t nt_ui_scroll_test_last_scroll_id(void);
 /* Scrollbar readbacks: which axes' bars emitted (bit0=x, bit1=y) + the last per-axis
  * bar geometry (thumb len/off, track len, eased fade opacity) + the derived id. */
