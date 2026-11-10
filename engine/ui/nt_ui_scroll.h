@@ -52,7 +52,7 @@ typedef struct {
     uint32_t parent;  /* enclosing scroll at the last declaration (0 = none or a popup barrier) */
     uint8_t flags;
     uint8_t bar_axis; /* 1 + axis while the owner drags this scroll by a thumb; 0 = content drag */
-    uint8_t bar_pad;  /* cross-axis hit padding of this frame's bars, per side */
+    uint16_t bar_pad; /* this frame's bar hit padding (style bar_hit_pad) */
 } nt_ui_scroll_state_t;
 
 /* Scrollbar visibility (defined here so the style stays one struct). Bars always float
@@ -69,6 +69,7 @@ typedef struct {
     /* scrollbar visual */
     nt_ui_scrollbar_visibility_t bar_visibility;
     float bar_thickness;
+    float bar_hit_pad; /* extra hit width from the visual bar toward the content (touch target); 0 = the bar only */
     float bar_thumb_min_px;
     float bar_fade_speed; /* AUTO_HIDE fade via nt_ui_anim value_t */
     float bar_hide_delay; /* AUTO_HIDE: seconds of idle before the bar fades out (iOS/macOS overlay linger ~1.2s) */

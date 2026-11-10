@@ -206,6 +206,7 @@ nt_ui_scroll_style_t nt_ui_scroll_style_defaults(void) {
         .wheel_step_px = 40.0F,
         .bar_visibility = NT_UI_SCROLLBAR_ALWAYS,
         .bar_thickness = 12.0F,
+        .bar_hit_pad = 12.0F, /* a 24-wide touch target */
         .bar_thumb_min_px = 24.0F,
         .bar_fade_speed = 6.0F,
         .bar_hide_delay = 1.2F,
@@ -395,17 +396,14 @@ static void gesture_press(nt_ui_context_t *ctx, uint32_t i) {
     }
 }
 
-/* Claim: the excess past the slop is routed on the first crossing frame (no 8 dp loss, no jump); a
- * claim on a later frame anchors at the pointer. The owner path does the routing once. */
+/* Claim: the excess past the slop is routed (no 8 dp loss, no jump). The owner path does the routing once. */
 static void gesture_claim(nt_ui_context_t *ctx, uint32_t i, gesture_link_t link, const float d[2], const float slop[2]) {
     nt_ui_capture_t *cap = &ctx->captures[i];
     const nt_pointer_t *p = &ctx->frame_pointers[i];
-    const float prev[2] = {cap->pos[0] - cap->press_pos[0], cap->pos[1] - cap->press_pos[1]};
-    const bool first_crossing = gesture_crossing(prev, slop, link.axes) == 0.0F;
     scroll_take(ctx, link.id, i);
     for (int a = 0; a < 2; ++a) {
         float route = 0.0F;
-        if (first_crossing && (link.axes & (1U << a)) != 0U && fabsf(d[a]) > slop[a]) {
+        if ((link.axes & (1U << a)) != 0U && fabsf(d[a]) > slop[a]) {
             route = (d[a] > 0.0F) ? (d[a] - slop[a]) : (d[a] + slop[a]);
         }
         cap->pos[a] = ((a == 0) ? p->x : p->y) - route;
@@ -434,8 +432,6 @@ static void gesture_decide(nt_ui_context_t *ctx, uint32_t i, const float slop[2]
         }
     }
     if (best == 0.0F) {
-        cap->pos[0] = p->x; /* last processed position: tells the first crossing frame apart */
-        cap->pos[1] = p->y;
         return;
     }
     cap->scroll_scope = 0U;
@@ -595,22 +591,11 @@ static float scrollbar_thumb_pos(float pos, float content, float container, floa
     return frac * (track_len - thumb_len);
 }
 
-/* Min effective cross-axis thickness for the bar's HIT area (touch target); the visual
- * bar_thickness stays slim. The pad is split across the two cross-axis sides. */
-#define NT_UI_SCROLLBAR_HIT_MIN_PX 24.0F
-
-/* Cross-axis hit pad per side so a thin visual bar still has a >= NT_UI_SCROLLBAR_HIT_MIN_PX touch target. */
-static uint8_t scrollbar_hit_grow(float thickness) {
-    const float grow = (NT_UI_SCROLLBAR_HIT_MIN_PX - thickness) * 0.5F;
-    return (grow > 0.0F) ? (uint8_t)ceilf(grow) : 0U;
-}
-
-/* axis 1 (vertical bar): pad left/right; axis 0 (horizontal): pad top/bottom. */
-static void scrollbar_hit_pad(int axis, uint8_t grow, int16_t out[4]) {
-    const int16_t side = (axis == 1) ? 0 : 2;
+/* The bar's hit pad grows toward the content only: the container clips the outer side. A vertical bar
+ * sits on the right edge (pad left), a horizontal one on the bottom edge (pad top). */
+static void scrollbar_hit_pad(int axis, uint16_t pad, int16_t out[4]) {
     memset(out, 0, 4U * sizeof out[0]);
-    out[side] = (int16_t)grow;
-    out[side + 1] = (int16_t)grow;
+    out[(axis == 1) ? 0 : 2] = (int16_t)pad;
 }
 
 /* The arbiter turns a press on a bar into the scroll's thumb owner. The thumb owner maps the pointer
@@ -713,7 +698,7 @@ static void scrollbar_emit_axis(nt_ui_context_t *ctx, uint32_t scroll_id, int ax
         return; /* fully faded: no element, so no hit record either (scroll activity wakes the bar) */
     }
     s->flags |= (uint8_t)(NT_UI_SCROLL_FLAG_BAR_X << axis);
-    s->bar_pad = scrollbar_hit_grow(style->bar_thickness);
+    s->bar_pad = (uint16_t)ceilf(style->bar_hit_pad);
 
     /* Bar draws on the container's own layer (NOT hardcoded 0): a scroll whose content sits on a higher
      * layer (e.g. a dropdown list on the IMAGE layer over an opaque panel) would otherwise emit its bar
@@ -807,6 +792,7 @@ void nt_ui_scroll_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
     NT_ASSERT(isfinite(style->bounce_speed) && style->bounce_speed >= 0.0F && "nt_ui_scroll_begin: bounce_speed must be finite >= 0");
     NT_ASSERT((style->rubber_band_c == 0.0F || style->bounce_speed > 0.0F) && "nt_ui_scroll_begin: a rubber band needs bounce_speed > 0 to return");
     NT_ASSERT(isfinite(style->bar_thickness) && style->bar_thickness >= 0.0F && "nt_ui_scroll_begin: bar_thickness must be finite >= 0");
+    NT_ASSERT(style->bar_hit_pad >= 0.0F && style->bar_hit_pad <= 1024.0F && "nt_ui_scroll_begin: bar_hit_pad must be in [0, 1024]");
     NT_ASSERT(isfinite(style->bar_thumb_min_px) && style->bar_thumb_min_px >= 0.0F && "nt_ui_scroll_begin: bar_thumb_min_px must be finite >= 0");
     NT_ASSERT(isfinite(style->bar_fade_speed) && style->bar_fade_speed >= 0.0F && "nt_ui_scroll_begin: bar_fade_speed must be finite >= 0");
     NT_ASSERT(isfinite(style->bar_hide_delay) && style->bar_hide_delay >= 0.0F && "nt_ui_scroll_begin: bar_hide_delay must be finite >= 0");

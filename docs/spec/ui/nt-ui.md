@@ -434,8 +434,8 @@ pressed widget's own `drag_axes` and the chain's eligible axes, inner first. The
 strongest crossing (|d| / slop) wins, ties going to the widget, then the inner scroll;
 nothing crossed keeps the gesture pending. A scroll that wins takes the capture — the
 widget sees a foreign owner and goes silent (no release, no click), keeping any value it wrote (Model D:
-draggables hold value changes while pending). On the first crossing frame the excess past
-the slop is routed (no jump, no lost distance); a later claim anchors at the pointer.
+draggables hold value changes while pending). The excess past
+the slop is routed (no jump, no lost distance).
 A crossing on the release frame still claims (fling, no click), and the owner keeps the
 capture through its release frame. A release with nothing crossed stays pending through
 its release frame (`nt_ui_end` ends it, so skipped frames never continue it): the widget gets its release (click when over it) with `gesture_pending`,
@@ -459,7 +459,7 @@ out `bar_hide_delay` seconds after the last motion, via one `nt_ui_anim` value_t
 A thumb press grabs at the press offset inside the thumb (no jump-to-center); a press
 on the track off the thumb centers the thumb under the pointer: a held press at once, a
 tap within one frame smoothly (`nt_ui_scroll_to`). A
-thin bar still gets a ≥ 24 px touch target via a cross-axis hit pad. The
+thin bar gets a wider touch target from the style's `bar_hit_pad` (default 12, a 24-wide target): extra hit width from the visual bar toward the content only, since the container clips the outer side; that zone wins over the content under it, and 0 leaves the visual bar alone. The
 "Scissor limitation" note below still holds (AABB clip of a rotated scroll
 container is unchanged).
 

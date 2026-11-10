@@ -2478,6 +2478,36 @@ static void test_arb_thumb_over_row_takes_the_thumb(void) {
     TEST_ASSERT_FALSE(s_child_in.pressed);
 }
 
+/* bar_hit_pad widens the bar's touch target toward the content and wins over the row under it; 0
+ * leaves that strip to the row. The bar is 188..200; 180 is inside a 12 pad. */
+static void test_arb_bar_hit_pad_is_the_style_s(void) {
+    arb_scene_reset();
+    s_scene.body = body_button_row;
+    nt_pointer_t p = arb_pointer(180.0F, 20.0F);
+    arb_warm(&p);
+    arb_press(&p);
+    arb_frame(&p, 1);
+    assert_thumb_owner(0U, SCROLL_ID, 1);
+    arb_release(&p);
+    arb_frame(&p, 1);
+    p.buttons[NT_BUTTON_LEFT] = (nt_button_state_t){0};
+    s_scene.style.bar_hit_pad = 0.0F;
+    arb_warm(&p);
+    arb_press(&p);
+    arb_frame(&p, 1);
+    TEST_ASSERT_TRUE(s_child_in.pressed_now);
+}
+
+/* The container clips its bar: a press past its edge is not a thumb press. */
+static void test_arb_bar_is_clipped_to_its_container(void) {
+    arb_scene_reset();
+    nt_pointer_t p = arb_pointer(203.0F, 20.0F);
+    arb_warm(&p);
+    arb_press(&p);
+    arb_frame(&p, 1);
+    TEST_ASSERT_EQUAL_UINT32(0U, s_fx.ctx->captures[0].active_id);
+}
+
 /* A pending press keeps the pointer for the UI after it leaves the list: the list may still take it. */
 static void test_arb_pending_press_wants_pointer_off_the_list(void) {
     arb_scene_reset();
@@ -2650,6 +2680,8 @@ static void test_assert_release_with_newer_press(void) { NT_TEST_EXPECT_ASSERT(r
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_arb_foreground_outside_list_not_stolen);
+    RUN_TEST(test_arb_bar_hit_pad_is_the_style_s);
+    RUN_TEST(test_arb_bar_is_clipped_to_its_container);
     RUN_TEST(test_arb_tap_scope_does_not_outlive_its_frame);
     RUN_TEST(test_arb_thumb_over_row_takes_the_thumb);
     RUN_TEST(test_arb_pending_press_wants_pointer_off_the_list);
