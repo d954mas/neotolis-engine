@@ -698,7 +698,7 @@ static bool input_focus_edge(nt_ui_input_state_t *st, const nt_ui_interaction_t 
         st->tap_focus = (in->gesture_pending && !was_focused) ? 1U : 0U;
         return st->tap_focus == 0U;
     }
-    return in->clicked && in->gesture_pending && st->tap_focus != 0U; /* a pending release is a tap */
+    return in->clicked && st->tap_focus != 0U; /* the tap's release: a scroll that took the press gives no click */
 }
 
 /* focus-order bookkeeping (Tab wrap) + the single mutating interaction step + focus capture / drag.

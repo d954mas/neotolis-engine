@@ -624,8 +624,8 @@ void nt_ui_block_pointer(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lr
 bool nt_ui_wants_pointer(const nt_ui_context_t *ctx);
 
 /* Front-most interactive record under the pointer this frame: the hit painted last (3D: nearest
- * within the occlusion cutoff first; then the later floating tree root — band, then declaration; then
- * the later nt_ui_step call, which is declaration order when widgets step in declaration order).
+ * within the occlusion cutoff first; then the band and the element's place in paint order, layers
+ * included; an element that draws nothing stands where its parent does, the later nt_ui_step wins there).
  * Resolved by nt_ui_begin from the prev-frame registry: stepped widgets, blockers, scroll surfaces
  * (a scroll id over its empty area) and scrollbars. id 0 = none. */
 nt_ui_hot_t nt_ui_pointer_hot(const nt_ui_context_t *ctx, uint32_t pointer_index);

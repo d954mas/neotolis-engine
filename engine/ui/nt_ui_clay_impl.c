@@ -442,7 +442,7 @@ static void compose_transform_level(const nt_ui_transform_t *t, float cx, float 
 
 /* Floating descendants skipped (handled by outer roots loop). Text leaves have no .children. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void bt_dfs_subtree(nt_ui_context_t *ctx, Clay_Context *cc, int32_t root_elem_idx, const nt_ui_baked_xform_t *seed, int16_t root_zindex, uint16_t paint_root) {
+static void bt_dfs_subtree(nt_ui_context_t *ctx, Clay_Context *cc, int32_t root_elem_idx, const nt_ui_baked_xform_t *seed, int16_t root_zindex) {
     nt_ui_dfs_frame_t *S = ctx->tree_dfs_stack;
     int32_t sp = 0;
     NT_ASSERT(sp < NT_UI_TREE_DFS_DEPTH_CAP);
@@ -480,7 +480,6 @@ static void bt_dfs_subtree(nt_ui_context_t *ctx, Clay_Context *cc, int32_t root_
             ctx->tree_baked[f->elem_idx].opacity = op;
             ctx->tree_baked[f->elem_idx].hierarchy_depth = f->hierarchy_depth;
             ctx->tree_baked[f->elem_idx].zindex = root_zindex; /* uniform per Clay tree root */
-            ctx->tree_baked[f->elem_idx].paint_root = paint_root;
             memcpy(f->m, m_cur, sizeof m_cur);
             f->opacity = op;
         }
@@ -530,7 +529,6 @@ void nt_ui_internal_build_tree(nt_ui_context_t *ctx) {
     // #endregion
 
     // #region elem-to-root-map
-    NT_ASSERT(R <= (int32_t)UINT16_MAX && "build_tree: tree roots exceed the paint-order field");
     for (int32_t k = 0; k < R; ++k) {
         Clay__LayoutElementTreeRoot *root = Clay__LayoutElementTreeRootArray_Get(&cc->layoutElementTreeRoots, k);
         ctx->tree_root_for_elem[root->layoutElementIndex] = k;
@@ -563,8 +561,60 @@ void nt_ui_internal_build_tree(nt_ui_context_t *ctx) {
             seed = ctx->tree_baked[p_elem_idx];
             seed.hierarchy_depth = (uint16_t)(seed.hierarchy_depth + 1U);
         }
-        /* Clay sorted the tree roots by band, stably: the index is the paint order. */
-        bt_dfs_subtree(ctx, cc, elem_idx, &seed, root_zindex, (uint16_t)root_idx);
+        bt_dfs_subtree(ctx, cc, elem_idx, &seed, root_zindex);
+    }
+    // #endregion
+
+    // #region paint-rank
+    /* Each element's place in the walker's paint order, for the front-most resolve: commands run in
+     * segments (consecutive segmentable commands of one band), inside a segment by layer, then in
+     * command order. An element that draws nothing stands where its parent does. */
+    uint32_t paint_seq = 0U;
+    for (int32_t i = 0; i < ctx->frozen_cmds.length;) {
+        const Clay_RenderCommand *first = &ctx->frozen_cmds.internalArray[i];
+        if (!nt_ui_internal_cmd_segmentable(first->commandType)) {
+            ++i;
+            continue;
+        }
+        NT_ASSERT(first->nt_layout_index >= 0 && first->nt_layout_index < N && "build_tree: segmentable command without layout element");
+        const int16_t band = ctx->tree_baked[first->nt_layout_index].zindex;
+        int32_t end = i + 1;
+        while (end < ctx->frozen_cmds.length && nt_ui_internal_cmd_segmentable(ctx->frozen_cmds.internalArray[end].commandType) &&
+               ctx->tree_baked[ctx->frozen_cmds.internalArray[end].nt_layout_index].zindex == band) {
+            ++end;
+        }
+        for (int32_t layer = -1;;) {
+            int32_t next_layer = 256;
+            for (int32_t j = i; j < end; ++j) {
+                const Clay_RenderCommand *c = &ctx->frozen_cmds.internalArray[j];
+                const int32_t l = (c->userData != NULL) ? (int32_t)((const nt_ui_element_data_t *)c->userData)->layer : 0;
+                if (l > layer && l < next_layer) {
+                    next_layer = l;
+                }
+            }
+            if (next_layer == 256) {
+                break;
+            }
+            layer = next_layer;
+            for (int32_t j = i; j < end; ++j) {
+                const Clay_RenderCommand *c = &ctx->frozen_cmds.internalArray[j];
+                const int32_t l = (c->userData != NULL) ? (int32_t)((const nt_ui_element_data_t *)c->userData)->layer : 0;
+                if (l == layer) {
+                    ctx->tree_baked[c->nt_layout_index].paint_rank = ++paint_seq;
+                }
+            }
+        }
+        i = end;
+    }
+    /* Elements are stored parent-first, so the last element seen one level up is the parent. */
+    uint32_t rank_at_depth[NT_UI_TREE_DFS_DEPTH_CAP] = {0U};
+    for (int32_t elem_idx = 0; elem_idx < N; ++elem_idx) {
+        nt_ui_baked_xform_t *b = &ctx->tree_baked[elem_idx];
+        const uint32_t depth = (b->hierarchy_depth < NT_UI_TREE_DFS_DEPTH_CAP) ? b->hierarchy_depth : (uint32_t)NT_UI_TREE_DFS_DEPTH_CAP - 1U;
+        if (b->paint_rank == 0U && depth > 0U) {
+            b->paint_rank = rank_at_depth[depth - 1U];
+        }
+        rank_at_depth[depth] = b->paint_rank;
     }
     // #endregion
 
