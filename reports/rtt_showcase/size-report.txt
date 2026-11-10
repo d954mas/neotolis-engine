@@ -1,5 +1,5 @@
 # Size Report: rtt_showcase (wasm-analysis-paired)
-# Commit: b3a208a
+# Commit: fa036cf
 
 ## WASM Section Sizes
 
@@ -7,36 +7,36 @@ Section                Size
 ---------------- ----------
 Type                 313 B
 Import               626 B
-Function             182 B
+Function             187 B
 Table                  5 B
 Memory                 7 B
 Global                 9 B
 Export                29 B
 Elem                  49 B
-Code              238460 B
-Data               22199 B
-Custom              6485 B
+Code              244269 B
+Data               22190 B
+Custom              6593 B
 ---------------- ----------
-TOTAL             268364 B
+TOTAL             274277 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-61317 B   frame
-19236 B   dispatch_command
+67096 B   frame
+19228 B   dispatch_command
 13190 B   create_gpu
-10452 B   declare_slider_control
- 8812 B   Clay__ConfigureOpenElementPtr
- 8619 B   main
+10537 B   declare_slider_control
+ 8737 B   Clay__ConfigureOpenElementPtr
+ 8649 B   main
  6038 B   Clay__SizeContainersAlongAxis
  5616 B   Clay__InitializeEphemeralMemory
  4343 B   upload_glyph
- 4152 B   nt_window_web_on_input
  3992 B   Clay__MeasureTextCached
  3593 B   nt_http_request_ex
  3353 B   Clay__CloseElement
  3342 B   nt_ui_label
+ 3279 B   nt_window_web_on_input
  3007 B   fmt_fp
  2551 B   nt_font_lookup_glyph_offset
  2545 B   atlas_on_resolve
@@ -45,17 +45,17 @@ TOTAL             268364 B
  2386 B   nt_sprite_renderer_set_material
  2252 B   nt_gfx_apply_texture_bindings
  2100 B   Clay__InitializePersistentMemory
- 1947 B   nt_shape_renderer_flush
+ 1948 B   nt_shape_renderer_flush
  1851 B   __rem_pio2f
  1747 B   nt_hash64
- 1401 B   emit_glyph_pass
+ 1403 B   emit_glyph_pass
  1379 B   nt_gfx_make_render_target
  1355 B   Clay__AddHashMapItem
- 1338 B   ui_hit_test
+ 1327 B   ui_hit_test
  1324 B   nt_gfx_frame_create_buffers
 
-Total functions: 180
-Total code size: 238146 B
+Total functions: 185
+Total code size: 243948 B
 
 ## Built Engine Archives
 
@@ -83,7 +83,7 @@ libnt_gfx_stub.a            6838 B
 libnt_hash.a                4108 B
 libnt_http.a               18238 B
 libnt_http_stub.a          13148 B
-libnt_input.a              12762 B
+libnt_input.a              11818 B
 libnt_introspect.a           908 B
 libnt_log.a                11916 B
 libnt_log_ring.a             696 B
@@ -115,18 +115,18 @@ libnt_sprite_renderer.a    16114 B
 libnt_text_renderer.a       7650 B
 libnt_time.a                 900 B
 libnt_transform_comp.a      5336 B
-libnt_ui.a                352612 B
-libnt_ui_rich.a            39736 B
+libnt_ui.a                355390 B
+libnt_ui_rich.a            39704 B
 libnt_ui_rich_fx.a          3050 B
-libnt_ui_stub.a             1324 B
+libnt_ui_stub.a             1270 B
 libnt_utf8.a                1098 B
 libnt_version.a              638 B
 libnt_window.a             14562 B
 libnt_window_stub.a         1960 B
 ------------------------ ----------
-TOTAL (archives)         2653580 B
+TOTAL (archives)         2655328 B
 
 ## Data Segments Summary
 
 Segments: 58
-Total data size: 21788 B
+Total data size: 21779 B
