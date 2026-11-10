@@ -17,6 +17,7 @@
 #include "graphics/nt_gfx.h"
 #include "memory/nt_mem_scratch.h"
 #include "test_helpers/nt_assert_trap.h"
+#include "test_helpers/ui_bar_probe.h"
 #include "test_helpers/ui_test_arena.h"
 #include "test_helpers/ui_walker_fixture.h"
 #include "ui/nt_ui.h"
@@ -287,7 +288,6 @@ static void test_scroll_wheel_applied_once(void) {
     scroll_frame(&p, &style);
 
     const nt_ui_scroll_state_t *st = (const nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, SCROLL_ID);
-    TEST_ASSERT_EQUAL_UINT32(SCROLL_ID, nt_ui_scroll_test_last_scroll_id());
     /* Exactly ONE wheel contribution (-1 * 40); a Clay double-drive would be -80. */
     TEST_ASSERT_TRUE(float_near(st->pos[1], -40.0F, 0.5F));
     TEST_ASSERT_TRUE(float_near(st->pos[0], 0.0F, 0.001F)); /* y-only style */
@@ -391,12 +391,12 @@ static void test_scrollbar_auto_only_on_overflow(void) {
     /* Content SHORTER than container (150 < 200): no overflow -> bar hidden. */
     scrollbar_frame(&p, &style, 150.0F);
     scrollbar_frame(&p, &style, 150.0F); /* second frame: dims solved */
-    TEST_ASSERT_EQUAL_UINT8(0U, nt_ui_scroll_test_last_bar_emitted_axes() & 2U);
+    TEST_ASSERT_FALSE(ui_bar_declared(s_fx.ctx, nt_ui_scroll_test_bar_id(SCROLL_ID, 1)));
 
     /* Content LONGER than container (1000 > 200): overflow -> bar shown. */
     scrollbar_frame(&p, &style, 1000.0F);
     scrollbar_frame(&p, &style, 1000.0F);
-    TEST_ASSERT_TRUE((nt_ui_scroll_test_last_bar_emitted_axes() & 2U) != 0U);
+    TEST_ASSERT_TRUE(ui_bar_declared(s_fx.ctx, nt_ui_scroll_test_bar_id(SCROLL_ID, 1)));
 }
 
 /* ---- Test 11: ALWAYS emits the bar even without overflow. ---- */
@@ -406,7 +406,7 @@ static void test_scrollbar_always_shows(void) {
     p.active = true;
     scrollbar_frame(&p, &style, 150.0F); /* no overflow */
     scrollbar_frame(&p, &style, 150.0F);
-    TEST_ASSERT_TRUE((nt_ui_scroll_test_last_bar_emitted_axes() & 2U) != 0U);
+    TEST_ASSERT_TRUE(ui_bar_declared(s_fx.ctx, nt_ui_scroll_test_bar_id(SCROLL_ID, 1)));
 }
 
 /* ---- A standalone scroll (no floating encloses it) must not lift anything: with zIndex inherited from
@@ -417,7 +417,7 @@ static void test_scrollbar_standalone_no_z_lift(void) {
     p.active = true;
     scrollbar_frame(&p, &style, 1000.0F); /* overflow */
     scrollbar_frame(&p, &style, 1000.0F);
-    TEST_ASSERT_TRUE((nt_ui_scroll_test_last_bar_emitted_axes() & 2U) != 0U);
+    TEST_ASSERT_TRUE(ui_bar_declared(s_fx.ctx, nt_ui_scroll_test_bar_id(SCROLL_ID, 1)));
     /* The bar's own band: Clay stamps root->zIndex on the clipTo SCISSOR that opens the bar's floating
      * root, which is the command immediately preceding the bar's art (image commands are stamped 0). */
     const Clay_RenderCommandArray *arr = &s_fx.ctx->frozen_cmds;
@@ -453,7 +453,11 @@ static void test_scrollbar_thumb_size_ratio(void) {
     scrollbar_frame(&p, &style, 800.0F);
     float thumb_len = 0.0F;
     float track_len = 0.0F;
-    nt_ui_scroll_test_last_bar_geometry(1, &thumb_len, NULL, &track_len, NULL);
+    {
+        const ui_bar_probe_t bar_probe = ui_bar_probe(s_fx.ctx, nt_ui_scroll_test_bar_id(SCROLL_ID, 1), 1);
+        thumb_len = bar_probe.thumb_len;
+        track_len = bar_probe.track_len;
+    }
     TEST_ASSERT_TRUE(track_len > 0.0F);
     TEST_ASSERT_TRUE(float_near(thumb_len, 0.25F * track_len, 2.0F));
 }
@@ -472,7 +476,10 @@ static void test_scrollbar_thumb_pos_clay_sign(void) {
     scrollbar_frame(&p, &style, 800.0F);
     scrollbar_frame(&p, &style, 800.0F);
     float off_top = -1.0F;
-    nt_ui_scroll_test_last_bar_geometry(1, NULL, &off_top, NULL, NULL);
+    {
+        const ui_bar_probe_t bar_probe = ui_bar_probe(s_fx.ctx, nt_ui_scroll_test_bar_id(SCROLL_ID, 1), 1);
+        off_top = bar_probe.thumb_off;
+    }
     TEST_ASSERT_TRUE(float_near(off_top, 0.0F, 0.5F));
 
     /* Scroll to the bottom (max negative offset = -(content-container) = -600). */
@@ -482,7 +489,12 @@ static void test_scrollbar_thumb_pos_clay_sign(void) {
     float off_bot = 0.0F;
     float thumb_len = 0.0F;
     float track_len = 0.0F;
-    nt_ui_scroll_test_last_bar_geometry(1, &thumb_len, &off_bot, &track_len, NULL);
+    {
+        const ui_bar_probe_t bar_probe = ui_bar_probe(s_fx.ctx, nt_ui_scroll_test_bar_id(SCROLL_ID, 1), 1);
+        thumb_len = bar_probe.thumb_len;
+        off_bot = bar_probe.thumb_off;
+        track_len = bar_probe.track_len;
+    }
     /* Bottom end: thumb offset == track_len - thumb_len. */
     TEST_ASSERT_TRUE(float_near(off_bot, track_len - thumb_len, 2.0F));
     TEST_ASSERT_TRUE(off_bot > off_top); /* moved DOWN the track */
@@ -538,7 +550,10 @@ static void test_scrollbar_auto_hide_fades(void) {
     float last_op = 1.0F;
     for (int i = 0; i < 120; ++i) {
         scrollbar_frame(&p, &style, 800.0F);
-        nt_ui_scroll_test_last_bar_geometry(1, NULL, NULL, NULL, &last_op);
+        {
+            const ui_bar_probe_t bar_probe = ui_bar_probe(s_fx.ctx, nt_ui_scroll_test_bar_id(SCROLL_ID, 1), 1);
+            last_op = bar_probe.opacity;
+        }
     }
     TEST_ASSERT_TRUE(last_op < 0.2F); /* faded out while idle */
 }
@@ -1164,7 +1179,10 @@ static void test_scrollbar_auto_hide_fades_in_on_activity(void) {
     float op_idle = 1.0F;
     for (int i = 0; i < 120; ++i) {
         scrollbar_frame(&p, &style, 800.0F);
-        nt_ui_scroll_test_last_bar_geometry(1, NULL, NULL, NULL, &op_idle);
+        {
+            const ui_bar_probe_t bar_probe = ui_bar_probe(s_fx.ctx, nt_ui_scroll_test_bar_id(SCROLL_ID, 1), 1);
+            op_idle = bar_probe.opacity;
+        }
     }
     TEST_ASSERT_TRUE(op_idle < 0.2F); /* faded out while idle */
 
@@ -1176,12 +1194,18 @@ static void test_scrollbar_auto_hide_fades_in_on_activity(void) {
     scrollbar_frame(&p, &style, 800.0F);
     p.wheel_dy = 0.0F;
     float op_prev = 0.0F;
-    nt_ui_scroll_test_last_bar_geometry(1, NULL, NULL, NULL, &op_prev);
+    {
+        const ui_bar_probe_t bar_probe = ui_bar_probe(s_fx.ctx, nt_ui_scroll_test_bar_id(SCROLL_ID, 1), 1);
+        op_prev = bar_probe.opacity;
+    }
     bool rose = false;
     for (int i = 0; i < 10; ++i) {
         scrollbar_frame(&p, &style, 800.0F); /* fling-in-motion keeps idle reset -> fade target stays 1 */
         float op = 0.0F;
-        nt_ui_scroll_test_last_bar_geometry(1, NULL, NULL, NULL, &op);
+        {
+            const ui_bar_probe_t bar_probe = ui_bar_probe(s_fx.ctx, nt_ui_scroll_test_bar_id(SCROLL_ID, 1), 1);
+            op = bar_probe.opacity;
+        }
         if (op > op_prev + 0.01F) {
             rose = true;
         }
@@ -1215,7 +1239,10 @@ static void test_scrollbar_auto_hide_hover_keeps_visible(void) {
     float op = 0.0F;
     for (int i = 0; i < 120; ++i) {
         scrollbar_frame(&p, &style, 800.0F);
-        nt_ui_scroll_test_last_bar_geometry(1, NULL, NULL, NULL, &op);
+        {
+            const ui_bar_probe_t bar_probe = ui_bar_probe(s_fx.ctx, nt_ui_scroll_test_bar_id(SCROLL_ID, 1), 1);
+            op = bar_probe.opacity;
+        }
     }
     TEST_ASSERT_TRUE(op > 0.8F); /* hover held it visible past the idle linger */
 }
@@ -1235,14 +1262,20 @@ static void test_scrollbar_auto_hide_born_idle_no_flash(void) {
     scrollbar_frame(&p, &style, 800.0F);
     scrollbar_frame(&p, &style, 800.0F);
     float op_start = 1.0F;
-    nt_ui_scroll_test_last_bar_geometry(1, NULL, NULL, NULL, &op_start);
+    {
+        const ui_bar_probe_t bar_probe = ui_bar_probe(s_fx.ctx, nt_ui_scroll_test_bar_id(SCROLL_ID, 1), 1);
+        op_start = bar_probe.opacity;
+    }
     TEST_ASSERT_TRUE(op_start < 0.1F); /* born hidden — no startup flash */
 
     /* Stays hidden across more idle frames (idle never dips below the linger on its own). */
     float op_idle = 1.0F;
     for (int i = 0; i < 30; ++i) {
         scrollbar_frame(&p, &style, 800.0F);
-        nt_ui_scroll_test_last_bar_geometry(1, NULL, NULL, NULL, &op_idle);
+        {
+            const ui_bar_probe_t bar_probe = ui_bar_probe(s_fx.ctx, nt_ui_scroll_test_bar_id(SCROLL_ID, 1), 1);
+            op_idle = bar_probe.opacity;
+        }
     }
     TEST_ASSERT_TRUE(op_idle < 0.1F);
 
@@ -1254,11 +1287,17 @@ static void test_scrollbar_auto_hide_born_idle_no_flash(void) {
     p.wheel_dy = 0.0F;
     bool rose = false;
     float op_prev = 0.0F;
-    nt_ui_scroll_test_last_bar_geometry(1, NULL, NULL, NULL, &op_prev);
+    {
+        const ui_bar_probe_t bar_probe = ui_bar_probe(s_fx.ctx, nt_ui_scroll_test_bar_id(SCROLL_ID, 1), 1);
+        op_prev = bar_probe.opacity;
+    }
     for (int i = 0; i < 10; ++i) {
         scrollbar_frame(&p, &style, 800.0F); /* fling-in-motion keeps idle reset -> target stays 1 */
         float op = 0.0F;
-        nt_ui_scroll_test_last_bar_geometry(1, NULL, NULL, NULL, &op);
+        {
+            const ui_bar_probe_t bar_probe = ui_bar_probe(s_fx.ctx, nt_ui_scroll_test_bar_id(SCROLL_ID, 1), 1);
+            op = bar_probe.opacity;
+        }
         if (op > op_prev + 0.01F) {
             rose = true;
         }
@@ -1280,7 +1319,10 @@ static void test_scrollbar_always_born_visible(void) {
     scrollbar_frame(&p, &style, 800.0F);
     scrollbar_frame(&p, &style, 800.0F);
     float op = 0.0F;
-    nt_ui_scroll_test_last_bar_geometry(1, NULL, NULL, NULL, &op);
+    {
+        const ui_bar_probe_t bar_probe = ui_bar_probe(s_fx.ctx, nt_ui_scroll_test_bar_id(SCROLL_ID, 1), 1);
+        op = bar_probe.opacity;
+    }
     TEST_ASSERT_TRUE(op > 0.9F); /* always visible from the first emit */
 }
 
@@ -1436,7 +1478,12 @@ static void test_scrollbar_thumb_grab_offset_no_jump(void) {
     float thumb_len = 0.0F;
     float thumb_off0 = 0.0F;
     float track_len = 0.0F;
-    nt_ui_scroll_test_last_bar_geometry(1, &thumb_len, &thumb_off0, &track_len, NULL);
+    {
+        const ui_bar_probe_t bar_probe = ui_bar_probe(s_fx.ctx, nt_ui_scroll_test_bar_id(SCROLL_ID, 1), 1);
+        thumb_len = bar_probe.thumb_len;
+        thumb_off0 = bar_probe.thumb_off;
+        track_len = bar_probe.track_len;
+    }
     TEST_ASSERT_TRUE(float_near(thumb_off0, 0.0F, 1.0F)); /* thumb at the top at rest */
 
     /* over = content - container = 800 - 200 = 600; thumb travel maps pos: a thumb_off delta of D

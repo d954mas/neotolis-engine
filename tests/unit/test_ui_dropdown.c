@@ -13,6 +13,7 @@
 #include "memory/nt_mem_scratch.h"
 #include "test_helpers/nt_assert_trap.h"
 #include "test_helpers/nt_input_test_frame.h"
+#include "test_helpers/ui_bar_probe.h"
 #include "test_helpers/ui_test_arena.h"
 #include "test_helpers/ui_walker_fixture.h"
 #include "ui/nt_ui.h"
@@ -255,8 +256,8 @@ static void test_dropdown_long_list_shows_scrollbar(void) {
     nt_ui_dropdown_style_t st = nt_ui_dropdown_style_defaults();
     st.max_visible_rows = 4; /* 12 rows > 4 -> the list scrolls */
     /* Wire bar sprites exactly as the showcase does (via the embedded list_scroll); non-zero refs let scroll draw the bar. */
-    st.list_scroll.track_ref = nt_atlas_ref((nt_resource_t){.id = 1U}, 0x100U);
-    st.list_scroll.thumb_ref = nt_atlas_ref((nt_resource_t){.id = 1U}, 0x101U);
+    st.list_scroll.track_ref = nt_atlas_ref_idx(s_fx.atlas.handle, 0, s_fx.atlas.white_region_idx); /* real art: the probe reads what is drawn */
+    st.list_scroll.thumb_ref = st.list_scroll.track_ref;
 
     int selected = 0;
     bool open = true;
@@ -267,16 +268,20 @@ static void test_dropdown_long_list_shows_scrollbar(void) {
     combo_im_frame(&idle, 30.0F, 30.0F, s_long, 12, &selected, &open, &st, NULL);
     combo_im_frame(&idle, 30.0F, 30.0F, s_long, 12, &selected, &open, &st, NULL);
 
-    /* The last scroll container declared this frame was the combo list wrapper. */
-    TEST_ASSERT_EQUAL_UINT(nt_ui_dropdown_test_scroll_id(DD_A), nt_ui_scroll_test_last_scroll_id());
+    /* The combo list wrapper is a scroll container. */
+    TEST_ASSERT_TRUE(nt_ui_state_has_tag(s_fx.ctx, nt_ui_dropdown_test_scroll_id(DD_A), NT_UI_SCROLL_TAG));
     /* The vertical bar emitted (bit1 = y). */
-    TEST_ASSERT_TRUE_MESSAGE((nt_ui_scroll_test_last_bar_emitted_axes() & 2U) != 0U, "combo long list must emit a vertical scrollbar");
+    TEST_ASSERT_TRUE_MESSAGE(ui_bar_declared(s_fx.ctx, nt_ui_scroll_test_bar_id(nt_ui_dropdown_test_scroll_id(DD_A), 1)), "combo long list must emit a vertical scrollbar");
     /* Non-zero geometry + visible opacity -> a real bar is drawn, not skipped. */
     float thumb_len = 0.0F;
-    float thumb_off = 0.0F;
     float track_len = 0.0F;
     float opacity = 0.0F;
-    nt_ui_scroll_test_last_bar_geometry(1, &thumb_len, &thumb_off, &track_len, &opacity);
+    {
+        const ui_bar_probe_t bar_probe = ui_bar_probe(s_fx.ctx, nt_ui_scroll_test_bar_id(nt_ui_dropdown_test_scroll_id(DD_A), 1), 1);
+        thumb_len = bar_probe.thumb_len;
+        track_len = bar_probe.track_len;
+        opacity = bar_probe.opacity;
+    }
     TEST_ASSERT_TRUE_MESSAGE(track_len > 0.0F, "scrollbar track must have non-zero length");
     TEST_ASSERT_TRUE_MESSAGE(thumb_len > 0.0F, "scrollbar thumb must have non-zero length");
     TEST_ASSERT_TRUE_MESSAGE(opacity > 0.0F, "ALWAYS-visible scrollbar must be opaque");
@@ -296,8 +301,8 @@ static void test_dropdown_long_list_scrollbar_showcase_fidelity(void) {
     st.panel_bg = nt_atlas_ref((nt_resource_t){.id = 1U}, 0x200U);
     st.panel_tint = 0xFFB0AAA4U;
     st.list_scroll = nt_ui_scroll_style_defaults();
-    st.list_scroll.track_ref = nt_atlas_ref((nt_resource_t){.id = 1U}, 0x100U);
-    st.list_scroll.thumb_ref = nt_atlas_ref((nt_resource_t){.id = 1U}, 0x101U);
+    st.list_scroll.track_ref = nt_atlas_ref_idx(s_fx.atlas.handle, 0, s_fx.atlas.white_region_idx); /* real art: the probe reads what is drawn */
+    st.list_scroll.thumb_ref = st.list_scroll.track_ref;
     st.list_scroll.bar_visibility = NT_UI_SCROLLBAR_ALWAYS;
 
     /* row 0 carries an icon (routed through combo_selectable_icon, engine gutter); the rest are plain. */
@@ -311,18 +316,23 @@ static void test_dropdown_long_list_scrollbar_showcase_fidelity(void) {
         combo_im_frame_icons(&idle, 30.0F, 30.0F, s_long, icons, 12, &selected, &open, &st, NULL);
     }
 
-    TEST_ASSERT_EQUAL_UINT(nt_ui_dropdown_test_scroll_id(DD_A), nt_ui_scroll_test_last_scroll_id());
-    TEST_ASSERT_TRUE_MESSAGE((nt_ui_scroll_test_last_bar_emitted_axes() & 2U) != 0U, "showcase-fidelity long list must emit a vertical scrollbar");
+    TEST_ASSERT_TRUE(nt_ui_state_has_tag(s_fx.ctx, nt_ui_dropdown_test_scroll_id(DD_A), NT_UI_SCROLL_TAG));
+    TEST_ASSERT_TRUE_MESSAGE(ui_bar_declared(s_fx.ctx, nt_ui_scroll_test_bar_id(nt_ui_dropdown_test_scroll_id(DD_A), 1)), "showcase-fidelity long list must emit a vertical scrollbar");
     float thumb_len = 0.0F;
-    float thumb_off = 0.0F;
     float track_len = 0.0F;
     float opacity = 0.0F;
-    nt_ui_scroll_test_last_bar_geometry(1, &thumb_len, &thumb_off, &track_len, &opacity);
+    {
+        const ui_bar_probe_t bar_probe = ui_bar_probe(s_fx.ctx, nt_ui_scroll_test_bar_id(nt_ui_dropdown_test_scroll_id(DD_A), 1), 1);
+        thumb_len = bar_probe.thumb_len;
+        track_len = bar_probe.track_len;
+        opacity = bar_probe.opacity;
+    }
     TEST_ASSERT_TRUE_MESSAGE(track_len > 0.0F, "showcase scrollbar track must have non-zero length");
     TEST_ASSERT_TRUE_MESSAGE(thumb_len > 0.0F, "showcase scrollbar thumb must have non-zero length");
     TEST_ASSERT_TRUE_MESSAGE(opacity > 0.0F, "ALWAYS-visible showcase scrollbar must be opaque");
     /* The bar must draw on the combo's CONTENT layer (1 here), not hardcoded 0. */
-    TEST_ASSERT_EQUAL_UINT8_MESSAGE(1U, nt_ui_scroll_test_last_bar_layer(1), "scrollbar must draw on the container content layer, not buried under the panel");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(1U, ui_bar_probe(s_fx.ctx, nt_ui_scroll_test_bar_id(nt_ui_dropdown_test_scroll_id(DD_A), 1), 1).layer,
+                                    "scrollbar must draw on the container content layer, not buried under the panel");
 }
 
 /* ---- The combo list is a popup-nested scroll: its bar INHERITS the popup panel's band (it no longer
@@ -343,7 +353,7 @@ static void test_dropdown_long_list_scrollbar_inherits_popup_band(void) {
     combo_im_frame(&idle, 30.0F, 30.0F, s_long, 12, &selected, &open, &st, NULL);
     combo_im_frame(&idle, 30.0F, 30.0F, s_long, 12, &selected, &open, &st, NULL);
 
-    TEST_ASSERT_TRUE_MESSAGE((nt_ui_scroll_test_last_bar_emitted_axes() & 2U) != 0U, "popup-nested long list must emit a vertical scrollbar");
+    TEST_ASSERT_TRUE_MESSAGE(ui_bar_declared(s_fx.ctx, nt_ui_scroll_test_bar_id(nt_ui_dropdown_test_scroll_id(DD_A), 1)), "popup-nested long list must emit a vertical scrollbar");
     /* The combo popup panel floats one band up (stride*1 here). The bar is declared INSIDE that panel, so
      * it must inherit the panel's band instead of sinking to the base 0 and drawing under the panel. */
     const int32_t stride = (int32_t)s_fx.ctx->modal_zband_stride;

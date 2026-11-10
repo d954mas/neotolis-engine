@@ -329,8 +329,7 @@ static void test_vlist_one_clip(void) {
     vlist_frame(NT_UI_AXIS_Y, 100U, 40.0F);
     vlist_frame(NT_UI_AXIS_Y, 100U, 40.0F);
 
-    /* The vlist owns a single scroll keyed by VL_ID (the last/only scroll begun this frame). */
-    TEST_ASSERT_EQUAL_UINT32(VL_ID, nt_ui_scroll_test_last_scroll_id());
+    /* The vlist owns a single scroll keyed by VL_ID. */
     TEST_ASSERT_TRUE(nt_ui_state_has_tag(s_fx.ctx, VL_ID, VL_SCRL_TAG));
     /* Rows are NOT scroll containers (no clip-per-row). */
     TEST_ASSERT_FALSE(nt_ui_state_has_tag(s_fx.ctx, nt_ui_vlist_item_id_of(VL_ID, 0U, VL_RING), VL_SCRL_TAG));

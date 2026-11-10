@@ -217,18 +217,6 @@ nt_ui_scroll_style_t nt_ui_scroll_style_defaults(void) {
     };
 }
 
-// #region last-fed clip offset (test readback)
-#ifdef NT_TEST_ACCESS
-static uint32_t s_last_scroll_id = 0U;
-static uint8_t s_last_bar_emitted_axes = 0U;       /* bit0 = x, bit1 = y */
-static float s_last_bar_thumb_len[2] = {0.0F};     /* per-axis thumb length */
-static float s_last_bar_thumb_off[2] = {0.0F};     /* per-axis thumb offset along the track */
-static float s_last_bar_track_len[2] = {0.0F};     /* per-axis track length */
-static float s_last_bar_opacity[2] = {0.0F, 0.0F}; /* per-axis eased fade opacity */
-static uint8_t s_last_bar_layer[2] = {0U, 0U};     /* per-axis draw layer of the emitted bar */
-#endif
-// #endregion
-
 /* Time-windowed release-fling velocity for one axis. A moving frame blends toward the instantaneous
  * sample with a dt-based gain (clamped); a zero-delta frame decays toward 0 with a dt-based factor so
  * one empty frame keeps most velocity (fling survives event quantization) yet a held finger drains.
@@ -576,20 +564,6 @@ static nt_ui_element_data_t *scrollbar_make_data(uint8_t layer, float opacity) {
     return d;
 }
 
-#ifdef NT_TEST_ACCESS
-/* Visibility predicate mirroring scrollbar_emit_axis: AUTO emits only on overflow;
- * ALWAYS / AUTO_HIDE register whenever the container has solved dims. Test-only. */
-static bool scrollbar_was_emitted(const nt_ui_scroll_style_t *style, float content, float container) {
-    if (container <= 0.0F) {
-        return false;
-    }
-    if (style->bar_visibility == NT_UI_SCROLLBAR_AUTO) {
-        return nt_ui_internal_overflows(content, container);
-    }
-    return true;
-}
-#endif
-
 /* Thumb length on the track ∝ container/content, clamped to bar_thumb_min_px. */
 static float scrollbar_thumb_len(float track_len, float content, float container, float min_px) {
     if (content <= 0.0F) {
@@ -714,14 +688,6 @@ static void scrollbar_emit_axis(nt_ui_context_t *ctx, uint32_t scroll_id, int ax
         const nt_ui_anim_interaction_t *a = nt_ui_anim(ctx, bar_id, &tgt, 0.0F, style->bar_fade_speed);
         opacity = nt_ui_clampf(a->value_t, 0.0F, 1.0F);
     }
-#ifdef NT_TEST_ACCESS
-    /* Single write site — geometry + opacity are final by here (incl. the faded case). */
-    s_last_bar_thumb_len[axis] = thumb_len;
-    s_last_bar_thumb_off[axis] = thumb_off;
-    s_last_bar_track_len[axis] = track_len;
-    s_last_bar_opacity[axis] = opacity;
-    s_last_bar_layer[axis] = bar_layer;
-#endif
     if (opacity < NT_UI_SCROLLBAR_FADE_EPS) {
         return; /* fully faded: no element, so no hit record either (scroll activity wakes the bar) */
     }
@@ -873,17 +839,6 @@ void nt_ui_scroll_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
      * the container's own layer so it isn't buried under higher-layer content (e.g. a dropdown panel). */
     const uint8_t bar_layer = (data != NULL) ? data->layer : 0U;
     scrollbar_emit(ctx, id, style, s, content, container, thumb_drag, bar_layer);
-
-#ifdef NT_TEST_ACCESS
-    s_last_scroll_id = id;
-    s_last_bar_emitted_axes = 0U;
-    if (style->scroll_x && scrollbar_was_emitted(style, content[0], container[0])) {
-        s_last_bar_emitted_axes |= 1U;
-    }
-    if (style->scroll_y && scrollbar_was_emitted(style, content[1], container[1])) {
-        s_last_bar_emitted_axes |= 2U;
-    }
-#endif
 }
 
 void nt_ui_scroll_end(nt_ui_context_t *ctx) {
@@ -939,26 +894,5 @@ void nt_ui_scroll_test_integrate(nt_ui_scroll_state_t *s, const float wheel[2], 
     scroll_integrate(s, wheel, dt, content, container, style, dragging);
 }
 float nt_ui_scroll_test_rubber_band(float d, float dim) { return nt_ui_rubber_band(d, dim, 0.55F); }
-uint32_t nt_ui_scroll_test_last_scroll_id(void) { return s_last_scroll_id; }
-uint8_t nt_ui_scroll_test_last_bar_emitted_axes(void) { return s_last_bar_emitted_axes; }
-void nt_ui_scroll_test_last_bar_geometry(int axis, float *thumb_len, float *thumb_off, float *track_len, float *opacity) {
-    NT_ASSERT(axis == 0 || axis == 1);
-    if (thumb_len != NULL) {
-        *thumb_len = s_last_bar_thumb_len[axis];
-    }
-    if (thumb_off != NULL) {
-        *thumb_off = s_last_bar_thumb_off[axis];
-    }
-    if (track_len != NULL) {
-        *track_len = s_last_bar_track_len[axis];
-    }
-    if (opacity != NULL) {
-        *opacity = s_last_bar_opacity[axis];
-    }
-}
 uint32_t nt_ui_scroll_test_bar_id(uint32_t scroll_id, int axis) { return scrollbar_id(scroll_id, axis); }
-uint8_t nt_ui_scroll_test_last_bar_layer(int axis) {
-    NT_ASSERT(axis == 0 || axis == 1);
-    return s_last_bar_layer[axis];
-}
 #endif
