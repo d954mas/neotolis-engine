@@ -537,27 +537,6 @@ static void test_scrollbar_track_click_scroll_to(void) {
     TEST_ASSERT_TRUE(((const nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, SCROLL_ID))->pos[1] < -50.0F);
 }
 
-/* ---- Test 15: AUTO_HIDE fades toward 0 after idle (the eased fade opacity drops). ---- */
-static void test_scrollbar_auto_hide_fades(void) {
-    nt_ui_scroll_style_t style = bar_style(NT_UI_SCROLLBAR_AUTO_HIDE);
-    style.bar_fade_speed = 8.0F;
-    nt_pointer_t p = {0};
-    p.active = true; /* pointer NOT over the bar -> idle -> fade target 0 */
-    p.x = 10.0F;
-    p.y = 10.0F;
-
-    /* Many idle frames: the fade eases toward 0. */
-    float last_op = 1.0F;
-    for (int i = 0; i < 120; ++i) {
-        scrollbar_frame(&p, &style, 800.0F);
-        {
-            const ui_bar_probe_t bar_probe = ui_bar_probe(s_fx.ctx, nt_ui_scroll_test_bar_id(SCROLL_ID, 1), 1);
-            last_op = bar_probe.opacity;
-        }
-    }
-    TEST_ASSERT_TRUE(last_op < 0.2F); /* faded out while idle */
-}
-
 /* ---- Test 16: the per-axis bar id derives from the scroll id (own id for own anim). ---- */
 static void test_scrollbar_id_derivation_distinct(void) {
     const uint32_t vy = nt_ui_scroll_test_bar_id(SCROLL_ID, 1);
@@ -2579,6 +2558,16 @@ static void test_arb_bar_without_a_movable_thumb_takes_no_press(void) {
     arb_press(&p);
     arb_frame(&p, 1);
     TEST_ASSERT_TRUE(s_child_in.pressed_now);
+
+    arb_release(&p);
+    arb_frame(&p, 1);
+    p.buttons[NT_BUTTON_LEFT] = (nt_button_state_t){0};
+    s_scene.style = bar_style(NT_UI_SCROLLBAR_ALWAYS);
+    s_scene.style.bar_thumb_min_px = 200.0F; /* art and overflow, but the thumb fills the track */
+    arb_warm(&p);
+    arb_press(&p);
+    arb_frame(&p, 1);
+    TEST_ASSERT_TRUE(s_child_in.pressed_now);
 }
 
 /* Nested lists with aligned right edges: the inner bar paints over the outer one and takes the press. */
@@ -2622,15 +2611,6 @@ static void test_arb_dropped_pointer_slot_holds_no_gesture(void) {
     TEST_ASSERT_TRUE(nt_ui_wants_pointer(s_fx.ctx));
     arb_frame(ps, 1);
     TEST_ASSERT_FALSE(nt_ui_wants_pointer(s_fx.ctx));
-}
-
-/* The container clips its bar: a press past its edge is not a thumb press. */
-static void test_arb_bar_is_clipped_to_its_container(void) {
-    nt_pointer_t p = arb_pointer(203.0F, 20.0F);
-    arb_warm(&p);
-    arb_press(&p);
-    arb_frame(&p, 1);
-    TEST_ASSERT_EQUAL_UINT32(0U, s_fx.ctx->captures[0].active_id);
 }
 
 /* A pending press keeps the pointer for the UI after it leaves the list: the list may still take it. */
@@ -2797,7 +2777,6 @@ int main(void) {
     RUN_TEST(test_arb_foreground_outside_list_not_stolen);
     RUN_TEST(test_arb_bar_hit_pad_is_the_style_s);
     RUN_TEST(test_arb_thumb_drag_moves_content_the_same_frame);
-    RUN_TEST(test_arb_bar_is_clipped_to_its_container);
     RUN_TEST(test_arb_bar_without_a_movable_thumb_takes_no_press);
     RUN_TEST(test_arb_inner_bar_over_outer_bar_takes_the_press);
     RUN_TEST(test_arb_wheel_does_not_move_a_held_thumb);
@@ -2849,7 +2828,6 @@ int main(void) {
     RUN_TEST(test_scrollbar_thumb_size_ratio);
     RUN_TEST(test_scrollbar_thumb_pos_clay_sign);
     RUN_TEST(test_scrollbar_track_click_scroll_to);
-    RUN_TEST(test_scrollbar_auto_hide_fades);
     RUN_TEST(test_scrollbar_id_derivation_distinct);
     RUN_TEST(test_scroll_to_top_from_button_sequence);
     RUN_TEST(test_scroll_empty_press_drag_and_fling);

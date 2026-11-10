@@ -74,6 +74,17 @@ static inline float scroll_min_bound(float content, float container) {
     return (over > 0.0F) ? -over : 0.0F;
 }
 
+/* True when an axis overflows; the half unit absorbs layout rounding, so a fitting list never turns
+ * scrollable (or shows an AUTO bar) by noise. */
+static bool overflows(float content, float container) { return content > container + 0.5F; }
+
+/* Axes a scroll can move on in last frame's layout: clipped AND overflowing (NT_UI_DRAG_X | _Y). */
+static uint8_t scroll_axes(const Clay_ScrollContainerData *scd) {
+    const bool x = scd->found && scd->config.horizontal && overflows(scd->contentDimensions.width, scd->scrollContainerDimensions.width);
+    const bool y = scd->found && scd->config.vertical && overflows(scd->contentDimensions.height, scd->scrollContainerDimensions.height);
+    return (uint8_t)((x ? NT_UI_DRAG_X : 0U) | (y ? NT_UI_DRAG_Y : 0U));
+}
+
 // #region integrator
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void scroll_integrate(nt_ui_scroll_state_t *s, const float wheel[2], float dt, const float content[2], const float container[2], const nt_ui_scroll_style_t *style, bool dragging) {
@@ -238,6 +249,10 @@ static float scroll_sample_vel(float prev_vel, float delta, float dt) {
 }
 
 // #region gesture arbiter
+/* Engine-internal inspector pane: a scroll cell flag (it floats above the game and takes the
+ * sidebar's pointer). Bit 0 is NT_UI_SCROLL_FLAG_SCROLL_TO. */
+#define NT_UI_SCROLL_FLAG_PANE ((uint8_t)(1U << 1))
+
 /* A tap on a flinging scroll faster than this (dp/s) stops the fling and is swallowed (iOS). */
 #define NT_UI_SCROLL_FLING_STOP_DP 50.0F
 
@@ -268,7 +283,7 @@ static gesture_link_t gesture_link(nt_ui_context_t *ctx, uint32_t id) {
     const Clay_ScrollContainerData scd = Clay_GetScrollContainerData((Clay_ElementId){.id = id});
     if (scd.found) {
         link.s = (nt_ui_scroll_state_t *)nt_ui_state_find(ctx, id);
-        link.axes = nt_ui_internal_scroll_axes(&scd);
+        link.axes = scroll_axes(&scd);
     }
     return link;
 }
@@ -354,12 +369,6 @@ static void scroll_take(nt_ui_context_t *ctx, uint32_t id, uint32_t self) {
  * a chain that cannot scroll decides at once, so widgets in fitting panels are never pending. */
 static void gesture_press(nt_ui_context_t *ctx, uint32_t i, gesture_link_t start) {
     nt_ui_capture_t *cap = &ctx->captures[i];
-    const nt_pointer_t *p = &ctx->frame_pointers[i];
-    cap->pending_scroll = 0U;
-    cap->press_pos[0] = p->x;
-    cap->press_pos[1] = p->y;
-    cap->pos[0] = p->x;
-    cap->pos[1] = p->y;
     const uint32_t hot = ctx->pointer_hot[i].id;
     for (int a = 0; a < 2 && start.s != NULL; ++a) {
         if (hot == scrollbar_id(start.id, a) && (start.axes & (1U << a)) != 0U) {
@@ -380,7 +389,7 @@ static void gesture_press(nt_ui_context_t *ctx, uint32_t i, gesture_link_t start
         for (int a = 0; a < 2; ++a) {
             flinging = flinging || (((link.axes & (1U << a)) != 0U) && fabsf(link.s->vel[a]) > NT_UI_SCROLL_FLING_STOP_DP * ctx->layout_per_dp[a]);
         }
-        if (flinging && cap->active_id == 0U && !gesture_owned(ctx, link.id)) {
+        if (flinging && !gesture_owned(ctx, link.id)) {
             link.s->vel[0] = 0.0F;
             link.s->vel[1] = 0.0F;
             link.s->target[0] = link.s->pos[0];
@@ -553,7 +562,7 @@ static bool scroll_gather_input(nt_ui_context_t *ctx, uint32_t id, nt_ui_scroll_
             out_wheel[1] += -p->wheel_dy; /* input edge: flip to Clay's negative-down */
         }
     }
-    return scroll_route_owner(ctx, id, s, nt_ui_internal_scroll_axes(scd));
+    return scroll_route_owner(ctx, id, s, scroll_axes(scd));
 }
 // #endregion
 
@@ -591,13 +600,6 @@ static float scrollbar_thumb_pos(float pos, float content, float container, floa
     return frac * (track_len - thumb_len);
 }
 
-/* The bar's hit pad grows toward the content only: the container clips the outer side. A vertical bar
- * sits on the right edge (pad left), a horizontal one on the bottom edge (pad top). */
-static void scrollbar_hit_pad(int axis, const nt_ui_scroll_style_t *style, int16_t out[4]) {
-    memset(out, 0, 4U * sizeof out[0]);
-    out[(axis == 1) ? 0 : 2] = (int16_t)ceilf(style->bar_hit_pad);
-}
-
 /* The arbiter turns a press on a bar into the scroll's thumb owner (s->bar_axis). The thumb owner maps
  * the pointer so the grabbed point stays under it; a track press centers the thumb under the pointer
  * (a held one at once, a tap smoothly). Runs before the integrator, so the content and the thumb follow
@@ -609,12 +611,15 @@ static bool scrollbar_drive(nt_ui_context_t *ctx, uint32_t scroll_id, const nt_u
         return false;
     }
     const int axis = (int)s->bar_axis - 1;
+    if (!((axis == 1) ? style->scroll_y : style->scroll_x)) {
+        return false; /* the style no longer scrolls this axis: the owner is dropped as unseen */
+    }
     const float content = contents[axis];
     const float container = containers[axis];
     const float track_len = container;
     const float thumb_len = scrollbar_thumb_len(track_len, content, container, style->bar_thumb_min_px);
     const float thumb_off = scrollbar_thumb_pos(s->pos[axis], content, container, track_len, thumb_len);
-    if (!cbb->found || !nt_ui_internal_overflows(content, container) || track_len - thumb_len <= 0.0F) {
+    if (!cbb->found || !overflows(content, container) || track_len - thumb_len <= 0.0F) {
         return false;
     }
     const float bar_origin = (axis == 1) ? cbb->boundingBox.y : cbb->boundingBox.x; /* the bar spans the container's edge */
@@ -667,7 +672,7 @@ static void scrollbar_emit_axis(nt_ui_context_t *ctx, uint32_t scroll_id, int ax
         return; /* dims not solved yet (frame 1) */
     }
     /* AUTO hides entirely when there is no overflow; ALWAYS / AUTO_HIDE always register. */
-    if (style->bar_visibility == NT_UI_SCROLLBAR_AUTO && !nt_ui_internal_overflows(ccontent, clen)) {
+    if (style->bar_visibility == NT_UI_SCROLLBAR_AUTO && !overflows(ccontent, clen)) {
         return;
     }
 
@@ -745,8 +750,10 @@ static void scrollbar_emit_axis(nt_ui_context_t *ctx, uint32_t scroll_id, int ax
     }
     nt_ui_clay_priv_open_element();
     nt_ui_clay_priv_configure_open_element(track_decl);
-    int16_t reg_pad[4];
-    scrollbar_hit_pad(axis, style, reg_pad); /* same pad as the hit-test record (inspector overlay parity) */
+    /* The hit pad grows toward the content only (the container clips the outer side): a vertical bar
+     * sits on the right edge (pad left), a horizontal one on the bottom edge (pad top). */
+    int16_t reg_pad[4] = {0, 0, 0, 0};
+    reg_pad[(axis == 1) ? 0 : 2] = (int16_t)ceilf(style->bar_hit_pad);
     nt_ui_widget_register(ctx, bar_id, &NT_UI_SCROLLBAR_DEF, reg_pad, true);
     nt_ui_clay_priv_close_element();
 
@@ -759,20 +766,9 @@ static void scrollbar_emit_axis(nt_ui_context_t *ctx, uint32_t scroll_id, int ax
         nt_ui_image(ctx, scrollbar_make_data(layer, opacity), &thumb_ref, &thumb_style, &thumb_decl);
         /* The bar takes presses only while it shows a thumb that can move; the front-most resolve ranks
          * it by paint order, over the content it floats on. */
-        if (nt_ui_internal_overflows(ccontent, clen)) {
+        if (overflows(ccontent, clen) && track_len > thumb_len && thickness > 0.0F) {
             nt_ui_internal_register_interactive(ctx, bar_id, reg_pad);
         }
-    }
-}
-
-/* Emits enabled-axis scrollbars as floating children of the open scroll container. */
-static void scrollbar_emit(nt_ui_context_t *ctx, uint32_t scroll_id, const nt_ui_scroll_style_t *style, nt_ui_scroll_state_t *s, const float content[2], const float container[2], bool thumb_drag,
-                           uint8_t bar_layer) {
-    if (style->scroll_x) {
-        scrollbar_emit_axis(ctx, scroll_id, 0, style, s, content, container, thumb_drag && s->bar_axis == 1U, bar_layer);
-    }
-    if (style->scroll_y) {
-        scrollbar_emit_axis(ctx, scroll_id, 1, style, s, content, container, thumb_drag && s->bar_axis == 2U, bar_layer);
     }
 }
 
@@ -838,7 +834,12 @@ void nt_ui_scroll_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
      * read THIS frame's offset (s->pos) but the bbox/content dims at a 1-frame lag. The bar draws on
      * the container's own layer so it isn't buried under higher-layer content (e.g. a dropdown panel). */
     const uint8_t bar_layer = (data != NULL) ? data->layer : 0U;
-    scrollbar_emit(ctx, id, style, s, content, container, thumb_drag, bar_layer);
+    if (style->scroll_x) {
+        scrollbar_emit_axis(ctx, id, 0, style, s, content, container, thumb_drag && s->bar_axis == 1U, bar_layer);
+    }
+    if (style->scroll_y) {
+        scrollbar_emit_axis(ctx, id, 1, style, s, content, container, thumb_drag && s->bar_axis == 2U, bar_layer);
+    }
 }
 
 void nt_ui_scroll_end(nt_ui_context_t *ctx) {

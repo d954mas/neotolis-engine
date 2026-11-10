@@ -71,9 +71,15 @@ static void apply_buttons_mask(nt_pointer_t *ptr, uint8_t buttons_mask) {
 static void move_pointer(nt_pointer_t *ptr, float x, float y, bool delta) {
     const ptrdiff_t i = ptr - s_next.pointers;
     if (pos_held(ptr)) {
+        if ((s_waiting_press[i] & ~s_waiting_down[i]) != 0U) {
+            return; /* a waiting tap is published where it was made: motion after it is dropped */
+        }
         s_held_pos[i][0] = x;
         s_held_pos[i][1] = y;
-        return;
+        if (delta) {
+            return;
+        }
+        /* An untracked reposition (the mouse came back) ends the hold: no delta may cover that jump. */
     }
     if (delta) {
         ptr->dx += x - ptr->x;

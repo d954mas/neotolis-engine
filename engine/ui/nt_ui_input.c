@@ -803,8 +803,8 @@ static void focus_step(input_frame_t *f) {
         st->caret = caret_from_x(style, props->password, font, buffer, cur_len, local_x);
         st->blink = 0.0F;
     }
-    if (in.released_now) {
-        st->drag = 0U;
+    if (!in.pressed) {
+        st->drag = 0U; /* released, or a scroll took the press */
     }
 
     /* Mark this field not-orphan for next begin's focus cleanup whenever it holds focus (even if

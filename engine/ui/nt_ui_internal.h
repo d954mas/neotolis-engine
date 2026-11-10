@@ -211,7 +211,7 @@ struct nt_ui_context {
     /* capture_seen[] tracks who touched the capture this frame — orphans cleared on begin. */
     nt_ui_capture_t captures[NT_INPUT_MAX_POINTERS];
     /* Per-pointer front-most interactive widget + game-fed occlusion cutoff (3D), resolved by
-     * nt_ui_begin from prev-frame layout (3D: nearest ray-t within cutoff; 2D: top zIndex). Ordered here
+     * nt_ui_begin from prev-frame layout (3D: nearest ray-t within cutoff; then paint order of the tree root). Ordered here
      * by alignment (after the 4B-aligned captures) to avoid adding struct padding. */
     nt_ui_hot_t pointer_hot[NT_INPUT_MAX_POINTERS];
     float pointer_occlusion[NT_INPUT_MAX_POINTERS]; /* max world ray distance; default +inf = no cutoff */
@@ -562,10 +562,6 @@ void nt_ui_internal_apply_scissor_logical_to_physical(const nt_ui_target_t *targ
  * Feed the result to clip.childOffset. */
 Clay_Vector2 nt_ui_internal_scroll_pane_offset(nt_ui_context_t *ctx, uint32_t id);
 
-/* Engine-internal inspector pane: a scroll cell flag (it floats above the game and takes the
- * sidebar's pointer). */
-#define NT_UI_SCROLL_FLAG_PANE ((uint8_t)(1U << 1))
-
 /* State-pool tag of a scroll cell (game scrolls and inspector panes). */
 #define NT_UI_SCROLL_TAG NT_UI_STATE_TAG('s', 'c', 'r', 'l')
 
@@ -578,17 +574,6 @@ void nt_ui_internal_scroll_arbitrate(nt_ui_context_t *ctx);
 
 /* How a hit on record `id` counts in the front-most resolve: a scroll's own id is its surface. */
 nt_ui_hit_kind_t nt_ui_internal_record_kind(nt_ui_context_t *ctx, uint32_t id);
-
-/* True when an axis overflows; the half unit absorbs layout rounding, so a fitting list never turns
- * scrollable (or shows an AUTO bar) by noise. */
-static inline bool nt_ui_internal_overflows(float content, float container) { return content > container + 0.5F; }
-
-/* Axes a scroll can move on in last frame's layout: clipped AND overflowing (NT_UI_DRAG_X | _Y). */
-static inline uint8_t nt_ui_internal_scroll_axes(const Clay_ScrollContainerData *scd) {
-    const bool x = scd->found && scd->config.horizontal && nt_ui_internal_overflows(scd->contentDimensions.width, scd->scrollContainerDimensions.width);
-    const bool y = scd->found && scd->config.vertical && nt_ui_internal_overflows(scd->contentDimensions.height, scd->scrollContainerDimensions.height);
-    return (uint8_t)((x ? NT_UI_DRAG_X : 0U) | (y ? NT_UI_DRAG_Y : 0U));
-}
 
 /* Adds a registry record for the front-most resolve. */
 void nt_ui_internal_register_interactive(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lrtb[4]);

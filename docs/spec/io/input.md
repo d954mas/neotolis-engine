@@ -59,12 +59,14 @@ position and deltas in framebuffer pixels (fractional, never rounded), wheel not
 
 - **A release is published where it happened.** After a button's release edge the pointer holds
   its position for the rest of that frame; where it goes afterwards is published next frame, and
-  that frame's `dx`/`dy` cover the motion. So the frame of a release never shows a later hover.
+  that frame's `dx`/`dy` cover the motion. So the frame of a release never shows a later hover. A
+  mouse that left and came back in that frame is simply at its new position, with no delta.
 - **A frame never reads a release together with a newer press.** A press of the released button
   that arrives before the poll waits for the next frame, where it is published at the pointer's
   new position, as a whole tap when the button was lifted again meanwhile; a pointer that leaves or
   loses focus in that frame is published once more for that tap. Anything further in that frame
-  folds into that press. A press and its release from an up button still read together:
+  folds into that press; motion after a waiting tap is dropped (the next move reports the pointer),
+  so the tap is published where it was made. A press and its release from an up button still read together:
   `is_pressed && is_released` always means "pressed, then released". Keys keep both edges in one
   frame. Only that button waits: another button's edge, the wheel and the pressure of that frame
   are published with the release, at the release position. A bot's waiting press is published by

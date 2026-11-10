@@ -2,7 +2,8 @@
 #define NT_UI_BAR_PROBE_H
 
 /* Reads a scrollbar back from what the last frame produced: its declared element and its render
-   commands. The bar's id is the track; the thumb is the image drawn right after it. */
+   commands. The bar's id is the track; the thumb is the next image, and it lies on the track. Both
+   need art: without it nothing is drawn and the probe reads zeros. */
 
 #include "clay.h"
 #include "ui/nt_ui.h"
@@ -10,7 +11,6 @@
 #include "ui/nt_ui_internal.h"
 
 typedef struct {
-    bool drawn; /* the track reached the render commands */
     float track_len;
     float thumb_len;
     float thumb_off; /* along the track, from its start */
@@ -33,13 +33,15 @@ static inline ui_bar_probe_t ui_bar_probe(const nt_ui_context_t *ctx, uint32_t b
             continue;
         }
         const nt_ui_element_data_t *data = (const nt_ui_element_data_t *)track->userData;
-        out.drawn = true;
         out.track_len = (axis == 1) ? track->boundingBox.height : track->boundingBox.width;
         out.opacity = data->opacity;
         out.layer = data->layer;
         for (int32_t k = i + 1; k < arr->length; ++k) {
             const Clay_RenderCommand *thumb = &arr->internalArray[k];
-            if (thumb->commandType == CLAY_RENDER_COMMAND_TYPE_IMAGE) {
+            const bool on_track = thumb->boundingBox.x >= track->boundingBox.x - 0.5F && thumb->boundingBox.y >= track->boundingBox.y - 0.5F &&
+                                  thumb->boundingBox.x + thumb->boundingBox.width <= track->boundingBox.x + track->boundingBox.width + 0.5F &&
+                                  thumb->boundingBox.y + thumb->boundingBox.height <= track->boundingBox.y + track->boundingBox.height + 0.5F;
+            if (thumb->commandType == CLAY_RENDER_COMMAND_TYPE_IMAGE && on_track) {
                 out.thumb_len = (axis == 1) ? thumb->boundingBox.height : thumb->boundingBox.width;
                 out.thumb_off = (axis == 1) ? (thumb->boundingBox.y - track->boundingBox.y) : (thumb->boundingBox.x - track->boundingBox.x);
                 break;

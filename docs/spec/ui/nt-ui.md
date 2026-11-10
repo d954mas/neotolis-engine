@@ -281,12 +281,13 @@ nearest world ray-distance within a game-fed occlusion cutoff
 (`nt_ui_frame_desc_t.occlusion`) so UI can't be clicked through
 world geometry — the game owns the raycast, the engine only takes the cutoff distance;
 `nt_ui_interaction_t.distance` reports the hit distance. Hits within 1e-5 of the nearest
-distance (relative, floored at one unit) are coplanar and compete like 2D. 2D ctx: the hit
-that is painted last. Clay paints its tree roots (the document and every floating element)
-by band, then by declaration, so the later root wins: a floating element is over the
-content it floats on, whatever order the two were stepped in. Inside one root the later
-record wins, i.e. the later `nt_ui_step` call; widget code should step in declaration
-order so this matches paint order. `nt_ui_wants_pointer` is true
+distance (relative, floored at one unit) are coplanar and compete like 2D. 2D ctx: Clay
+orders its tree roots (the document and every floating element) by band, then by
+declaration, and the later root wins: a floating element is over the content it floats on,
+whatever order the two were stepped in. Inside one root the later record wins, i.e. the
+later `nt_ui_step` call; widget code should step in declaration order. This follows paint
+order except for the draw `layer`: an unclipped same-band element on a higher layer is
+painted over one on a lower layer, and the resolve does not look at layers. `nt_ui_wants_pointer` is true
 while a pointer holds a capture or a pending scroll gesture, or its front-most record is declared again this frame (a
 record that vanished this frame is not UI under the pointer). A free pointer drives a
 widget only if it is the resolved hot
@@ -426,7 +427,7 @@ chain of its own content); the same holds for a game's own unclipped floating el
 declared inside a scroll: neither a drag nor the wheel over it reaches that scroll.
 Scrollbars clip to their scroll, so they belong to its chain (the wheel over a bar
 scrolls it). A bar has a hit record only while it shows a thumb that can move: thumb art,
-an overflowing axis and not faded out; otherwise its strip belongs to the content under
+a non-zero thickness, an overflowing axis, room for the thumb to travel, and not faded out; otherwise its strip belongs to the content under
 it. `nt_ui_scroll_begin` / `_end` must balance: `nt_ui_end` asserts that no element is left
 open. A scroll's own id is its surface and must not be stepped as a widget (checked under
 `NT_UI_CHECKS`).
@@ -569,12 +570,10 @@ would dismiss. The cost is real and accepted: two catcher-bearing popups on
 one band with different draw layers paint by layer but dismiss by
 declaration, so an outside click can close the one underneath. Ranking the
 slot by paint order requires making the pointer arbiter layer-aware first
-(`resolve_hot` is band-only today) — until then the two must use
+(`resolve_hot` ranks by band and tree root, not by layer) — until then the two must use
 one key, and this is that key. The agreement is a 2D-context property: a 3D
 ctx arbitrates the pointer by ray distance and does not rank overlays by
-band at all. The agreement is a 2D-context property: a
-3D ctx arbitrates the pointer by ray distance and does not rank overlays
-by band at all. A catcher-less
+band at all. A catcher-less
 overlay (menu, tooltip) never claims that slot and runs its own dismiss; the
 text field's Esc-unfocus is independent of both. A fully-closed
 popup declares NO catcher, so the base UI stays clickable; a hover-driven

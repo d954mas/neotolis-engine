@@ -91,8 +91,13 @@ static void declare_hud(void) {
     /* Feed ALL pointer slots, not just [0]: a synthetic ui.click lands in the first FREE slot, which is
        NOT 0 when a real mouse already holds slot 0. Deactivated slots keep stale x/y but their button
        edge bits are cleared, so they fire no buttons and never spuriously hit a widget. */
-    nt_ui_begin(s_hud_ctx,
-                &(nt_ui_frame_desc_t){.layout_w = fb_w, .layout_h = fb_h, .dt = g_nt_app.dt, .pointers = g_nt_input.pointers, .pointer_count = NT_INPUT_MAX_POINTERS, .primary = g_nt_input.primary});
+    nt_ui_begin(s_hud_ctx, &(nt_ui_frame_desc_t){.layout_w = fb_w,
+                                                 .layout_h = fb_h,
+                                                 .dt = g_nt_app.dt,
+                                                 .pointers = g_nt_input.pointers,
+                                                 .pointer_count = NT_INPUT_MAX_POINTERS,
+                                                 .primary = g_nt_input.primary,
+                                                 .viewport = {.px_per_dp = g_nt_window.dpr}});
     CLAY({.id = CLAY_ID("hud_root"), .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .padding = CLAY_PADDING_ALL(20), .childGap = 12}}) {
         CLAY({.id = CLAY_ID("hud_btn"), .layout = {.sizing = {CLAY_SIZING_FIXED(160), CLAY_SIZING_FIXED(40)}}}) {}
         CLAY({.id = CLAY_ID("hud_btn_b"), .layout = {.sizing = {CLAY_SIZING_FIXED(160), CLAY_SIZING_FIXED(40)}}}) {}

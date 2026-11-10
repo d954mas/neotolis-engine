@@ -157,6 +157,39 @@ void test_waiting_press_keeps_its_position_through_a_buttons_event(void) {
     TEST_ASSERT_EQUAL_INT(40, (int)m->y);
 }
 
+/* A waiting tap is published where it was made, not where the mouse went after it. */
+void test_waiting_tap_keeps_its_point(void) {
+    nt_input_feed(nt_test_mouse(5.0F, 5.0F, 1));
+    nt_input_poll();
+    nt_input_feed(nt_test_mouse(5.0F, 5.0F, 0));
+    nt_input_feed(nt_test_mouse(90.0F, 40.0F, 1));
+    nt_input_feed(nt_test_mouse(90.0F, 40.0F, 0));
+    nt_input_feed(nt_test_mouse(300.0F, 200.0F, 0));
+    nt_input_poll();
+    nt_input_poll();
+    const nt_pointer_t *m = &g_nt_input.pointers[0];
+    TEST_ASSERT_TRUE(m->buttons[NT_BUTTON_LEFT].is_pressed && m->buttons[NT_BUTTON_LEFT].is_released);
+    TEST_ASSERT_EQUAL_INT(90, (int)m->x);
+    TEST_ASSERT_EQUAL_INT(40, (int)m->y);
+}
+
+/* A mouse that left after its release and came back in the same frame is at its new place with no
+   delta, in that frame and the next. */
+void test_mouse_back_after_release_reports_no_delta(void) {
+    nt_input_feed(nt_test_mouse(10.0F, 10.0F, 1));
+    nt_input_poll();
+    nt_input_feed(nt_test_mouse(10.0F, 10.0F, 0));
+    nt_input_feed(nt_test_leave());
+    nt_input_feed(nt_test_mouse(500.0F, 10.0F, 0));
+    nt_input_poll();
+    const nt_pointer_t *m = &g_nt_input.pointers[0];
+    TEST_ASSERT_TRUE(m->active && m->buttons[NT_BUTTON_LEFT].is_released);
+    TEST_ASSERT_EQUAL_INT(0, (int)m->dx);
+    nt_input_poll();
+    TEST_ASSERT_EQUAL_INT(500, (int)m->x);
+    TEST_ASSERT_EQUAL_INT(0, (int)m->dx);
+}
+
 /* A waiting tap is published before a mouse that left in the same frame is gone. */
 void test_waiting_tap_survives_a_leave(void) {
     nt_input_feed(nt_test_mouse(5.0F, 5.0F, 1));
@@ -458,6 +491,8 @@ int main(void) {
     RUN_TEST(test_release_then_press_takes_two_frames);
     RUN_TEST(test_waiting_press_keeps_its_position_through_a_buttons_event);
     RUN_TEST(test_waiting_tap_survives_a_leave);
+    RUN_TEST(test_waiting_tap_keeps_its_point);
+    RUN_TEST(test_mouse_back_after_release_reports_no_delta);
     RUN_TEST(test_release_then_tap_and_tap_then_press);
     RUN_TEST(test_waiting_press_keeps_the_mouse_through_a_leave);
     RUN_TEST(test_mouse_focus_lost_drops_pressure);

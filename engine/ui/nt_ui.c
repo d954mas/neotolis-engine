@@ -492,15 +492,18 @@ void nt_ui_begin(nt_ui_context_t *ctx, const nt_ui_frame_desc_t *frame) {
             cap->active_id = 0U;
             cap->pending_scroll = 0U;
         }
+        if (btn.is_pressed) {
+            cap->press_pos[0] = ctx->frame_pointers[i].x;
+            cap->press_pos[1] = ctx->frame_pointers[i].y;
+            cap->pos[0] = cap->press_pos[0];
+            cap->pos[1] = cap->press_pos[1];
+        }
     }
 
     /* Orphan cleanup — captures unqueried last frame would hold the pointer forever. */
     for (uint32_t i = 0; i < NT_INPUT_MAX_POINTERS; ++i) {
         if (ctx->captures[i].active_id != 0U && ctx->capture_seen[i] == 0U) {
             ctx->captures[i].active_id = 0U;
-        }
-        if (i >= count) {
-            ctx->captures[i].pending_scroll = 0U; /* a slot the game no longer passes holds no gesture */
         }
         if (ctx->captures[i].active_id != 0U) {
             ctx->captures[i].hold_prev_secs = ctx->captures[i].hold_secs;
@@ -2708,7 +2711,7 @@ nt_ui_interaction_t nt_ui_step(nt_ui_context_t *ctx, uint32_t id, const nt_ui_st
         const nt_pointer_t *p = &ctx->frame_pointers[pidx];
         nt_ui_capture_t *cap = &ctx->captures[pidx];
         if (s.new_capture) {
-            cap->active_id = id; /* press_pos: the arbiter set it at this press edge */
+            cap->active_id = id; /* press_pos: nt_ui_begin set it at this press edge */
             cap->hold_secs = 0.0F;
             cap->hold_prev_secs = 0.0F;
             cap->hold_live = true;
@@ -2877,7 +2880,7 @@ bool nt_ui_wants_pointer(const nt_ui_context_t *ctx) {
         return true;
     }
 #endif
-    for (uint32_t i = 0; i < NT_INPUT_MAX_POINTERS; ++i) {
+    for (uint32_t i = 0; i < ctx->frame_pointer_count; ++i) {
         if (ctx->captures[i].active_id != 0U || ctx->captures[i].pending_scroll != 0U) {
             return true; /* a pending press may still become a scroll */
         }
