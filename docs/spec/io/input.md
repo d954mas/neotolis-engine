@@ -20,7 +20,7 @@ typed characters); it and the query functions are read-only for their consumers.
 
 A focus loss is applied in that order: it releases all held input (while the bot drives, the gate
 drops it and the bot's input stays), and events after it apply after it. A release and a new press
-of one button in one frame therefore read pressed and released together, like any fast press and
+of one key in one frame therefore read pressed and released together, like any fast press and
 release inside one frame. On web a focus loss is a blur of the canvas or of the window: a browser
 may keep the canvas focused across an app or tab switch.
 
@@ -57,6 +57,12 @@ void nt_window_set_text_input_mode(nt_text_input_mode_t mode);  // soft-keyboard
 position and deltas in framebuffer pixels (fractional, never rounded), wheel notches, pressure, type, and per-button
 `is_down`/`is_pressed`/`is_released`.
 
+- **A frame never reads a release together with a newer press.** A pointer button that is released
+  and pressed again between two polls publishes the release first, at the position it happened;
+  the press, its position and the moves after it are published one frame later (as a whole tap when
+  the button was lifted again meanwhile). Anything further in that frame folds into that press. A
+  press and its release from an up button still read together: `is_pressed && is_released` always
+  means "pressed, then released". Keys keep both edges in one frame.
 - **`pointers[0]` is the mouse.** It is active while the cursor is over the window, or while a
   button is held (a drag outside the window keeps it). A button release keeps it; after a leave
   or a focus loss it is published once more (that frame still reads the release) and then

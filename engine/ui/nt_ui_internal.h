@@ -252,10 +252,6 @@ struct nt_ui_context {
     uint16_t scroll_top;
     uint8_t active_modal_depth;
     uint8_t capture_seen[NT_INPUT_MAX_POINTERS];
-    /* One gesture edge per pointer and frame (nt_ui_begin): the button state shown last frame, and a
-     * press held back one frame because a release shared its frame. */
-    uint8_t was_down[NT_INPUT_MAX_POINTERS];
-    uint8_t deferred_press[NT_INPUT_MAX_POINTERS];
     bool pointer_over_any; /* the front-most record under a pointer was declared again this frame */
     /* Modal-presence across frames: _cur set when any modal declares a backdrop this frame;
      * nt_ui_begin commits it into _prev. nt_ui_modal_active reads _prev so the game can gate its

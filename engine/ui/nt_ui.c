@@ -482,27 +482,9 @@ void nt_ui_begin(nt_ui_context_t *ctx, const nt_ui_frame_desc_t *frame) {
     ctx->layout_per_dp[1] = vp.px_per_dp * inv_sy;
 
     for (uint32_t i = 0; i < count; ++i) {
-        /* One gesture edge per frame: a release sharing its frame with a newer press (a fast re-tap)
-         * ends the held gesture now, and the press starts next frame. From an up button the first tap
-         * completes now. */
-        nt_button_state_t *b = &ctx->frame_pointers[i].buttons[NT_BUTTON_LEFT];
-        if (ctx->deferred_press[i] != 0U) {
-            ctx->deferred_press[i] = 0U;
-            b->is_pressed = true;
-            b->is_released = b->is_released || !b->is_down; /* lifted again meanwhile: a tap */
-        } else if (b->is_pressed && b->is_released && (b->is_down || ctx->was_down[i] != 0U)) {
-            ctx->deferred_press[i] = 1U;
-            b->is_pressed = ctx->was_down[i] == 0U;
-            b->is_down = false;
-            if (ctx->captures[i].active_id != 0U || ctx->captures[i].scroll_scope != 0U) {
-                /* The position is the new press's: the held or pending gesture ends where it was last seen. */
-                ctx->frame_pointers[i].x = ctx->captures[i].pos[0];
-                ctx->frame_pointers[i].y = ctx->captures[i].pos[1];
-            }
-        }
-        ctx->was_down[i] = b->is_down ? 1U : 0U;
-
-        const nt_button_state_t btn = *b;
+        const nt_button_state_t btn = ctx->frame_pointers[i].buttons[NT_BUTTON_LEFT];
+        /* nt_input never publishes it: a press that follows a release waits for the next frame. */
+        NT_ASSERT(!(btn.is_pressed && btn.is_released && btn.is_down) && "nt_ui_begin: a release and a newer press of one pointer in one frame");
         nt_ui_capture_t *cap = &ctx->captures[i];
         if (!btn.is_released && (!btn.is_down || btn.is_pressed)) {
             /* Frames without nt_ui_begin swallow edges: no release edge, yet the button is up or newly pressed. */

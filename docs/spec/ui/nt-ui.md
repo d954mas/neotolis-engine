@@ -258,10 +258,10 @@ target). The step commits capture, so a later
 query that frame can read different edges: read one-shot edges from the step's
 result, and `double_clicked` only from there. Capture is per-pointer:
 a press records `active_id`; release clears. Other widgets are
-`exclusive_gated` while one holds capture. A pointer shows one gesture edge per frame:
-when a release and a new press arrive in one frame (a fast re-tap), the held gesture
-releases where it was last seen and the press starts next frame; from an up button the
-whole tap completes at once. **Orphan cleanup** at
+`exclusive_gated` while one holds capture. A frame carries a pointer's release or a
+whole tap, never a release with a newer press: `nt_input` publishes that press one frame
+later ([Input](../io/input.md)), and `nt_ui_begin` asserts it for pointers built by
+hand. **Orphan cleanup** at
 `nt_ui_begin` drops `active_id` if the widget didn't call step last
 frame — covers scene switches, conditional disable, and widget hide. It also drops
 `active_id` when a pointer has no release edge and its button is up or newly pressed:

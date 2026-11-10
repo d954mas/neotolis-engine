@@ -2449,46 +2449,6 @@ static void test_arb_popup_barrier_keeps_drag_from_list(void) {
     TEST_ASSERT_TRUE(float_near(arb_list()->raw[1], 0.0F, 0.001F));
 }
 
-/* A list's owner lifts and presses elsewhere in one frame: the jump between the two touch points is
- * not a finger move, so the list does not move by it. */
-static void test_arb_release_and_press_does_not_jump_list(void) {
-    arb_scene_reset();
-    nt_pointer_t p = arb_pointer(100.0F, 150.0F);
-    arb_warm(&p);
-    arb_press(&p);
-    arb_frame(&p, 1);
-    arb_hold(&p);
-    p.y = 120.0F;
-    arb_frame(&p, 1);
-    TEST_ASSERT_EQUAL_UINT32(SCROLL_ID, s_fx.ctx->captures[0].active_id);
-    const float raw_before = arb_list()->raw[1];
-    p.y = 20.0F; /* up at 120, down again at 20 */
-    p.buttons[NT_BUTTON_LEFT].is_released = true;
-    p.buttons[NT_BUTTON_LEFT].is_pressed = true;
-    arb_frame(&p, 1);
-    TEST_ASSERT_TRUE(float_near(arb_list()->raw[1], raw_before, 0.001F));
-}
-
-/* A pending press on the list lifts and presses elsewhere in one frame: the jump is not a finger move. */
-static void test_arb_pending_retap_does_not_scroll(void) {
-    arb_scene_reset();
-    nt_pointer_t p = arb_pointer(100.0F, 150.0F);
-    arb_warm(&p);
-    arb_press(&p);
-    arb_frame(&p, 1);
-    arb_hold(&p);
-    arb_frame(&p, 1);
-    p.y = 20.0F;
-    p.buttons[NT_BUTTON_LEFT].is_released = true;
-    p.buttons[NT_BUTTON_LEFT].is_pressed = true;
-    arb_frame(&p, 1);
-    p.buttons[NT_BUTTON_LEFT].is_released = false;
-    p.buttons[NT_BUTTON_LEFT].is_pressed = false;
-    arb_frame(&p, 1);
-    TEST_ASSERT_TRUE(float_near(arb_list()->pos[1], 0.0F, 0.001F));
-    TEST_ASSERT_TRUE(float_near(arb_list()->vel[1], 0.0F, 0.001F));
-}
-
 /* The wheel over a scrollbar scrolls its list. */
 static void test_arb_wheel_over_bar_scrolls_list(void) {
     arb_scene_reset();
@@ -2591,64 +2551,6 @@ static void test_arb_second_finger_takes_held_bar(void) {
     TEST_ASSERT_EQUAL_UINT32(0U, s_fx.ctx->captures[0].active_id);
 }
 
-/* One gesture edge per frame: a release sharing its frame with a newer press ends the old gesture
- * first; the press starts next frame. */
-static nt_ui_interaction_t s_a_in;
-static nt_ui_interaction_t s_b_in;
-static void two_buttons_frame(const nt_pointer_t *p) {
-    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .dt = 1.0F / 60.0F, .pointers = p, .pointer_count = 1});
-    CLAY({.id = CLAY_ID("two_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(100)}}}) {
-        CLAY({.id = CLAY_ID("btn_a"), .layout = {.sizing = {CLAY_SIZING_FIXED(100), CLAY_SIZING_FIXED(100)}}}) { s_a_in = nt_ui_step(s_fx.ctx, CLAY_ID("btn_a").id, NULL); }
-        CLAY({.id = CLAY_ID("btn_b"), .layout = {.sizing = {CLAY_SIZING_FIXED(100), CLAY_SIZING_FIXED(100)}}}) { s_b_in = nt_ui_step(s_fx.ctx, CLAY_ID("btn_b").id, NULL); }
-    }
-    nt_ui_end(s_fx.ctx);
-}
-
-static void test_release_and_press_in_one_frame(void) {
-    nt_pointer_t p = arb_pointer(50.0F, 50.0F);
-    two_buttons_frame(&p);
-    two_buttons_frame(&p);
-    arb_press(&p);
-    two_buttons_frame(&p);
-    TEST_ASSERT_TRUE(s_a_in.pressed_now);
-    /* Up on A and down on B within one frame: A releases where it was last seen (a click), B's press
-     * starts next frame. */
-    p.x = 150.0F;
-    p.buttons[NT_BUTTON_LEFT].is_released = true;
-    p.buttons[NT_BUTTON_LEFT].is_pressed = true;
-    p.buttons[NT_BUTTON_LEFT].is_down = true;
-    two_buttons_frame(&p);
-    TEST_ASSERT_TRUE(s_a_in.clicked);
-    TEST_ASSERT_FALSE(s_b_in.pressed);
-    p.buttons[NT_BUTTON_LEFT].is_released = false;
-    p.buttons[NT_BUTTON_LEFT].is_pressed = false;
-    two_buttons_frame(&p);
-    TEST_ASSERT_TRUE(s_b_in.pressed_now);
-    TEST_ASSERT_EQUAL_UINT32(CLAY_ID("btn_b").id, s_fx.ctx->captures[0].active_id);
-
-    /* Retap of the same widget: its click lands now, its new press next frame. */
-    p.buttons[NT_BUTTON_LEFT].is_released = true;
-    p.buttons[NT_BUTTON_LEFT].is_pressed = true;
-    two_buttons_frame(&p);
-    TEST_ASSERT_TRUE(s_b_in.clicked);
-    p.buttons[NT_BUTTON_LEFT].is_released = false;
-    p.buttons[NT_BUTTON_LEFT].is_pressed = false;
-    two_buttons_frame(&p);
-    TEST_ASSERT_TRUE(s_b_in.pressed_now);
-
-    /* Up, tap and up again within one frame: the release now, the tap next frame. */
-    p.buttons[NT_BUTTON_LEFT].is_released = true;
-    p.buttons[NT_BUTTON_LEFT].is_pressed = true;
-    p.buttons[NT_BUTTON_LEFT].is_down = false;
-    two_buttons_frame(&p);
-    TEST_ASSERT_TRUE(s_b_in.clicked);
-    p.buttons[NT_BUTTON_LEFT].is_released = false;
-    p.buttons[NT_BUTTON_LEFT].is_pressed = false;
-    two_buttons_frame(&p);
-    TEST_ASSERT_TRUE(s_b_in.pressed_now);
-    TEST_ASSERT_TRUE(s_b_in.clicked);
-}
-
 /* rubber_band_c == 0: a drag past the edge leaves no dead zone — reversing moves content at once. */
 static void test_hard_edge_drag_reversal_has_no_dead_zone(void) {
     const nt_ui_scroll_style_t style = {.friction = 0.92F, .wheel_step_px = 40.0F};
@@ -2678,6 +2580,14 @@ static void nesting_overflow_frame(void) {
 }
 
 static void test_assert_scroll_nesting_overflow(void) { NT_TEST_EXPECT_ASSERT(nesting_overflow_frame()); }
+
+/* nt_input publishes a press that follows a release one frame later; a frame with both is not input. */
+static void release_with_newer_press_frame(void) {
+    nt_pointer_t p = arb_pointer(100.0F, 150.0F);
+    p.buttons[NT_BUTTON_LEFT] = (nt_button_state_t){.is_down = true, .is_pressed = true, .is_released = true};
+    arb_frame(&p, 1);
+}
+static void test_assert_release_with_newer_press(void) { NT_TEST_EXPECT_ASSERT(release_with_newer_press_frame()); }
 #endif /* NT_ASSERT_MODE == NT_ASSERT_FULL */
 
 int main(void) {
@@ -2701,14 +2611,11 @@ int main(void) {
     RUN_TEST(test_arb_thumb_press_during_fling_grabs_bar);
     RUN_TEST(test_arb_thumb_press_takes_list_from_content_drag);
     RUN_TEST(test_arb_popup_barrier_keeps_drag_from_list);
-    RUN_TEST(test_arb_release_and_press_does_not_jump_list);
-    RUN_TEST(test_arb_pending_retap_does_not_scroll);
     RUN_TEST(test_arb_wheel_over_bar_scrolls_list);
     RUN_TEST(test_arb_content_take_keeps_last_thumb_move);
     RUN_TEST(test_arb_second_finger_takes_held_bar);
     RUN_TEST(test_arb_both_bars_pressed_together);
     RUN_TEST(test_arb_tap_on_other_bar_while_held);
-    RUN_TEST(test_release_and_press_in_one_frame);
     RUN_TEST(test_hard_edge_drag_reversal_has_no_dead_zone);
     RUN_TEST(test_scroll_momentum_decays_monotonic);
     RUN_TEST(test_scroll_steal_real_child_tracks_current_pointer);
@@ -2767,6 +2674,7 @@ int main(void) {
     RUN_TEST(test_scrollbar_nested_clipped_to_outer);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_assert_scroll_nesting_overflow);
+    RUN_TEST(test_assert_release_with_newer_press);
 #endif
     return UNITY_END();
 }
