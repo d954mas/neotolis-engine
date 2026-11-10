@@ -363,8 +363,8 @@ static void test_modal_wants_pointer_while_open(void) {
 /* ---- Modal body button must be clickable: the helper declares no panel self-occluder, so the button
  *      is the sole interactive record and wins. Needs 3 frames (register / press / release-inside). ---- */
 /* The panel floats attached-to-root CENTER_CENTER, so it sits at the viewport center. The button is a
- * NORMAL (non-floating) child of the panel -> it shares the panel's floating tree root and inherits the
- * panel's uniform zindex; with no self-occluder it's the sole interactive record and wins. With the
+ * NORMAL (non-floating) child of the panel -> it shares the panel's floating tree root, declared after
+ * the panel; with no self-occluder it's the sole interactive record and wins. With the
  * panel shrink-wrapping the button, the panel == the button bbox, both centered in the 800x600 frame. */
 #define MODAL_VIEW_W 800.0F
 #define MODAL_VIEW_H 600.0F

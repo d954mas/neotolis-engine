@@ -238,7 +238,7 @@ static void test_coplanar_row_beats_its_scroll_surface(void) {
     (void)list_row_frame_3d(&p);
     (void)list_row_frame_3d(&p);
     (void)list_row_frame_3d(&p);
-    TEST_ASSERT_EQUAL_UINT32(nt_ui_id("list3d_row"), s_hot3d.id); /* the later-registered coplanar row */
+    TEST_ASSERT_EQUAL_UINT32(nt_ui_id("list3d_row"), s_hot3d.id); /* the coplanar row, declared after its surface */
     p.buttons[NT_BUTTON_LEFT].is_down = true;
     p.buttons[NT_BUTTON_LEFT].is_pressed = true;
     TEST_ASSERT_TRUE(list_row_frame_3d(&p).pressed_now);

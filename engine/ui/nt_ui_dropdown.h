@@ -125,8 +125,8 @@ bool nt_ui_combo_selectable_icon(nt_ui_context_t *ctx, uint32_t key, const nt_at
  * list is already guarded by combo_begin, so there is no body-guard to report (unlike menu item_begin,
  * which can be closed). `selected` drives the per-state look.
  * _end closes the row, does its ONE nt_ui_step, and returns clicked: the game writes *selected, the
- * combo clears *open. A combo custom row is whole-row-clickable (no activatable=false opt-out like the
- * menu) — by design: the list is a flat pick list, custom content is decoration around the choice. */
+ * combo clears *open. The whole row picks, except over an interactive child: the later-declared child
+ * wins the press, as everywhere in nt_ui. No activatable=false opt-out like the menu. */
 void nt_ui_combo_selectable_begin(nt_ui_context_t *ctx, uint32_t key, bool selected);
 bool nt_ui_combo_selectable_end(nt_ui_context_t *ctx);
 

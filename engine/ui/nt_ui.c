@@ -1531,8 +1531,8 @@ static void emit_custom(const nt_ui_context_t *ctx, const Clay_RenderCommand *c,
 
 // #region walk
 /* SCISSOR/CUSTOM/NONE = hard barriers; never reordered. */
-/* Clay stamps zIndex on RECT/TEXT/SCISSOR only; the baked band covers every command. Only synthetic
- * scissors carry -1, and those are barriers, so a segmentable command always maps to a layout element. */
+/* The baked stacking order covers every command (Clay stamps zIndex on RECT/TEXT/SCISSOR only). Only
+ * synthetic scissors carry -1, and those are barriers, so a segmentable command always maps to a layout element. */
 static const nt_ui_baked_xform_t *cmd_baked(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, int32_t n_elements) {
     NT_ASSERT(c->nt_layout_index >= 0 && c->nt_layout_index < n_elements && "segmentable command without layout element");
     return &ctx->tree_baked[c->nt_layout_index];
@@ -1943,11 +1943,12 @@ static void nt_ui_walk_impl(nt_ui_context_t *ctx, const nt_ui_target_t *target, 
             ++i;
             continue;
         }
-        const int16_t seg_z = cmd_baked(ctx, c, N_elements)->zindex;
+        /* One segment never spans two tree roots: a later root paints whole over an earlier one, as it hit-tests. */
+        const uint32_t seg_root = cmd_baked(ctx, c, N_elements)->order >> 16U;
         int32_t seg_end = i + 1;
         while (seg_end < arr->length) {
             const Clay_RenderCommand *next = &arr->internalArray[seg_end];
-            if (!is_segmentable(next->commandType) || cmd_baked(ctx, next, N_elements)->zindex != seg_z) {
+            if (!is_segmentable(next->commandType) || (cmd_baked(ctx, next, N_elements)->order >> 16U) != seg_root) {
                 break;
             }
             ++seg_end;
@@ -2318,11 +2319,11 @@ static bool map_pointer_to_local(const nt_ui_context_t *ctx, const nt_ui_baked_x
     return true;
 }
 
-/* out_t / out_paint (both nullable, valid only when this returns true): out_t = world distance from
- * the near plane to the hit in 3D ctx (0 in 2D); out_paint = the hit element's tree root in Clay's sorted root order
- * (its floating tree-root's), used for 2D front-most arbitration. */
+/* out_t / out_order (both nullable, valid only when this returns true): out_t = world distance from
+ * the near plane to the hit in 3D ctx (0 in 2D); out_order = the hit element's stacking order, used for
+ * front-most arbitration. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static bool ui_hit_test(const nt_ui_context_t *ctx, uint32_t id, float px, float py, const int16_t pad_lrtb[4], float *out_t, int32_t *out_paint) {
+static bool ui_hit_test(const nt_ui_context_t *ctx, uint32_t id, float px, float py, const int16_t pad_lrtb[4], float *out_t, uint32_t *out_order) {
     if (id == 0U) {
         return false;
     }
@@ -2353,8 +2354,8 @@ static bool ui_hit_test(const nt_ui_context_t *ctx, uint32_t id, float px, float
 
     const Clay_BoundingBox box = d.boundingBox;
     const nt_ui_baked_xform_t b = ctx->hit_baked[slot];
-    if (out_paint != NULL) {
-        *out_paint = (int32_t)b.paint_root; /* slot already gated by hit_generation above */
+    if (out_order != NULL) {
+        *out_order = b.order; /* slot already gated by hit_generation above */
     }
     float lx;
     float ly;
@@ -2434,8 +2435,10 @@ uint32_t nt_ui_internal_pick_zone_3d(const nt_ui_context_t *ctx, float px, float
     }
     const float screen_w = nt_ui_clay_priv_layout_width(ctx->clay);
     const float screen_h = nt_ui_clay_priv_layout_height(ctx->clay);
-    /* Reverse order: deepest-recorded zone wins (record/step order), matching the 2D scan. */
-    for (int32_t zi = (int32_t)ctx->debug_zone_count - 1; zi >= 0; --zi) {
+    /* The hit with the highest stacking order wins, matching the 2D scan and pointer arbitration. */
+    uint32_t picked = 0U;
+    uint32_t best_order = 0U;
+    for (uint32_t zi = 0U; zi < ctx->debug_zone_count; ++zi) {
         const nt_ui_debug_zone_t *z = &ctx->debug_zones[zi];
         if (z->id == 0U) {
             continue;
@@ -2447,11 +2450,12 @@ uint32_t nt_ui_internal_pick_zone_3d(const nt_ui_context_t *ctx, float px, float
         if (!raycast_hit(ctx->inv_view_proj, &b, px, py, screen_w, screen_h, &lx, &ly, NULL)) {
             continue;
         }
-        if (lx >= z->visual_l && lx <= z->visual_r && ly >= z->visual_t && ly <= z->visual_b) {
-            return z->id;
+        if (lx >= z->visual_l && lx <= z->visual_r && ly >= z->visual_t && ly <= z->visual_b && z->order >= best_order) {
+            picked = z->id;
+            best_order = z->order;
         }
     }
-    return 0U;
+    return picked;
 }
 #endif
 
@@ -2602,9 +2606,9 @@ nt_ui_interaction_t nt_ui_query_interaction(nt_ui_context_t *ctx, uint32_t id) {
 
 /* One registry record against a pointer: NONE when missed, occluded (3D cutoff) or a see-through
  * scroll surface; PANE for an inspector pane; HIT otherwise. */
-static nt_ui_hit_kind_t hot_candidate(nt_ui_context_t *ctx, const nt_ui_interactive_t *rec, uint32_t pidx, float *out_t, int32_t *out_paint) {
+static nt_ui_hit_kind_t hot_candidate(nt_ui_context_t *ctx, const nt_ui_interactive_t *rec, uint32_t pidx, float *out_t, uint32_t *out_order) {
     const nt_pointer_t *p = &ctx->frame_pointers[pidx];
-    if (!ui_hit_test(ctx, rec->id, p->x, p->y, rec->pad, out_t, out_paint)) {
+    if (!ui_hit_test(ctx, rec->id, p->x, p->y, rec->pad, out_t, out_order)) {
         return NT_UI_HIT_NONE;
     }
     const nt_ui_hit_kind_t kind = nt_ui_internal_record_kind(ctx, rec->id);
@@ -2615,9 +2619,9 @@ static nt_ui_hit_kind_t hot_candidate(nt_ui_context_t *ctx, const nt_ui_interact
 }
 
 /* nt_ui_begin's front-most record per pointer, from LAST frame's registry and layout. 3D: nearest
- * world distance within the occlusion cutoff first. Then structural: the later tree root (band, then
- * declaration), then the later record inside one root; the draw layer is not consulted. Game records
- * share one view_proj; inspector panes win outright. */
+ * world distance within the occlusion cutoff first. Then the highest stacking order: the later tree root
+ * (band, then declaration), then the later-declared element inside one root; neither the draw layer nor
+ * the nt_ui_step call order is consulted. Game records share one view_proj; inspector panes win outright. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void resolve_hot(nt_ui_context_t *ctx) {
     for (uint32_t pidx = 0; pidx < ctx->frame_pointer_count; ++pidx) {
@@ -2631,34 +2635,32 @@ static void resolve_hot(nt_ui_context_t *ctx) {
         float nearest_t = INFINITY;
         for (uint32_t k = 0; ctx->use_raycast_input && k < ctx->interactive_prev_count; ++k) {
             float t = 0.0F;
-            int32_t paint = 0;
-            if (hot_candidate(ctx, &ctx->interactive_prev[k], pidx, &t, &paint) == NT_UI_HIT) {
+            uint32_t order = 0U;
+            if (hot_candidate(ctx, &ctx->interactive_prev[k], pidx, &t, &order) == NT_UI_HIT) {
                 nearest_t = fminf(nearest_t, t);
             }
         }
         const float band = nearest_t + (1.0e-5F * fmaxf(fabsf(nearest_t), 1.0F));
         nt_ui_hot_t best = {0};
-        int32_t best_paint = -1;
+        uint32_t best_order = 0U;
         for (uint32_t k = 0; k < ctx->interactive_prev_count; ++k) {
             const nt_ui_interactive_t *rec = &ctx->interactive_prev[k];
             float t = 0.0F;
-            int32_t paint = 0;
-            const nt_ui_hit_kind_t kind = hot_candidate(ctx, rec, pidx, &t, &paint);
+            uint32_t order = 0U;
+            const nt_ui_hit_kind_t kind = hot_candidate(ctx, rec, pidx, &t, &order);
             if (kind == NT_UI_HIT_NONE || (ctx->use_raycast_input && kind == NT_UI_HIT && t > band)) {
                 continue;
             }
-            /* The later tree root wins; >= so a later record of one root overwrites (registry order =
-             * nt_ui_step call order = declaration order when the game steps in declaration order).
-             * An inspector pane floats above the game in any view_proj, so it wins outright. */
+            /* An inspector pane floats above the game in any view_proj, so it wins outright. */
 #if NT_UI_DEBUG_TOOLS
             if (kind == NT_UI_HIT_PANE) {
-                paint = INT32_MAX;
+                order = UINT32_MAX;
             }
 #endif
-            if (paint >= best_paint) {
+            if (order >= best_order) {
                 best.id = rec->id;
                 best.distance = ctx->use_raycast_input ? t : 0.0F;
-                best_paint = paint;
+                best_order = order;
             }
         }
         /* best stays {0} when nothing was hit OR all hits were occluded — both gate to skip. */
@@ -2758,9 +2760,11 @@ nt_ui_interaction_t nt_ui_step(nt_ui_context_t *ctx, uint32_t id, const nt_ui_st
         const int32_t e_slot = nt_ui_clay_priv_hashmap_slot_for_id(ctx->clay, id);
         if (e_slot >= 0 && ctx->hit_generation[e_slot] == ctx->current_generation) {
             memcpy(z->m, ctx->hit_baked[e_slot].m, sizeof z->m);
+            z->order = ctx->hit_baked[e_slot].order;
         } else {
             const nt_ui_baked_xform_t b = nt_ui_internal_identity_baked();
             memcpy(z->m, b.m, sizeof z->m);
+            z->order = 0U;
         }
         uint16_t flags = 0U;
         if (out.hovered) {
@@ -2867,9 +2871,11 @@ void nt_ui_debug_record_disabled_zone(nt_ui_context_t *ctx, uint32_t id, const i
     const int32_t e_slot = nt_ui_clay_priv_hashmap_slot_for_id(ctx->clay, id);
     if (e_slot >= 0 && ctx->hit_generation[e_slot] == ctx->current_generation) {
         memcpy(z->m, ctx->hit_baked[e_slot].m, sizeof z->m);
+        z->order = ctx->hit_baked[e_slot].order;
     } else {
         const nt_ui_baked_xform_t b = nt_ui_internal_identity_baked();
         memcpy(z->m, b.m, sizeof z->m);
+        z->order = 0U;
     }
     z->state_flags = (uint16_t)NT_UI_DEBUG_FLAG_DISABLED;
 }

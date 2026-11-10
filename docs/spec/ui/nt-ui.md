@@ -132,21 +132,23 @@ Bands accumulate with declaration nesting, NOT with attachment:
 declared as one `modal_zband_stride` each, so nested overlays accumulate
 one stride per level, themselves included, when every enclosing floating
 is an engine overlay. A widget's own floating parts declare delta 0 and
-paint above their container's content because they are declared last.
-Under a clip ancestor their clipTo opens a SCISSOR barrier, so `layer`
-never reorders them against that content; without one they order by
-`layer` like the rest of the band. A floating declared AFTER one of them
-in the same band paints over it. There is no way out
+paint above their container's content because each is a later tree root
+of the same band, and `layer` never reorders across tree roots. A floating
+declared AFTER one of them in the same band paints over it. There is no way out
 of an enclosing stacking context: a game floating that must stay under
 all UI belongs at the root level.
 
 The value Clay stores and reports for a floating is the accumulated
-band, not the declared delta. `nt_ui` bakes that band per element and
-the walker orders on it — the `zIndex` field of individual render
-commands is never read by the engine (Clay fills it only for RECTANGLE,
-TEXT and the floating root's clip SCISSOR). Paint order is band asc, then
-`layer` asc within each barrier-delimited run, then declaration;
-SCISSOR/CUSTOM are hard barriers. An accumulated band that would saturate
+band, not the declared delta. Clay sorts its tree roots (the document and
+every floating element) by that band, stably, so equal bands keep
+declaration order. `nt_ui` bakes each element's stacking order — its tree
+root's place in that sort, then its declaration index — and the walker and
+the pointer arbiter both order on it; the `zIndex` field of individual
+render commands is never read by the engine (Clay fills it only for
+RECTANGLE, TEXT and the floating root's clip SCISSOR). Paint order is tree
+root, then `layer` asc within each barrier-delimited run of one root, then
+Clay's command order (a parent's border after its children); SCISSOR/CUSTOM
+are hard barriers. An accumulated band that would saturate
 `int16` raises a Clay error, which `nt_ui` asserts on rather than
 silently merging two bands. That caps what a game floating may declare: its own
 `zIndex` plus one stride per overlay level nested inside it must still
@@ -215,7 +217,12 @@ Two coord-space modes are gated by `nt_ui_create_desc_t.use_raycast_input`:
   write depth need it above 0, or their children are coplanar with the
   background. Text drawn without depth writes occludes nothing: a farther
   panel drawn later covers a label wherever the label's own background does
-  not. Hit-test stays on the unbiased widget plane. Debug inspector render commands are excluded
+  not. Hit-test stays on the unbiased widget plane. With depth-writing
+  panels the depth test, not the stacking order, decides what is drawn on
+  top: the bias grows with `hierarchy_depth`, so document content nested
+  deeper than an overlay can cover it while the pointer goes to the
+  overlay. This is a known divergence from the stacking order, tracked in
+  #875. Debug inspector render commands are excluded
   from the regular 3D walk and drawn by `nt_ui_debug_inspector_walk` as
   a separate final screen-space pass. The game binds a 2D UI projection
   first; `nt_ui_make_screen_view_proj(w, h, ...)` provides the standard
@@ -282,14 +289,13 @@ nearest world ray-distance within a game-fed occlusion cutoff
 world geometry — the game owns the raycast, the engine only takes the cutoff distance;
 `nt_ui_interaction_t.distance` reports the hit distance. Hits within 1e-5 of the nearest
 distance (relative, floored at one unit) are coplanar and compete like 2D. 2D ctx: the
-ranking is structural. Clay orders its tree roots (the document and every floating element)
-by band, then by declaration, and the later root wins: a floating element of the same or a higher band is over the
-content it floats on, whatever order the two were stepped in. Inside one root the later
-record wins, i.e. the later `nt_ui_step` call; widget code should step in declaration
-order. The draw `layer` is not part of it: layers order batches inside a band and are not
-a way to say which of two interactive elements is on top. Where two interactive elements
-overlap in one band with different layers, the walker may paint the earlier one over the
-later; give the upper one a band (a floating `zIndex`). `nt_ui_wants_pointer` is true
+ranking is the stacking order (see "Floating zIndex is relative"): the later tree root wins
+(band, then declaration), and inside one root the later-declared element wins, so a child is
+over its parent and a later sibling over an earlier one. The order `nt_ui_step` is called in
+does not matter. The draw `layer` is not part of it: it reorders painting inside one root for
+batching and never changes which element gets the pointer. Elements of one root overlap only
+through a transform, overflow without a clip, or hit padding; put such interactive parts on
+one layer or make the upper one floating. `nt_ui_wants_pointer` is true
 while a pointer of the current frame holds a capture or a pending scroll gesture, or its front-most record is declared again this frame (a
 record that vanished this frame is not UI under the pointer). A free pointer drives a
 widget only if it is the resolved hot
@@ -565,16 +571,9 @@ floating (Clay accumulates the nesting, see "Floating zIndex is relative" above;
 NT_ASSERT before the push so a runaway nesting fails early); and a present-only, transparent light-dismiss
 catcher at `panel_z-1` (outside-click raises a close signal). Esc and the
 outside-click scan run on ONE CATCHER-BEARING popup per frame: the highest
-effective band, ties to the last declared. That is the POINTER arbiter's key,
-not the paint key, and deliberately so — the winner performs the dismissal
-through its own catcher's interaction, so a slot ranked by draw layer would
-hand the scan to a popup whose catcher never wins the click and NEITHER
-would dismiss. The cost is real and accepted: two catcher-bearing popups on
-one band with different draw layers paint by layer but dismiss by
-declaration, so an outside click can close the one underneath. Ranking the
-slot by paint order requires making the pointer arbiter layer-aware first
-(`resolve_hot` ranks by band and tree root, not by layer) — until then the two must use
-one key, and this is that key. The agreement is a 2D-context property: a 3D
+effective band, ties to the last declared. That is the panels' tree-root
+order, so the popup that paints on top is the one whose catcher wins the
+click and performs the dismissal. The agreement is a 2D-context property: a 3D
 ctx arbitrates the pointer by ray distance and does not rank overlays by
 band at all. A catcher-less
 overlay (menu, tooltip) never claims that slot and runs its own dismiss; the
@@ -602,6 +601,13 @@ state (`nt_ui_menu_state_t` / `bool *open`) and, for the combo, the `int`
 selection; the widget only signals and clears `open` on a pick (Model D, same
 as popup-core). Both build on the kept popup-core (+ the scroll wrapper for a
 long combo list). There is no data-array form — immediate-only.
+
+A custom-content row (`item_begin..item_end`, `selectable_begin..selectable_end`,
+`preview_begin..preview_end`, and a tab's `nt_ui_tab_begin..nt_ui_tab_end`) steps
+in its `_end`, after its children, but the stacking order is declaration, so an
+interactive child declared inside the row wins the press over its own area; the
+rest of the row activates it. A menu row with `non_activatable` has no action of
+its own (for a row that only hosts a control) and never steps.
 
 Per-frame menu scratch is GAME-owned (`nt_ui_menu_ctx_t`, allocated by the
 game — static / app field / arena slice — and init via `nt_ui_menu_init`), so

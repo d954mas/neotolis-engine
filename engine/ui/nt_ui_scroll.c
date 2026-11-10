@@ -697,10 +697,8 @@ static void scrollbar_emit_axis(nt_ui_context_t *ctx, uint32_t scroll_id, int ax
         return; /* fully faded: no element, so no hit record either (scroll activity wakes the bar) */
     }
 
-    /* Bar draws on the container's own layer (NOT hardcoded 0): a scroll whose content sits on a higher
-     * layer (e.g. a dropdown list on the IMAGE layer over an opaque panel) would otherwise emit its bar
-     * on layer 0, sorted UNDER the panel and invisible. Floating still draws over siblings of the SAME
-     * layer; matching the content layer keeps the bar above the panel fill. */
+    /* Bar carries the container's own layer: the inspector's debug pass selects commands by layer, and a
+     * 3D ctx picks the inspector view_proj for the bar's hit by it. */
     const uint8_t layer = bar_layer;
     const float thickness = style->bar_thickness;
     /* Track spans the full axis on the trailing edge; thumb is offset along the axis. */
@@ -831,8 +829,7 @@ void nt_ui_scroll_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
     nt_ui_widget_register(ctx, id, &NT_UI_SCROLL_DEF, NULL, true);
 
     /* Scrollbars float over the container edges (no layout cost; clipped to the container). They
-     * read THIS frame's offset (s->pos) but the bbox/content dims at a 1-frame lag. The bar draws on
-     * the container's own layer so it isn't buried under higher-layer content (e.g. a dropdown panel). */
+     * read THIS frame's offset (s->pos) but the bbox/content dims at a 1-frame lag. */
     const uint8_t bar_layer = (data != NULL) ? data->layer : 0U;
     if (style->scroll_x) {
         scrollbar_emit_axis(ctx, id, 0, style, s, content, container, thumb_drag && s->bar_axis == 1U, bar_layer);

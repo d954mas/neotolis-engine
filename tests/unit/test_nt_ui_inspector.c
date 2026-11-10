@@ -1169,6 +1169,26 @@ static void test_inspector_highlight_from_viewport_hover(void) {
     TEST_ASSERT_EQUAL_UINT32(nt_ui_id("hover_target"), s_fx.ctx->inspector_highlight_id);
 }
 
+/* The viewport pick follows the stacking order like the pointer: a child over its parent, even when
+ * the parent is stepped after the child. */
+static void pick_parent_child_frame(const nt_pointer_t *p) {
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = p, .pointer_count = 1});
+    CLAY({.id = CLAY_ID("pick_parent"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = 100.0F, .y = 100.0F}}, .layout = {.sizing = {CLAY_SIZING_FIXED(120), CLAY_SIZING_FIXED(120)}}}) {
+        CLAY({.id = CLAY_ID("pick_child"), .layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(40)}}}) { (void)nt_ui_step(s_fx.ctx, CLAY_ID("pick_child").id, NULL); }
+        (void)nt_ui_step(s_fx.ctx, CLAY_ID("pick_parent").id, NULL);
+    }
+    nt_ui_end(s_fx.ctx);
+}
+
+static void test_inspector_viewport_pick_prefers_child_stepped_first(void) {
+    nt_ui_inspector_set_active(s_fx.ctx, true);
+    nt_pointer_t p = make_pointer(120.0F, 120.0F);
+    pick_parent_child_frame(&p);
+    pick_parent_child_frame(&p);
+    pick_parent_child_frame(&p);
+    TEST_ASSERT_EQUAL_UINT32(nt_ui_id("pick_child"), s_fx.ctx->inspector_highlight_id);
+}
+
 /* ---- Test 15t: viewport hover inside panel area does NOT override highlight ----
  * inspector_pointer_consumed gates the propagation. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -1695,20 +1715,20 @@ static void test_inspector_layer_split_collapses_dispatch(void) {
     uint8_t seg_layer[SEG_CAP];
     int seg_pipe[SEG_CAP];
     int32_t seg_len = 0;
-    int16_t prev_z = 0;
-    bool prev_z_valid = false;
+    uint32_t prev_root = 0U;
+    bool prev_root_valid = false;
     uint32_t sim_alternations = 0U;
     for (int32_t i = 0; i <= arr->length; ++i) {
         const Clay_RenderCommand *cc = (i < arr->length) ? &arr->internalArray[i] : NULL;
         const bool is_segmentable = (cc != NULL) && (cc->commandType == CLAY_RENDER_COMMAND_TYPE_RECTANGLE || cc->commandType == CLAY_RENDER_COMMAND_TYPE_BORDER ||
                                                      cc->commandType == CLAY_RENDER_COMMAND_TYPE_IMAGE || cc->commandType == CLAY_RENDER_COMMAND_TYPE_TEXT);
-        /* Segment boundary: end of array, non-segmentable cmd, or band change (baked, as the walker reads it). */
+        /* Segment boundary: end of array, non-segmentable cmd, or tree-root change (baked, as the walker reads it). */
         const nt_ui_baked_xform_t *baked = (cc != NULL) ? nt_ui_internal_test_get_tree_baked(s_fx.ctx, cc->nt_layout_index) : NULL;
-        int16_t cc_z = 0;
+        uint32_t cc_root = 0U;
         if (baked != NULL) {
-            cc_z = baked->zindex;
+            cc_root = baked->order >> 16U;
         }
-        const bool boundary = (cc == NULL) || !is_segmentable || (prev_z_valid && cc_z != prev_z);
+        const bool boundary = (cc == NULL) || !is_segmentable || (prev_root_valid && cc_root != prev_root);
         if (boundary) {
             if (seg_len > 0) {
                 /* Insertion sort segment indices by layer ascending. */
@@ -1737,7 +1757,7 @@ static void test_inspector_layer_split_collapses_dispatch(void) {
                 }
                 seg_len = 0;
             }
-            prev_z_valid = false;
+            prev_root_valid = false;
             if (cc == NULL) {
                 break;
             }
@@ -1759,11 +1779,11 @@ static void test_inspector_layer_split_collapses_dispatch(void) {
             seg_pipe[seg_len] = pipe;
             ++seg_len;
         }
-        prev_z = cc_z;
-        prev_z_valid = true;
+        prev_root = cc_root;
+        prev_root_valid = true;
     }
 
-    /* Cap 8 leaves headroom for ~5 scissor/zIndex barriers (sidebar / header /
+    /* Cap 8 leaves headroom for ~5 scissor/tree-root barriers (sidebar / header /
      * scroll clip / info-pane clip / panelContents). */
     char msg2[200];
     (void)snprintf(msg2, sizeof msg2, "post-sort inspector dispatch alternations: %u (cap 8). bg_count=%u text_count=%u", sim_alternations, bg_count, text_count);
@@ -2730,6 +2750,7 @@ int main(void) {
     RUN_TEST(test_overlay_projects_through_accum_for_transformed_id);
     RUN_TEST(test_overlay_falls_back_to_axis_aligned_when_no_zone);
     RUN_TEST(test_inspector_highlight_from_viewport_hover);
+    RUN_TEST(test_inspector_viewport_pick_prefers_child_stepped_first);
     RUN_TEST(test_inspector_highlight_ignores_panel_hover);
     RUN_TEST(test_inspector_highlight_zero_when_no_pointer_over);
     RUN_TEST(test_inspector_viewport_hover_prefers_widget_over_child);

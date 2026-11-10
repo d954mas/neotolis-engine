@@ -94,7 +94,7 @@ typedef struct {
     const char *shortcut;       /* optional right-aligned shortcut text (e.g. "Ctrl+S"); NULL = none */
     bool disabled;              /* greyed + non-selectable when true (default false = enabled) */
     bool selected;              /* checkmark (toggle/radio menu items) */
-    bool non_activatable;       /* true = an interactive child owns the click (item_begin only; default false) */
+    bool non_activatable;       /* true = the row has no action of its own: never activates (item_begin only) */
     uint8_t _pad[1];
 } nt_ui_menu_item_opts_t;
 /* 64-bit: 16 ref + 8 ptr + 4 bools/pad = 28 -> 32 (8-align). wasm 32-bit: 16 + 4 + 4 = 24. Both = a
@@ -148,7 +148,7 @@ typedef struct nt_ui_menu_ctx {
     struct {
         uint32_t id;      /* the open custom-content row's id (for item_end's nt_ui_step) */
         bool enabled;     /* false = a disabled row: item_end never steps/activates (mirrors item_ex's enabled gate) */
-        bool activatable; /* false = an interactive child owns the click (the row never latches activate) */
+        bool activatable; /* false = the row has no action of its own (never latches activate) */
         bool active;      /* a custom-content row element is open (between item_begin/item_end) */
     } pending_menu_item;
 

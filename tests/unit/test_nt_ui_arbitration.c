@@ -1,7 +1,7 @@
 /* Front-most input arbitration (2D ctx).
  *
  * Among overlapping interactive widgets only the front-most (highest effective Clay zIndex; equal
- * zIndex → last-registered, i.e. the later nt_ui_step call) may hover/press a free pointer;
+ * zIndex → the later-declared tree root, then the later-declared element) may hover/press a free pointer;
  * those behind it are gated off. Arbitration
  * uses the PREVIOUS frame's interactive registry, so on frame 1 (empty registry) nothing reacts;
  * each widget registers on its first step and becomes eligible from the next frame. */
@@ -84,8 +84,8 @@ void test_empty_registry_no_react(void) {
     TEST_ASSERT_FALSE(top.hovered);
 }
 
-/* Once both are in the registry, the resolve makes "top" (last-registered: stepped after "bottom",
- * equal zIndex) hot; "bottom" is gated off. */
+/* Once both are in the registry, the resolve makes "top" (declared after "bottom", equal zIndex) hot;
+ * "bottom" is gated off. */
 void test_overlap_top_wins_hover(void) {
     nt_pointer_t over = make_pointer(OVER_CX, OVER_CY, false, false);
     nt_ui_interaction_t bottom;

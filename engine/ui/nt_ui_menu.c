@@ -692,9 +692,9 @@ bool nt_ui_menu_item_end(nt_ui_menu_ctx_t *menu) {
     /* A disabled row never steps/activates — mirror item_ex's enabled gate (a disabled custom row must not
      * capture the pointer nor fire on a stashed keyboard activation). */
     if (!menu->pending_menu_item.enabled || !menu->pending_menu_item.activatable) {
-        /* activatable=false: the inner interactive child owns the click. The row must NOT nt_ui_step —
-         * a row step would capture the pointer and starve the child. Hover highlight still works via the
-         * read-only query_interaction in menu_im_row (prev-frame geometry, no capture). Never activates. */
+        /* activatable=false: the row has no action, so it does not step — a press beside the child must
+         * not capture the pointer. Hover highlight still works via the read-only query_interaction in
+         * menu_im_row (prev-frame geometry, no capture). */
         return false;
     }
     nt_ui_context_t *ctx = menu->ui;

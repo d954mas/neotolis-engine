@@ -767,6 +767,48 @@ static void test_dropdown_custom_selectable_click_selects(void) {
     TEST_ASSERT_FALSE_MESSAGE(open, "a custom-row click must clear *open (the combo closes the list)");
 }
 
+/* A custom row with an interactive child: the row steps in _end, after the child, but the child is
+ * declared later, so a press over the child is the child's, not the row's. */
+#define DD_ROW_CHILD_ID 0xDD000CU
+static nt_ui_interaction_t s_row_child;
+static void combo_im_frame_custom_child(const nt_pointer_t *p, bool *open, bool *out_clicked) {
+    nt_ui_dropdown_style_t st = nt_ui_dropdown_style_defaults();
+    bool clicked = false;
+    nt_arena_reset(&g_nt_mem_scratch);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = p, .pointer_count = 1});
+    CLAY({.id = (Clay_ElementId){.id = 0xDD000BU}, .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = 30.0F, .y = 30.0F}}}) {
+        if (nt_ui_combo_begin(s_fx.ctx, NT_UI_DATA_LAYER(1), 2, DD_A, "Select...", &st, open)) {
+            nt_ui_combo_selectable_begin(s_fx.ctx, ROW_KEY(0), false);
+            CLAY({.id = (Clay_ElementId){.id = DD_ROW_CHILD_ID}, .layout = {.sizing = {CLAY_SIZING_FIXED(20), CLAY_SIZING_FIXED(16)}}}) { s_row_child = nt_ui_step(s_fx.ctx, DD_ROW_CHILD_ID, NULL); }
+            if (nt_ui_combo_selectable_end(s_fx.ctx)) {
+                clicked = true;
+            }
+            nt_ui_combo_end(s_fx.ctx);
+        }
+    }
+    nt_ui_end(s_fx.ctx);
+    *out_clicked = clicked;
+}
+
+static void test_dropdown_custom_row_interactive_child_takes_the_press(void) {
+    bool open = true;
+    bool clicked = false;
+    nt_pointer_t w = pointer_at(0.0F, 0.0F, false, false, false);
+    combo_im_frame_custom_child(&w, &open, &clicked);
+    combo_im_frame_custom_child(&w, &open, &clicked);
+    const nt_ui_bbox_t bb = nt_ui_get_bbox(s_fx.ctx, DD_ROW_CHILD_ID);
+    TEST_ASSERT_TRUE(bb.found);
+    const float cx = bb.x + (bb.width * 0.5F);
+    const float cy = bb.y + (bb.height * 0.5F);
+    nt_pointer_t pr = pointer_at(cx, cy, true, true, false);
+    combo_im_frame_custom_child(&pr, &open, &clicked);
+    nt_pointer_t rl = pointer_at(cx, cy, false, false, true);
+    combo_im_frame_custom_child(&rl, &open, &clicked);
+    TEST_ASSERT_TRUE(s_row_child.clicked);
+    TEST_ASSERT_FALSE(clicked);
+    TEST_ASSERT_TRUE(open);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_dropdown_abi_size);
@@ -792,5 +834,6 @@ int main(void) {
     RUN_TEST(test_dropdown_combo_duplicate_key_asserts);
 #endif
     RUN_TEST(test_dropdown_custom_selectable_click_selects);
+    RUN_TEST(test_dropdown_custom_row_interactive_child_takes_the_press);
     return UNITY_END();
 }

@@ -46,6 +46,7 @@ typedef struct {
     float m[16];
     /* Used by both rotation pivot and inverse-affine so draw matches hit-test. */
     float center_x, center_y;
+    uint32_t order; /* the element's stacking order (nt_ui_baked_xform_t.order); 0 when its slot was stale */
     /* bit0 hovered, bit1 pressed, bit2 captured, bit3 disabled-heuristic. */
     uint16_t state_flags;
 } nt_ui_debug_zone_t;
@@ -61,9 +62,10 @@ typedef struct {
     float m[16];
     float opacity;
     uint16_t hierarchy_depth;
-    int16_t zindex;      /* effective Clay zIndex (the owning floating tree-root's); 0 for base content. */
-    uint16_t paint_root; /* the owning tree root's index in Clay's sorted root order: band, then declaration */
-    uint16_t _pad16;
+    uint16_t _pad_u16;
+    /* Stacking order for painting and hit: (tree root index in Clay's sorted root order: band, then
+     * declaration) << 16 | layout element index (declaration order, preorder inside one root). */
+    uint32_t order;
     float _pad;
 } nt_ui_baked_xform_t;
 _Static_assert(sizeof(nt_ui_baked_xform_t) == 80, "nt_ui_baked_xform_t fixed at 80B");
@@ -143,13 +145,8 @@ static inline int nt_ui_clampi(int v, int lo, int hi) {
 
 /* Identity baked xform — DFS seed + walker OOB fallback. */
 static inline nt_ui_baked_xform_t nt_ui_internal_identity_baked(void) {
-    nt_ui_baked_xform_t bx = {.m = {1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F},
-                              .opacity = 1.0F,
-                              .hierarchy_depth = 0U,
-                              .zindex = 0,
-                              .paint_root = 0U,
-                              ._pad16 = 0U,
-                              ._pad = 0.0F};
+    nt_ui_baked_xform_t bx = {
+        .m = {1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F}, .opacity = 1.0F, .hierarchy_depth = 0U, ._pad_u16 = 0U, .order = 0U, ._pad = 0.0F};
     return bx;
 }
 
@@ -536,9 +533,9 @@ int32_t nt_ui_internal_test_get_tree_root_for_elem(const nt_ui_context_t *ctx, i
 /* Shared overlay helpers — single source of truth for the Y-flip + per-level accum convention. */
 const nt_ui_debug_zone_t *nt_ui_internal_find_debug_zone(const nt_ui_context_t *ctx, uint32_t id);
 
-/* 3D-ctx inspector viewport pick: last-recorded zone the cursor ray hits, game view_proj (record/step
- * order, not camera distance). Scope: recorded debug_zones only (interactive widgets) — non-interactive
- * elements are tree-selectable, not scene-hover-pickable. 0 = none. */
+/* 3D-ctx inspector viewport pick: the front-most zone (highest stacking order) the cursor ray hits,
+ * game view_proj (not camera distance). Scope: recorded debug_zones only (interactive widgets) —
+ * non-interactive elements are tree-selectable, not scene-hover-pickable. 0 = none. */
 uint32_t nt_ui_internal_pick_zone_3d(const nt_ui_context_t *ctx, float px, float py);
 
 void nt_ui_internal_project_layout_to_world(const float m[16], float vy, float vh, float x, float y, float *out_x, float *out_y);
