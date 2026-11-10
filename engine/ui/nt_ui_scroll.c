@@ -268,16 +268,10 @@ typedef struct {
     uint8_t axes; /* NT_UI_DRAG_X | NT_UI_DRAG_Y */
 } gesture_link_t;
 
-/* The hit-snapshot slot of an element declared last frame, else -1. */
-static int32_t live_slot(const nt_ui_context_t *ctx, uint32_t id) {
-    const int32_t slot = (id != 0U) ? nt_ui_clay_priv_hashmap_slot_for_id(ctx->clay, id) : -1;
-    return (slot >= 0 && ctx->hit_generation[slot] == ctx->current_generation) ? slot : -1;
-}
-
 static gesture_link_t gesture_link(nt_ui_context_t *ctx, uint32_t id) {
     gesture_link_t link = {.id = id};
     /* Declared last frame: Clay can keep a vanished scroll's data one frame longer. */
-    if (live_slot(ctx, id) < 0 || !nt_ui_state_has_tag(ctx, id, NT_UI_SCROLL_TAG)) {
+    if (nt_ui_internal_live_slot(ctx, id) < 0 || !nt_ui_state_has_tag(ctx, id, NT_UI_SCROLL_TAG)) {
         return link;
     }
     const Clay_ScrollContainerData scd = Clay_GetScrollContainerData((Clay_ElementId){.id = id});
@@ -290,7 +284,7 @@ static gesture_link_t gesture_link(nt_ui_context_t *ctx, uint32_t id) {
 
 /* The clip parent of an element in last frame's layout: 0 = none, or the element was not declared. */
 static uint32_t clip_parent(const nt_ui_context_t *ctx, uint32_t id) {
-    const int32_t slot = live_slot(ctx, id);
+    const int32_t slot = nt_ui_internal_live_slot(ctx, id);
     return (slot >= 0) ? ctx->hit_clip_parent_id[slot] : 0U;
 }
 

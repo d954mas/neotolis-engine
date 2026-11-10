@@ -314,26 +314,24 @@ beneath it but itself reacts to nothing), then orphan cleanup drops it next fram
 A statically-disabled widget never registers, so never gates — unless it opts in via
 `nt_ui_block_pointer(ctx, id, pad_lrtb)`, which writes an INERT hit-registry entry (the
 same record `nt_ui_step` makes, minus any interaction). It blocks input to widgets
-behind it but never captures or clicks; a query on a blocked id reports hover while
-it is front-most. The stock disabled widgets (button/checkbox/slider) call it so a
+behind it but never captures or clicks; a query on a blocked id reads like an
+unstepped widget: hover and the press edge while it is front-most (unpadded). The stock disabled widgets (button/checkbox/slider) call it so a
 disabled overlay or modal can't leak clicks through.
 
 Two hover questions have two answers. `hovered` means "this record is the pointer's
-target and the pointer is over it": it is exclusive, like the press. `nt_ui_hovered_within(ctx, id)`
+target and the pointer is over it": it is exclusive, like the press, except that a capture
+holder reports it over its whole box, even under an element declared later. `nt_ui_hovered_within(ctx, id)`
 means "the pointer's target is `id` or an element declared inside `id`" (CSS `:hover` on an
 ancestor). The target is the pointer's hot; a held pointer targets its capture holder
 instead, and only while its hot is the holder or inside it, so a control dragged off hovers
 nothing, its holder included, and dragging one row's control over another row hovers neither.
-Clay indexes elements in open order, so what is declared inside an element is the range
-from its index to the last index opened before it closed (NT patch 10); `nt_ui` bakes that end
-per element, and the query looks up the queried id and each pointer's hot (and holder).
 `id` need not be interactive, but only records are targets: the empty area of a plain
 container is not inside it, so a container that should hover over its gaps blocks the
 pointer itself (`nt_ui_block_pointer`; its children are declared later and still win).
 Floating children count as inside, overlays too: a combo or menu opened inside a container
 puts its full-viewport catcher or occluder inside that container, so the container reads
 hovered within over the whole screen while the overlay is open (as CSS does for a fixed
-overlay inside a hovered element). Combo rows, the combo trigger, tabs, custom menu rows and
+overlay inside a hovered element); a tooltip on that container shows over the open overlay. Combo rows, the combo trigger, tabs, menu rows and
 tooltips read hover within; a sidebar-consumed pointer hovers nothing, as in every query.
 
 ## Anim cache

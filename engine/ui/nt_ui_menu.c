@@ -471,7 +471,7 @@ static nt_ui_interaction_t menu_im_row(nt_ui_menu_ctx_t *menu, uint32_t key, con
     const nt_ui_interaction_t in = enabled ? nt_ui_query_interaction(ctx, row_id) : (nt_ui_interaction_t){0};
     /* A custom row stays under the pointer over its own interactive child (hot, declared later), so
      * focus, highlight and the leaf collapse follow the row the pointer is in. */
-    const bool pointed = enabled && (open_element ? nt_ui_hovered_within(ctx, row_id) : in.hovered);
+    const bool pointed = enabled && nt_ui_hovered_within(ctx, row_id);
     const bool focused = (rt->focus[depth] == (int16_t)running_idx);
     const bool highlit = pointed || (enabled && focused);
 

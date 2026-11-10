@@ -361,6 +361,7 @@ static void test_inspector_intercepts_pointer_over_sidebar(void) {
     nt_pointer_t f1 = make_pointer(0.0F, 0.0F);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = screen_w, .layout_h = screen_h, .pointers = &f1, .pointer_count = 1});
     CLAY({.id = CLAY_ID("hidden_btn"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = btn_x, .y = btn_y}}, .layout = {.sizing = {CLAY_SIZING_FIXED(btn_w), CLAY_SIZING_FIXED(btn_h)}}}) {
+        (void)nt_ui_step(s_fx.ctx, nt_ui_id("hidden_btn"), NULL); /* a record, so frame 2 resolves it hot */
     }
     nt_ui_end(s_fx.ctx);
 
@@ -378,6 +379,8 @@ static void test_inspector_intercepts_pointer_over_sidebar(void) {
 
     /* The flag is set in nt_ui_begin (coord-based, frame-1 safe). */
     TEST_ASSERT_TRUE(nt_ui_inspector_pointer_consumed(s_fx.ctx));
+    TEST_ASSERT_EQUAL_UINT32(nt_ui_id("hidden_btn"), nt_ui_pointer_hot(s_fx.ctx, 0U).id); /* hot under the sidebar... */
+    TEST_ASSERT_FALSE(nt_ui_hovered_within(s_fx.ctx, nt_ui_id("hidden_btn")));            /* ...but the sidebar has the pointer */
 
     /* Both the unpadded and padded query MUST return zeroed: no hover, no
      * press, no clicked, no capture. */

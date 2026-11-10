@@ -271,7 +271,9 @@ static void card_child_frame_3d(const nt_pointer_t *p) {
 
 static void test_coplanar_child_beats_parent_stepped_later(void) {
     nt_pointer_t p = {.x = BBOX_X + 20.0F, .y = BBOX_Y + 20.0F, .active = true};
+#if NT_UI_DEBUG_TOOLS
     nt_ui_debug_set_recording(s_fx.ctx, true);
+#endif
     card_child_frame_3d(&p);
     card_child_frame_3d(&p);
     card_child_frame_3d(&p);
@@ -281,10 +283,46 @@ static void test_coplanar_child_beats_parent_stepped_later(void) {
 #endif
 }
 
+/* Two overlapping panels at different depths: the nearer one is declared first, so stacking order and
+ * distance disagree. */
+static void near_far_frame_3d(const nt_pointer_t *p) {
+    float vp[16];
+    make_ortho_clay_y_down(vp);
+    nt_ui_transform_t near_t = nt_ui_transform_defaults();
+    near_t.offset_z = 0.5F;
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = SCREEN_W, .layout_h = SCREEN_H, .dt = 1.0F / 60.0F, .pointers = p, .pointer_count = 1, .view_proj = vp});
+    s_hot3d = nt_ui_pointer_hot(s_fx.ctx, 0U);
+    CLAY({.id = CLAY_ID("near3d"),
+          .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = BBOX_X, .y = BBOX_Y}},
+          .layout = {.sizing = {CLAY_SIZING_FIXED(BBOX_W), CLAY_SIZING_FIXED(BBOX_H)}},
+          .userData = NT_UI_CLAY_DATA_XFORM(0, &near_t, 1.0F)}) {
+        (void)nt_ui_step(s_fx.ctx, nt_ui_id("near3d"), NULL);
+    }
+    CLAY({.id = CLAY_ID("far3d"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = BBOX_X, .y = BBOX_Y}}, .layout = {.sizing = {CLAY_SIZING_FIXED(BBOX_W), CLAY_SIZING_FIXED(BBOX_H)}}}) {
+        (void)nt_ui_step(s_fx.ctx, nt_ui_id("far3d"), NULL);
+    }
+    nt_ui_end(s_fx.ctx);
+}
+
+static void test_nearer_panel_beats_later_declared(void) {
+    nt_pointer_t p = {.x = BBOX_X + 20.0F, .y = BBOX_Y + 20.0F, .active = true};
+#if NT_UI_DEBUG_TOOLS
+    nt_ui_debug_set_recording(s_fx.ctx, true);
+#endif
+    near_far_frame_3d(&p);
+    near_far_frame_3d(&p);
+    near_far_frame_3d(&p);
+    TEST_ASSERT_EQUAL_UINT32(nt_ui_id("near3d"), s_hot3d.id);
+#if NT_UI_DEBUG_TOOLS
+    TEST_ASSERT_EQUAL_UINT32(nt_ui_id("near3d"), nt_ui_internal_pick_zone_3d(s_fx.ctx, p.x, p.y)); /* the inspector pick agrees */
+#endif
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_coplanar_row_beats_its_scroll_surface);
     RUN_TEST(test_coplanar_child_beats_parent_stepped_later);
+    RUN_TEST(test_nearer_panel_beats_later_declared);
     RUN_TEST(test_view_proj_set_caches_inverse);
     RUN_TEST(test_raycast_hit_accept_and_reject);
     RUN_TEST(test_hit_test_asserts_when_view_proj_not_set);

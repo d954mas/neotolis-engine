@@ -718,13 +718,13 @@ static void test_dropdown_combo_duplicate_key_asserts(void) {
 
 /* One combo frame with a single CUSTOM row: combo_selectable_begin opens the row (void), game content
  * fills it (an interactive 20x16 child when with_child), combo_selectable_end closes it and returns
- * clicked. `*out_clicked` carries that click; the combo clears *open on the click. */
+ * clicked. `*out_clicked` carries that click; the combo clears *open on the click. Returns the child's click. */
 #define DD_ROW_CHILD_ID 0xDD000CU
-static nt_ui_interaction_t s_row_child;
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void combo_im_frame_custom(const nt_pointer_t *p, bool *open, bool *out_clicked, bool with_child) {
+static bool combo_im_frame_custom(const nt_pointer_t *p, bool *open, bool *out_clicked, bool with_child) {
     nt_ui_dropdown_style_t st = nt_ui_dropdown_style_defaults();
     bool clicked = false;
+    bool child_clicked = false;
     nt_arena_reset(&g_nt_mem_scratch);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = p, .pointer_count = 1});
     CLAY({.id = (Clay_ElementId){.id = 0xDD000BU}, .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = 30.0F, .y = 30.0F}}}) {
@@ -732,7 +732,7 @@ static void combo_im_frame_custom(const nt_pointer_t *p, bool *open, bool *out_c
             nt_ui_combo_selectable_begin(s_fx.ctx, ROW_KEY(0), false);
             if (with_child) {
                 CLAY({.id = (Clay_ElementId){.id = DD_ROW_CHILD_ID}, .layout = {.sizing = {CLAY_SIZING_FIXED(20), CLAY_SIZING_FIXED(16)}}}) {
-                    s_row_child = nt_ui_step(s_fx.ctx, DD_ROW_CHILD_ID, NULL);
+                    child_clicked = nt_ui_step(s_fx.ctx, DD_ROW_CHILD_ID, NULL).clicked;
                 }
             } else {
                 CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(16)}}}) {} /* game-owned row content */
@@ -747,6 +747,7 @@ static void combo_im_frame_custom(const nt_pointer_t *p, bool *open, bool *out_c
     if (out_clicked != NULL) {
         *out_clicked = clicked;
     }
+    return child_clicked;
 }
 
 /* ---- A custom-content row (combo_selectable_begin/end) reports its click via _end (the fixed polarity:
@@ -775,22 +776,24 @@ static void test_dropdown_custom_selectable_click_selects(void) {
     TEST_ASSERT_FALSE_MESSAGE(open, "a custom-row click must clear *open (the combo closes the list)");
 }
 
-/* A custom row with an interactive child: the row steps in _end, after the child, but the child is
- * declared later, so a press over the child is the child's, not the row's. */
-/* The custom row's fill in the last frame: its hover fill (0xFF4A4A4A) shows while the pointer is on
- * its interactive child, since the row is hovered within; idle rows draw no fill. */
+/* The custom row's fill in the last frame is its hover fill; idle rows draw no fill. */
 static bool combo_custom_row_hover_lit(void) {
     const uint32_t row_id = nt_ui_dropdown_test_combo_row_id(DD_A, ROW_KEY(0));
+    const Clay_Color hover = nt_ui_unpack_abgr(nt_ui_dropdown_style_defaults().row_hover.fill);
     const Clay_RenderCommandArray *arr = &s_fx.ctx->frozen_cmds;
     for (int32_t i = 0; i < arr->length; ++i) {
         const Clay_RenderCommand *c = &arr->internalArray[i];
         if (c->id == row_id && c->commandType == CLAY_RENDER_COMMAND_TYPE_RECTANGLE) {
-            return c->renderData.rectangle.backgroundColor.r == 74.0F;
+            const Clay_Color got = c->renderData.rectangle.backgroundColor;
+            return got.r == hover.r && got.g == hover.g && got.b == hover.b && got.a == hover.a;
         }
     }
     return false;
 }
 
+/* A custom row with an interactive child: the row steps in _end, after the child, but the child is
+ * declared later, so a press over the child is the child's, not the row's. The row is hovered within
+ * over its child, so it shows its hover fill there. */
 static void test_dropdown_custom_row_interactive_child_takes_the_press(void) {
     bool open = true;
     bool clicked = false;
@@ -806,8 +809,7 @@ static void test_dropdown_custom_row_interactive_child_takes_the_press(void) {
     combo_im_frame_custom(&pr, &open, &clicked, true);
     TEST_ASSERT_TRUE(combo_custom_row_hover_lit());
     nt_pointer_t rl = pointer_at(cx, cy, false, false, true);
-    combo_im_frame_custom(&rl, &open, &clicked, true);
-    TEST_ASSERT_TRUE(s_row_child.clicked);
+    TEST_ASSERT_TRUE(combo_im_frame_custom(&rl, &open, &clicked, true));
     TEST_ASSERT_FALSE(clicked);
     TEST_ASSERT_TRUE(open);
 }

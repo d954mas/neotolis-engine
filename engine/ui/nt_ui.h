@@ -616,8 +616,9 @@ void nt_ui_set_gesture_constants(nt_ui_context_t *ctx, float dbl_window_secs, fl
 
 /* Inert occluder: enters id into the interactive registry so it wins next-frame front-most
  * arbitration over widgets behind it (the pointer can't leak through), but never captures or
- * clicks; nt_ui_query_interaction on it reports hover while it is front-most. Disabled widgets call this so a modal/overlay blocks input to
- * whatever sits underneath. pad_lrtb inflates the block area (NULL = none, asserts >= 0). */
+ * clicks; nt_ui_query_interaction on it reads like an unstepped widget (hover and the press edge while
+ * front-most, unpadded). Disabled widgets call this so a modal/overlay blocks input to whatever sits
+ * underneath. pad_lrtb inflates the block area (NULL = none, asserts >= 0). */
 void nt_ui_block_pointer(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lrtb[4]);
 
 /* True when a pointer of the last frame holds a capture or a pending scroll gesture, or is over a widget. */

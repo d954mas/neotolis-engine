@@ -2785,6 +2785,8 @@ static void test_front_most_inside_a_root_is_declaration_order(void) {
     TEST_ASSERT_FALSE(s_decl_card.clicked);
     decl_press(75.0F, 20.0F);
     TEST_ASSERT_TRUE(s_decl_card.clicked); /* the card outside its child */
+    TEST_ASSERT_FALSE(s_decl_child.clicked);
+    TEST_ASSERT_FALSE(s_decl_late.clicked);
     decl_press(25.0F, 45.0F);
     TEST_ASSERT_TRUE(s_decl_late.clicked); /* the later sibling's padding over the earlier child */
     TEST_ASSERT_FALSE(s_decl_child.clicked);
@@ -2845,6 +2847,8 @@ static void test_hovered_within_follows_capture(void) {
     within_at(&p, 20.0F, 20.0F); /* back over the holder, still held */
     TEST_ASSERT_TRUE(nt_ui_hovered_within(s_fx.ctx, CLAY_ID("w_row").id));
     arb_release(&p);
+    within_frame(&p);
+    p.buttons[NT_BUTTON_LEFT].is_released = false;
     within_at(&p, 20.0F, 60.0F); /* released: the other row again */
     TEST_ASSERT_TRUE(nt_ui_hovered_within(s_fx.ctx, CLAY_ID("w_other").id));
 }

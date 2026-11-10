@@ -529,11 +529,14 @@ int32_t nt_ui_internal_test_get_tree_baked_count(const nt_ui_context_t *ctx);
 int32_t nt_ui_internal_test_get_tree_root_for_elem(const nt_ui_context_t *ctx, int32_t elem_idx);
 #endif
 
+/* The hit-snapshot slot of an element declared last frame, else -1 (id 0 included). */
+int32_t nt_ui_internal_live_slot(const nt_ui_context_t *ctx, uint32_t id);
+
 /* Shared overlay helpers — single source of truth for the Y-flip + per-level accum convention. */
 const nt_ui_debug_zone_t *nt_ui_internal_find_debug_zone(const nt_ui_context_t *ctx, uint32_t id);
 
-/* 3D-ctx inspector viewport pick: the front-most zone (highest stacking order) the cursor ray hits,
- * game view_proj (not camera distance). Scope: recorded debug_zones only (interactive widgets) —
+/* 3D-ctx inspector viewport pick: the zone the pointer would drive — nearest coplanar band of the
+ * cursor ray's hits, then the highest stacking order, as resolve_hot (game view_proj). Scope: recorded debug_zones only (interactive widgets) —
  * non-interactive elements are tree-selectable, not scene-hover-pickable. 0 = none. */
 uint32_t nt_ui_internal_pick_zone_3d(const nt_ui_context_t *ctx, float px, float py);
 
