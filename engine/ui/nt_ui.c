@@ -503,7 +503,6 @@ void nt_ui_begin(nt_ui_context_t *ctx, const nt_ui_frame_desc_t *frame) {
         }
         ctx->capture_seen[i] = 0U;
         ctx->pointer_hot[i] = (nt_ui_hot_t){0};
-        ctx->pointer_scope[i] = 0U;
         ctx->wheel_owner[i][0] = 0U;
         ctx->wheel_owner[i][1] = 0U;
         /* NaN would make the `t > cutoff` test always false (click through a wall). */
@@ -511,7 +510,6 @@ void nt_ui_begin(nt_ui_context_t *ctx, const nt_ui_frame_desc_t *frame) {
         NT_ASSERT(!isnan(ctx->pointer_occlusion[i]) && "nt_ui_begin: occlusion must not be NaN");
     }
     ctx->last_press_age += dt;
-    ctx->scroll_top = 0U;         /* scroll/popup push-pop balance across the frame (asserted == 0 at end) */
     ctx->active_modal_depth = 0U; /* modal begin++/end-- balance across the frame (asserted == 0 at end) */
     /* Commit last frame's deepest modal as the close-scan target (1-frame IM lag), then reset. */
     ctx->modal_top_id_prev = ctx->modal_top_id_cur;
@@ -622,7 +620,6 @@ void nt_ui_end(nt_ui_context_t *ctx) {
     ctx->last_build_tree_ms = (float)((nt_time_now() - build_t0) * 1000.0);
 #endif
 
-    NT_ASSERT(ctx->scroll_top == 0U && "nt_ui_end: unbalanced scroll/popup begin/end");
     /* A pending gesture ends with its release frame (the widgets read it as a tap above), so a button
      * found held after skipped frames never continues it. */
     for (uint32_t i = 0; i < ctx->frame_pointer_count; ++i) {
@@ -2598,7 +2595,7 @@ static nt_ui_hit_kind_t hot_candidate(nt_ui_context_t *ctx, const nt_ui_interact
     if (!ui_hit_test(ctx, rec->id, p->x, p->y, rec->pad, out_t, out_zi)) {
         return NT_UI_HIT_NONE;
     }
-    const nt_ui_hit_kind_t kind = (rec->scope == rec->id) ? nt_ui_internal_scroll_surface_kind(ctx, rec->id) : NT_UI_HIT;
+    const nt_ui_hit_kind_t kind = nt_ui_internal_record_kind(ctx, rec->id);
     if (kind == NT_UI_HIT && ctx->use_raycast_input && *out_t > ctx->pointer_occlusion[pidx]) {
         return NT_UI_HIT_NONE; /* behind the game-fed cutoff (e.g. a wall) */
     }
@@ -2628,7 +2625,6 @@ static void resolve_hot(nt_ui_context_t *ctx) {
         }
         const float band = nearest_t + (1.0e-5F * fmaxf(fabsf(nearest_t), 1.0F));
         nt_ui_hot_t best = {0};
-        uint32_t best_scope = 0U;
         int16_t best_zindex = INT16_MIN;
         for (uint32_t k = 0; k < ctx->interactive_prev_count; ++k) {
             const nt_ui_interactive_t *rec = &ctx->interactive_prev[k];
@@ -2650,13 +2646,11 @@ static void resolve_hot(nt_ui_context_t *ctx) {
             if (z >= best_zindex) {
                 best.id = rec->id;
                 best.distance = ctx->use_raycast_input ? t : 0.0F;
-                best_scope = rec->scope;
                 best_zindex = z;
             }
         }
         /* best stays {0} when nothing was hit OR all hits were occluded — both gate to skip. */
         ctx->pointer_hot[pidx] = best;
-        ctx->pointer_scope[pidx] = best_scope;
     }
 }
 
@@ -2679,7 +2673,9 @@ nt_ui_interaction_t nt_ui_step(nt_ui_context_t *ctx, uint32_t id, const nt_ui_st
     const uint8_t drag_axes = (desc != NULL) ? desc->drag_axes : 0U;
     NT_ASSERT((pad_lrtb == NULL || (pad_lrtb[0] >= 0 && pad_lrtb[1] >= 0 && pad_lrtb[2] >= 0 && pad_lrtb[3] >= 0)) && "nt_ui_step: pad_lrtb components must be >= 0");
     NT_ASSERT(drag_axes <= (NT_UI_DRAG_X | NT_UI_DRAG_Y) && "nt_ui_step: drag_axes takes only NT_UI_DRAG_X | NT_UI_DRAG_Y");
-    NT_ASSERT(id != nt_ui_internal_scroll_open(ctx) && "nt_ui_step: a scroll's own id is its surface, not a widget (step a child id)");
+#if NT_UI_CHECKS
+    NT_ASSERT(!nt_ui_state_has_tag(ctx, id, NT_UI_SCROLL_TAG) && "nt_ui_step: a scroll's own id is its surface, not a widget (step a child id)");
+#endif
 
     bool owner_over = false;
     nt_ui_widget_pidx_state_t s;
@@ -2687,7 +2683,7 @@ nt_ui_interaction_t nt_ui_step(nt_ui_context_t *ctx, uint32_t id, const nt_ui_st
 
     /* Record this interactive widget for NEXT frame's hot resolve (resolve re-validates id/transform,
      * so recording an id that later vanishes is harmless). */
-    nt_ui_internal_register_interactive(ctx, id, pad_lrtb, nt_ui_internal_scroll_open(ctx));
+    nt_ui_internal_register_interactive(ctx, id, pad_lrtb);
 
 #if NT_UI_DEBUG_TOOLS
     /* capture_seen stays 0 so next begin's orphan cleanup wipes in-progress capture (no phantom drag). */
@@ -2804,19 +2800,20 @@ void nt_ui_block_pointer(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lr
     NT_ASSERT(ctx->in_frame && ctx == g_nt_ui_inframe_ctx && "nt_ui_block_pointer: must be called between nt_ui_begin and nt_ui_end on the active ctx");
     NT_ASSERT(id != 0U && "nt_ui_block_pointer: id must be non-zero (0 = no widget)");
     NT_ASSERT((pad_lrtb == NULL || (pad_lrtb[0] >= 0 && pad_lrtb[1] >= 0 && pad_lrtb[2] >= 0 && pad_lrtb[3] >= 0)) && "nt_ui_block_pointer: pad_lrtb components must be >= 0");
-    NT_ASSERT(id != nt_ui_internal_scroll_open(ctx) && "nt_ui_block_pointer: a scroll's own id is its surface (block a child id)");
+#if NT_UI_CHECKS
+    NT_ASSERT(!nt_ui_state_has_tag(ctx, id, NT_UI_SCROLL_TAG) && "nt_ui_block_pointer: a scroll's own id is its surface (block a child id)");
+#endif
 
     /* Same registry record as step (so next-frame resolve_hot ranks it for topmost arbitration), minus
      * the capture/button-edge state machine — an inert occluder, not an interactive widget. */
-    nt_ui_internal_register_interactive(ctx, id, pad_lrtb, nt_ui_internal_scroll_open(ctx));
+    nt_ui_internal_register_interactive(ctx, id, pad_lrtb);
 }
 
 /* One record per declared element at most: a full registry is a widget stepped twice per frame. */
-void nt_ui_internal_register_interactive(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lrtb[4], uint32_t scope) {
+void nt_ui_internal_register_interactive(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lrtb[4]) {
     NT_ASSERT(ctx->interactive_cur_count < ctx->max_elements && "nt_ui: interactive registry full (a widget stepped twice per frame?)");
     nt_ui_interactive_t *rec = &ctx->interactive_cur[ctx->interactive_cur_count++];
     rec->id = id;
-    rec->scope = scope;
     if (pad_lrtb != NULL) {
         memcpy(rec->pad, pad_lrtb, sizeof rec->pad);
     } else {

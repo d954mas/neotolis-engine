@@ -2425,13 +2425,11 @@ static void test_arb_thumb_press_takes_list_from_content_drag(void) {
 
 /* A floating panel declared inside the list behind a popup barrier keeps its drags. */
 static void body_barrier_panel(void) {
-    nt_ui_internal_scroll_push(s_fx.ctx, 0U);
     CLAY({.id = CLAY_ID("arb_popup"),
           .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .zIndex = 10, .offset = {.x = 50.0F, .y = 50.0F}},
           .layout = {.sizing = {CLAY_SIZING_FIXED(80), CLAY_SIZING_FIXED(80)}}}) {
         s_fg_in = nt_ui_step(s_fx.ctx, CLAY_ID("arb_popup").id, NULL);
     }
-    nt_ui_internal_scroll_pop(s_fx.ctx, true);
 }
 
 static void test_arb_popup_barrier_keeps_drag_from_list(void) {
@@ -2655,19 +2653,6 @@ static void test_hard_edge_drag_reversal_has_no_dead_zone(void) {
 // #endregion
 
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
-/* Nesting scrolls past the declaration-stack cap traps instead of losing scope links. */
-static void nesting_overflow_frame(void) {
-    nt_pointer_t p = {0};
-    p.active = true;
-    nt_ui_scroll_style_t style = nt_ui_scroll_style_defaults();
-    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .dt = 1.0F / 60.0F, .pointers = &p, .pointer_count = 1});
-    for (uint32_t i = 0; i <= (uint32_t)NT_UI_SCROLL_STACK_CAP; ++i) {
-        nt_ui_scroll_begin(s_fx.ctx, NULL, 0x100U + i, &style, NULL);
-    }
-}
-
-static void test_assert_scroll_nesting_overflow(void) { NT_TEST_EXPECT_ASSERT(nesting_overflow_frame()); }
-
 /* nt_input publishes a press that follows a release one frame later; a frame with both is not input. */
 static void release_with_newer_press_frame(void) {
     nt_pointer_t p = arb_pointer(100.0F, 150.0F);
@@ -2766,7 +2751,6 @@ int main(void) {
     RUN_TEST(test_scrollbar_standalone_renders_inside_clip);
     RUN_TEST(test_scrollbar_nested_clipped_to_outer);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
-    RUN_TEST(test_assert_scroll_nesting_overflow);
     RUN_TEST(test_assert_release_with_newer_press);
 #endif
     return UNITY_END();

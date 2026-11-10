@@ -173,7 +173,6 @@ nt_ui_popup_result_t nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t i
 
     // #region stack push + z-band (shared depth counter with modal)
     ++ctx->active_modal_depth;
-    nt_ui_internal_scroll_push(ctx, 0U); /* barrier: a drag inside the popup never reaches a scroll behind it */
     /* One band ABOVE whatever floating encloses this call; Clay accumulates the nesting, so a popup
      * opened inside another needs no depth arithmetic here. */
     const int16_t panel_z = ctx->modal_zband_stride;
@@ -339,7 +338,6 @@ void nt_ui_popup_end(nt_ui_context_t *ctx) {
     NT_ASSERT(ctx->in_frame && ctx == nt_ui_internal_get_inframe_ctx() && "nt_ui_popup_end: must be called between nt_ui_begin and nt_ui_end on the active ctx");
     NT_ASSERT(ctx->active_modal_depth > 0U && "nt_ui_popup_end: unbalanced begin/end (stack underflow)");
     nt_ui_clay_priv_close_element();
-    nt_ui_internal_scroll_pop(ctx, true);
     --ctx->active_modal_depth;
 }
 

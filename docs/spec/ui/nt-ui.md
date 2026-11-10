@@ -284,9 +284,7 @@ distance (relative, floored at one unit) are coplanar and compete like 2D. 2D ct
 zIndex (tie → last-registered, i.e. the later `nt_ui_step` call; widget code should
 step in declaration order so this matches paint order). `nt_ui_wants_pointer` is true
 while a pointer holds a capture or a pending scroll gesture, or its front-most record is declared again this frame (a
-record that vanished this frame is not UI under the pointer). Each registry record also stores its
-scroll scope (the innermost scroll open when it registered), which starts the scroll
-chain of a press on it. A free pointer drives a
+record that vanished this frame is not UI under the pointer). A free pointer drives a
 widget only if it is the resolved hot
 widget or already holds capture; `nt_ui_pointer_hot` exposes the resolved id.
 Consequence: a freshly-shown widget registers on its first step and only
@@ -414,16 +412,17 @@ interactive registry and each scroll's eligible axes (clipped AND overflowing, f
 clip data Clay keeps for a scroll declared last frame). A scroll container registers its own bbox as a
 *surface* record, so an empty-area press resolves through the normal front-most
 arbitration (z-order, blockers, modals, transforms, 3D occlusion); a scroll whose content
-fits (within half a unit) is see-through. Scrolls form a declaration chain: `scroll_begin` pushes its id and
-records the enclosing scroll as its parent; popup core (dropdown, menu, modal, tooltip)
-pushes a 0 barrier and the menu occluder registers with scope 0, so a drag inside a popup
-never reaches a scroll behind it. Scrollbars belong to their scroll's chain (the wheel over
-a bar scrolls it); `scroll_end` adds their hit records after the content's, so a press on
-a bar never goes to a row under it, and a faded-out bar has none. Widgets inside a scroll
-must step between its begin and end.
+fits (within half a unit) is see-through. The scroll chain of an element is the scrolls
+that clip it, innermost first: it is read from last frame's clip tree, the one the hit
+test walks, so no declaration order or bookkeeping is involved. A floating element takes
+no clip unless it asks for one (`clipTo`), so everything inside a popup (dropdown, menu,
+modal, tooltip) and the menu occluder has an empty chain, and a drag inside a popup never
+reaches a scroll behind it; the same holds for a game's own unclipped floating element
+declared inside a scroll. Scrollbars clip to their scroll, so they belong to its chain
+(the wheel over a bar scrolls it); `scroll_end` adds their hit records after the
+content's, so a press on a bar never goes to a row under it, and a faded-out bar has none.
 
-A press starts a gesture record on the chain of the front-most record under it (its
-scope); a press on a bar that can move makes the pointer its scroll's owner by the thumb
+A press starts a gesture record on the chain of the front-most record under it; a press on a bar that can move makes the pointer its scroll's owner by the thumb
 at once (a thumb has no slop; one owner per scroll, by content or by a thumb), and a chain with no eligible axis decides at once (widgets
 in fitting panels are never pending). A chain link counts
 only if that scroll was declared and its layout solved last frame, so a vanished scroll

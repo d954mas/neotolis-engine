@@ -21,8 +21,8 @@ typedef struct nt_ui_context nt_ui_context_t;
 extern const nt_ui_widget_def_t NT_UI_SCROLL_DEF;
 extern const nt_ui_widget_def_t NT_UI_SCROLLBAR_DEF;
 
-/* Scroll gestures: a press records the scroll chain of the front-most widget under it (its
- * declaration scope). Once the pointer moves the drag slop (NT_UI_DRAG_SLOP_DP, 8 dp) along an
+/* Scroll gestures: a press records the scroll chain of the front-most widget under it (the scrolls
+ * that clip it, innermost first). Once the pointer moves the drag slop (NT_UI_DRAG_SLOP_DP, 8 dp) along an
  * axis, the strongest crossing among the pressed widget's own drag axes (nt_ui_step_desc_t.drag_axes)
  * and the chain's scrollable axes (inner first) takes the gesture; a scroll that wins cancels the
  * widget (no click). The cancelled widget keeps any value it wrote before (Model D), so a draggable
@@ -37,11 +37,8 @@ extern const nt_ui_widget_def_t NT_UI_SCROLLBAR_DEF;
 #define NT_UI_SCROLL_FLAG_BAR_X ((uint8_t)(1U << 2))
 #define NT_UI_SCROLL_FLAG_BAR_Y ((uint8_t)(1U << 3))
 
-/* State-pool tag of a scroll cell (game scrolls and inspector panes). */
-#define NT_UI_SCROLL_TAG NT_UI_STATE_TAG('s', 'c', 'r', 'l')
-
 /* Per-container retained state in the nt_ui_state pool. pos/vel/target in Clay's
- * negative-down sign convention. 48B; under NT_UI_STATE_PAYLOAD_MAX. */
+ * negative-down sign convention. 44B; under NT_UI_STATE_PAYLOAD_MAX. */
 typedef struct {
     float pos[2];     /* DISPLAY offset fed to clip.childOffset (raw clamped/rubber-banded) */
     float raw[2];     /* un-rubber-banded scroll pos: accumulates finger 1:1 even past the edge (drag anchor) */
@@ -49,7 +46,6 @@ typedef struct {
     float target[2];  /* smooth-wheel + scroll-to target */
     float idle;       /* seconds since last scroll activity (AUTO_HIDE linger; dt-accumulated, no wall clock) */
     float thumb_grab; /* offset of the press point within the thumb (track-axis px); set on thumb-press */
-    uint32_t parent;  /* enclosing scroll at the last declaration (0 = none or a popup barrier) */
     uint8_t flags;
     uint8_t bar_axis; /* 1 + axis while the owner drags this scroll by a thumb; 0 = content drag */
     uint16_t bar_pad; /* this frame's bar hit padding (style bar_hit_pad) */

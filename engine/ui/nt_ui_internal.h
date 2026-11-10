@@ -146,18 +146,12 @@ static inline nt_ui_baked_xform_t nt_ui_internal_identity_baked(void) {
     return bx;
 }
 
-/* Per-frame record of a step, blocker or scroll surface, used next frame by the
+/* Per-frame record of a step, blocker, scroll surface or scrollbar, used next frame by the
  * front-most hot-widget resolve. The transform/bbox are re-fetched by id at resolve time. */
 typedef struct {
     uint32_t id;
-    uint32_t scope; /* innermost scroll open when recorded (0 = none); scope == id marks a scroll surface */
     int16_t pad[4]; /* hit padding L/R/T/B */
 } nt_ui_interactive_t;
-
-/* Scroll nesting depth; popups push a 0 barrier on the same stack. */
-#ifndef NT_UI_SCROLL_MAX_DEPTH
-#define NT_UI_SCROLL_MAX_DEPTH 16
-#endif
 
 /* Nested-modal cap (fail-early assert on overflow; depth is a counter, no heap). Depth is the
  * overflow guard only — bands come from Clay's relative zIndex, top-targeting from modal_top_z_cur.
@@ -165,9 +159,6 @@ typedef struct {
 #ifndef NT_UI_MODAL_MAX_DEPTH
 #define NT_UI_MODAL_MAX_DEPTH 16
 #endif
-
-/* Declaration stack: nested scrolls and popup barriers. */
-#define NT_UI_SCROLL_STACK_CAP (NT_UI_SCROLL_MAX_DEPTH + NT_UI_MODAL_MAX_DEPTH)
 
 /* Bound the storage and per-row work of NT_UI_CHECKS duplicate detection. */
 #ifndef NT_UI_COMBO_DUP_KEY_WINDOW
@@ -216,13 +207,8 @@ struct nt_ui_context {
      * by alignment (after the 4B-aligned captures) to avoid adding struct padding. */
     nt_ui_hot_t pointer_hot[NT_INPUT_MAX_POINTERS];
     float pointer_occlusion[NT_INPUT_MAX_POINTERS]; /* max world ray distance; default +inf = no cutoff */
-    /* Scope of the front-most record under each pointer (set with pointer_hot) — where its scroll
-     * chain starts. */
-    uint32_t pointer_scope[NT_INPUT_MAX_POINTERS];
     /* Per pointer and axis (0 = x, 1 = y): the scroll allowed to consume this frame's wheel. */
     uint32_t wheel_owner[NT_INPUT_MAX_POINTERS][2];
-    /* Declaration stack of open scrolls (0 = popup barrier); top = scroll_top. */
-    uint32_t scroll_stack[NT_UI_SCROLL_STACK_CAP];
     /* Top-modal targeting with the standard 1-frame IM lag: _cur tracks the DEEPEST modal id seen
      * this frame; nt_ui_begin commits it into _prev, which the Esc/backdrop close-scan targets so
      * only the genuinely-topmost modal consumes the event (same-frame nesting can't be known at
@@ -249,7 +235,6 @@ struct nt_ui_context {
     uint32_t rich_max_text_bytes;
     /* Band each overlay level declares above the floating enclosing it; validated in create_context (> 1). */
     int16_t modal_zband_stride;
-    uint16_t scroll_top;
     uint8_t active_modal_depth;
     uint8_t capture_seen[NT_INPUT_MAX_POINTERS];
     /* Modal-presence across frames: _cur set when any modal declares a backdrop this frame;
@@ -573,6 +558,9 @@ Clay_Vector2 nt_ui_internal_scroll_pane_offset(nt_ui_context_t *ctx, uint32_t id
  * sidebar's pointer). */
 #define NT_UI_SCROLL_FLAG_PANE ((uint8_t)(1U << 1))
 
+/* State-pool tag of a scroll cell (game scrolls and inspector panes). */
+#define NT_UI_SCROLL_TAG NT_UI_STATE_TAG('s', 'c', 'r', 'l')
+
 /* How a hit on a registry record counts in the front-most resolve. */
 typedef enum { NT_UI_HIT_NONE = 0, NT_UI_HIT, NT_UI_HIT_PANE } nt_ui_hit_kind_t;
 
@@ -580,8 +568,8 @@ typedef enum { NT_UI_HIT_NONE = 0, NT_UI_HIT, NT_UI_HIT_PANE } nt_ui_hit_kind_t;
  * routes the wheel. Reads last frame's layout and this frame's front-most records. */
 void nt_ui_internal_scroll_arbitrate(nt_ui_context_t *ctx);
 
-/* How a hit on a scroll surface record counts in the front-most resolve. */
-nt_ui_hit_kind_t nt_ui_internal_scroll_surface_kind(nt_ui_context_t *ctx, uint32_t id);
+/* How a hit on record `id` counts in the front-most resolve: a scroll's own id is its surface. */
+nt_ui_hit_kind_t nt_ui_internal_record_kind(nt_ui_context_t *ctx, uint32_t id);
 
 /* True when an axis overflows; the half unit absorbs layout rounding, so a fitting list never turns
  * scrollable (or shows an AUTO bar) by noise. */
@@ -594,13 +582,8 @@ static inline uint8_t nt_ui_internal_scroll_axes(const Clay_ScrollContainerData 
     return (uint8_t)((x ? NT_UI_DRAG_X : 0U) | (y ? NT_UI_DRAG_Y : 0U));
 }
 
-/* Adds a registry record for the front-most resolve with the current scroll scope. */
-void nt_ui_internal_register_interactive(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lrtb[4], uint32_t scope);
-
-/* Declaration stack: scrolls push their id, popups push 0 (a barrier for the scroll chain). */
-void nt_ui_internal_scroll_push(nt_ui_context_t *ctx, uint32_t id);
-void nt_ui_internal_scroll_pop(nt_ui_context_t *ctx, bool barrier);
-static inline uint32_t nt_ui_internal_scroll_open(const nt_ui_context_t *ctx) { return (ctx->scroll_top > 0U) ? ctx->scroll_stack[ctx->scroll_top - 1U] : 0U; }
+/* Adds a registry record for the front-most resolve. */
+void nt_ui_internal_register_interactive(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lrtb[4]);
 
 /* Prev-frame transform-aware point-in-bbox test (same 1-frame IM lag as step/query), with optional
  * L/R/T/B padding. Sets the Clay current-ctx internally. Used by the modal close-on-backdrop guard. */

@@ -44,6 +44,12 @@ int32_t nt_ui_clay_priv_open_floating_z(Clay_Context *clay) {
     return (len > 0) ? Clay__int32_tArray_GetValue(&clay->openFloatingZStack, len - 1) : 0;
 }
 
+uint32_t nt_ui_clay_priv_open_element_id(Clay_Context *clay) {
+    NT_ASSERT(clay != NULL && clay->openLayoutElementStack.length > 0 && "nt_ui_clay_priv_open_element_id: no open element");
+    const int32_t index = Clay__int32_tArray_GetValue(&clay->openLayoutElementStack, clay->openLayoutElementStack.length - 1);
+    return Clay_LayoutElementArray_Get(&clay->layoutElements, index)->id;
+}
+
 float nt_ui_clay_priv_layout_width(Clay_Context *clay) {
     NT_ASSERT(clay != NULL && "nt_ui_clay_priv_layout_width: clay must be non-NULL");
     return clay->layoutDimensions.width;

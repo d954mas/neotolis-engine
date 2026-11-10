@@ -425,7 +425,7 @@ static void menu_declare_occluder(nt_ui_context_t *ctx, uint8_t fill_layer, uint
     /* Inert gate: wins next-frame topmost-z over base UI so the dismiss click is absorbed (never leaks
      * through) and base UI is non-interactive while the menu is open. The menu-owned outside-click
      * dismiss (global press + !over-any-panel) remains the dismiss source. */
-    nt_ui_internal_register_interactive(ctx, occ_id, NULL, 0U); /* scope 0: never hands a drag to a scroll it covers */
+    nt_ui_block_pointer(ctx, occ_id, NULL);
 }
 
 // #region immediate-mode menu (begin/item/submenu/separator/end)
