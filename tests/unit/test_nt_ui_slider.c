@@ -596,7 +596,7 @@ static void slider_top_in_scroll_frame(const nt_pointer_t *p, float *value) {
 }
 
 #define TOP_SL_CY (SCROLL_Y + (SL_H * 0.5F))
-#define TOP_SL_TRACK_X (SCROLL_X + SL_W - 15.0F) /* on the track, right of the mid thumb */
+#define TOP_SL_TRACK_X (SCROLL_X + SL_W - 25.0F) /* on the track, right of the mid thumb, clear of the bar's touch target */
 
 /* A vertical drag that starts on the track scrolls the list and leaves the value alone. */
 static void test_slider_in_scroll_vertical_drag_keeps_value(void) {

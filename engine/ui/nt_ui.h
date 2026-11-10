@@ -350,7 +350,7 @@ typedef struct {
     float dt;                     /* seconds, >= 0 */
     const nt_pointer_t *pointers; /* RAW DEVICE coords; [0..count) drive multitouch (see nt_ui_interaction_t) */
     uint32_t pointer_count;       /* 1..NT_INPUT_MAX_POINTERS */
-    uint32_t primary;             /* anchors menus, rich-text links, the Clay feed and the inspector */
+    uint32_t primary;             /* anchors menus, the Clay feed and the inspector */
     nt_ui_viewport_t viewport;    /* device content rect (nt_ui_viewport_from_scale); zero size = identity (px_per_dp 0 = 1) */
     const float *view_proj;       /* 3D ctx: mat4 (above); 2D ctx: NULL */
     const float *occlusion;       /* 3D ctx: per-pointer max ray distance, e.g. the nearest world hit; NULL = none */
@@ -554,7 +554,7 @@ nt_ui_bbox_t nt_ui_get_bbox(const nt_ui_context_t *ctx, uint32_t id);
  * Aggregated interaction_t.hovered = any pointer over; pressed/released/clicked
  * track the single owner pidx. interaction_t.pointer_id holds the OS id of the
  * owning (or first hovering) pointer. */
-/* Computed lazily: this-frame pointer vs PREVIOUS-frame bbox (1-frame IM lag). */
+/* This-frame pointer vs PREVIOUS-frame bbox (1-frame IM lag). */
 typedef struct {
     bool hovered;           /* pointer over bbox (transform-aware) */
     bool pressed;           /* currently captured (held) */
@@ -603,12 +603,16 @@ bool nt_ui_hold_crossed(const nt_ui_interaction_t *in, float secs);
 /* Linear 0..1 ramp toward secs > 0 while the hold is live, 0 otherwise (the hold-to-confirm signal). */
 float nt_ui_hold_progress(const nt_ui_interaction_t *in, float secs);
 
-/* App-wide gesture constants: the double-click window (secs), the move radius (dp) within which a
- * second press still counts as a double-click, and the drag slop (dp) a press must move along an axis
- * before an enclosing scroll or a draggable widget takes it. Hold/long-press is NOT cancelled by
- * movement — only by leaving the widget's hitbox. Asserts each is finite and >= 0 (slop > 0).
- * Defaults: 0.5 s, 16 dp, 8 dp. */
-void nt_ui_set_gesture_constants(nt_ui_context_t *ctx, float dbl_window_secs, float move_radius_dp, float drag_slop_dp);
+/* Drag slop (dp): how far a press moves along an axis before an enclosing scroll or a draggable
+ * widget takes it (Android touchSlop). */
+#ifndef NT_UI_DRAG_SLOP_DP
+#define NT_UI_DRAG_SLOP_DP 8.0F
+#endif
+
+/* App-wide gesture constants: the double-click window (secs) and the move radius (dp) within which a
+ * second press still counts as a double-click. Hold/long-press is NOT cancelled by movement — only by
+ * leaving the widget's hitbox. Asserts each is finite and >= 0. Defaults: 0.5 s, 16 dp. */
+void nt_ui_set_gesture_constants(nt_ui_context_t *ctx, float dbl_window_secs, float move_radius_dp);
 
 /* Inert occluder: enters id into the interactive registry so it wins next-frame topmost-z
  * arbitration over widgets behind it (the pointer can't leak through), but never captures,

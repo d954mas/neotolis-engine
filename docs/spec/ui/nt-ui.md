@@ -283,7 +283,7 @@ world geometry — the game owns the raycast, the engine only takes the cutoff d
 distance (relative, floored at one unit) are coplanar and compete like 2D. 2D ctx: highest effective Clay
 zIndex (tie → last-registered, i.e. the later `nt_ui_step` call; widget code should
 step in declaration order so this matches paint order). `nt_ui_wants_pointer` is true
-while a pointer holds a capture or its front-most record is declared again this frame (a
+while a pointer holds a capture or a pending scroll gesture, or its front-most record is declared again this frame (a
 record that vanished this frame is not UI under the pointer). Each registry record also stores its
 scroll scope (the innermost scroll open when it registered), which starts the scroll
 chain of a press on it. A free pointer drives a
@@ -416,8 +416,11 @@ clip data Clay keeps for a scroll declared last frame). A scroll container regis
 arbitration (z-order, blockers, modals, transforms, 3D occlusion); a scroll whose content
 fits (within half a unit) is see-through. Scrolls form a declaration chain: `scroll_begin` pushes its id and
 records the enclosing scroll as its parent; popup core (dropdown, menu, modal, tooltip)
-and the menu occluder push a 0 barrier, so a drag inside a popup never reaches a scroll
-behind it. Scrollbars belong to their scroll's chain (the wheel over a bar scrolls it). Widgets inside a scroll must step between its begin and end.
+pushes a 0 barrier and the menu occluder registers with scope 0, so a drag inside a popup
+never reaches a scroll behind it. Scrollbars belong to their scroll's chain (the wheel over
+a bar scrolls it); `scroll_end` adds their hit records after the content's, so a press on
+a bar never goes to a row under it, and a faded-out bar has none. Widgets inside a scroll
+must step between its begin and end.
 
 A press starts a gesture record on the chain of the front-most record under it (its
 scope); a press on a bar that can move makes the pointer its scroll's owner by the thumb
@@ -426,7 +429,7 @@ in fitting panels are never pending). A chain link counts
 only if that scroll was declared and its layout solved last frame, so a vanished scroll
 takes nothing. While pending, the pressed widget sees `gesture_pending`. Each frame the
 pointer's displacement from the press is compared per axis with the drag slop
-(`nt_ui_set_gesture_constants`, default 8 dp, Android touchSlop): candidates are the
+(`NT_UI_DRAG_SLOP_DP`, 8 dp, Android touchSlop): candidates are the
 pressed widget's own `drag_axes` and the chain's eligible axes, inner first. The
 strongest crossing (|d| / slop) wins, ties going to the widget, then the inner scroll;
 nothing crossed keeps the gesture pending. A scroll that wins takes the capture — the
@@ -435,7 +438,7 @@ draggables hold value changes while pending). On the first crossing frame the ex
 the slop is routed (no jump, no lost distance); a later claim anchors at the pointer.
 A crossing on the release frame still claims (fling, no click), and the owner keeps the
 capture through its release frame. A release with nothing crossed stays pending through
-its release frame: the widget gets its release (click when over it) with `gesture_pending`,
+its release frame (`nt_ui_end` ends it, so skipped frames never continue it): the widget gets its release (click when over it) with `gesture_pending`,
 which marks a tap; a pending draggable applies a tap only when `clicked`. The newest pointer to claim a scroll or press its bar takes
 it from older pointers (Android). A press on a flinging, undragged scroll of the chain
 stops the fling and is swallowed (tap-to-stop). Wheel goes per pointer and axis to the
@@ -453,8 +456,9 @@ scrollbar (2-piece slice9 track + thumb, both axes) emits as floating children o
 the container with
 ALWAYS / AUTO / AUTO_HIDE visibility (AUTO_HIDE shows on scroll activity and fades
 out `bar_hide_delay` seconds after the last motion, via one `nt_ui_anim` value_t).
-A thumb press grabs at the press offset inside the thumb (no jump-to-center); a click
-on the track off the thumb smooth-jumps to the clicked spot (`nt_ui_scroll_to`). A
+A thumb press grabs at the press offset inside the thumb (no jump-to-center); a press
+on the track off the thumb centers the thumb under the pointer: a held press at once, a
+tap within one frame smoothly (`nt_ui_scroll_to`). A
 thin bar still gets a ≥ 24 px touch target via a cross-axis hit pad. The
 "Scissor limitation" note below still holds (AABB clip of a rotated scroll
 container is unchanged).
@@ -557,7 +561,7 @@ would dismiss. The cost is real and accepted: two catcher-bearing popups on
 one band with different draw layers paint by layer but dismiss by
 declaration, so an outside click can close the one underneath. Ranking the
 slot by paint order requires making the pointer arbiter layer-aware first
-(`resolve_hot_if_needed` is band-only today) — until then the two must use
+(`resolve_hot` is band-only today) — until then the two must use
 one key, and this is that key. The agreement is a 2D-context property: a 3D
 ctx arbitrates the pointer by ray distance and does not rank overlays by
 band at all. The agreement is a 2D-context property: a

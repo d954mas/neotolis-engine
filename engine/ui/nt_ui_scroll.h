@@ -22,7 +22,7 @@ extern const nt_ui_widget_def_t NT_UI_SCROLL_DEF;
 extern const nt_ui_widget_def_t NT_UI_SCROLLBAR_DEF;
 
 /* Scroll gestures: a press records the scroll chain of the front-most widget under it (its
- * declaration scope). Once the pointer moves the drag slop (nt_ui_set_gesture_constants, 8 dp) along an
+ * declaration scope). Once the pointer moves the drag slop (NT_UI_DRAG_SLOP_DP, 8 dp) along an
  * axis, the strongest crossing among the pressed widget's own drag axes (nt_ui_step_desc_t.drag_axes)
  * and the chain's scrollable axes (inner first) takes the gesture; a scroll that wins cancels the
  * widget (no click). The cancelled widget keeps any value it wrote before (Model D), so a draggable
@@ -30,8 +30,12 @@ extern const nt_ui_widget_def_t NT_UI_SCROLLBAR_DEF;
 
 /* Scroll-to active: ease pos toward target, clear on arrival. */
 #define NT_UI_SCROLL_FLAG_SCROLL_TO ((uint8_t)(1U << 0))
-/* Engine-internal inspector pane (floats above the game; takes the sidebar's pointer). */
-#define NT_UI_SCROLL_FLAG_PANE ((uint8_t)(1U << 1))
+/* Bit 1 is engine-internal (nt_ui_internal.h). */
+
+/* This frame declared the x / y bar: nt_ui_scroll_end adds its hit record after the content's, so a
+ * row under the bar never outranks it. */
+#define NT_UI_SCROLL_FLAG_BAR_X ((uint8_t)(1U << 2))
+#define NT_UI_SCROLL_FLAG_BAR_Y ((uint8_t)(1U << 3))
 
 /* State-pool tag of a scroll cell (game scrolls and inspector panes). */
 #define NT_UI_SCROLL_TAG NT_UI_STATE_TAG('s', 'c', 'r', 'l')
@@ -48,6 +52,7 @@ typedef struct {
     uint32_t parent;  /* enclosing scroll at the last declaration (0 = none or a popup barrier) */
     uint8_t flags;
     uint8_t bar_axis; /* 1 + axis while the owner drags this scroll by a thumb; 0 = content drag */
+    uint8_t bar_pad;  /* cross-axis hit padding of this frame's bars, per side */
 } nt_ui_scroll_state_t;
 
 /* Scrollbar visibility (defined here so the style stays one struct). Bars always float
@@ -81,9 +86,9 @@ nt_ui_scroll_style_t nt_ui_scroll_style_defaults(void);
  * padding only. Scroll state rides the nt_ui_state pool keyed by id. Must be balanced
  * with nt_ui_scroll_end. */
 void nt_ui_scroll_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint32_t id, const nt_ui_scroll_style_t *style, const Clay_ElementDeclaration *decl);
-/* Emits the scrollbars (both axes) as floating children at the container's own band (delta 0), declared
- * last so they paint over the container's content — a floating declared after them in the same band
- * paints over the bar. */
+/* Closes the container. The scrollbars are floating children declared by nt_ui_scroll_begin at the
+ * container's own band (delta 0); their hit records are added here, after the content's, so a press on
+ * a bar never goes to a row under it. */
 void nt_ui_scroll_end(nt_ui_context_t *ctx);
 
 /* Set the target offset (Clay sign: negative = down/right) and ease there.

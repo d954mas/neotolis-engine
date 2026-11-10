@@ -2449,6 +2449,63 @@ static void test_arb_popup_barrier_keeps_drag_from_list(void) {
     TEST_ASSERT_TRUE(float_near(arb_list()->raw[1], 0.0F, 0.001F));
 }
 
+/* A tap's pending gesture ends with its frame: a button found held when the context runs again
+ * (frames skipped, no edges) is not that press and drags nothing. */
+static void test_arb_tap_scope_does_not_outlive_its_frame(void) {
+    arb_scene_reset();
+    nt_pointer_t p = arb_pointer(100.0F, 150.0F);
+    arb_warm(&p);
+    arb_press(&p);
+    arb_frame(&p, 1);
+    arb_release(&p);
+    arb_frame(&p, 1);
+    p.buttons[NT_BUTTON_LEFT] = (nt_button_state_t){.is_down = true};
+    p.y = 110.0F;
+    arb_frame(&p, 1);
+    TEST_ASSERT_EQUAL_UINT32(0U, s_fx.ctx->captures[0].active_id);
+    TEST_ASSERT_TRUE(float_near(arb_list()->raw[1], 0.0F, 0.001F));
+}
+
+/* A thumb press over a full-width row takes the thumb, not the row under it. */
+static void test_arb_thumb_over_row_takes_the_thumb(void) {
+    arb_scene_reset();
+    s_scene.body = body_button_row;
+    nt_pointer_t p = arb_pointer(195.0F, 20.0F);
+    arb_warm(&p);
+    arb_press(&p);
+    arb_frame(&p, 1);
+    assert_thumb_owner(0U, SCROLL_ID, 1);
+    TEST_ASSERT_FALSE(s_child_in.pressed);
+}
+
+/* A pending press keeps the pointer for the UI after it leaves the list: the list may still take it. */
+static void test_arb_pending_press_wants_pointer_off_the_list(void) {
+    arb_scene_reset();
+    nt_pointer_t p = arb_pointer(100.0F, 150.0F);
+    arb_warm(&p);
+    arb_press(&p);
+    arb_frame(&p, 1);
+    arb_hold(&p);
+    p.x = 500.0F;
+    arb_frame(&p, 1);
+    TEST_ASSERT_TRUE(nt_ui_wants_pointer(s_fx.ctx));
+}
+
+/* A track tap centers the thumb under the pointer, like a held track press: 150 on a 200 track with a
+ * 40 thumb is frac (150 - 20) / 160 of the 800 overflow. */
+static void test_arb_track_tap_centers_the_thumb(void) {
+    arb_scene_reset();
+    nt_pointer_t p = arb_pointer(195.0F, 150.0F);
+    arb_warm(&p);
+    p.buttons[NT_BUTTON_LEFT] = (nt_button_state_t){.is_pressed = true, .is_released = true};
+    arb_frame(&p, 1);
+    p.buttons[NT_BUTTON_LEFT] = (nt_button_state_t){0};
+    for (int i = 0; i < 240; ++i) {
+        arb_frame(&p, 1);
+    }
+    TEST_ASSERT_TRUE(float_near(arb_list()->pos[1], -650.0F, 1.0F));
+}
+
 /* The wheel over a scrollbar scrolls its list. */
 static void test_arb_wheel_over_bar_scrolls_list(void) {
     arb_scene_reset();
@@ -2593,6 +2650,10 @@ static void test_assert_release_with_newer_press(void) { NT_TEST_EXPECT_ASSERT(r
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_arb_foreground_outside_list_not_stolen);
+    RUN_TEST(test_arb_tap_scope_does_not_outlive_its_frame);
+    RUN_TEST(test_arb_thumb_over_row_takes_the_thumb);
+    RUN_TEST(test_arb_pending_press_wants_pointer_off_the_list);
+    RUN_TEST(test_arb_track_tap_centers_the_thumb);
     RUN_TEST(test_arb_modal_blocks_tap_to_stop_and_drag);
     RUN_TEST(test_arb_drag_from_disabled_row_scrolls);
     RUN_TEST(test_arb_diagonal_arc_scrolls_vertical_list);

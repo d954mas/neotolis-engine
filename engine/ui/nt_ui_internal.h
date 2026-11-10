@@ -154,7 +154,7 @@ typedef struct {
     int16_t pad[4]; /* hit padding L/R/T/B */
 } nt_ui_interactive_t;
 
-/* Scroll nesting depth; popups and the menu occluder push a 0 barrier on the same stack. */
+/* Scroll nesting depth; popups push a 0 barrier on the same stack. */
 #ifndef NT_UI_SCROLL_MAX_DEPTH
 #define NT_UI_SCROLL_MAX_DEPTH 16
 #endif
@@ -202,7 +202,7 @@ struct nt_ui_context {
 
     nt_pointer_t frame_pointers[NT_INPUT_MAX_POINTERS];
     uint32_t frame_pointer_count;
-    uint32_t frame_primary; /* the nt_ui_begin primary: menus, rich-text links and the inspector follow it */
+    uint32_t frame_primary; /* the nt_ui_begin primary: menus and the inspector follow it */
     float frame_dt;
     nt_ui_viewport_t viewport;
     /* begin dims (= screen_w/h) — the layout size the device<->layout conversion divides by. Stored so
@@ -252,7 +252,6 @@ struct nt_ui_context {
     uint16_t scroll_top;
     uint8_t active_modal_depth;
     uint8_t capture_seen[NT_INPUT_MAX_POINTERS];
-    bool pointer_over_any; /* the front-most record under a pointer was declared again this frame */
     /* Modal-presence across frames: _cur set when any modal declares a backdrop this frame;
      * nt_ui_begin commits it into _prev. nt_ui_modal_active reads _prev so the game can gate its
      * next-frame hotkeys (the live depth is always 0 by nt_ui_end, can't be queried after). */
@@ -391,7 +390,6 @@ struct nt_ui_context {
     /* App-wide gesture constants, see nt_ui_set_gesture_constants. Grouped with the float block to avoid padding. */
     float gesture_dbl_window_secs;
     float gesture_move_radius_dp;
-    float gesture_drag_slop_dp;
     float layout_per_dp[2]; /* layout units per dp on x/y, from the viewport each frame */
     uint32_t last_press_id; /* widget of the previous press; 0 = nothing to pair with */
     float last_press_age;   /* dt accumulated since that press */
@@ -570,6 +568,10 @@ void nt_ui_internal_apply_scissor_logical_to_physical(const nt_ui_target_t *targ
  * the custom scroll integrator off prev-frame dims + wheel, on the axes its clip config enables.
  * Feed the result to clip.childOffset. */
 Clay_Vector2 nt_ui_internal_scroll_pane_offset(nt_ui_context_t *ctx, uint32_t id);
+
+/* Engine-internal inspector pane: a scroll cell flag (it floats above the game and takes the
+ * sidebar's pointer). */
+#define NT_UI_SCROLL_FLAG_PANE ((uint8_t)(1U << 1))
 
 /* How a hit on a registry record counts in the front-most resolve. */
 typedef enum { NT_UI_HIT_NONE = 0, NT_UI_HIT, NT_UI_HIT_PANE } nt_ui_hit_kind_t;

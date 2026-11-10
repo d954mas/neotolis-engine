@@ -244,7 +244,6 @@ nt_ui_context_t *nt_ui_create_context(void *arena, size_t arena_size, const nt_u
     /* Touch-friendly baseline, looser than ImGui's mouse 6px/0.3s: the engine targets mobile/WASM. */
     ctx->gesture_dbl_window_secs = 0.50F;
     ctx->gesture_move_radius_dp = 16.0F;
-    ctx->gesture_drag_slop_dp = 8.0F; /* Android touchSlop */
     const size_t tree_baked_bytes = NT_ALIGN_UP(sizeof(nt_ui_baked_xform_t) * desc->max_elements, NT_UI_CACHE_LINE);
     const size_t tree_root_bytes = NT_ALIGN_UP(sizeof(*ctx->tree_root_for_elem) * desc->max_elements, NT_UI_CACHE_LINE);
     const size_t tree_dfs_bytes = NT_ALIGN_UP(sizeof(nt_ui_dfs_frame_t) * NT_UI_TREE_DFS_DEPTH_CAP, NT_UI_CACHE_LINE);
@@ -531,7 +530,6 @@ void nt_ui_begin(nt_ui_context_t *ctx, const nt_ui_frame_desc_t *frame) {
      * first-field tracker re-zeroes so a Tab off the last field wraps to this frame's first. */
     ctx->focus_tab_seek = 0U;
     ctx->focus_first_id = 0U;
-    ctx->pointer_over_any = false;
 
     /* Swap the interactive registry: this frame's resolve reads last frame's set (now _prev); _cur is
      * refilled by this frame's nt_ui_step calls. */
@@ -625,6 +623,13 @@ void nt_ui_end(nt_ui_context_t *ctx) {
 #endif
 
     NT_ASSERT(ctx->scroll_top == 0U && "nt_ui_end: unbalanced scroll/popup begin/end");
+    /* A pending gesture ends with its release frame (the widgets read it as a tap above), so a button
+     * found held after skipped frames never continues it. */
+    for (uint32_t i = 0; i < ctx->frame_pointer_count; ++i) {
+        if (!ctx->frame_pointers[i].buttons[NT_BUTTON_LEFT].is_down) {
+            ctx->captures[i].scroll_scope = 0U;
+        }
+    }
 
     /* Publish this frame's modal presence for nt_ui_modal_active: a game polls it next frame BEFORE
      * begin (e.g. gating its own hotkeys), so commit at end (not begin) to hold the latest result. */
@@ -2637,9 +2642,11 @@ static void resolve_hot(nt_ui_context_t *ctx) {
              * nt_ui_step call order = declaration (paint) order when the game steps in declaration order.
              * An inspector pane floats above the game in any view_proj, so it wins outright. */
             int16_t z = zi;
+#if NT_UI_DEBUG_TOOLS
             if (kind == NT_UI_HIT_PANE) {
                 z = INT16_MAX;
             }
+#endif
             if (z >= best_zindex) {
                 best.id = rec->id;
                 best.distance = ctx->use_raycast_input ? t : 0.0F;
@@ -2699,9 +2706,7 @@ nt_ui_interaction_t nt_ui_step(nt_ui_context_t *ctx, uint32_t id, const nt_ui_st
         const nt_pointer_t *p = &ctx->frame_pointers[pidx];
         nt_ui_capture_t *cap = &ctx->captures[pidx];
         if (s.new_capture) {
-            cap->active_id = id;
-            cap->press_pos[0] = p->x;
-            cap->press_pos[1] = p->y;
+            cap->active_id = id; /* press_pos: the arbiter set it at this press edge */
             cap->hold_secs = 0.0F;
             cap->hold_prev_secs = 0.0F;
             cap->hold_live = true;
@@ -2782,15 +2787,12 @@ float nt_ui_hold_progress(const nt_ui_interaction_t *in, float secs) {
     return in->hold_secs >= secs ? 1.0F : in->hold_secs / secs;
 }
 
-// NOLINTNEXTLINE(readability-function-cognitive-complexity) — count is all NT_ASSERT guards, not logic
-void nt_ui_set_gesture_constants(nt_ui_context_t *ctx, float dbl_window_secs, float move_radius_dp, float drag_slop_dp) {
+void nt_ui_set_gesture_constants(nt_ui_context_t *ctx, float dbl_window_secs, float move_radius_dp) {
     NT_ASSERT(ctx != NULL && "nt_ui_set_gesture_constants: ctx must be non-NULL");
     NT_ASSERT(isfinite(dbl_window_secs) && dbl_window_secs >= 0.0F && "nt_ui_set_gesture_constants: dbl_window_secs must be finite and >= 0");
     NT_ASSERT(isfinite(move_radius_dp) && move_radius_dp >= 0.0F && "nt_ui_set_gesture_constants: move_radius_dp must be finite and >= 0");
-    NT_ASSERT(isfinite(drag_slop_dp) && drag_slop_dp > 0.0F && "nt_ui_set_gesture_constants: drag_slop_dp must be finite and > 0");
     ctx->gesture_dbl_window_secs = dbl_window_secs;
     ctx->gesture_move_radius_dp = move_radius_dp;
-    ctx->gesture_drag_slop_dp = drag_slop_dp;
 }
 
 /* Inert registry entry: the id wins next-frame hot arbitration over anything behind it (topmost-z),
@@ -2815,11 +2817,6 @@ void nt_ui_internal_register_interactive(nt_ui_context_t *ctx, uint32_t id, cons
     nt_ui_interactive_t *rec = &ctx->interactive_cur[ctx->interactive_cur_count++];
     rec->id = id;
     rec->scope = scope;
-    for (uint32_t i = 0; i < ctx->frame_pointer_count; ++i) {
-        if (ctx->pointer_hot[i].id == id) {
-            ctx->pointer_over_any = true; /* the front-most record under a pointer is still declared */
-        }
-    }
     if (pad_lrtb != NULL) {
         memcpy(rec->pad, pad_lrtb, sizeof rec->pad);
     } else {
@@ -2879,12 +2876,15 @@ bool nt_ui_wants_pointer(const nt_ui_context_t *ctx) {
         return true;
     }
 #endif
-    if (ctx->pointer_over_any) {
-        return true;
-    }
     for (uint32_t i = 0; i < NT_INPUT_MAX_POINTERS; ++i) {
-        if (ctx->captures[i].active_id != 0U) {
-            return true;
+        if (ctx->captures[i].active_id != 0U || ctx->captures[i].scroll_scope != 0U) {
+            return true; /* a pending press may still become a scroll */
+        }
+        /* Over a widget: the front-most record under the pointer was declared again this frame. */
+        for (uint32_t k = 0; ctx->pointer_hot[i].id != 0U && k < ctx->interactive_cur_count; ++k) {
+            if (ctx->interactive_cur[k].id == ctx->pointer_hot[i].id) {
+                return true;
+            }
         }
     }
     return false;

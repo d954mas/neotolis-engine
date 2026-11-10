@@ -218,7 +218,7 @@ static void test_unstepped_frame_ends_hold(void) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_double_click_window_radius_and_third_press(void) {
     (void)btn_frame(idle_at(BTN_CY), 0.0F);
-    nt_ui_set_gesture_constants(s_fx.ctx, 0.25F, 8.0F, 8.0F);
+    nt_ui_set_gesture_constants(s_fx.ctx, 0.25F, 8.0F);
 
     (void)btn_frame(press_at(BTN_CY), 0.0F);
     (void)btn_frame(release_at(BTN_CY), 0.125F);
@@ -276,7 +276,7 @@ static void test_unstepped_frames_count_toward_window(void) {
 /* ---- only UI time separates presses: a short or dt==0 gap inside the window keeps the pair ---- */
 static void test_gap_inside_window_keeps_pair(void) {
     (void)btn_frame(idle_at(BTN_CY), 0.0F);
-    nt_ui_set_gesture_constants(s_fx.ctx, 0.25F, 8.0F, 8.0F);
+    nt_ui_set_gesture_constants(s_fx.ctx, 0.25F, 8.0F);
 
     (void)btn_frame(press_at(BTN_CY), 0.0F);
     (void)btn_frame(release_at(BTN_CY), 0.0F);
@@ -302,7 +302,7 @@ static nt_ui_interaction_t two_btn_frame(nt_pointer_t p, bool want_other) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_press_on_other_widget_replaces_record(void) {
-    nt_ui_set_gesture_constants(s_fx.ctx, 10.0F, 1000.0F, 8.0F);
+    nt_ui_set_gesture_constants(s_fx.ctx, 10.0F, 1000.0F);
     (void)two_btn_frame(idle_at(OTHER_CY), true);
 
     TEST_ASSERT_TRUE(two_btn_frame(press_at(BTN_CY), false).pressed_now);
@@ -390,7 +390,7 @@ static void test_press_edge_on_held_capture_restarts_hold(void) {
 
 /* ---- a release lost the same way must not keep the pointer bound to the old widget ---- */
 static void test_lost_release_frees_capture_for_next_press(void) {
-    nt_ui_set_gesture_constants(s_fx.ctx, 0.0F, 0.0F, 8.0F);
+    nt_ui_set_gesture_constants(s_fx.ctx, 0.0F, 0.0F);
     (void)two_btn_frame(idle_at(BTN_CY), false);
     TEST_ASSERT_TRUE(two_btn_frame(press_at(BTN_CY), false).pressed_now);
 
@@ -401,14 +401,12 @@ static void test_lost_release_frees_capture_for_next_press(void) {
 
 /* nt_ui_set_gesture_constants asserts finite & >= 0 (fail-early, no silent clamp). */
 static void test_set_gesture_constants_rejects_bad_values(void) {
-    NT_TEST_EXPECT_ASSERT(nt_ui_set_gesture_constants(s_fx.ctx, -1.0F, 6.0F, 8.0F));
-    NT_TEST_EXPECT_ASSERT(nt_ui_set_gesture_constants(s_fx.ctx, 0.30F, -2.0F, 8.0F));
-    NT_TEST_EXPECT_ASSERT(nt_ui_set_gesture_constants(s_fx.ctx, NAN, 6.0F, 8.0F));
-    NT_TEST_EXPECT_ASSERT(nt_ui_set_gesture_constants(s_fx.ctx, 0.30F, INFINITY, 8.0F));
-    NT_TEST_EXPECT_ASSERT(nt_ui_set_gesture_constants(s_fx.ctx, 0.30F, 6.0F, 0.0F));
-    NT_TEST_EXPECT_ASSERT(nt_ui_set_gesture_constants(s_fx.ctx, 0.30F, 6.0F, NAN));
+    NT_TEST_EXPECT_ASSERT(nt_ui_set_gesture_constants(s_fx.ctx, -1.0F, 6.0F));
+    NT_TEST_EXPECT_ASSERT(nt_ui_set_gesture_constants(s_fx.ctx, 0.30F, -2.0F));
+    NT_TEST_EXPECT_ASSERT(nt_ui_set_gesture_constants(s_fx.ctx, NAN, 6.0F));
+    NT_TEST_EXPECT_ASSERT(nt_ui_set_gesture_constants(s_fx.ctx, 0.30F, INFINITY));
     /* A valid pair is accepted. */
-    nt_ui_set_gesture_constants(s_fx.ctx, 0.25F, 8.0F, 8.0F);
+    nt_ui_set_gesture_constants(s_fx.ctx, 0.25F, 8.0F);
 }
 
 int main(void) {
