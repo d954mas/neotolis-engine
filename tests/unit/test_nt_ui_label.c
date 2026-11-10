@@ -43,8 +43,8 @@ static nt_program_t text_program(void) { return nt_material_get_info(s_fx.text_m
 
 /* glyph_data[1] of quad `q`: 0 marks a solid decoration quad, a glyph quad has bands. */
 static uint32_t quad_band_count(nt_gfx_fake_draw_t d, uint32_t q) {
-    uint32_t bands = 0;
-    memcpy(&bands, ui_walker_fx_text_vertex(d, q, 0) + 24U, sizeof bands);
+    uint16_t bands = 0;
+    memcpy(&bands, ui_walker_fx_text_vertex(d, q, 0) + UI_WALKER_FX_TEXT_BAND_COUNT, sizeof bands);
     return bands;
 }
 
@@ -312,7 +312,7 @@ static void test_label_decoration_reaches_the_renderer(void) {
     TEST_ASSERT_EQUAL_UINT32(1U, ui_walker_fx_draw_count(text_program()));
     const nt_gfx_fake_draw_t d = ui_walker_fx_draw_at(text_program(), 0);
     TEST_ASSERT_EQUAL_UINT32_MESSAGE((3U * 4U) + 1U, ui_walker_fx_quads(d), "shadow, outline and fill passes of 4 glyphs plus one underline quad");
-    const float fill_x1 = ui_walker_fx_vertex_float(ui_walker_fx_text_vertex(d, 8, 0), UI_WALKER_FX_TEXT_GLYPH_BOUNDS_X1);
+    const float fill_x1 = ui_walker_fx_vertex_i16(ui_walker_fx_text_vertex(d, 8, 0), UI_WALKER_FX_TEXT_GLYPH_BOUNDS_X1);
     TEST_ASSERT_TRUE_MESSAGE(fill_x1 > 400.0F, "bold label fills with an emboldened glyph variant");
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, quad_band_count(d, 12), "the last quad is the solid underline");
     const float bl_y = ui_walker_fx_vertex_float(ui_walker_fx_text_vertex(d, 12, 0), 4);
@@ -433,7 +433,7 @@ static void test_label_plain_no_decoration(void) {
     const nt_gfx_fake_draw_t d = ui_walker_fx_draw_at(text_program(), 0);
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(5U, ui_walker_fx_quads(d), "plain label: one fill quad per glyph, no underline");
     for (uint32_t q = 0; q < 5U; q++) {
-        TEST_ASSERT_TRUE_MESSAGE(ui_walker_fx_vertex_float(ui_walker_fx_text_vertex(d, q, 0), UI_WALKER_FX_TEXT_GLYPH_BOUNDS_X1) == 400.0F, "plain label uses the unweighted glyph");
+        TEST_ASSERT_TRUE_MESSAGE(ui_walker_fx_vertex_i16(ui_walker_fx_text_vertex(d, q, 0), UI_WALKER_FX_TEXT_GLYPH_BOUNDS_X1) == 400.0F, "plain label uses the unweighted glyph");
     }
 }
 

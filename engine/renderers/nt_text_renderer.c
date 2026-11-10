@@ -15,15 +15,16 @@
 #include <string.h>
 
 // #region Vertex format
-/* 48 bytes per vertex, matching slug_text.vert contract */
+/* 36 bytes per vertex, matching slug_text.vert contract. The integer fields are read unnormalized:
+ * the shader receives their exact values as floats. */
 typedef struct {
-    float position[3];     /* 12B: world-space quad corner (full 3D) */
-    float texcoord[2];     /* 8B: em-space coordinate */
-    float glyph_data[2];   /* 8B: packed uint via memcpy (band_row, band_count) */
-    float glyph_bounds[4]; /* 16B: bbox x0/y0/x1/y1 in em-space */
-    uint32_t color;        /* 4B: RGBA8 0xAABBGGRR, read normalized */
+    float position[3];       /* 12B: world-space quad corner (full 3D) */
+    float texcoord[2];       /* 8B: em-space coordinate */
+    uint16_t glyph_data[2];  /* 4B: band_row, band_count */
+    int16_t glyph_bounds[4]; /* 8B: bbox x0/y0/x1/y1 in em-space */
+    uint32_t color;          /* 4B: RGBA8 0xAABBGGRR, read normalized */
 } nt_text_vertex_t;
-_Static_assert(sizeof(nt_text_vertex_t) == 48, "text vertex stride must be 48 bytes");
+_Static_assert(sizeof(nt_text_vertex_t) == 36, "text vertex stride must be 36 bytes");
 // #endregion
 
 // #region Module state
@@ -87,8 +88,8 @@ static nt_vertex_input_t find_or_create_vertex_input(void) {
                     {
                         {.location = 0, .type = NT_VERTEX_FLOAT, .count = 3, .offset = 0},                                                     /* a_position */
                         {.location = 1, .type = NT_VERTEX_FLOAT, .count = 2, .offset = 12},                                                    /* a_texcoord */
-                        {.location = 2, .type = NT_VERTEX_FLOAT, .count = 2, .offset = 20},                                                    /* a_glyph_data */
-                        {.location = 3, .type = NT_VERTEX_FLOAT, .count = 4, .offset = 28},                                                    /* a_glyph_bounds */
+                        {.location = 2, .type = NT_VERTEX_UINT16, .count = 2, .offset = 20},                                                   /* a_glyph_data */
+                        {.location = 3, .type = NT_VERTEX_INT16, .count = 4, .offset = 24},                                                    /* a_glyph_bounds */
                         {.location = 4, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = offsetof(nt_text_vertex_t, color)}, /* a_color */
                     },
             },
@@ -145,8 +146,6 @@ void nt_text_renderer_set_material(nt_material_t mat) {
 // #endregion
 
 // #region Vertex generation helpers
-static void pack_uint_as_float(float *out, uint32_t val) { memcpy(out, &val, 4); /* bit-preserving uint-to-float, never cast */ }
-
 static void transform_point(float out[3], const float model[16], float x, float y) {
     /* mat4 * vec4(x, y, 0, 1) -- full 3D transform */
     out[0] = model[0] * x + model[4] * y + model[12];
@@ -190,23 +189,17 @@ static void emit_quad(const nt_glyph_cache_entry_t *g, const float model[16], fl
     float em_x1 = (float)g->bbox_x1 + dilate_x;
     float em_y1 = (float)g->bbox_y1 + dilate_y;
 
-    /* Pack glyph data as uint bit patterns */
-    float gd0;
-    float gd1;
-    pack_uint_as_float(&gd0, (uint32_t)g->band_row);
-    pack_uint_as_float(&gd1, (uint32_t)g->band_count);
-
     /* 4 vertices per quad: BL, BR, TR, TL */
     nt_text_vertex_t *v = alloc_quad();
 
     /* Shared fields — fill once in v[0], copy to v[1..3]. glyph_bounds is the
      * UNDILATED glyph bbox so the shader's band lookup stays correct. */
-    v[0].glyph_data[0] = gd0;
-    v[0].glyph_data[1] = gd1;
-    v[0].glyph_bounds[0] = (float)g->bbox_x0;
-    v[0].glyph_bounds[1] = (float)g->bbox_y0;
-    v[0].glyph_bounds[2] = (float)g->bbox_x1;
-    v[0].glyph_bounds[3] = (float)g->bbox_y1;
+    v[0].glyph_data[0] = g->band_row;
+    v[0].glyph_data[1] = g->band_count;
+    v[0].glyph_bounds[0] = g->bbox_x0;
+    v[0].glyph_bounds[1] = g->bbox_y0;
+    v[0].glyph_bounds[2] = g->bbox_x1;
+    v[0].glyph_bounds[3] = g->bbox_y1;
     v[0].color = color;
     v[1] = v[0];
     v[2] = v[0];
