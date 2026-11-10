@@ -213,10 +213,10 @@ float ui_walker_fx_vertex_float(const uint8_t *vertex, uint32_t byte_offset) {
     return v;
 }
 
-float ui_walker_fx_vertex_i16(const uint8_t *vertex, uint32_t byte_offset) {
+int16_t ui_walker_fx_vertex_i16(const uint8_t *vertex, uint32_t byte_offset) {
     int16_t v = 0;
     memcpy(&v, vertex + byte_offset, sizeof v);
-    return (float)v;
+    return v;
 }
 
 #endif /* NT_TEST_ACCESS */

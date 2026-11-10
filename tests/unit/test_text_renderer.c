@@ -329,6 +329,19 @@ void test_vertex_color_bytes(void) {
     TEST_ASSERT_EQUAL_HEX32(NT_RGBA8(10, 20, 30, 40), color);
 }
 
+/* Bytes 20..23 carry the glyph's band row and band count as two uint16. */
+void test_vertex_glyph_data_is_band_row_and_count(void) {
+    nt_text_style_t style = plain();
+    nt_text_renderer_draw(&style, s_identity, "AB");
+    const nt_glyph_cache_entry_t *b = nt_font_lookup_glyph(s_font, 'B');
+    TEST_ASSERT_NOT_NULL(b);
+    uint16_t glyph_data[2] = {0};
+    memcpy(glyph_data, text_vertices() + ((size_t)4U * TEXT_VERTEX_BYTES) + 20U, sizeof glyph_data); /* quad 1 = 'B' */
+    TEST_ASSERT_EQUAL_UINT16(b->band_row, glyph_data[0]);
+    TEST_ASSERT_EQUAL_UINT16(b->band_count, glyph_data[1]);
+    TEST_ASSERT_NOT_EQUAL(b->band_row, b->band_count);
+}
+
 /* Five attributes fill the 36-byte vertex: glyph data and bounds are unnormalized 16-bit integers, the
  * color is normalized RGBA8 at byte 32. */
 void test_vertex_input_reads_color_as_normalized_rgba8(void) {
@@ -1299,6 +1312,7 @@ int main(void) {
     RUN_TEST(test_measure_empty_string);
     RUN_TEST(test_measure_null_string);
     RUN_TEST(test_vertex_color_bytes);
+    RUN_TEST(test_vertex_glyph_data_is_band_row_and_count);
     RUN_TEST(test_vertex_input_reads_color_as_normalized_rgba8);
     RUN_TEST(test_quad_covers_fp16_rounded_tofu);
     RUN_TEST(test_text_material_may_declare_its_own_textures);

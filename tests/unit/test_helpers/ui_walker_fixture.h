@@ -69,8 +69,7 @@ nt_gfx_fake_draw_t ui_walker_fx_draw_at(nt_program_t program, uint32_t n);
 /* Bytes of corner `corner` (0 BL, 1 BR, 2 TR, 3 TL) of quad `quad` of an indexed text draw. */
 const uint8_t *ui_walker_fx_text_vertex(nt_gfx_fake_draw_t draw, uint32_t quad, uint32_t corner);
 float ui_walker_fx_vertex_float(const uint8_t *vertex, uint32_t byte_offset);
-/* A 16-bit integer field of a text vertex, as the shader receives it. */
-float ui_walker_fx_vertex_i16(const uint8_t *vertex, uint32_t byte_offset);
+int16_t ui_walker_fx_vertex_i16(const uint8_t *vertex, uint32_t byte_offset);
 static inline uint32_t ui_walker_fx_quads(nt_gfx_fake_draw_t draw) { return draw.num_indices / 6U; }
 
 #ifdef __cplusplus

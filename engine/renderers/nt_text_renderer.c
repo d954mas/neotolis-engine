@@ -15,7 +15,7 @@
 #include <string.h>
 
 // #region Vertex format
-/* 36 bytes per vertex, matching slug_text.vert contract. The integer fields are read unnormalized:
+/* 36 bytes per vertex, the inputs of common/slug_vertex.glsl. The integer fields are read unnormalized:
  * the shader receives their exact values as floats. */
 typedef struct {
     float position[3];       /* 12B: world-space quad corner (full 3D) */
@@ -87,9 +87,9 @@ static nt_vertex_input_t find_or_create_vertex_input(void) {
                 .attrs =
                     {
                         {.location = 0, .type = NT_VERTEX_FLOAT, .count = 3, .offset = 0},                                                     /* a_position */
-                        {.location = 1, .type = NT_VERTEX_FLOAT, .count = 2, .offset = 12},                                                    /* a_texcoord */
-                        {.location = 2, .type = NT_VERTEX_UINT16, .count = 2, .offset = 20},                                                   /* a_glyph_data */
-                        {.location = 3, .type = NT_VERTEX_INT16, .count = 4, .offset = 24},                                                    /* a_glyph_bounds */
+                        {.location = 1, .type = NT_VERTEX_FLOAT, .count = 2, .offset = offsetof(nt_text_vertex_t, texcoord)},                  /* a_texcoord */
+                        {.location = 2, .type = NT_VERTEX_UINT16, .count = 2, .offset = offsetof(nt_text_vertex_t, glyph_data)},               /* a_glyph_data */
+                        {.location = 3, .type = NT_VERTEX_INT16, .count = 4, .offset = offsetof(nt_text_vertex_t, glyph_bounds)},              /* a_glyph_bounds */
                         {.location = 4, .type = NT_VERTEX_UINT8, .count = 4, .normalized = true, .offset = offsetof(nt_text_vertex_t, color)}, /* a_color */
                     },
             },
