@@ -62,7 +62,7 @@ static nt_program_t text_program(void) { return nt_material_get_info(s_fx.text_m
 /* Horizontal lean of quad `q` of a text draw: its TL corner x minus its BL corner x. */
 static float quad_lean(nt_gfx_fake_draw_t d, uint32_t q) { return ui_walker_fx_vertex_float(ui_walker_fx_text_vertex(d, q, 3), 0) - ui_walker_fx_vertex_float(ui_walker_fx_text_vertex(d, q, 0), 0); }
 
-static float quad_glyph_x1(nt_gfx_fake_draw_t d, uint32_t q) { return ui_walker_fx_vertex_float(ui_walker_fx_text_vertex(d, q, 0), UI_WALKER_FX_TEXT_GLYPH_BOUNDS_X1); }
+static float quad_glyph_x1(nt_gfx_fake_draw_t d, uint32_t q) { return ui_walker_fx_vertex_i16(ui_walker_fx_text_vertex(d, q, 0), UI_WALKER_FX_TEXT_GLYPH_BOUNDS_X1); }
 
 static void make_real_fonts(nt_font_t *fonts, int count) {
     for (int i = 0; i < count; i++) {

@@ -2,34 +2,9 @@ precision highp float;
 precision highp int;
 
 #include "common/globals.glsl"
-
-// CPU-SIDE PACKING FORMAT (nt_text vertex buffer contract):
-// Stride: 48 bytes per vertex, 4 vertices per glyph quad (2 triangles = 6 indices)
-// location 0: vec3  a_position     - world-space quad corner (float32 x3, full 3D)
-// location 1: vec2  a_texcoord     - em-space coordinate (float32 x2)
-// location 2: vec2  a_glyph_data   - packed as floatBitsToUint: (band_row, band_count)
-// location 3: vec4  a_glyph_bounds - bbox x0/y0/x1/y1 in em-space (float32 x4)
-// location 4: vec4  a_color        - text color RGBA (normalized uint8 x4)
-
-layout(location = 0) in vec3 a_position;
-layout(location = 1) in vec2 a_texcoord;
-layout(location = 2) in vec2 a_glyph_data;
-layout(location = 3) in vec4 a_glyph_bounds;
-layout(location = 4) in vec4 a_color;
-
-out vec2 v_texcoord;
-flat out uvec2 v_glyph;
-flat out vec4 v_band_transform; // bbox x0, y0, band_count / width, band_count / height
-out mediump vec4 v_color;
+#include "common/slug_vertex.glsl"
 
 void main() {
-    uvec2 glyph = floatBitsToUint(a_glyph_data);
-    v_glyph = glyph;
-    v_texcoord = a_texcoord;
-    // Divide per vertex so the fragment shader picks a band without dividing.
-    vec2 bands = vec2(float(glyph.y));
-    v_band_transform = vec4(a_glyph_bounds.xy, bands / (a_glyph_bounds.zw - a_glyph_bounds.xy));
-    v_color = a_color;
-
+    SlugVertex();
     gl_Position = view_proj * vec4(a_position, 1.0);
 }

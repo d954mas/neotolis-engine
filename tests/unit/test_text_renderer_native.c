@@ -29,7 +29,7 @@ static const char *s_vs_src = "precision highp float;\n"
                               "layout(location = 0) in vec3 a_position;\n"
                               "layout(location = 2) in vec2 a_glyph_data;\n"
                               "flat out uint v_row;\n"
-                              "void main() { v_row = floatBitsToUint(a_glyph_data.x); gl_Position = vec4(a_position.xy * 0.001, 0.0, 1.0); }\n";
+                              "void main() { v_row = uint(a_glyph_data.x); gl_Position = vec4(a_position.xy * 0.001, 0.0, 1.0); }\n";
 
 /* Green where the glyph's row header holds curves, red where the row is still empty. */
 static const char *s_fs_src = "precision highp float;\n"
@@ -39,7 +39,7 @@ static const char *s_fs_src = "precision highp float;\n"
                               "out vec4 frag_color;\n"
                               "void main() {\n"
                               "    vec4 h = texelFetch(u_curve_texture, ivec2(0, int(v_row)), 0);\n"
-                              "    frag_color = (h.y + h.w > 0.5) ? vec4(0.0, 1.0, 0.0, 1.0) : vec4(1.0, 0.0, 0.0, 1.0);\n"
+                              "    frag_color = (v_row != 0u && h.y + h.w > 0.5) ? vec4(0.0, 1.0, 0.0, 1.0) : vec4(1.0, 0.0, 0.0, 1.0);\n"
                               "}\n";
 
 static uint8_t s_pixels[CAPTURE_BYTES];

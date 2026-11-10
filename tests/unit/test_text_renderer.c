@@ -59,7 +59,7 @@ static void capture_errors(nt_log_level_t level, const char *domain, const char 
 
 static const float s_identity[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
 static const uint32_t s_white = 0xFFFFFFFFU;
-#define TEXT_VERTEX_BYTES 48U /* nt_text_vertex_t */
+#define TEXT_VERTEX_BYTES 36U /* nt_text_vertex_t */
 
 /* The style most draws use: the setUp font, 32 px, white, nothing else set. */
 static nt_text_style_t plain(void) { return (nt_text_style_t){.font = s_font, .size = 32.0F, .color = s_white}; }
@@ -318,32 +318,53 @@ void test_measure_null_string(void) {
     TEST_ASSERT_TRUE(sz.height == 0.0F);
 }
 
-/* The vertex carries the draw's packed color at byte 44. */
+/* The vertex carries the draw's packed color at byte 32. */
 void test_vertex_color_bytes(void) {
     nt_text_style_t style = plain();
     style.color = NT_RGBA8(10, 20, 30, 40);
     nt_text_renderer_draw(&style, s_identity, "AB");
     TEST_ASSERT_EQUAL_UINT32(2, text_quad_count());
     uint32_t color = 0;
-    memcpy(&color, text_vertices() + 44U, sizeof color);
+    memcpy(&color, text_vertices() + 32U, sizeof color);
     TEST_ASSERT_EQUAL_HEX32(NT_RGBA8(10, 20, 30, 40), color);
 }
 
-/* Five attributes fill the 48-byte vertex; the GPU reads the color as normalized RGBA8 at byte 44. */
-void test_vertex_input_reads_color_as_normalized_rgba8(void) {
+/* Bytes 20..23 carry the glyph's band row and band count as two uint16. */
+void test_vertex_glyph_data_is_band_row_and_count(void) {
+    nt_text_style_t style = plain();
+    nt_text_renderer_draw(&style, s_identity, "AB");
+    TEST_ASSERT_EQUAL_UINT32(2, text_quad_count());
+    const nt_glyph_cache_entry_t *b = nt_font_lookup_glyph(s_font, 'B');
+    TEST_ASSERT_NOT_NULL(b);
+    uint16_t glyph_data[2] = {0};
+    memcpy(glyph_data, text_vertices() + ((size_t)4U * TEXT_VERTEX_BYTES) + 20U, sizeof glyph_data); /* quad 1 = 'B' */
+    TEST_ASSERT_EQUAL_UINT16(b->band_row, glyph_data[0]);
+    TEST_ASSERT_EQUAL_UINT16(b->band_count, glyph_data[1]);
+    TEST_ASSERT_NOT_EQUAL(b->band_row, b->band_count);
+}
+
+/* Five attributes fill the 36-byte vertex: glyph data and bounds are unnormalized 16-bit integers, the
+ * color is normalized RGBA8 at byte 32. */
+void test_vertex_input_layout(void) {
     const nt_vertex_layout_t layout = nt_gfx_fake_last_vertex_input_layout();
     TEST_ASSERT_EQUAL_UINT16(TEXT_VERTEX_BYTES, layout.stride);
     TEST_ASSERT_EQUAL_UINT8(5U, layout.attr_count);
-    static const uint16_t offsets[4] = {0U, 12U, 20U, 28U};
+    static const uint16_t offsets[4] = {0U, 12U, 20U, 24U};
     for (uint8_t i = 0; i < 4U; i++) {
         TEST_ASSERT_EQUAL_UINT8(i, layout.attrs[i].location);
         TEST_ASSERT_EQUAL_UINT16(offsets[i], layout.attrs[i].offset);
     }
+    TEST_ASSERT_EQUAL_INT(NT_VERTEX_UINT16, layout.attrs[2].type);
+    TEST_ASSERT_EQUAL_UINT8(2U, layout.attrs[2].count);
+    TEST_ASSERT_FALSE(layout.attrs[2].normalized);
+    TEST_ASSERT_EQUAL_INT(NT_VERTEX_INT16, layout.attrs[3].type);
+    TEST_ASSERT_EQUAL_UINT8(4U, layout.attrs[3].count);
+    TEST_ASSERT_FALSE(layout.attrs[3].normalized);
     TEST_ASSERT_EQUAL_UINT8(4U, layout.attrs[4].location);
     TEST_ASSERT_EQUAL_INT(NT_VERTEX_UINT8, layout.attrs[4].type);
     TEST_ASSERT_EQUAL_UINT8(4U, layout.attrs[4].count);
     TEST_ASSERT_TRUE(layout.attrs[4].normalized);
-    TEST_ASSERT_EQUAL_UINT16(44U, layout.attrs[4].offset);
+    TEST_ASSERT_EQUAL_UINT16(32U, layout.attrs[4].offset);
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- Unity assertions expand into branches.
@@ -383,10 +404,10 @@ void test_quad_covers_fp16_rounded_tofu(void) {
         const uint8_t *verts = text_vertices();
         float bl[5];
         float tr[5];
-        float bounds[4];
+        int16_t bounds[4];
         memcpy(bl, verts, sizeof bl);
         memcpy(tr, verts + ((size_t)2U * TEXT_VERTEX_BYTES), sizeof tr);
-        memcpy(bounds, verts + 28U, sizeof bounds);
+        memcpy(bounds, verts + 24U, sizeof bounds);
         TEST_ASSERT_TRUE(bl[0] <= -0.5F);
         TEST_ASSERT_TRUE(bl[1] <= (cases[i].rounded_bottom * 2.0F) - 0.5F);
         TEST_ASSERT_TRUE(tr[0] >= (cases[i].rounded_right * 2.0F) + 0.5F);
@@ -395,8 +416,8 @@ void test_quad_covers_fp16_rounded_tofu(void) {
         TEST_ASSERT_TRUE(bl[4] <= cases[i].rounded_bottom - 0.25F);
         TEST_ASSERT_TRUE(tr[3] >= cases[i].rounded_right + 0.25F);
         TEST_ASSERT_TRUE(tr[4] >= cases[i].rounded_top + 0.25F);
-        TEST_ASSERT_TRUE((float)cases[i].descent == bounds[1]);
-        TEST_ASSERT_TRUE((float)cases[i].ascent == bounds[3]);
+        TEST_ASSERT_EQUAL_INT16(cases[i].descent, bounds[1]);
+        TEST_ASSERT_EQUAL_INT16(cases[i].ascent, bounds[3]);
 
         nt_test_frame_close();
         nt_font_destroy(font);
@@ -1117,8 +1138,8 @@ void test_shadow_pass_offset(void) {
     TEST_ASSERT_EQUAL_INT32(-10, (int32_t)(shadow_y - fill_y));
     uint32_t shadow_color = 0;
     uint32_t fill_color = 0;
-    memcpy(&shadow_color, v + 44U, sizeof shadow_color);
-    memcpy(&fill_color, v + ((size_t)4U * TEXT_VERTEX_BYTES) + 44U, sizeof fill_color);
+    memcpy(&shadow_color, v + 32U, sizeof shadow_color);
+    memcpy(&fill_color, v + ((size_t)4U * TEXT_VERTEX_BYTES) + 32U, sizeof fill_color);
     TEST_ASSERT_EQUAL_HEX32(s_black, shadow_color); /* each pass carries its own color */
     TEST_ASSERT_EQUAL_HEX32(s_white, fill_color);
 }
@@ -1145,8 +1166,8 @@ void test_zero_alpha_outline_keeps_the_shadow_on_the_outline_silhouette(void) {
     nt_text_renderer_draw(&style, s_identity, "A");
     TEST_ASSERT_EQUAL_UINT32(8U, text_vertex_count()); /* shadow + fill */
     const uint8_t *v = text_vertices();
-    /* Glyph data and bounds (bytes 20..43) name the cache variant: the shadow's is not the fill's. */
-    TEST_ASSERT_NOT_EQUAL(0, memcmp(v + 20U, v + ((size_t)4U * TEXT_VERTEX_BYTES) + 20U, 24U));
+    /* Glyph data and bounds (bytes 20..31) name the cache variant: the shadow's is not the fill's. */
+    TEST_ASSERT_NOT_EQUAL(0, memcmp(v + 20U, v + ((size_t)4U * TEXT_VERTEX_BYTES) + 20U, 12U));
 }
 #endif
 
@@ -1192,11 +1213,11 @@ void test_underline_one_quad_per_segment(void) {
     /* 2 fill glyphs + 1 underline quad. */
     TEST_ASSERT_EQUAL_UINT32(3U, text_quad_count());
 
-    /* The 3rd quad is the decoration sentinel: band_count (glyph_data[1]) packed as uint 0. */
-    uint32_t band_count = 0xFFFFFFFFU;
-    /* vertex 8 (quad2 v0), glyph_data at byte offset 20, [1] at +4 = 24. */
-    memcpy(&band_count, text_vertices() + ((size_t)8U * TEXT_VERTEX_BYTES) + 20U + 4U, sizeof(uint32_t));
-    TEST_ASSERT_EQUAL_UINT32(0U, band_count);
+    /* The 3rd quad is the decoration sentinel: band_count (glyph_data[1]) is 0. */
+    uint16_t band_count = 0xFFFFU;
+    /* vertex 8 (quad2 v0), glyph_data at byte offset 20, [1] at +2 = 22. */
+    memcpy(&band_count, text_vertices() + ((size_t)8U * TEXT_VERTEX_BYTES) + 20U + 2U, sizeof band_count);
+    TEST_ASSERT_EQUAL_UINT16(0U, band_count);
 }
 
 /* One decoration quad PER LINE: two lines → two underline quads (continuous per same-style segment). */
@@ -1292,7 +1313,8 @@ int main(void) {
     RUN_TEST(test_measure_empty_string);
     RUN_TEST(test_measure_null_string);
     RUN_TEST(test_vertex_color_bytes);
-    RUN_TEST(test_vertex_input_reads_color_as_normalized_rgba8);
+    RUN_TEST(test_vertex_glyph_data_is_band_row_and_count);
+    RUN_TEST(test_vertex_input_layout);
     RUN_TEST(test_quad_covers_fp16_rounded_tofu);
     RUN_TEST(test_text_material_may_declare_its_own_textures);
     RUN_TEST(test_zero_frame_capacity_asserts_at_set_material);

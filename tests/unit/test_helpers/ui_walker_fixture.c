@@ -213,6 +213,12 @@ float ui_walker_fx_vertex_float(const uint8_t *vertex, uint32_t byte_offset) {
     return v;
 }
 
+int16_t ui_walker_fx_vertex_i16(const uint8_t *vertex, uint32_t byte_offset) {
+    int16_t v = 0;
+    memcpy(&v, vertex + byte_offset, sizeof v);
+    return v;
+}
+
 #endif /* NT_TEST_ACCESS */
 
 void ui_walker_fixture_inject_cmds(ui_walker_fixture_t *fx, Clay_RenderCommand *cmds, int32_t count, int32_t capacity) {

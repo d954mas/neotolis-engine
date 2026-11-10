@@ -46,8 +46,9 @@ typedef struct {
 } ui_walker_fixture_t;
 
 /* Text vertex layout in frame storage (nt_text_renderer's vertex). */
-#define UI_WALKER_FX_TEXT_VERTEX_BYTES 48U
-#define UI_WALKER_FX_TEXT_GLYPH_BOUNDS_X1 36U /* glyph_bounds[2] */
+#define UI_WALKER_FX_TEXT_VERTEX_BYTES 36U
+#define UI_WALKER_FX_TEXT_BAND_COUNT 22U      /* glyph_data[1], uint16 */
+#define UI_WALKER_FX_TEXT_GLYPH_BOUNDS_X1 28U /* glyph_bounds[2], int16 */
 
 void ui_walker_fixture_init(ui_walker_fixture_t *fx, void *arena, size_t arena_size, ui_walker_fx_bind_t bind);
 void ui_walker_fixture_shutdown(ui_walker_fixture_t *fx);
@@ -68,6 +69,7 @@ nt_gfx_fake_draw_t ui_walker_fx_draw_at(nt_program_t program, uint32_t n);
 /* Bytes of corner `corner` (0 BL, 1 BR, 2 TR, 3 TL) of quad `quad` of an indexed text draw. */
 const uint8_t *ui_walker_fx_text_vertex(nt_gfx_fake_draw_t draw, uint32_t quad, uint32_t corner);
 float ui_walker_fx_vertex_float(const uint8_t *vertex, uint32_t byte_offset);
+int16_t ui_walker_fx_vertex_i16(const uint8_t *vertex, uint32_t byte_offset);
 static inline uint32_t ui_walker_fx_quads(nt_gfx_fake_draw_t draw) { return draw.num_indices / 6U; }
 
 #ifdef __cplusplus
