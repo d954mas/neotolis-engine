@@ -1,5 +1,5 @@
 # Size Report: rtt_showcase (wasm-analysis-paired)
-# Commit: fa036cf
+# Commit: efbffd4
 
 ## WASM Section Sizes
 
@@ -13,11 +13,11 @@ Memory                 7 B
 Global                 9 B
 Export                29 B
 Elem                  49 B
-Code              244269 B
+Code              244161 B
 Data               22190 B
 Custom              6593 B
 ---------------- ----------
-TOTAL             274277 B
+TOTAL             274169 B
 
 ## Top 30 Functions by Size
 
@@ -48,14 +48,14 @@ TOTAL             274277 B
  1948 B   nt_shape_renderer_flush
  1851 B   __rem_pio2f
  1747 B   nt_hash64
- 1403 B   emit_glyph_pass
  1379 B   nt_gfx_make_render_target
+ 1359 B   emit_glyph_pass
  1355 B   Clay__AddHashMapItem
  1327 B   ui_hit_test
  1324 B   nt_gfx_frame_create_buffers
 
 Total functions: 185
-Total code size: 243948 B
+Total code size: 243840 B
 
 ## Built Engine Archives
 
@@ -112,7 +112,7 @@ libnt_skinned_mesh_renderer.a    5804 B
 libnt_sort.a                 470 B
 libnt_sprite_comp.a         8744 B
 libnt_sprite_renderer.a    16114 B
-libnt_text_renderer.a       7650 B
+libnt_text_renderer.a       7540 B
 libnt_time.a                 900 B
 libnt_transform_comp.a      5336 B
 libnt_ui.a                355390 B
@@ -124,7 +124,7 @@ libnt_version.a              638 B
 libnt_window.a             14562 B
 libnt_window_stub.a         1960 B
 ------------------------ ----------
-TOTAL (archives)         2655328 B
+TOTAL (archives)         2655218 B
 
 ## Data Segments Summary
 
