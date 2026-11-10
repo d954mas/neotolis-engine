@@ -94,7 +94,7 @@ typedef struct {
     const char *shortcut;       /* optional right-aligned shortcut text (e.g. "Ctrl+S"); NULL = none */
     bool disabled;              /* greyed + non-selectable when true (default false = enabled) */
     bool selected;              /* checkmark (toggle/radio menu items) */
-    bool non_activatable;       /* true = an interactive child owns the click (item_begin only; default false) */
+    bool non_activatable;       /* true = the row has no action of its own: never activates (item_begin only) */
     uint8_t _pad[1];
 } nt_ui_menu_item_opts_t;
 /* 64-bit: 16 ref + 8 ptr + 4 bools/pad = 28 -> 32 (8-align). wasm 32-bit: 16 + 4 + 4 = 24. Both = a
@@ -148,7 +148,7 @@ typedef struct nt_ui_menu_ctx {
     struct {
         uint32_t id;      /* the open custom-content row's id (for item_end's nt_ui_step) */
         bool enabled;     /* false = a disabled row: item_end never steps/activates (mirrors item_ex's enabled gate) */
-        bool activatable; /* false = an interactive child owns the click (the row never latches activate) */
+        bool activatable; /* false = the row has no action of its own (never latches activate) */
         bool active;      /* a custom-content row element is open (between item_begin/item_end) */
     } pending_menu_item;
 
@@ -193,8 +193,8 @@ bool nt_ui_menu_item_ex(nt_ui_menu_ctx_t *menu, uint32_t key, const char *label,
 /* item_begin returns DECLARE-BODY (true while the menu is OPEN), NOT clicked — guard the custom body with it
  * (a closed/present-only menu returns false so the body is skipped, no scene leak). The row's ACTIVATION is
  * reported by item_end (parallel to item/item_ex returning clicked), so the two bools never mean the same
- * thing: item_begin = "declare the body", item_end = "the row was activated". An activatable=false row never
- * activates (item_end returns false) — its inner child owns the click.
+ * thing: item_begin = "declare the body", item_end = "the row was activated". A non_activatable row has no
+ * action of its own and never activates (item_end returns false).
  * item_end is a NO-OP when item_begin returned false (closed menu opened no row), so BOTH placements are safe:
  *   if (item_begin(...)) { ...body...; item_end(...); }   // item_end inside the guard
  *   if (item_begin(...)) { ...body...; }  item_end(...);  // item_end unconditional

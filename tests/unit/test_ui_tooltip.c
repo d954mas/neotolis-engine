@@ -132,6 +132,39 @@ static void test_tooltip_delayed_reveal(void) {
     TEST_ASSERT_TRUE(saw_reveal);
 }
 
+/* ---- A tooltip on a container reveals over an interactive child declared inside it and hides the first
+ *      frame the pointer leaves. Only records are targets: the container's own gap counts only when the
+ *      container blocks the pointer itself. ---- */
+#define TGT_CHILD_ID 0x7A1D02U
+static bool container_tooltip_frame(const nt_pointer_t *p, nt_ui_tooltip_style_t *st, bool block) {
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = DT, .pointers = p, .pointer_count = 1});
+    CLAY({.id = (Clay_ElementId){.id = TGT_ID}, .layout = {.sizing = {CLAY_SIZING_FIXED(TGT_W), CLAY_SIZING_FIXED(TGT_H)}}}) {
+        if (block) {
+            nt_ui_block_pointer(s_fx.ctx, TGT_ID, NULL);
+        }
+        CLAY({.id = (Clay_ElementId){.id = TGT_CHILD_ID}, .layout = {.sizing = {CLAY_SIZING_FIXED(20), CLAY_SIZING_FIXED(TGT_H)}}}) { (void)nt_ui_step(s_fx.ctx, TGT_CHILD_ID, NULL); }
+    }
+    const bool shown = nt_ui_tooltip(s_fx.ctx, NT_UI_DATA_LAYER(1), 2U, TGT_ID, "hint text", st);
+    nt_ui_end(s_fx.ctx);
+    return shown;
+}
+
+static void test_tooltip_on_container_reveals_over_its_child(void) {
+    const nt_pointer_t on_child = pointer_at(10.0F, TGT_H * 0.5F);
+    const nt_pointer_t on_gap = pointer_at(TGT_W - 10.0F, TGT_H * 0.5F);
+    const nt_pointer_t away = pointer_at(VIEW_W - 10.0F, VIEW_H - 10.0F);
+    for (int block = 0; block < 2; ++block) {
+        nt_ui_tooltip_style_t st = test_style();
+        bool shown = false;
+        for (int i = 0; i < (int)ceilf(DELAY / DT) + 4 && !shown; ++i) {
+            shown = container_tooltip_frame(&on_child, &st, block != 0);
+        }
+        TEST_ASSERT_TRUE(shown);
+        TEST_ASSERT_EQUAL(block != 0, container_tooltip_frame(&on_gap, &st, block != 0));
+        TEST_ASSERT_FALSE(container_tooltip_frame(&away, &st, block != 0));
+    }
+}
+
 /* ---- Hide on leave: once revealed, moving the cursor off the target resets the timer to 0 and hides
  *      the tooltip. ---- */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -396,6 +429,7 @@ int main(void) {
     RUN_TEST(test_tooltip_defaults_valid);
     RUN_TEST(test_tooltip_delayed_reveal);
     RUN_TEST(test_tooltip_hide_on_leave);
+    RUN_TEST(test_tooltip_on_container_reveals_over_its_child);
     RUN_TEST(test_tooltip_declares_no_catcher);
     RUN_TEST(test_tooltip_no_double_mutation);
     RUN_TEST(test_tooltip_caret_on_first_frame);

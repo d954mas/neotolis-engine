@@ -8,8 +8,11 @@
  * resets to 0 on leave; the floating panel is declared at the target's anchor only once the accumulated
  * hover reaches style->delay_secs.
  *
- * The target's hover is read via nt_ui_query_interaction (IDEMPOTENT) on a salted id so the tooltip
- * never becomes a second mutating interaction step on the underlying widget. */
+ * The target's hover is read via nt_ui_hovered_within (read-only), so the tooltip never becomes a
+ * second mutating interaction step on the underlying widget, and a tooltip on a container stays up while
+ * the pointer is on an interactive element declared inside it. Only records are targets: a container
+ * that should keep its tooltip over its own gaps calls nt_ui_block_pointer on itself. A combo or menu
+ * opened inside the target counts as inside too, so the tooltip shows over the open overlay. */
 
 #include <stdbool.h>
 #include <stdint.h>

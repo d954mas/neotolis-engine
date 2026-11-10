@@ -159,8 +159,8 @@ bool nt_ui_tab_begin(nt_ui_context_t *ctx, int index, bool active) {
     nt_ui_tab_state_t *st = &style->idle;
     if (active) {
         st = &style->selected;
-    } else if (in.hovered) {
-        st = &style->hover;
+    } else if (nt_ui_hovered_within(ctx, tab_id)) {
+        st = &style->hover; /* also over the tab's own interactive child (a close button) */
     }
 
     // #region eased state + accent value

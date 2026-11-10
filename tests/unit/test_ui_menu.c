@@ -905,102 +905,116 @@ static void test_menu_record_nav_focuses_recorded_item(void) {
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(nt_ui_menu_test_item_id(MENU_A, KEY_FILE), focus_id, "Down must focus the first recorded item (this-frame record, 1-frame effect)");
 }
 
-/* ---- A custom-content row with non_activatable lets an inner button own the click — the inner button
- *      reports clicked while the row id reports !clicked. ---- */
+/* Four frames of one custom row (key KEY_NEW) hosting a 60x20 inner button: frames 0-1 bake the bboxes
+ * (1-frame IM lag), frame 2 presses and frame 3 releases at the inner button's center (on_child) or at
+ * the row's right edge, beside the child. */
+#define MENU_ROW_CHILD_ID 0x1B7701U
+typedef struct {
+    bool btn_clicked;
+    bool end_activated;
+    bool row_captured;
+} menu_row_child_result_t;
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void test_menu_item_begin_activatable_false_child_owns_click(void) {
+static menu_row_child_result_t menu_row_child_frames(nt_ui_menu_state_t *st, bool non_activatable, bool on_child) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
-    nt_ui_menu_state_t st = {0};
-    menu_im_open(&st, 120.0F, 80.0F);
-
-    const uint32_t row_key = KEY_NEW;
-    const uint32_t inner_btn = 0x1B7701U;
-    const uint32_t row_id = nt_ui_menu_test_item_id(MENU_A, row_key);
-
-    /* Frames 0-1 bake the inner button bbox (1-frame IM lag); frame 2 PRESSES over it (capture); frame 3
-     * RELEASES over it -> clicked = is_released && over fires on the inner child. The non_activatable
-     * row must NOT steal that click (the chain stays open — no activation). item_begin returns DECLARE-BODY
-     * (true while open) — the body is guarded by it; the click is owned by the inner child. */
-    bool declared = false;
-    bool btn_clicked = false;
-    bool end_activated = false;
+    menu_row_child_result_t r = {0};
+    const uint32_t row_id = nt_ui_menu_test_item_id(MENU_A, KEY_NEW);
     for (int frame = 0; frame < 4; ++frame) {
-        const bool press = (frame == 2);   /* press began this frame -> capture */
-        const bool release = (frame == 3); /* release over the widget -> click one-shot */
-        nt_ui_bbox_t bb = nt_ui_get_bbox(s_fx.ctx, inner_btn);
-        const float bx = bb.found ? (bb.x + (bb.width * 0.5F)) : 0.0F;
-        const float by = bb.found ? (bb.y + (bb.height * 0.5F)) : 0.0F;
-
-        nt_pointer_t p = {0};
-        p.x = bx;
-        p.y = by;
-        p.active = true;
-        if (press && bb.found) {
+        const nt_ui_bbox_t child = nt_ui_get_bbox(s_fx.ctx, MENU_ROW_CHILD_ID);
+        const nt_ui_bbox_t row = nt_ui_get_bbox(s_fx.ctx, row_id);
+        const bool found = child.found && row.found;
+        nt_pointer_t p = {.active = true};
+        if (found) {
+            p.x = on_child ? (child.x + (child.width * 0.5F)) : (row.x + row.width - 2.0F);
+            p.y = child.y + (child.height * 0.5F);
+        }
+        if (frame == 2 && found) {
             p.buttons[NT_BUTTON_LEFT].is_down = true;
             p.buttons[NT_BUTTON_LEFT].is_pressed = true;
-        } else if (release && bb.found) {
-            p.buttons[NT_BUTTON_LEFT].is_released = true; /* down -> up over the widget */
-        }
-        nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = &p, .pointer_count = 1});
-        nt_ui_menu_begin(&s_menu, s_fx.ctx, NULL, 0U, MENU_A, &st, &style);
-        if (nt_ui_menu_item_begin(&s_menu, row_key, (nt_ui_menu_item_opts_t){.non_activatable = true})) {
-            declared = true;
-            /* Inner interactive child owns the click; lay out a fixed button-sized element + step it. */
-            CLAY({.id = (Clay_ElementId){.id = inner_btn}, .layout = {.sizing = {CLAY_SIZING_FIXED(60), CLAY_SIZING_FIXED(20)}}}) {}
-            const nt_ui_interaction_t in = nt_ui_step(s_fx.ctx, inner_btn, NULL);
-            if (in.clicked) {
-                btn_clicked = true;
-            }
-        }
-        /* item_end reports activation for an ACTIVATABLE row; a non_activatable row never activates. */
-        if (nt_ui_menu_item_end(&s_menu)) {
-            end_activated = true;
-        }
-        nt_ui_menu_end(&s_menu);
-        nt_ui_end(s_fx.ctx);
-    }
-
-    TEST_ASSERT_TRUE_MESSAGE(declared, "an open menu must declare the custom-content body (item_begin returns true)");
-    TEST_ASSERT_TRUE_MESSAGE(btn_clicked, "the inner child button must own the click");
-    /* A non_activatable row that latched the click as an activation would
-     * close the chain. The chain staying OPEN proves the row did NOT steal the inner child's click. */
-    TEST_ASSERT_TRUE_MESSAGE(st.open, "a non_activatable row must NOT latch the click as an activation (chain stays open)");
-    TEST_ASSERT_FALSE_MESSAGE(end_activated, "item_end must return false for a non_activatable row (child owns the click)");
-    (void)row_id;
-
-    /* POSITIVE CONTROL: the same click geometry on a {.non_activatable = false} custom row with NO inner
-     * child (nothing steals the click) MUST make item_end return true. Without this control the FALSE
-     * assertion above could pass for the wrong reason (an item_end that always returns false). */
-    nt_ui_menu_state_t st2 = {0};
-    menu_im_open(&st2, 120.0F, 80.0F);
-    const uint32_t ctrl_id = nt_ui_menu_test_item_id(MENU_A, row_key);
-    bool ctrl_activated = false;
-    for (int frame = 0; frame < 4; ++frame) {
-        const bool press = (frame == 2);
-        const bool release = (frame == 3);
-        const nt_ui_bbox_t bb = nt_ui_get_bbox(s_fx.ctx, ctrl_id);
-        const float bx = bb.found ? (bb.x + (bb.width * 0.5F)) : 0.0F;
-        const float by = bb.found ? (bb.y + (bb.height * 0.5F)) : 0.0F;
-        nt_pointer_t p = {.x = bx, .y = by, .active = true};
-        if (press && bb.found) {
-            p.buttons[NT_BUTTON_LEFT].is_down = true;
-            p.buttons[NT_BUTTON_LEFT].is_pressed = true;
-        } else if (release && bb.found) {
+        } else if (frame == 3 && found) {
             p.buttons[NT_BUTTON_LEFT].is_released = true;
         }
         nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = &p, .pointer_count = 1});
-        nt_ui_menu_begin(&s_menu, s_fx.ctx, NULL, 0U, MENU_A, &st2, &style);
-        if (nt_ui_menu_item_begin(&s_menu, row_key, (nt_ui_menu_item_opts_t){.non_activatable = false})) {
-            CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}}}) {} /* no interactive child */
+        nt_ui_menu_begin(&s_menu, s_fx.ctx, NULL, 0U, MENU_A, st, &style);
+        if (nt_ui_menu_item_begin(&s_menu, KEY_NEW, (nt_ui_menu_item_opts_t){.non_activatable = non_activatable})) {
+            CLAY({.id = (Clay_ElementId){.id = MENU_ROW_CHILD_ID}, .layout = {.sizing = {CLAY_SIZING_FIXED(60), CLAY_SIZING_FIXED(20)}}}) {}
+            r.btn_clicked |= nt_ui_step(s_fx.ctx, MENU_ROW_CHILD_ID, NULL).clicked;
         }
-        if (nt_ui_menu_item_end(&s_menu)) {
-            ctrl_activated = true;
+        r.end_activated |= nt_ui_menu_item_end(&s_menu);
+        nt_ui_menu_end(&s_menu);
+        nt_ui_end(s_fx.ctx);
+        r.row_captured |= (nt_ui_test_capture_active_id(s_fx.ctx, 0U) == row_id);
+    }
+    return r;
+}
+
+/* ---- An inner button owns its press in a custom-content row, with or without the row's own action:
+ *      the row steps in item_end, after the child, but the child is declared later. The row is still
+ *      the one under the pointer, so it takes hover focus. ---- */
+static void test_menu_item_begin_child_owns_its_press(void) {
+    nt_ui_menu_state_t st = {0};
+    menu_im_open(&st, 120.0F, 80.0F);
+    menu_row_child_result_t r = menu_row_child_frames(&st, false, true);
+    TEST_ASSERT_TRUE(r.btn_clicked);
+    TEST_ASSERT_FALSE(r.end_activated);
+    TEST_ASSERT_TRUE(st.open);
+    TEST_ASSERT_EQUAL_UINT32(nt_ui_menu_test_item_id(MENU_A, KEY_NEW), nt_ui_menu_test_focus_item_id(s_fx.ctx, &s_menu, MENU_A, 0U));
+
+    r = menu_row_child_frames(&st, true, true);
+    TEST_ASSERT_TRUE(r.btn_clicked);
+    TEST_ASSERT_FALSE(r.end_activated);
+    TEST_ASSERT_TRUE(st.open);
+}
+
+/* ---- Beside the child a non_activatable row takes hover focus but never captures, activates or
+ *      closes (first, on a fresh registry); an activatable row activates and closes the chain. ---- */
+static void test_menu_item_begin_press_beside_child(void) {
+    nt_ui_menu_state_t st = {0};
+    menu_im_open(&st, 120.0F, 80.0F);
+    menu_row_child_result_t r = menu_row_child_frames(&st, true, false);
+    TEST_ASSERT_FALSE(r.btn_clicked);
+    TEST_ASSERT_FALSE(r.end_activated);
+    TEST_ASSERT_FALSE(r.row_captured);
+    TEST_ASSERT_TRUE(st.open);
+    TEST_ASSERT_EQUAL_UINT32(nt_ui_menu_test_item_id(MENU_A, KEY_NEW), nt_ui_menu_test_focus_item_id(s_fx.ctx, &s_menu, MENU_A, 0U));
+
+    r = menu_row_child_frames(&st, false, false);
+    TEST_ASSERT_FALSE(r.btn_clicked);
+    TEST_ASSERT_TRUE(r.end_activated);
+    TEST_ASSERT_FALSE(st.open);
+}
+
+/* ---- A drag captured by one row's control does not hover another row: pressing row A's control and
+ *      dragging onto row B's control leaves hover focus on A, as every query ignores a pointer captured
+ *      elsewhere. ---- */
+#define MENU_ROW_B_CHILD_ID 0x1B7702U
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_menu_item_begin_captured_drag_keeps_focus(void) {
+    nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
+    nt_ui_menu_state_t st = {0};
+    menu_im_open(&st, 120.0F, 80.0F);
+    for (int frame = 0; frame < 5; ++frame) {
+        const nt_ui_bbox_t ca = nt_ui_get_bbox(s_fx.ctx, MENU_ROW_CHILD_ID);
+        const nt_ui_bbox_t cb = nt_ui_get_bbox(s_fx.ctx, MENU_ROW_B_CHILD_ID);
+        const nt_ui_bbox_t c = (frame < 3) ? ca : cb; /* press on A's control, then drag onto B's */
+        nt_pointer_t p = {.x = c.x + (c.width * 0.5F), .y = c.y + (c.height * 0.5F), .active = true};
+        p.buttons[NT_BUTTON_LEFT].is_down = (frame >= 2);
+        p.buttons[NT_BUTTON_LEFT].is_pressed = (frame == 2);
+        nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = &p, .pointer_count = 1});
+        nt_ui_menu_begin(&s_menu, s_fx.ctx, NULL, 0U, MENU_A, &st, &style);
+        if (nt_ui_menu_item_begin(&s_menu, KEY_NEW, (nt_ui_menu_item_opts_t){0})) {
+            CLAY({.id = (Clay_ElementId){.id = MENU_ROW_CHILD_ID}, .layout = {.sizing = {CLAY_SIZING_FIXED(60), CLAY_SIZING_FIXED(20)}}}) { (void)nt_ui_step(s_fx.ctx, MENU_ROW_CHILD_ID, NULL); }
         }
+        (void)nt_ui_menu_item_end(&s_menu);
+        if (nt_ui_menu_item_begin(&s_menu, KEY_OPEN, (nt_ui_menu_item_opts_t){0})) {
+            CLAY({.id = (Clay_ElementId){.id = MENU_ROW_B_CHILD_ID}, .layout = {.sizing = {CLAY_SIZING_FIXED(60), CLAY_SIZING_FIXED(20)}}}) { (void)nt_ui_step(s_fx.ctx, MENU_ROW_B_CHILD_ID, NULL); }
+        }
+        (void)nt_ui_menu_item_end(&s_menu);
         nt_ui_menu_end(&s_menu);
         nt_ui_end(s_fx.ctx);
     }
-    TEST_ASSERT_TRUE_MESSAGE(ctrl_activated, "an activatable (non_activatable=false) custom row with no inner child MUST activate via item_end");
-    TEST_ASSERT_FALSE_MESSAGE(st2.open, "activating the control row must close the chain (st.open -> false)");
+    TEST_ASSERT_EQUAL_UINT32(MENU_ROW_CHILD_ID, nt_ui_test_capture_active_id(s_fx.ctx, 0U));
+    TEST_ASSERT_EQUAL_UINT32(nt_ui_menu_test_item_id(MENU_A, KEY_NEW), nt_ui_menu_test_focus_item_id(s_fx.ctx, &s_menu, MENU_A, 0U));
 }
 
 /* ---- Custom row leak: a CLOSED (present-only) menu's item_begin returns false so the game skips
@@ -1526,7 +1540,9 @@ int main(void) {
     RUN_TEST(test_menu_open_trigger_bound_requires_target_hover);
     RUN_TEST(test_menu_item_id_distinct_siblings_and_scopes);
     RUN_TEST(test_menu_record_nav_focuses_recorded_item);
-    RUN_TEST(test_menu_item_begin_activatable_false_child_owns_click);
+    RUN_TEST(test_menu_item_begin_child_owns_its_press);
+    RUN_TEST(test_menu_item_begin_press_beside_child);
+    RUN_TEST(test_menu_item_begin_captured_drag_keeps_focus);
     RUN_TEST(test_menu_item_begin_closed_skips_body);
     RUN_TEST(test_menu_item_begin_closed_guarded_no_poison);
     RUN_TEST(test_menu_item_begin_disabled_never_activates);

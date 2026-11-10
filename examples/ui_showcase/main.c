@@ -511,7 +511,7 @@ static uint32_t s_id_tip_a, s_id_tip_b, s_id_tip_c;         /* tooltip targets *
 static uint32_t s_id_menu_global;                           /* global context menu (right-click anywhere) */
 static uint32_t s_id_menu_zone;                             /* zone context menu (bound to a panel) */
 static uint32_t s_id_menu_panel;                            /* the zone panel the zone menu binds to (opens only over it) */
-static uint32_t s_id_menu_opacity_btn;                      /* inner button on the zone menu's activatable=false custom row */
+static uint32_t s_id_menu_opacity_btn;                      /* inner button on the zone menu's non_activatable custom row */
 static uint32_t s_id_tabs_demo_base;                        /* begin/end-core demo strip: tabs salt from this + index */
 static bool s_ids_ready;
 // #endregion

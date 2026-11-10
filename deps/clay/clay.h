@@ -45,6 +45,10 @@
 //      declared, instead of reading it through the cached layoutElement pointer: mid-frame that
 //      slot may already hold another element (e.g. a parent's scrollbar declared first), which
 //      returned found=false and zero dims for a nested scroll. Search "NT patch 9" (field + 3 sites).
+//  10. Clay_LayoutElement.nt_last_index: the last layout element index opened before the element
+//      closed, i.e. the end of the range [own index, nt_last_index] declared inside it (floating
+//      children included). Written in Clay__CloseElement; text elements keep 0. nt_ui bakes it for
+//      the hover-within test. Search "NT patch 10" (field + 1 site).
 // NT DEPENDENCY: nt_ui_clay_impl.c wraps Clay__OpenElement /
 //   Clay__ConfigureOpenElement / Clay__CloseElement for the begin/end split
 //   pattern used by nt_ui widgets. Verify these internals still exist on update.
@@ -1200,6 +1204,7 @@ typedef struct {
     Clay_LayoutConfig *layoutConfig;
     Clay__ElementConfigArraySlice elementConfigs;
     uint32_t id;
+    int32_t nt_last_index; // NT patch 10: last element index declared inside this one (set at close)
 } Clay_LayoutElement;
 
 CLAY__ARRAY_DEFINE(Clay_LayoutElement, Clay_LayoutElementArray)
@@ -1893,6 +1898,7 @@ void Clay__CloseElement(void) {
         return;
     }
     Clay_LayoutElement *openLayoutElement = Clay__GetOpenLayoutElement();
+    openLayoutElement->nt_last_index = context->layoutElements.length - 1; // NT patch 10
     Clay_LayoutConfig *layoutConfig = openLayoutElement->layoutConfig;
     bool elementHasScrollHorizontal = false;
     bool elementHasScrollVertical = false;

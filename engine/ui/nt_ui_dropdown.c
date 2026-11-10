@@ -201,8 +201,8 @@ static nt_ui_interaction_t combo_emit_row_decl(nt_ui_context_t *ctx, uint8_t fil
         st = &style->row_selected;
     } else if (in.pressed && in.hovered) {
         st = &style->row_pressed;
-    } else if (in.hovered) {
-        st = &style->row_hover;
+    } else if (nt_ui_hovered_within(ctx, row_id)) {
+        st = &style->row_hover; /* also over the row's own interactive child */
     }
 
     const nt_ui_anim_target_t tgt = {.scale_x = st->scale, .scale_y = st->scale, .scale_z = 1.0F, .opacity = st->opacity};
@@ -264,9 +264,9 @@ static bool dropdown_declare_row(nt_ui_context_t *ctx, uint8_t fill_layer, uint8
 /* ---- Immediate combo (begin/selectable/end) ---- */
 
 /* Combo render layers come from the CALL (data->layer for fills, label_layer for text), NOT the style —
- * mirrors menu/checkbox/tabbar so the game owns the render band. The scrollbar floats on the SAME fill
- * layer as the panel (nt_ui_scroll draws its bar on the container's data->layer); floating-over-same-layer
- * keeps it above the panel fill at ANY base, so no fixed +1 offset is needed. data NULL => fills fall to 0. */
+ * mirrors menu/checkbox/tabbar so the game owns the render band. The scrollbar floats on the panel's fill
+ * layer (nt_ui_scroll draws its bar on the container's data->layer); as a later tree root it paints over
+ * the panel at any layer. data NULL => fills fall to 0. */
 #define NT_UI_COMBO_TRIGGER_H 32.0F /* default trigger control height: combo_begin owns sizing (no caller decl), the list anchors to trigger bottom */
 
 /* Emit the trigger element + harvest the toggle. When `leave_open` the element stays OPEN (the game declares
@@ -279,8 +279,8 @@ static void combo_open_trigger(nt_ui_context_t *ctx, uint8_t fill_layer, uint8_t
     nt_ui_dd_state_t *st = &style->trigger_idle;
     if (in.pressed && in.hovered) {
         st = &style->trigger_pressed;
-    } else if (in.hovered) {
-        st = &style->trigger_hover;
+    } else if (nt_ui_hovered_within(ctx, id)) {
+        st = &style->trigger_hover; /* also over an interactive child of the preview content */
     }
 
     const nt_ui_anim_target_t tgt = {.scale_x = st->scale, .scale_y = st->scale, .scale_z = 1.0F, .opacity = st->opacity, .value_t = *open ? 1.0F : 0.0F};
@@ -517,9 +517,8 @@ bool nt_ui_combo_selectable_end(nt_ui_context_t *ctx) {
 
     const uint32_t row_id = ctx->pending_combo.row_id;
     nt_ui_clay_priv_close_element();
-    /* A combo custom row is whole-row-clickable (no activatable=false opt-out like the menu): the combo list
-     * is a flat pick list, so a custom row's content is decoration around the choice, never a rival hit
-     * target. The ONE nt_ui_step owns the click; on click the combo clears *open (game writes *selected). */
+    /* The ONE nt_ui_step picks the row; an interactive child, declared later, wins the press over its own
+     * area. On click the combo clears *open (game writes *selected). */
     const nt_ui_interaction_t step = nt_ui_step(ctx, row_id, NULL);
     if (step.clicked) {
         *(ctx->pending_combo.open) = false; /* the game writes *selected; the combo clears *open */

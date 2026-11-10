@@ -17,6 +17,7 @@
 #include "graphics/nt_gfx.h"
 #include "memory/nt_mem_scratch.h"
 #include "test_helpers/nt_assert_trap.h"
+#include "test_helpers/nt_sprite_test_emit.h"
 #include "test_helpers/ui_bar_probe.h"
 #include "test_helpers/ui_test_arena.h"
 #include "test_helpers/ui_walker_fixture.h"
@@ -232,10 +233,13 @@ static void test_scroll_takes_real_child_and_tracks_the_pointer(void) {
     scroll_child_frame(&p, &style);
     TEST_ASSERT_EQUAL_UINT32(CLAY_ID("interactive_content").id, s_fx.ctx->captures[0].active_id);
 
+    TEST_ASSERT_TRUE(nt_ui_hovered_within(s_fx.ctx, CLAY_ID("interactive_content").id));
+
     p.buttons[NT_BUTTON_LEFT].is_pressed = false;
     p.y = 80.0F;
     scroll_child_frame(&p, &style);
     TEST_ASSERT_EQUAL_UINT32(SCROLL_ID, s_fx.ctx->captures[0].active_id);
+    TEST_ASSERT_FALSE(nt_ui_hovered_within(s_fx.ctx, CLAY_ID("interactive_content").id)); /* the list holds the pointer now */
     const nt_ui_scroll_state_t *s = nt_ui_state_find(s_fx.ctx, SCROLL_ID);
     TEST_ASSERT_NOT_NULL(s);
     TEST_ASSERT_TRUE(float_near(s->raw[1], -12.0F, 0.001F)); /* the 20 px move minus the 8 dp slop */
@@ -2709,7 +2713,8 @@ static void layers_frame(const nt_pointer_t *p, uint8_t layer_button, int16_t z_
     nt_ui_end(s_fx.ctx);
 }
 
-static void layers_press(uint8_t layer_button, int16_t z_floating, bool button_floats) {
+/* Presses the overlap, then walks the last frame: returns true when the red floating paints last. */
+static bool layers_press(uint8_t layer_button, int16_t z_floating, bool button_floats) {
     nt_pointer_t p = arb_pointer(50.0F, 50.0F);
     layers_frame(&p, layer_button, z_floating, button_floats);
     layers_frame(&p, layer_button, z_floating, button_floats);
@@ -2717,21 +2722,135 @@ static void layers_press(uint8_t layer_button, int16_t z_floating, bool button_f
     layers_frame(&p, layer_button, z_floating, button_floats);
     arb_release(&p);
     layers_frame(&p, layer_button, z_floating, button_floats);
+    const nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
+    nt_ui_walk(s_fx.ctx, &target);
+    uint8_t rgba[4];
+    nt_sprite_renderer_test_last_emit_color(0U, rgba);
+    return rgba[0] > rgba[1];
 }
 
+/* Paint and press agree across tree roots, whatever the draw layer. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_front_most_is_structural_not_by_layer(void) {
-    layers_press(0U, 0, false);
+    TEST_ASSERT_TRUE(layers_press(0U, 0, false));
     TEST_ASSERT_TRUE(s_layer_a.clicked); /* the floating element, though the document button stepped later */
     TEST_ASSERT_FALSE(s_layer_b.clicked);
-    layers_press(1U, 0, false);
-    TEST_ASSERT_TRUE(s_layer_a.clicked); /* a higher draw layer on the button changes nothing */
+    TEST_ASSERT_TRUE(layers_press(1U, 0, false));
+    TEST_ASSERT_TRUE(s_layer_a.clicked); /* a higher draw layer on the button changes neither */
     TEST_ASSERT_FALSE(s_layer_b.clicked);
-    layers_press(0U, 0, true);
+    TEST_ASSERT_FALSE(layers_press(0U, 0, true));
     TEST_ASSERT_TRUE(s_layer_b.clicked); /* two floating roots of one band: the later declared */
     TEST_ASSERT_FALSE(s_layer_a.clicked);
-    layers_press(0U, 5, true);
+    TEST_ASSERT_TRUE(layers_press(0U, 5, true));
     TEST_ASSERT_TRUE(s_layer_a.clicked); /* a higher band beats the later root */
     TEST_ASSERT_FALSE(s_layer_b.clicked);
+    TEST_ASSERT_FALSE(layers_press(0U, -1, false));
+    TEST_ASSERT_TRUE(s_layer_b.clicked); /* a negative band is under the document */
+    TEST_ASSERT_FALSE(s_layer_a.clicked);
+}
+
+/* Inside one tree root the later-declared element takes the press, whatever order the steps run in and
+ * whatever the layers: a child over its parent, which steps after it and sits on a higher layer; a
+ * later sibling's hit padding over an earlier descendant. */
+static nt_ui_interaction_t s_decl_card;
+static nt_ui_interaction_t s_decl_child;
+static nt_ui_interaction_t s_decl_late;
+static void decl_frame(const nt_pointer_t *p) {
+    static const int16_t k_late_pad[4] = {0, 0, 60, 0};
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .dt = 1.0F / 60.0F, .pointers = p, .pointer_count = 1});
+    s_decl_late = nt_ui_step(s_fx.ctx, CLAY_ID("decl_late").id, &(nt_ui_step_desc_t){.pad_lrtb = k_late_pad});
+    CLAY({.id = CLAY_ID("decl_root"), .layout = {.layoutDirection = CLAY_TOP_TO_BOTTOM, .sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(200)}}}) {
+        CLAY({.id = CLAY_ID("decl_card"), .layout = {.sizing = {CLAY_SIZING_FIXED(100), CLAY_SIZING_FIXED(100)}}, .userData = NT_UI_CLAY_DATA(1)}) {
+            CLAY({.id = CLAY_ID("decl_child"), .layout = {.sizing = {CLAY_SIZING_FIXED(50), CLAY_SIZING_FIXED(50)}}}) { s_decl_child = nt_ui_step(s_fx.ctx, CLAY_ID("decl_child").id, NULL); }
+            s_decl_card = nt_ui_step(s_fx.ctx, CLAY_ID("decl_card").id, NULL);
+        }
+        CLAY({.id = CLAY_ID("decl_late"), .layout = {.sizing = {CLAY_SIZING_FIXED(100), CLAY_SIZING_FIXED(100)}}}) {}
+    }
+    nt_ui_end(s_fx.ctx);
+}
+
+static void decl_press(float x, float y) {
+    nt_pointer_t p = arb_pointer(x, y);
+    decl_frame(&p);
+    decl_frame(&p);
+    arb_press(&p);
+    decl_frame(&p);
+    arb_release(&p);
+    decl_frame(&p);
+}
+
+static void test_front_most_inside_a_root_is_declaration_order(void) {
+    decl_press(25.0F, 20.0F);
+    TEST_ASSERT_TRUE(s_decl_child.clicked);
+    TEST_ASSERT_FALSE(s_decl_card.clicked);
+    decl_press(75.0F, 20.0F);
+    TEST_ASSERT_TRUE(s_decl_card.clicked); /* the card outside its child */
+    TEST_ASSERT_FALSE(s_decl_child.clicked);
+    TEST_ASSERT_FALSE(s_decl_late.clicked);
+    decl_press(25.0F, 45.0F);
+    TEST_ASSERT_TRUE(s_decl_late.clicked); /* the later sibling's padding over the earlier child */
+    TEST_ASSERT_FALSE(s_decl_child.clicked);
+    TEST_ASSERT_FALSE(s_decl_card.clicked);
+}
+
+/* Hover within: a row holding a control and a floating part, then an unrelated row. */
+static void within_frame(const nt_pointer_t *p) {
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .dt = 1.0F / 60.0F, .pointers = p, .pointer_count = 1});
+    CLAY({.id = CLAY_ID("w_root"), .layout = {.layoutDirection = CLAY_TOP_TO_BOTTOM}}) {
+        CLAY({.id = CLAY_ID("w_row"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(40)}}}) {
+            CLAY({.id = CLAY_ID("w_ctl"), .layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(40)}}}) { (void)nt_ui_step(s_fx.ctx, CLAY_ID("w_ctl").id, NULL); }
+            CLAY(
+                {.id = CLAY_ID("w_pop"), .floating = {.attachTo = CLAY_ATTACH_TO_PARENT, .offset = {.x = 100.0F, .y = 100.0F}}, .layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(40)}}}) {
+                (void)nt_ui_step(s_fx.ctx, CLAY_ID("w_pop").id, NULL);
+            }
+        }
+        CLAY({.id = CLAY_ID("w_other"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(40)}}}) { (void)nt_ui_step(s_fx.ctx, CLAY_ID("w_other").id, NULL); }
+    }
+    nt_ui_end(s_fx.ctx);
+}
+
+static void within_at(nt_pointer_t *p, float x, float y) {
+    p->x = x;
+    p->y = y;
+    within_frame(p);
+    within_frame(p);
+}
+
+static void test_hovered_within_follows_declaration(void) {
+    nt_pointer_t p = arb_pointer(0.0F, 0.0F);
+    within_at(&p, 20.0F, 20.0F); /* the row's control: inside the row, not the other row */
+    TEST_ASSERT_TRUE(nt_ui_hovered_within(s_fx.ctx, CLAY_ID("w_row").id));
+    TEST_ASSERT_TRUE(nt_ui_hovered_within(s_fx.ctx, CLAY_ID("w_ctl").id));
+    TEST_ASSERT_FALSE(nt_ui_hovered_within(s_fx.ctx, CLAY_ID("w_other").id));
+    within_at(&p, 120.0F, 120.0F); /* the row's floating part, outside the row's box */
+    TEST_ASSERT_TRUE(nt_ui_hovered_within(s_fx.ctx, CLAY_ID("w_row").id));
+    TEST_ASSERT_FALSE(nt_ui_hovered_within(s_fx.ctx, CLAY_ID("w_ctl").id));
+    within_at(&p, 20.0F, 60.0F);
+    TEST_ASSERT_FALSE(nt_ui_hovered_within(s_fx.ctx, CLAY_ID("w_row").id));
+    TEST_ASSERT_TRUE(nt_ui_hovered_within(s_fx.ctx, CLAY_ID("w_other").id));
+    within_at(&p, 500.0F, 500.0F);
+    TEST_ASSERT_FALSE(nt_ui_hovered_within(s_fx.ctx, CLAY_ID("w_row").id));
+    TEST_ASSERT_FALSE(nt_ui_hovered_within(s_fx.ctx, CLAY_ID("w_other").id));
+}
+
+/* A held pointer hovers within its holder only while it is over it. */
+static void test_hovered_within_follows_capture(void) {
+    nt_pointer_t p = arb_pointer(0.0F, 0.0F);
+    within_at(&p, 20.0F, 20.0F);
+    arb_press(&p);
+    within_frame(&p);
+    arb_hold(&p);
+    within_at(&p, 20.0F, 60.0F); /* dragged onto the other row: neither */
+    TEST_ASSERT_EQUAL_UINT32(CLAY_ID("w_ctl").id, nt_ui_test_capture_active_id(s_fx.ctx, 0U));
+    TEST_ASSERT_FALSE(nt_ui_hovered_within(s_fx.ctx, CLAY_ID("w_row").id));
+    TEST_ASSERT_FALSE(nt_ui_hovered_within(s_fx.ctx, CLAY_ID("w_other").id));
+    within_at(&p, 20.0F, 20.0F); /* back over the holder, still held */
+    TEST_ASSERT_TRUE(nt_ui_hovered_within(s_fx.ctx, CLAY_ID("w_row").id));
+    arb_release(&p);
+    within_frame(&p);
+    p.buttons[NT_BUTTON_LEFT].is_released = false;
+    within_at(&p, 20.0F, 60.0F); /* released: the other row again */
+    TEST_ASSERT_TRUE(nt_ui_hovered_within(s_fx.ctx, CLAY_ID("w_other").id));
 }
 
 /* A pointer slot the game stops passing holds no pending gesture. */
@@ -2923,6 +3042,9 @@ int main(void) {
     RUN_TEST(test_arb_thumb_stops_when_its_axis_is_disabled);
     RUN_TEST(test_arb_dropped_pointer_slot_holds_no_gesture);
     RUN_TEST(test_front_most_is_structural_not_by_layer);
+    RUN_TEST(test_front_most_inside_a_root_is_declaration_order);
+    RUN_TEST(test_hovered_within_follows_declaration);
+    RUN_TEST(test_hovered_within_follows_capture);
     RUN_TEST(test_arb_equal_crossings_go_to_the_widget_then_the_inner_scroll);
     RUN_TEST(test_arb_vanished_scroll_takes_nothing);
     RUN_TEST(test_arb_tap_gesture_does_not_outlive_its_frame);

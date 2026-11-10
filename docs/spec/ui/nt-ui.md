@@ -132,21 +132,23 @@ Bands accumulate with declaration nesting, NOT with attachment:
 declared as one `modal_zband_stride` each, so nested overlays accumulate
 one stride per level, themselves included, when every enclosing floating
 is an engine overlay. A widget's own floating parts declare delta 0 and
-paint above their container's content because they are declared last.
-Under a clip ancestor their clipTo opens a SCISSOR barrier, so `layer`
-never reorders them against that content; without one they order by
-`layer` like the rest of the band. A floating declared AFTER one of them
-in the same band paints over it. There is no way out
+paint above their container's content because each is a later tree root
+of the same band, and `layer` never reorders across tree roots. A floating
+declared AFTER one of them in the same band paints over it. There is no way out
 of an enclosing stacking context: a game floating that must stay under
 all UI belongs at the root level.
 
 The value Clay stores and reports for a floating is the accumulated
-band, not the declared delta. `nt_ui` bakes that band per element and
-the walker orders on it — the `zIndex` field of individual render
-commands is never read by the engine (Clay fills it only for RECTANGLE,
-TEXT and the floating root's clip SCISSOR). Paint order is band asc, then
-`layer` asc within each barrier-delimited run, then declaration;
-SCISSOR/CUSTOM are hard barriers. An accumulated band that would saturate
+band, not the declared delta. Clay sorts its tree roots (the document and
+every floating element) by that band, stably, so equal bands keep
+declaration order. `nt_ui` bakes each element's stacking order — its tree
+root's place in that sort, then its declaration index — and the walker and
+the pointer arbiter both order on it; the `zIndex` field of individual
+render commands is never read by the engine (Clay fills it only for
+RECTANGLE, TEXT and the floating root's clip SCISSOR). Paint order is tree
+root, then `layer` asc within each barrier-delimited run of one root, then
+Clay's command order (a parent's border after its children); SCISSOR/CUSTOM
+are hard barriers. An accumulated band that would saturate
 `int16` raises a Clay error, which `nt_ui` asserts on rather than
 silently merging two bands. That caps what a game floating may declare: its own
 `zIndex` plus one stride per overlay level nested inside it must still
@@ -215,7 +217,12 @@ Two coord-space modes are gated by `nt_ui_create_desc_t.use_raycast_input`:
   write depth need it above 0, or their children are coplanar with the
   background. Text drawn without depth writes occludes nothing: a farther
   panel drawn later covers a label wherever the label's own background does
-  not. Hit-test stays on the unbiased widget plane. Debug inspector render commands are excluded
+  not. Hit-test stays on the unbiased widget plane. With depth-writing
+  panels the depth test, not the stacking order, decides what is drawn on
+  top: the bias grows with `hierarchy_depth`, so document content nested
+  deeper than an overlay can cover it while the pointer goes to the
+  overlay. This is a known divergence from the stacking order, tracked in
+  #875. Debug inspector render commands are excluded
   from the regular 3D walk and drawn by `nt_ui_debug_inspector_walk` as
   a separate final screen-space pass. The game binds a 2D UI projection
   first; `nt_ui_make_screen_view_proj(w, h, ...)` provides the standard
@@ -282,18 +289,21 @@ nearest world ray-distance within a game-fed occlusion cutoff
 world geometry — the game owns the raycast, the engine only takes the cutoff distance;
 `nt_ui_interaction_t.distance` reports the hit distance. Hits within 1e-5 of the nearest
 distance (relative, floored at one unit) are coplanar and compete like 2D. 2D ctx: the
-ranking is structural. Clay orders its tree roots (the document and every floating element)
-by band, then by declaration, and the later root wins: a floating element of the same or a higher band is over the
-content it floats on, whatever order the two were stepped in. Inside one root the later
-record wins, i.e. the later `nt_ui_step` call; widget code should step in declaration
-order. The draw `layer` is not part of it: layers order batches inside a band and are not
-a way to say which of two interactive elements is on top. Where two interactive elements
-overlap in one band with different layers, the walker may paint the earlier one over the
-later; give the upper one a band (a floating `zIndex`). `nt_ui_wants_pointer` is true
+ranking is the stacking order (see "Floating zIndex is relative"): the later tree root wins
+(band, then declaration), and inside one root the later-declared element wins, so a child is
+over its parent and a later sibling over an earlier one. The order `nt_ui_step` is called in
+does not matter. The draw `layer` is not part of it: it reorders painting inside one root for
+batching and never changes which element gets the pointer. A child overlaps its parent: a
+parent on a higher layer than its interactive child, or the parent's border (Clay emits it
+after the children), paints over the child while the child gets the pointer, so keep an
+interactive child's layer at or above its parent's. Siblings of one root overlap only
+through a transform, overflow without a clip, or hit padding; put such interactive parts on
+one layer or make the upper one floating. `nt_ui_wants_pointer` is true
 while a pointer of the current frame holds a capture or a pending scroll gesture, or its front-most record is declared again this frame (a
 record that vanished this frame is not UI under the pointer). A free pointer drives a
 widget only if it is the resolved hot
 widget or already holds capture; `nt_ui_pointer_hot` exposes the resolved id.
+
 Consequence: a freshly-shown widget registers on its first step and only
 becomes eligible the NEXT frame; on the first frame (empty registry) nothing
 reacts — reliability over instant first-frame response, no raw-hit fallback
@@ -304,8 +314,25 @@ beneath it but itself reacts to nothing), then orphan cleanup drops it next fram
 A statically-disabled widget never registers, so never gates — unless it opts in via
 `nt_ui_block_pointer(ctx, id, pad_lrtb)`, which writes an INERT hit-registry entry (the
 same record `nt_ui_step` makes, minus any interaction). It blocks input to widgets
-behind it but never captures, clicks, or reports hover — the stock disabled widgets
-(button/checkbox/slider) call it so a disabled overlay or modal can't leak clicks through.
+behind it but never captures or clicks; a query on a blocked id reads like an
+unstepped widget: hover and the press edge while it is front-most (unpadded). The stock disabled widgets (button/checkbox/slider) call it so a
+disabled overlay or modal can't leak clicks through.
+
+Two hover questions have two answers. `hovered` means "this record is the pointer's
+target and the pointer is over it": it is exclusive, like the press, except that a capture
+holder reports it over its whole box, even under an element declared later. `nt_ui_hovered_within(ctx, id)`
+means "the pointer's target is `id` or an element declared inside `id`" (CSS `:hover` on an
+ancestor). The target is the pointer's hot; a held pointer targets its capture holder
+instead, and only while its hot is the holder or inside it, so a control dragged off hovers
+nothing, its holder included, and dragging one row's control over another row hovers neither.
+`id` need not be interactive, but only records are targets: the empty area of a plain
+container is not inside it, so a container that should hover over its gaps blocks the
+pointer itself (`nt_ui_block_pointer`; its children are declared later and still win).
+Floating children count as inside, overlays too: a combo or menu opened inside a container
+puts its full-viewport catcher or occluder inside that container, so the container reads
+hovered within over the whole screen while the overlay is open (as CSS does for a fixed
+overlay inside a hovered element); a tooltip on that container shows over the open overlay. Combo rows, the combo trigger, tabs, menu rows and
+tooltips read hover within; a sidebar-consumed pointer hovers nothing, as in every query.
 
 ## Anim cache
 
@@ -565,16 +592,9 @@ floating (Clay accumulates the nesting, see "Floating zIndex is relative" above;
 NT_ASSERT before the push so a runaway nesting fails early); and a present-only, transparent light-dismiss
 catcher at `panel_z-1` (outside-click raises a close signal). Esc and the
 outside-click scan run on ONE CATCHER-BEARING popup per frame: the highest
-effective band, ties to the last declared. That is the POINTER arbiter's key,
-not the paint key, and deliberately so — the winner performs the dismissal
-through its own catcher's interaction, so a slot ranked by draw layer would
-hand the scan to a popup whose catcher never wins the click and NEITHER
-would dismiss. The cost is real and accepted: two catcher-bearing popups on
-one band with different draw layers paint by layer but dismiss by
-declaration, so an outside click can close the one underneath. Ranking the
-slot by paint order requires making the pointer arbiter layer-aware first
-(`resolve_hot` ranks by band and tree root, not by layer) — until then the two must use
-one key, and this is that key. The agreement is a 2D-context property: a 3D
+effective band, ties to the last declared. That is the panels' tree-root
+order, so the popup that paints on top is the one whose catcher wins the
+click and performs the dismissal. The agreement is a 2D-context property: a 3D
 ctx arbitrates the pointer by ray distance and does not rank overlays by
 band at all. A catcher-less
 overlay (menu, tooltip) never claims that slot and runs its own dismiss; the
@@ -602,6 +622,18 @@ state (`nt_ui_menu_state_t` / `bool *open`) and, for the combo, the `int`
 selection; the widget only signals and clears `open` on a pick (Model D, same
 as popup-core). Both build on the kept popup-core (+ the scroll wrapper for a
 long combo list). There is no data-array form — immediate-only.
+
+A custom-content row (`item_begin..item_end`, `selectable_begin..selectable_end`,
+`preview_begin..preview_end`, and a tab's `nt_ui_tab_begin..nt_ui_tab_end`) steps
+in its `_end`, after its children, but the stacking order is declaration, so an
+interactive child declared inside the row wins the press over its own area; the
+rest of the row activates it. Over the child the row's own `hovered` is false,
+but it is hovered within: combo rows, the combo trigger and tabs keep their hover
+look, and a menu row keeps highlight, hover focus and the leaf collapse. A rich-text block
+with links is one record over its whole box, so inside a row it takes the press
+over all of its text, not only over the links. A menu row with `non_activatable`
+has no action of its own (for a row that only hosts a control): it never steps,
+only blocks the pointer, so it hovers but never captures or activates.
 
 Per-frame menu scratch is GAME-owned (`nt_ui_menu_ctx_t`, allocated by the
 game — static / app field / arena slice — and init via `nt_ui_menu_init`), so
