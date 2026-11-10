@@ -39,7 +39,7 @@ static const char *s_fs_src = "precision highp float;\n"
                               "out vec4 frag_color;\n"
                               "void main() {\n"
                               "    vec4 h = texelFetch(u_curve_texture, ivec2(0, int(v_row)), 0);\n"
-                              "    frag_color = (h.y + h.w > 0.5) ? vec4(0.0, 1.0, 0.0, 1.0) : vec4(1.0, 0.0, 0.0, 1.0);\n"
+                              "    frag_color = (v_row != 0u && h.y + h.w > 0.5) ? vec4(0.0, 1.0, 0.0, 1.0) : vec4(1.0, 0.0, 0.0, 1.0);\n"
                               "}\n";
 
 static uint8_t s_pixels[CAPTURE_BYTES];

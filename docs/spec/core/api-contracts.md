@@ -298,14 +298,11 @@ accepts that the quads of one draw (neighbor glyphs, outline, shadow, underline)
 overlap in one plane, keep painter order only through blending and may z-fight
 under depth writes. The renderer does not check the material's depth state or FS;
 shaders are game assets. A vertex variant includes `common/slug_vertex.glsl`,
-which declares the renderer's vertex inputs and the outputs below, calls
-`SlugVertex()` and writes `gl_Position` from `a_position`; it does not
-redeclare or decode the inputs, so the vertex layout can change without
-touching it. A fragment variant consumes the outputs `v_texcoord`,
-`flat uvec2 v_glyph` (band row, band count),
-`flat vec4 v_band_transform` (bbox x0, y0, band count / width, band count /
-height, in em) and `v_color`, and computes coverage with `SlugRender(coord,
-glyph, band_transform)` from `common/slug_coverage.glsl`.
+calls `SlugVertex()` and writes `gl_Position` from `a_position`. A fragment
+variant includes `common/slug_coverage.glsl` and reads the coverage from
+`SlugCoverage()` and the color from `v_color`. The two files declare the
+vertex inputs and the varyings between the stages. A game consumes them from
+the engine's shader directory: a copy does not follow a layout change.
 
 Pipeline identity includes the program handle, so replacement makes a
 different pipeline. Destroying the old program (before the first pass or after
