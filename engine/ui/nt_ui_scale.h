@@ -43,12 +43,13 @@ nt_ui_scale_t nt_ui_compute_scale(const nt_ui_scale_desc_t *desc, float fb_w, fl
 
 /* Physical pointer -> logical. x/y/dx/dy scaled; wheel/buttons pass through. Ctx-free, framework-
  * agnostic primitive — kept for callers that convert outside nt_ui. The ctx-owned path
- * (nt_ui_set_viewport + nt_ui_viewport_from_scale) is preferred for nt_ui apps. */
+ * (nt_ui_frame_desc_t.viewport = nt_ui_viewport_from_scale) is preferred for nt_ui apps. */
 nt_pointer_t nt_ui_scale_apply_pointer(const nt_ui_scale_t *s, nt_pointer_t physical);
 
 /* Bridges a scale to the nt_ui ctx viewport (device content rect): offset = margins, size = logical *
- * scale. Feed to nt_ui_set_viewport so the ctx converts the raw device pointer internally. */
-nt_ui_viewport_t nt_ui_viewport_from_scale(const nt_ui_scale_t *s);
+ * scale, px_per_dp = the window DPR (g_nt_window.dpr). Feed to nt_ui_frame_desc_t.viewport so the ctx converts
+ * the raw device pointer internally. */
+nt_ui_viewport_t nt_ui_viewport_from_scale(const nt_ui_scale_t *s, float px_per_dp);
 
 /* Ortho bounds mapping logical Clay-space onto the full fb (including margins). */
 nt_ui_scale_ortho_t nt_ui_scale_ortho(const nt_ui_scale_t *s);

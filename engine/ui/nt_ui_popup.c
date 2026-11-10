@@ -272,7 +272,7 @@ nt_ui_popup_result_t nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t i
             close_src = NT_UI_POPUP_CLOSE_SRC_ESC;
         }
         if (is_top && dismiss_on_click) {
-            const nt_ui_interaction_t click = nt_ui_step_interaction(ctx, catcher_id);
+            const nt_ui_interaction_t click = nt_ui_step(ctx, catcher_id, NULL);
             if (close_src == NT_UI_POPUP_CLOSE_SRC_NONE && click.clicked) {
                 const int16_t pad_lrtb[4] = {close_pad, close_pad, close_pad, close_pad};
                 if (!nt_ui_internal_hit_test_padded(ctx, id, click.pos[0], click.pos[1], pad_lrtb)) {

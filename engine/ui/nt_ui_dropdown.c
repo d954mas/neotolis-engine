@@ -229,7 +229,7 @@ static nt_ui_interaction_t combo_emit_row_decl(nt_ui_context_t *ctx, uint8_t fil
 }
 
 /* One list row: the shared row rect + an engine column (optional leading icon gutter + left label), closed
- * here. Returns clicked (the mutating step_interaction). */
+ * here. Returns clicked (the mutating nt_ui_step). */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) — icon-gutter CLAY nesting, not deep control flow
 static bool dropdown_declare_row(nt_ui_context_t *ctx, uint8_t fill_layer, uint8_t label_layer, uint32_t row_id, uint32_t label_id, const char *label, const nt_atlas_region_ref_t *icon, bool selected,
                                  nt_ui_dropdown_style_t *style) {
@@ -258,7 +258,7 @@ static bool dropdown_declare_row(nt_ui_context_t *ctx, uint8_t fill_layer, uint8
         }
     }
     nt_ui_clay_priv_close_element();
-    return nt_ui_step_interaction(ctx, row_id).clicked;
+    return nt_ui_step(ctx, row_id, NULL).clicked;
 }
 
 /* ---- Immediate combo (begin/selectable/end) ---- */
@@ -316,7 +316,7 @@ static void combo_open_trigger(nt_ui_context_t *ctx, uint8_t fill_layer, uint8_t
     }
     dropdown_declare_chevron(ctx, fill_layer, 0U, style, a->value_t);
     nt_ui_clay_priv_close_element();
-    if (nt_ui_step_interaction(ctx, id).clicked) {
+    if (nt_ui_step(ctx, id, NULL).clicked) {
         *open = !*open;
     }
 }
@@ -449,7 +449,7 @@ bool nt_ui_combo_preview_end(nt_ui_context_t *ctx) {
     }
 
     nt_ui_clay_priv_close_element();
-    if (nt_ui_step_interaction(ctx, id).clicked) {
+    if (nt_ui_step(ctx, id, NULL).clicked) {
         *open = !*open;
     }
     ctx->pending_combo.trigger_open = 0U;
@@ -519,8 +519,8 @@ bool nt_ui_combo_selectable_end(nt_ui_context_t *ctx) {
     nt_ui_clay_priv_close_element();
     /* A combo custom row is whole-row-clickable (no activatable=false opt-out like the menu): the combo list
      * is a flat pick list, so a custom row's content is decoration around the choice, never a rival hit
-     * target. The ONE step_interaction owns the click; on click the combo clears *open (game writes *selected). */
-    const nt_ui_interaction_t step = nt_ui_step_interaction(ctx, row_id);
+     * target. The ONE nt_ui_step owns the click; on click the combo clears *open (game writes *selected). */
+    const nt_ui_interaction_t step = nt_ui_step(ctx, row_id, NULL);
     if (step.clicked) {
         *(ctx->pending_combo.open) = false; /* the game writes *selected; the combo clears *open */
     }

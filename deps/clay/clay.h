@@ -41,6 +41,10 @@
 //      out-of-bounds internal error) and the previous frame's bbox. One site in
 //      ConfigureOpenElementPtr reports FLOATING_CONTAINER_PARENT_NOT_FOUND;
 //      search "NT patch 8".
+//   9. Clay_GetScrollContainerData returns the clip config stored when the element was last
+//      declared, instead of reading it through the cached layoutElement pointer: mid-frame that
+//      slot may already hold another element (e.g. a parent's scrollbar declared first), which
+//      returned found=false and zero dims for a nested scroll. Search "NT patch 9" (field + 3 sites).
 // NT DEPENDENCY: nt_ui_clay_impl.c wraps Clay__OpenElement /
 //   Clay__ConfigureOpenElement / Clay__CloseElement for the begin/end split
 //   pattern used by nt_ui widgets. Verify these internals still exist on update.
@@ -1211,6 +1215,7 @@ typedef struct {
     Clay_Vector2 previousDelta;
     float momentumTime;
     uint32_t elementId;
+    Clay_ClipElementConfig ntClipConfig; // NT patch 9: config of the last declaration
     bool openThisFrame;
     bool pointerScrollActive;
 } Clay__ScrollContainerDataInternal;
@@ -2253,11 +2258,12 @@ void Clay__ConfigureOpenElementPtr(const Clay_ElementDeclaration *declaration) {
             if (openLayoutElement->id == mapping->elementId) {
                 scrollOffset = mapping;
                 scrollOffset->layoutElement = openLayoutElement;
+                scrollOffset->ntClipConfig = declaration->clip; // NT patch 9
                 scrollOffset->openThisFrame = true;
             }
         }
         if (!scrollOffset) {
-            scrollOffset = Clay__ScrollContainerDataInternalArray_Add(&context->scrollContainerDatas, CLAY__INIT(Clay__ScrollContainerDataInternal){.layoutElement = openLayoutElement, .scrollOrigin = {-1,-1}, .elementId = openLayoutElement->id, .openThisFrame = true});
+            scrollOffset = Clay__ScrollContainerDataInternalArray_Add(&context->scrollContainerDatas, CLAY__INIT(Clay__ScrollContainerDataInternal){.layoutElement = openLayoutElement, .scrollOrigin = {-1,-1}, .elementId = openLayoutElement->id, .ntClipConfig = declaration->clip, .openThisFrame = true}); // NT patch 9
         }
         if (context->externalScrollHandlingEnabled) {
             scrollOffset->scrollPosition = Clay__QueryScrollOffset(scrollOffset->elementId, context->queryScrollOffsetUserData);
@@ -4430,15 +4436,12 @@ Clay_ScrollContainerData Clay_GetScrollContainerData(Clay_ElementId id) {
     for (int32_t i = 0; i < context->scrollContainerDatas.length; ++i) {
         Clay__ScrollContainerDataInternal *scrollContainerData = Clay__ScrollContainerDataInternalArray_Get(&context->scrollContainerDatas, i);
         if (scrollContainerData->elementId == id.id) {
-            Clay_ClipElementConfig *clipElementConfig = Clay__FindElementConfigWithType(scrollContainerData->layoutElement, CLAY__ELEMENT_CONFIG_TYPE_CLIP).clipElementConfig;
-            if (!clipElementConfig) { // This can happen on the first frame before a scroll container is declared
-                return CLAY__INIT(Clay_ScrollContainerData) CLAY__DEFAULT_STRUCT;
-            }
+            // NT patch 9: the stored config, not the cached layoutElement slot (stale mid-frame).
             return CLAY__INIT(Clay_ScrollContainerData) {
                 .scrollPosition = &scrollContainerData->scrollPosition,
                 .scrollContainerDimensions = { scrollContainerData->boundingBox.width, scrollContainerData->boundingBox.height },
                 .contentDimensions = scrollContainerData->contentSize,
-                .config = *clipElementConfig,
+                .config = scrollContainerData->ntClipConfig,
                 .found = true
             };
         }

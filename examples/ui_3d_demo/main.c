@@ -427,7 +427,7 @@ static void draw_shape(void) {
 
 /* Cursor ray vs the central object's bounding sphere. *out_dist = world distance from the near plane
  * to the front hit (same metric as the UI hit distance), or false on miss. Fed to
- * nt_ui_set_pointer_occlusion so a panel directly behind the object can't be clicked through it. */
+ * the frame's occlusion so a panel directly behind the object can't be clicked through it. */
 static bool cursor_object_distance(float px, float py, float fb_w, float fb_h, const mat4 vp, float *out_dist) {
     if (fb_w <= 0.0F || fb_h <= 0.0F) {
         return false;
@@ -569,7 +569,7 @@ static int test_panel_body(const char *title, const uint32_t ids[TPICK_COUNT], i
 
 /* Two panels mounted BEHIND the central object so the cursor ray must pass it to reach them. NEAR
  * (z=-2.5) sits slightly left, FAR (z=-4.0) slightly right → they overlap along the sightline.
- *   - Aim THROUGH the object → buttons are occluded (set_pointer_occlusion blocks the click).
+ *   - Aim THROUGH the object → buttons are occluded (the frame's occlusion blocks the click).
  *   - Where NEAR & FAR overlap → only NEAR's button reacts (front-most arbitration); strafe (A/D)
  *     so the object stops blocking to see it. The side that sticks out belongs to one panel only.
  * Declared inside ui3d-root (floating, bbox at 0,0); the XFORM maps each to its world mount. */
@@ -893,14 +893,11 @@ static void frame(void) {
 
     if (ui_can_render) {
         const nt_pointer_t *pointer = &g_nt_input.pointers[g_nt_input.primary];
-        nt_ui_begin(s_ctx, fb_w, fb_h, dt, pointer, 1, 0);
-        nt_ui_set_view_proj(s_ctx, (const float *)vp_3d);
         /* Occlusion: if the cursor ray crosses the central object, block UI beyond it — a panel
          * behind the object can't be clicked through it (game owns the world raycast). */
-        float occl_dist = 0.0F;
-        if (cursor_object_distance(pointer->x, pointer->y, fb_w, fb_h, vp_3d, &occl_dist)) {
-            nt_ui_set_pointer_occlusion(s_ctx, 0, occl_dist);
-        }
+        float occl_dist = INFINITY;
+        (void)cursor_object_distance(pointer->x, pointer->y, fb_w, fb_h, vp_3d, &occl_dist);
+        nt_ui_begin(s_ctx, &(nt_ui_frame_desc_t){.layout_w = fb_w, .layout_h = fb_h, .dt = dt, .pointers = pointer, .pointer_count = 1, .view_proj = (const float *)vp_3d, .occlusion = &occl_dist});
         declare_panels();
         nt_ui_end(s_ctx);
     }

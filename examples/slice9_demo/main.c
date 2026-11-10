@@ -438,8 +438,12 @@ static void frame(void) {
 
     if (can_render) {
         /* Pass the RAW device pointer; the ctx converts it via the scale-derived viewport. */
-        nt_ui_begin(s_ctx, scale.logical_w, scale.logical_h, g_nt_app.dt, &g_nt_input.pointers[g_nt_input.primary], 1, 0);
-        nt_ui_set_viewport(s_ctx, nt_ui_viewport_from_scale(&scale));
+        nt_ui_begin(s_ctx, &(nt_ui_frame_desc_t){.layout_w = scale.logical_w,
+                                                 .layout_h = scale.logical_h,
+                                                 .dt = g_nt_app.dt,
+                                                 .pointers = &g_nt_input.pointers[g_nt_input.primary],
+                                                 .pointer_count = 1,
+                                                 .viewport = nt_ui_viewport_from_scale(&scale, g_nt_window.dpr)});
 
         // #region status line
         char status_text[128];

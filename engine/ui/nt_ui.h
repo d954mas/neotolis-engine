@@ -266,8 +266,8 @@ void nt_ui_module_shutdown(void);
 
 typedef struct {
     uint32_t max_elements; /* Clay layout-element cap. */
-    /* true = raycast hit-test against game's view_proj (3D ctx); the game must populate view_proj
-     * via nt_ui_set_view_proj after each nt_ui_begin (per-frame reset). false (default) =
+    /* true = raycast hit-test against game's view_proj (3D ctx); every frame passes it in
+     * nt_ui_frame_desc_t.view_proj. false (default) =
      * inverse-affine 2D hit-test against baked screen-space transform. */
     bool use_raycast_input;
     /* 3D ctx render-only depth bias. 0 = off. Positive values draw deeper hierarchy levels
@@ -320,36 +320,16 @@ void nt_ui_context_layout_size(const nt_ui_context_t *ctx, float *out_w, float *
    bounds are only valid then — a never-begun ctx has degenerate (0) dims that trap the converters. */
 bool nt_ui_context_has_frame(const nt_ui_context_t *ctx);
 
-/* REQUIRED for ctx with use_raycast_input=true. Call IMMEDIATELY after nt_ui_begin and BEFORE
- * any widget hit-test (nt_ui_button_begin, nt_ui_step_interaction*, nt_ui_test_hit etc.). The
- * setter copies into ctx and pre-computes the inverse for raycast; `nt_ui_begin` resets the
- * view_proj_set flag so a forgotten setter trips the per-frame assert instead of silently
- * raycasting through last frame's stale camera. ctx is non-NULL, use_raycast_input is true,
- * view_proj is finite + non-singular.
- *
- * Coord convention: baked.m for 3D ctx carries NO implicit Y-flip; game's view_proj must map
- * LAYOUT-space input (Y-down, matching Clay) → clip space directly. For screen-fit 3D UI use
- * `glm_ortho(0, w, h, 0, near, far)` (flipped top/bottom). For perspective 3D world UI, set up
- * lookAt with up = (0, -1, 0) so screen-down aligns with Clay layout-down.
- *
- * Render-side contract: this setter only feeds the hit-test path. The sprite/text materials
- * must receive the SAME view_proj via the game's frame-uniforms UBO before nt_ui_walk, or the
- * rendered geometry will not match where hit-test thinks the widgets are. */
-void nt_ui_set_view_proj(nt_ui_context_t *ctx, const float view_proj[16]);
-
 void nt_ui_set_font(nt_ui_context_t *ctx, uint16_t font_id, nt_font_t font);
 
 /* Device->layout viewport, the ctx's single device<->layout mapping.
- *   (x, y) — device-space offset of the layout content rect (LETTERBOX/CROP margins; 0 for unscaled)
- *   (w, h) — device-space size of that content rect (logical_dim * scale), must be > 0. */
+ *   (x, y)    — device-space offset of the layout content rect (LETTERBOX/CROP margins; 0 for unscaled)
+ *   (w, h)    — device-space size of that content rect (logical_dim * scale), must be > 0.
+ *   px_per_dp — device px per dp (the window DPR), > 0: gesture tolerances are physical finger sizes. */
 typedef struct {
     float x, y, w, h;
+    float px_per_dp;
 } nt_ui_viewport_t;
-
-/* Overrides this frame's viewport (begin reset it to the identity {0,0,screen_w,screen_h}).
- * Call AFTER nt_ui_begin and BEFORE the first hit-test resolve (step/query/pointer_hot) — same
- * lazy window as nt_ui_set_view_proj. Scaled apps feed nt_ui_viewport_from_scale here. */
-void nt_ui_set_viewport(nt_ui_context_t *ctx, nt_ui_viewport_t vp);
 
 /* Bidirectional device<->layout converters through the ctx viewport (cglm vec2 = float[2], passed
  * float[16]-style so the public header stays cglm-free). screen = device px; layout = Clay px.
@@ -357,11 +337,26 @@ void nt_ui_set_viewport(nt_ui_context_t *ctx, nt_ui_viewport_t vp);
 void nt_ui_screen_to_layout(const nt_ui_context_t *ctx, const float screen[2], float out_layout[2]);
 void nt_ui_layout_to_screen(const nt_ui_context_t *ctx, const float layout[2], float out_screen[2]);
 
-/* pointers[0..count) drive multitouch under α-semantics — see the multitouch note above nt_ui_interaction_t. pointers carry
- * RAW DEVICE coords; the ctx converts them to layout space via the viewport at the lazy hit resolve.
- * pointers[primary] anchors menus, rich-text links, the Clay feed and the inspector: a single-pointer UI
- * passes its one pointer with primary 0, a whole g_nt_input array passes g_nt_input.primary. */
-void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt, const nt_pointer_t *pointers, uint32_t count, uint32_t primary);
+/* One frame's input. nt_ui_begin converts the pointers, resolves the front-most record per pointer
+ * and decides the scroll gestures once, from it: every step and query of the frame then only reads.
+ *
+ * view_proj (3D ctx only, required there; finite, non-singular): baked.m carries NO implicit Y-flip,
+ * so it maps LAYOUT-space input (Y-down, matching Clay) to clip space directly — `glm_ortho(0, w, h,
+ * 0, near, far)` for screen-fit 3D UI, lookAt with up = (0, -1, 0) for perspective world UI. The
+ * sprite/text materials must receive the SAME view_proj through the game's frame uniforms before
+ * nt_ui_walk, or the drawn geometry will not match the hit-test. */
+typedef struct {
+    float layout_w, layout_h;     /* Clay layout size (logical space for scaled apps), > 0 */
+    float dt;                     /* seconds, >= 0 */
+    const nt_pointer_t *pointers; /* RAW DEVICE coords; [0..count) drive multitouch (see nt_ui_interaction_t) */
+    uint32_t pointer_count;       /* 1..NT_INPUT_MAX_POINTERS */
+    uint32_t primary;             /* anchors menus, the Clay feed and the inspector */
+    nt_ui_viewport_t viewport;    /* device content rect (nt_ui_viewport_from_scale); zero size = identity (px_per_dp 0 = 1) */
+    const float *view_proj;       /* 3D ctx: mat4 (above); 2D ctx: NULL */
+    const float *occlusion;       /* 3D ctx: per-pointer max ray distance, e.g. the nearest world hit; NULL = none */
+} nt_ui_frame_desc_t;
+
+void nt_ui_begin(nt_ui_context_t *ctx, const nt_ui_frame_desc_t *frame);
 void nt_ui_end(nt_ui_context_t *ctx);
 
 /* Extensible widget descriptor for the inspector. Descriptors must be pointer-stable
@@ -559,7 +554,7 @@ nt_ui_bbox_t nt_ui_get_bbox(const nt_ui_context_t *ctx, uint32_t id);
  * Aggregated interaction_t.hovered = any pointer over; pressed/released/clicked
  * track the single owner pidx. interaction_t.pointer_id holds the OS id of the
  * owning (or first hovering) pointer. */
-/* Computed lazily: this-frame pointer vs PREVIOUS-frame bbox (1-frame IM lag). */
+/* This-frame pointer vs PREVIOUS-frame bbox (1-frame IM lag). */
 typedef struct {
     bool hovered;           /* pointer over bbox (transform-aware) */
     bool pressed;           /* currently captured (held) */
@@ -573,28 +568,33 @@ typedef struct {
     float pos[2];           /* current pointer pos (UI-space) */
     float drag_dx, drag_dy; /* = pos - press_pos (convenience) */
     uint32_t pointer_id;    /* which pointer captured (multitouch) */
+    bool gesture_pending;   /* an enclosing scroll may still take this press: hold off value changes; a pending release is a tap */
     float distance;         /* 3D ctx: world distance (near-plane-relative) to this widget; 0 in 2D */
 } nt_ui_interaction_t;
 
-/* Front-most interactive widget under a pointer, resolved per frame (3D: nearest; 2D: top zIndex). */
+/* Front-most interactive record under a pointer, resolved per frame (3D: nearest; then tree root, then record). */
 typedef struct {
     uint32_t id;    /* 0 = none under the pointer */
     float distance; /* world distance in 3D ctx; 0 in 2D */
 } nt_ui_hot_t;
 
-/* Idempotent until the step: same result N times per frame; safe outside begin/end. Side effects are
- * frame-scoped only (hover observability + the once-per-frame arbitration resolve), never capture or
- * button-edge state — those live in step_interaction. Once the step has run, read one-shot edges
- * from its result: the capture it committed changes what a later query sees. */
+/* Pure read: same result N times per frame; safe outside begin/end. Capture and button edges live
+ * in nt_ui_step; once the step has run, read one-shot edges from its result. */
 nt_ui_interaction_t nt_ui_query_interaction(nt_ui_context_t *ctx, uint32_t id);
 
-/* MUTATING — call ONCE per widget per frame from the widget's begin.
- * Sidebar-consumed pointer returns zeroed struct (see nt_ui_inspector_pointer_consumed). */
-nt_ui_interaction_t nt_ui_step_interaction(nt_ui_context_t *ctx, uint32_t id);
+/* Drag axes a widget consumes itself (slider, thumb, custom draggable): a drag along them stays with
+ * the widget instead of being taken by an enclosing scroll. */
+#define NT_UI_DRAG_X ((uint8_t)1U)
+#define NT_UI_DRAG_Y ((uint8_t)2U)
 
-/* Inflates bbox BEFORE the inverse-affine for mobile touch-friendly hit areas.
- * Asserts each component >= 0; NULL = unpadded. */
-nt_ui_interaction_t nt_ui_step_interaction_padded(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lrtb[4]);
+typedef struct {
+    const int16_t *pad_lrtb; /* inflates the bbox BEFORE the inverse-affine (touch targets); NULL = none, each >= 0 */
+    uint8_t drag_axes;       /* NT_UI_DRAG_X | NT_UI_DRAG_Y; 0 = taps only (a scroll may take the drag) */
+} nt_ui_step_desc_t;
+
+/* MUTATING — call ONCE per widget per frame from the widget's begin. desc NULL = unpadded, no drag axes.
+ * Sidebar-consumed pointer returns zeroed struct (see nt_ui_inspector_pointer_consumed). */
+nt_ui_interaction_t nt_ui_step(nt_ui_context_t *ctx, uint32_t id, const nt_ui_step_desc_t *desc);
 
 /* One-shot long press: true on the frame the hold crosses secs > 0. secs must stay constant for the
  * whole hold. Compares stored values: subtracting dt could round across secs and fire twice. */
@@ -603,33 +603,32 @@ bool nt_ui_hold_crossed(const nt_ui_interaction_t *in, float secs);
 /* Linear 0..1 ramp toward secs > 0 while the hold is live, 0 otherwise (the hold-to-confirm signal). */
 float nt_ui_hold_progress(const nt_ui_interaction_t *in, float secs);
 
-/* App-wide gesture constants: the double-click window (secs) and the move radius (layout units) within
- * which a second press still counts as a double-click. Hold/long-press is NOT cancelled by
- * movement — only by leaving the widget's hitbox. Asserts each is finite and >= 0 (fail-early,
- * no silent clamp). Defaults: 0.5 s, 16. */
-void nt_ui_set_gesture_constants(nt_ui_context_t *ctx, float dbl_window_secs, float move_radius);
+/* Drag slop (dp): how far a press moves along an axis before an enclosing scroll or a draggable
+ * widget takes it (Android touchSlop). */
+#ifndef NT_UI_DRAG_SLOP_DP
+#define NT_UI_DRAG_SLOP_DP 8.0F
+#endif
 
-/* Inert occluder: enters id into the interactive registry so it wins next-frame topmost-z
+/* App-wide gesture constants: the double-click window (secs) and the move radius (dp) within which a
+ * second press still counts as a double-click. Hold/long-press is NOT cancelled by movement — only by
+ * leaving the widget's hitbox. Asserts each is finite and >= 0. Defaults: 0.5 s, 16 dp. */
+void nt_ui_set_gesture_constants(nt_ui_context_t *ctx, float dbl_window_secs, float move_radius_dp);
+
+/* Inert occluder: enters id into the interactive registry so it wins next-frame front-most
  * arbitration over widgets behind it (the pointer can't leak through), but never captures,
  * clicks, or reports hover. Disabled widgets call this so a modal/overlay blocks input to
  * whatever sits underneath. pad_lrtb inflates the block area (NULL = none, asserts >= 0). */
 void nt_ui_block_pointer(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lrtb[4]);
 
-/* True when any capture is active OR a pointer is over a widget this frame. */
+/* True when a pointer of the last frame holds a capture or a pending scroll gesture, or is over a widget. */
 bool nt_ui_wants_pointer(const nt_ui_context_t *ctx);
 
-/* 3D ctx only (asserts use_raycast_input): max world distance the pointer's ray may travel before UI
- * stops registering. Feed the nearest world-geometry hit (so the player can't click UI through a
- * wall) and/or an interaction range. Default +inf = no cutoff. Reset each nt_ui_begin; feed it BEFORE
- * this frame's first step_interaction / query / nt_ui_pointer_hot (the per-frame resolve latches once). */
-void nt_ui_set_pointer_occlusion(nt_ui_context_t *ctx, uint32_t pointer_index, float max_world_distance);
-
-/* Front-most interactive widget under the pointer this frame (3D: nearest within the cutoff; 2D:
- * highest effective zIndex, tie → last-registered = later step_interaction call, which equals
- * declaration/paint order when widgets step in declaration order). Resolved lazily from the prev-frame registry on the
- * first step/query (mutating). Only widgets that called step_interaction last frame are candidates. In 3D ctx call
- * nt_ui_set_view_proj first — the lazy resolve hit-tests, which asserts view_proj is set. id 0 = none. */
-nt_ui_hot_t nt_ui_pointer_hot(nt_ui_context_t *ctx, uint32_t pointer_index);
+/* Front-most interactive record under the pointer this frame (3D: nearest within the occlusion
+ * cutoff first; then the later tree root — band, then declaration; then the later nt_ui_step call).
+ * The draw layer is not consulted: an element that must be on top of another in one band gets a band.
+ * Resolved by nt_ui_begin from the prev-frame registry: stepped widgets, blockers, scroll surfaces
+ * (a scroll id over its empty area) and scrollbars. id 0 = none. */
+nt_ui_hot_t nt_ui_pointer_hot(const nt_ui_context_t *ctx, uint32_t pointer_index);
 // #endregion
 
 // #region test_access

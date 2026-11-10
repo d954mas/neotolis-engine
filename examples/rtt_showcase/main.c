@@ -338,7 +338,8 @@ static void declare_ui_overlay(void) {
     (void)snprintf(zoom_text, sizeof zoom_text, "%.2fx", (double)s_demo.sample_zoom);
     (void)snprintf(blur_text, sizeof blur_text, "%.1f px", (double)s_demo.blur_radius);
 
-    nt_ui_begin(s_ui_ctx, fb_w, fb_h, g_nt_app.dt, g_nt_input.pointers, NT_INPUT_MAX_POINTERS, g_nt_input.primary);
+    nt_ui_begin(s_ui_ctx,
+                &(nt_ui_frame_desc_t){.layout_w = fb_w, .layout_h = fb_h, .dt = g_nt_app.dt, .pointers = g_nt_input.pointers, .pointer_count = NT_INPUT_MAX_POINTERS, .primary = g_nt_input.primary});
     CLAY({.id = CLAY_ID("rtt_ui_root"),
           .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .padding = {.left = 18, .right = 18, .top = 14, .bottom = 0}, .layoutDirection = CLAY_TOP_TO_BOTTOM}}) {
         CLAY({.id = CLAY_ID("rtt_controls"),

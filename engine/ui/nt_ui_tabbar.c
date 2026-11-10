@@ -241,7 +241,7 @@ void nt_ui_tab_end(nt_ui_context_t *ctx) {
 
     const uint32_t tab_id = ctx->pending_tab.id;
     nt_ui_clay_priv_close_element();
-    (void)nt_ui_step_interaction(ctx, tab_id); /* the mutating step (registers the tab + advances capture) */
+    (void)nt_ui_step(ctx, tab_id, NULL); /* the mutating step (registers the tab + advances capture) */
     ctx->pending_tab.active = false;
 }
 

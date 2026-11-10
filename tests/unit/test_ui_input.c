@@ -29,6 +29,7 @@
 #include "ui/nt_ui_input.h"
 #include "ui/nt_ui_internal.h"
 #include "ui/nt_ui_modal.h"
+#include "ui/nt_ui_scroll.h"
 #include "ui/nt_ui_state.h"
 #include "unity.h"
 #include "utf8/nt_utf8.h"
@@ -39,10 +40,42 @@ static ui_walker_fixture_t s_fx;
 /* One UI frame: publish the input fed since the last frame, then begin. */
 static void ui_frame_begin(nt_ui_context_t *ctx, float w, float h, float dt, const nt_pointer_t *p, uint32_t count, uint32_t primary) {
     nt_input_poll();
-    nt_ui_begin(ctx, w, h, dt, p, count, primary);
+    nt_ui_begin(ctx, &(nt_ui_frame_desc_t){.layout_w = w, .layout_h = h, .dt = dt, .pointers = p, .pointer_count = count, .primary = primary});
 }
 static nt_ui_input_style_t s_style;
 static nt_ui_input_props_t s_props; /* per-field behaviour; tests set allow/password/keyboard here */
+
+/* From device events to widgets: a release and a new press that arrive between two frames reach the
+ * UI as two frames, the click of the first widget and then the press of the second. */
+static nt_ui_interaction_t s_e2e_a;
+static nt_ui_interaction_t s_e2e_b;
+static void e2e_frame(void) {
+    ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, g_nt_input.pointers, NT_INPUT_MAX_POINTERS, g_nt_input.primary);
+    CLAY({.id = CLAY_ID("e2e_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(100)}}}) {
+        CLAY({.id = CLAY_ID("e2e_a"), .layout = {.sizing = {CLAY_SIZING_FIXED(100), CLAY_SIZING_FIXED(100)}}}) { s_e2e_a = nt_ui_step(s_fx.ctx, CLAY_ID("e2e_a").id, NULL); }
+        CLAY({.id = CLAY_ID("e2e_b"), .layout = {.sizing = {CLAY_SIZING_FIXED(100), CLAY_SIZING_FIXED(100)}}}) { s_e2e_b = nt_ui_step(s_fx.ctx, CLAY_ID("e2e_b").id, NULL); }
+    }
+    nt_ui_end(s_fx.ctx);
+}
+static void test_release_and_press_between_frames_reach_widgets_in_order(void) {
+    nt_input_init();
+    nt_input_feed(nt_test_mouse(50.0F, 50.0F, 0));
+    e2e_frame();
+    e2e_frame();
+    nt_input_feed(nt_test_mouse(50.0F, 50.0F, 1));
+    e2e_frame();
+    TEST_ASSERT_TRUE(s_e2e_a.pressed_now);
+
+    nt_input_feed(nt_test_mouse(50.0F, 50.0F, 0));
+    nt_input_feed(nt_test_mouse(120.0F, 50.0F, 0));
+    nt_input_feed(nt_test_mouse(150.0F, 50.0F, 1));
+    e2e_frame();
+    TEST_ASSERT_TRUE(s_e2e_a.clicked); /* released where it happened, over A */
+    TEST_ASSERT_FALSE(s_e2e_b.pressed);
+    e2e_frame();
+    TEST_ASSERT_TRUE(s_e2e_b.pressed_now);
+    TEST_ASSERT_FALSE(s_e2e_a.pressed);
+}
 
 /* The fake clipboard exposes a test-only availability toggle (no fake header; declared here). */
 extern void nt_clipboard_fake_set_available(bool available);
@@ -125,6 +158,82 @@ static const Clay_RenderCommand *find_field_bg_rect(const nt_ui_context_t *ctx) 
         }
     }
     return NULL;
+}
+
+/* One frame with a single field at the top of a 300x200 list with 1000-tall content. */
+static void field_in_scroll_frame(const nt_pointer_t *p, uint32_t id, char *buf, size_t cap) {
+    const nt_ui_scroll_style_t list = nt_ui_scroll_style_defaults();
+    ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 0.016F, p, 1, 0);
+    CLAY({.id = CLAY_ID("root"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = IN_X, .y = IN_Y}}}) {
+        nt_ui_scroll_begin(s_fx.ctx, NULL, CLAY_ID("list").id, &list, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(300), CLAY_SIZING_FIXED(200)}}});
+        CLAY({.id = CLAY_ID("list_content"), .layout = {.sizing = {CLAY_SIZING_FIXED(300), CLAY_SIZING_FIXED(1000)}, .layoutDirection = CLAY_TOP_TO_BOTTOM}}) {
+            (void)nt_ui_input_text(s_fx.ctx, NULL, 0, id, buf, cap, &s_props, &s_style, &s_field_decl, true, NULL);
+        }
+        nt_ui_scroll_end(s_fx.ctx);
+    }
+    nt_ui_end(s_fx.ctx);
+}
+
+/* Inside a list a tap focuses the field on its release; a press still waiting for the list does not. */
+static void test_input_in_scroll_focuses_on_tap_release(void) {
+    char buf[32] = "hello";
+    const uint32_t id = 0x1F00D01U;
+    const float x = IN_X + 50.0F;
+    const float y = IN_Y + (IN_H * 0.5F);
+    nt_pointer_t p = make_pointer(x, y, false, false, false);
+    field_in_scroll_frame(&p, id, buf, sizeof buf);
+    field_in_scroll_frame(&p, id, buf, sizeof buf);
+    p = make_pointer(x, y, true, true, false);
+    field_in_scroll_frame(&p, id, buf, sizeof buf);
+    TEST_ASSERT_FALSE(nt_ui_input_focused(s_fx.ctx, id));
+    p = make_pointer(x, y, false, false, true);
+    field_in_scroll_frame(&p, id, buf, sizeof buf);
+    TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, id));
+}
+
+/* Esc while a focused field's press is held inside a list: the release does not refocus it. */
+static void test_input_in_scroll_esc_during_press_stays_unfocused(void) {
+    char buf[32] = "hello";
+    const uint32_t id = 0x1F00D03U;
+    const float x = IN_X + 50.0F;
+    const float y = IN_Y + (IN_H * 0.5F);
+    nt_pointer_t p = make_pointer(x, y, false, false, false);
+    field_in_scroll_frame(&p, id, buf, sizeof buf);
+    field_in_scroll_frame(&p, id, buf, sizeof buf);
+    p = make_pointer(x, y, true, true, false);
+    field_in_scroll_frame(&p, id, buf, sizeof buf);
+    p = make_pointer(x, y, false, false, true);
+    field_in_scroll_frame(&p, id, buf, sizeof buf);
+    TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, id));
+    p = make_pointer(x, y, true, true, false);
+    field_in_scroll_frame(&p, id, buf, sizeof buf);
+    nt_input_feed(nt_test_key(NT_KEY_ESCAPE, true));
+    p = make_pointer(x, y, true, false, false);
+    field_in_scroll_frame(&p, id, buf, sizeof buf);
+    nt_input_feed(nt_test_key(NT_KEY_ESCAPE, false));
+    TEST_ASSERT_FALSE(nt_ui_input_focused(s_fx.ctx, id));
+    p = make_pointer(x, y, false, false, true);
+    field_in_scroll_frame(&p, id, buf, sizeof buf);
+    TEST_ASSERT_FALSE(nt_ui_input_focused(s_fx.ctx, id));
+}
+
+/* A list drag that starts on an unfocused field scrolls and leaves the field unfocused. */
+static void test_input_in_scroll_drag_never_focuses(void) {
+    char buf[32] = "hello";
+    const uint32_t id = 0x1F00D02U;
+    const float x = IN_X + 50.0F;
+    const float y = IN_Y + (IN_H * 0.5F);
+    nt_pointer_t p = make_pointer(x, y, false, false, false);
+    field_in_scroll_frame(&p, id, buf, sizeof buf);
+    field_in_scroll_frame(&p, id, buf, sizeof buf);
+    p = make_pointer(x, y, true, true, false);
+    field_in_scroll_frame(&p, id, buf, sizeof buf);
+    p = make_pointer(x, y - 40.0F, true, false, false);
+    field_in_scroll_frame(&p, id, buf, sizeof buf);
+    TEST_ASSERT_EQUAL_UINT32(CLAY_ID("list").id, s_fx.ctx->captures[0].active_id);
+    p = make_pointer(x, y, false, false, true);
+    field_in_scroll_frame(&p, id, buf, sizeof buf);
+    TEST_ASSERT_FALSE(nt_ui_input_focused(s_fx.ctx, id));
 }
 
 /* One frame with a single field. Feeds the given pointer; returns the change flag. */
@@ -1492,6 +1601,9 @@ static void test_field_text_above_modal_band(void) {
 
 int main(void) {
     UNITY_BEGIN();
+    RUN_TEST(test_input_in_scroll_focuses_on_tap_release);
+    RUN_TEST(test_input_in_scroll_drag_never_focuses);
+    RUN_TEST(test_input_in_scroll_esc_during_press_stays_unfocused);
     RUN_TEST(test_insert_cyrillic_codepoints);
     RUN_TEST(test_backspace_one_codepoint);
     RUN_TEST(test_arrow_left_codepoint);
@@ -1547,6 +1659,7 @@ int main(void) {
     RUN_TEST(test_edit_step_backspace_across_multibyte_caret_boundary);
     RUN_TEST(test_scroll_step_caret_follow_fixed_width);
     RUN_TEST(test_field_text_above_modal_band);
+    RUN_TEST(test_release_and_press_between_frames_reach_widgets_in_order);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_assert_null_buffer);
     RUN_TEST(test_assert_zero_cap);

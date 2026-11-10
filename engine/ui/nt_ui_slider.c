@@ -26,6 +26,7 @@ const nt_ui_widget_def_t NT_UI_SLIDER_DEF = {
 #define NT_UI_SLIDER_DRAG_SALT 0x510D3201U
 typedef struct {
     float grab_offset; /* press_pos.x - thumb_left at grab; thumb_w/2 = track-jump */
+    float tap_frac;    /* track jump a tap applies on release while a scroll still decides; < 0 for the thumb */
     uint8_t active;    /* 1 while a drag is live */
     uint8_t _pad[3];
 } nt_ui_slider_drag_t;
@@ -112,11 +113,18 @@ static float slider_resolve_drag(nt_ui_context_t *ctx, uint32_t id, const nt_ui_
         drag->active = 1U;
         if (on_thumb) {
             drag->grab_offset = in->press_pos[axis] - thumb_lead; /* relative grab, value unchanged this frame */
+            drag->tap_frac = -1.0F;                               /* a thumb tap changes nothing */
             return frac;
         }
         drag->grab_offset = thumb_extent * 0.5F; /* track jump: thumb centers under the click */
         const float v = slider_pos_to_value(in->press_pos[axis], track_origin, usable, thumb_extent, min, max, invert);
-        return slider_value_to_frac(v, min, max);
+        drag->tap_frac = slider_value_to_frac(v, min, max);
+        /* Inside a scroll the jump waits: the press may still become a scroll (Android SeekBar). */
+        return in->gesture_pending ? frac : drag->tap_frac;
+    }
+    if (in->gesture_pending) {
+        /* A pending release is a tap: it applies the track jump when it lands on the slider. */
+        return (in->clicked && drag->tap_frac >= 0.0F) ? drag->tap_frac : frac;
     }
     if (drag->active != 0U) { /* held: thumb follows pointer keeping the grab offset */
         const float v = slider_pos_to_value(in->pos[axis] - drag->grab_offset + (thumb_extent * 0.5F), track_origin, usable, thumb_extent, min, max, invert);
@@ -283,7 +291,7 @@ static float slider_core(nt_ui_context_t *ctx, const nt_ui_element_data_t *data,
     slider_effective_pad(style, pad);
     nt_ui_interaction_t in;
     if (enabled) {
-        in = nt_ui_step_interaction_padded(ctx, id, pad);
+        in = nt_ui_step(ctx, id, &(nt_ui_step_desc_t){.pad_lrtb = pad, .drag_axes = vertical ? NT_UI_DRAG_Y : NT_UI_DRAG_X});
     } else {
         in = (nt_ui_interaction_t){0};
         nt_ui_block_pointer(ctx, id, pad); /* inert occluder: disabled slider still blocks input behind it */
@@ -292,9 +300,10 @@ static float slider_core(nt_ui_context_t *ctx, const nt_ui_element_data_t *data,
     // #endregion
     // #region drag math (press-ON-thumb grab vs track jump)
     float frac = nt_ui_clampf(in_frac, 0.0F, 1.0F);
-    if (enabled && (in.pressed_now || in.pressed)) {
+    if (enabled && (in.pressed_now || in.pressed || in.released_now)) {
         frac = slider_resolve_drag(ctx, id, &in, style, style->fill_direction, frac, min, max);
-    } else {
+    }
+    if (!enabled || !in.pressed) {
         /* Release OR disabled-mid-drag: drop the cell so re-enable can't resume a stale grab. */
         nt_ui_state_clear(ctx, slider_drag_id(id));
     }

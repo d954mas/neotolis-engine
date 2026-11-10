@@ -81,7 +81,7 @@ is no longer a valid configuration.
 | `NT_GFX_GPU_TIMING_ENABLED` | OFF | Debug/release-test ON; production Release OFF. |
 | `NT_GFX_CAPTURE_ENABLED` | OFF | Bounded gfx command capture. Debug/release-test ON; production Release OFF. Recording is opt-in at runtime. Ticks and all gfx counters exist in every build. |
 | `NT_GFX_MAX_VERTEX_STREAMS` | 8 | Frame vertex streams the game can size, 1-32. Sizes `nt_gfx_desc_t.frame_capacity` and the per-stream vertex inputs a mesh can own; budget `max_vertex_inputs` with [render architecture, Vertex inputs](spec/render/architecture.md#vertex-inputs) (Mesh vertex inputs). |
-| `NT_UI_CHECKS` | OFF | Duplicate-key scans in menu/combo lists. Debug/release-test ON; production Release OFF. Independent of inspector and assert mode; ordinary pointer, index and capacity assertions remain active when this flag is OFF. |
+| `NT_UI_CHECKS` | OFF | Duplicate-key scans in menu/combo lists, and the check that a scroll's own id is not stepped as a widget (a state probe per step). Debug/release-test ON; production Release OFF. Independent of inspector and assert mode; ordinary pointer, index and capacity assertions remain active when this flag is OFF. |
 | `NT_UI_DEBUG_TOOLS` | OFF | Debug/release-test ON; production Release OFF. |
 | `NT_LOG_RING_ENABLED`, `NT_METRICS_ENABLED`, `NT_INTROSPECT_ENABLED` | OFF | Independent options. Debug/release-test presets select ON; production Release selects OFF. |
 | `NT_INTROSPECT_WRITE_ENABLED` | OFF | Debug/release-test presets select ON; production Release selects OFF. |

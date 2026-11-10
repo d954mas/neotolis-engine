@@ -20,7 +20,7 @@ typed characters); it and the query functions are read-only for their consumers.
 
 A focus loss is applied in that order: it releases all held input (while the bot drives, the gate
 drops it and the bot's input stays), and events after it apply after it. A release and a new press
-of one button in one frame therefore read pressed and released together, like any fast press and
+of one key in one frame therefore read pressed and released together, like any fast press and
 release inside one frame. On web a focus loss is a blur of the canvas or of the window: a browser
 may keep the canvas focused across an app or tab switch.
 
@@ -57,6 +57,21 @@ void nt_window_set_text_input_mode(nt_text_input_mode_t mode);  // soft-keyboard
 position and deltas in framebuffer pixels (fractional, never rounded), wheel notches, pressure, type, and per-button
 `is_down`/`is_pressed`/`is_released`.
 
+- **A release is published where it happened.** After a button's release edge the pointer holds
+  its position for the rest of that frame; where it goes afterwards is published next frame, and
+  that frame's `dx`/`dy` cover the motion. So the frame of a release never shows a later hover. A
+  mouse that left and came back in that frame is published at its new position next frame too, and
+  that frame carries no delta at all: the untracked jump and any tracked motion around it.
+- **A frame never reads a release together with a newer press.** A press of the released button
+  that arrives before the poll waits for the next frame, where it is published at the pointer's
+  new position, as a whole tap when the button was lifted again meanwhile; a pointer that leaves or
+  loses focus in that frame is published once more for that tap. Anything further in that frame
+  folds into that press; motion after a waiting tap is dropped (the next move reports the pointer),
+  so the tap is published where it was made. A press and its release from an up button still read together:
+  `is_pressed && is_released` always means "pressed, then released". Keys keep both edges in one
+  frame. Only that button waits: another button's edge, the wheel and the pressure of that frame
+  are published with the release, at the release position. A bot's waiting press is published by
+  the next poll even when that tick does not advance the game.
 - **`pointers[0]` is the mouse.** It is active while the cursor is over the window, or while a
   button is held (a drag outside the window keeps it). A button release keeps it; after a leave
   or a focus loss it is published once more (that frame still reads the release) and then
@@ -76,10 +91,10 @@ position and deltas in framebuffer pixels (fractional, never rounded), wheel not
   a press or a release it did not get, and a widget capture never moves to another device. The cost
   is that a single-pointer consumer misses such a press, for example a second finger landing in the
   frame the first lifts; a UI that needs it passes the whole array. With no candidate the index
-  stays on the last primary, now inactive. `nt_ui_begin(..., pointers, count, primary)` takes the
-  primary explicitly: a single-pointer UI passes `&pointers[g_nt_input.primary], 1, 0`; a
-  multi-pointer UI passes the whole array with `g_nt_input.primary`, so a widget capture stays with
-  its slot. `nt_ui` anchors menus, rich-text links, the Clay feed and the inspector on that pointer.
+  stays on the last primary, now inactive. `nt_ui_begin`'s frame desc takes the
+  primary explicitly (`.pointers`, `.pointer_count`, `.primary`): a single-pointer UI passes
+  `&pointers[g_nt_input.primary]`, count 1, primary 0; a multi-pointer UI passes the whole array with
+  `g_nt_input.primary`, so a widget capture stays with its slot. `nt_ui` anchors menus, the Clay feed and the inspector on that pointer.
 
 Every real mouse event is a move with the held buttons (a button change too), plus a leave; each
 real wheel event first moves the mouse to the cursor. Contacts arrive as down, move and up.

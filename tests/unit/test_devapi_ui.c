@@ -83,8 +83,11 @@ static void declare_scaled_tree(void) {
     nt_pointer_t mouse = {0};
     mouse.x = -100.0F;
     mouse.y = -100.0F;
-    nt_ui_begin(s_scaled_ctx, LAYOUT_W, LAYOUT_H, 0.0F, &mouse, 1, 0);
-    nt_ui_set_viewport(s_scaled_ctx, (nt_ui_viewport_t){.x = SCALED_VP_X, .y = SCALED_VP_Y, .w = LAYOUT_W * SCALED_SCALE, .h = LAYOUT_H * SCALED_SCALE});
+    nt_ui_begin(s_scaled_ctx, &(nt_ui_frame_desc_t){.layout_w = LAYOUT_W,
+                                                    .layout_h = LAYOUT_H,
+                                                    .pointers = &mouse,
+                                                    .pointer_count = 1,
+                                                    .viewport = (nt_ui_viewport_t){.x = SCALED_VP_X, .y = SCALED_VP_Y, .w = LAYOUT_W * SCALED_SCALE, .h = LAYOUT_H * SCALED_SCALE, .px_per_dp = 1.0F}});
     CLAY({.id = CLAY_ID("widget"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = BBOX_X, .y = BBOX_Y}}, .layout = {.sizing = {CLAY_SIZING_FIXED(BBOX_W), CLAY_SIZING_FIXED(BBOX_H)}}}) {
     }
     nt_ui_widget_register(s_scaled_ctx, nt_ui_id("widget"), &NT_UI_BUTTON_DEF, NULL, true);
@@ -99,7 +102,7 @@ static void declare_tree(void) {
     nt_pointer_t mouse = {0};
     mouse.x = -100.0F;
     mouse.y = -100.0F;
-    nt_ui_begin(s_fx.ctx, LAYOUT_W, LAYOUT_H, 0.0F, &mouse, 1, 0);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = LAYOUT_W, .layout_h = LAYOUT_H, .pointers = &mouse, .pointer_count = 1});
     CLAY({.id = CLAY_ID("widget"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = BBOX_X, .y = BBOX_Y}}, .layout = {.sizing = {CLAY_SIZING_FIXED(BBOX_W), CLAY_SIZING_FIXED(BBOX_H)}}}) {
     }
     nt_ui_widget_register(s_fx.ctx, nt_ui_id("widget"), &NT_UI_BUTTON_DEF, NULL, true);
@@ -124,7 +127,7 @@ static void declare_xform_tree(void) {
         nt_pointer_t mouse = {0};
         mouse.x = -100.0F;
         mouse.y = -100.0F;
-        nt_ui_begin(s_fx.ctx, LAYOUT_W, LAYOUT_H, 0.0F, &mouse, 1, 0);
+        nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = LAYOUT_W, .layout_h = LAYOUT_H, .pointers = &mouse, .pointer_count = 1});
         CLAY({.id = CLAY_ID("xwidget"),
               .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = BBOX_X, .y = BBOX_Y}},
               .layout = {.sizing = {CLAY_SIZING_FIXED(BBOX_W), CLAY_SIZING_FIXED(BBOX_H)}},
@@ -320,7 +323,7 @@ static void declare_collapsed_tree(void) {
     nt_pointer_t mouse = {0};
     mouse.x = -100.0F;
     mouse.y = -100.0F;
-    nt_ui_begin(s_fx.ctx, LAYOUT_W, LAYOUT_H, 0.0F, &mouse, 1, 0);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = LAYOUT_W, .layout_h = LAYOUT_H, .pointers = &mouse, .pointer_count = 1});
     CLAY({.id = CLAY_ID("collapsed"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = BBOX_X, .y = BBOX_Y}}, .layout = {.sizing = {CLAY_SIZING_FIXED(0), CLAY_SIZING_FIXED(0)}}}) {}
     nt_ui_widget_register(s_fx.ctx, nt_ui_id("collapsed"), &NT_UI_BUTTON_DEF, NULL, true);
     nt_ui_end(s_fx.ctx);
@@ -406,7 +409,7 @@ static void test_transformed_click_id_targets_projected_center(void) {
     nt_pointer_t mouse = {0};
     mouse.x = -100.0F;
     mouse.y = -100.0F;
-    nt_ui_begin(s_fx.ctx, LAYOUT_W, LAYOUT_H, 0.0F, &mouse, 1, 0);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = LAYOUT_W, .layout_h = LAYOUT_H, .pointers = &mouse, .pointer_count = 1});
     CLAY({.id = CLAY_ID("xwidget"),
           .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = BBOX_X, .y = BBOX_Y}},
           .layout = {.sizing = {CLAY_SIZING_FIXED(BBOX_W), CLAY_SIZING_FIXED(BBOX_H)}},
@@ -464,8 +467,11 @@ static void test_scaled_click_string_id_lands_at_device_center(void) {
     nt_pointer_t mouse = {0};
     mouse.x = -100.0F;
     mouse.y = -100.0F;
-    nt_ui_begin(s_scaled_ctx, LAYOUT_W, LAYOUT_H, 0.0F, &mouse, 1, 0);
-    nt_ui_set_viewport(s_scaled_ctx, (nt_ui_viewport_t){.x = SCALED_VP_X, .y = SCALED_VP_Y, .w = LAYOUT_W * SCALED_SCALE, .h = LAYOUT_H * SCALED_SCALE});
+    nt_ui_begin(s_scaled_ctx, &(nt_ui_frame_desc_t){.layout_w = LAYOUT_W,
+                                                    .layout_h = LAYOUT_H,
+                                                    .pointers = &mouse,
+                                                    .pointer_count = 1,
+                                                    .viewport = (nt_ui_viewport_t){.x = SCALED_VP_X, .y = SCALED_VP_Y, .w = LAYOUT_W * SCALED_SCALE, .h = LAYOUT_H * SCALED_SCALE, .px_per_dp = 1.0F}});
     const float device_pt[2] = {slot->x, slot->y};
     float layout_pt[2];
     nt_ui_screen_to_layout(s_scaled_ctx, device_pt, layout_pt);
@@ -495,8 +501,11 @@ static void test_scaled_click_xy_lands_at_device_center(void) {
     nt_pointer_t mouse = {0};
     mouse.x = -100.0F;
     mouse.y = -100.0F;
-    nt_ui_begin(s_scaled_ctx, LAYOUT_W, LAYOUT_H, 0.0F, &mouse, 1, 0);
-    nt_ui_set_viewport(s_scaled_ctx, (nt_ui_viewport_t){.x = SCALED_VP_X, .y = SCALED_VP_Y, .w = LAYOUT_W * SCALED_SCALE, .h = LAYOUT_H * SCALED_SCALE});
+    nt_ui_begin(s_scaled_ctx, &(nt_ui_frame_desc_t){.layout_w = LAYOUT_W,
+                                                    .layout_h = LAYOUT_H,
+                                                    .pointers = &mouse,
+                                                    .pointer_count = 1,
+                                                    .viewport = (nt_ui_viewport_t){.x = SCALED_VP_X, .y = SCALED_VP_Y, .w = LAYOUT_W * SCALED_SCALE, .h = LAYOUT_H * SCALED_SCALE, .px_per_dp = 1.0F}});
     const float device_pt[2] = {slot->x, slot->y};
     float layout_pt[2];
     nt_ui_screen_to_layout(s_scaled_ctx, device_pt, layout_pt);

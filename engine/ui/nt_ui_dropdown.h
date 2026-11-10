@@ -99,7 +99,7 @@ bool nt_ui_combo_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, u
 
 /* Custom-trigger escape hatch: leaves the TRIGGER element OPEN so the game declares arbitrary content
  * (swatch+text, icon+label) inside, between preview_begin and preview_end. preview_end closes the trigger,
- * does its one step_interaction (toggling *open on a click), THEN opens the list and returns "declare the
+ * does its one nt_ui_step (toggling *open on a click), THEN opens the list and returns "declare the
  * selectables this frame?" (true while the list body should be built). data/label_layer set the combo's
  * fill/text layers (threaded through to the list rows). Usage:
  *   nt_ui_combo_preview_begin(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, id, &style, &open);
@@ -124,7 +124,7 @@ bool nt_ui_combo_selectable_icon(nt_ui_context_t *ctx, uint32_t key, const nt_at
  * _begin opens the row element for the game's children (icon+label, badges) and returns void — the combo
  * list is already guarded by combo_begin, so there is no body-guard to report (unlike menu item_begin,
  * which can be closed). `selected` drives the per-state look.
- * _end closes the row, does its ONE step_interaction, and returns clicked: the game writes *selected, the
+ * _end closes the row, does its ONE nt_ui_step, and returns clicked: the game writes *selected, the
  * combo clears *open. A combo custom row is whole-row-clickable (no activatable=false opt-out like the
  * menu) — by design: the list is a flat pick list, custom content is decoration around the choice. */
 void nt_ui_combo_selectable_begin(nt_ui_context_t *ctx, uint32_t key, bool selected);
