@@ -45,6 +45,38 @@ static void ui_frame_begin(nt_ui_context_t *ctx, float w, float h, float dt, con
 static nt_ui_input_style_t s_style;
 static nt_ui_input_props_t s_props; /* per-field behaviour; tests set allow/password/keyboard here */
 
+/* From device events to widgets: a release and a new press that arrive between two frames reach the
+ * UI as two frames, the click of the first widget and then the press of the second. */
+static nt_ui_interaction_t s_e2e_a;
+static nt_ui_interaction_t s_e2e_b;
+static void e2e_frame(void) {
+    ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, g_nt_input.pointers, NT_INPUT_MAX_POINTERS, g_nt_input.primary);
+    CLAY({.id = CLAY_ID("e2e_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(100)}}}) {
+        CLAY({.id = CLAY_ID("e2e_a"), .layout = {.sizing = {CLAY_SIZING_FIXED(100), CLAY_SIZING_FIXED(100)}}}) { s_e2e_a = nt_ui_step(s_fx.ctx, CLAY_ID("e2e_a").id, NULL); }
+        CLAY({.id = CLAY_ID("e2e_b"), .layout = {.sizing = {CLAY_SIZING_FIXED(100), CLAY_SIZING_FIXED(100)}}}) { s_e2e_b = nt_ui_step(s_fx.ctx, CLAY_ID("e2e_b").id, NULL); }
+    }
+    nt_ui_end(s_fx.ctx);
+}
+static void test_release_and_press_between_frames_reach_widgets_in_order(void) {
+    nt_input_init();
+    nt_input_feed(nt_test_mouse(50.0F, 50.0F, 0));
+    e2e_frame();
+    e2e_frame();
+    nt_input_feed(nt_test_mouse(50.0F, 50.0F, 1));
+    e2e_frame();
+    TEST_ASSERT_TRUE(s_e2e_a.pressed_now);
+
+    nt_input_feed(nt_test_mouse(50.0F, 50.0F, 0));
+    nt_input_feed(nt_test_mouse(120.0F, 50.0F, 0));
+    nt_input_feed(nt_test_mouse(150.0F, 50.0F, 1));
+    e2e_frame();
+    TEST_ASSERT_TRUE(s_e2e_a.clicked); /* released where it happened, over A */
+    TEST_ASSERT_FALSE(s_e2e_b.pressed);
+    e2e_frame();
+    TEST_ASSERT_TRUE(s_e2e_b.pressed_now);
+    TEST_ASSERT_FALSE(s_e2e_a.pressed);
+}
+
 /* The fake clipboard exposes a test-only availability toggle (no fake header; declared here). */
 extern void nt_clipboard_fake_set_available(bool available);
 
@@ -1627,6 +1659,7 @@ int main(void) {
     RUN_TEST(test_edit_step_backspace_across_multibyte_caret_boundary);
     RUN_TEST(test_scroll_step_caret_follow_fixed_width);
     RUN_TEST(test_field_text_above_modal_band);
+    RUN_TEST(test_release_and_press_between_frames_reach_widgets_in_order);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_assert_null_buffer);
     RUN_TEST(test_assert_zero_cap);

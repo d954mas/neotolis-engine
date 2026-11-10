@@ -2044,6 +2044,7 @@ typedef struct {
     float content_h;
     float content_w; /* 0 = the list width */
     float px_per_dp; /* 0 = keep the identity viewport */
+    bool hide;       /* the list is not declared this frame */
 } arb_scene_t;
 
 static arb_scene_t s_scene;
@@ -2058,6 +2059,9 @@ static void arb_frame(const nt_pointer_t *pointers, uint32_t count) {
         s_scene.outside_before();
     }
     CLAY({.id = CLAY_ID("arb_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(200)}}}) {
+        if (s_scene.hide) {
+            continue; /* CLAY is a one-pass loop: leaves the root empty */
+        }
         nt_ui_scroll_begin(s_fx.ctx, NULL, SCROLL_ID, &s_scene.style, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(200)}}});
         CLAY({.id = CLAY_ID("arb_content"),
               .layout = {.sizing = {CLAY_SIZING_FIXED((s_scene.content_w > 0.0F) ? s_scene.content_w : 200.0F), CLAY_SIZING_FIXED(s_scene.content_h)}, .layoutDirection = CLAY_TOP_TO_BOTTOM}}) {
@@ -2601,6 +2605,51 @@ static void test_arb_wheel_does_not_move_a_held_thumb(void) {
     TEST_ASSERT_TRUE(float_near(arb_list()->pos[1], held, 0.001F));
 }
 
+/* Equal crossings: the pressed widget keeps the drag over a scroll, the inner scroll over the outer. */
+static void test_arb_equal_crossings_go_to_the_widget_then_the_inner_scroll(void) {
+    s_scene.body = body_x_draggable_row;
+    nt_pointer_t p = arb_pointer(100.0F, 30.0F);
+    arb_warm(&p);
+    arb_press(&p);
+    arb_frame(&p, 1);
+    arb_hold(&p);
+    p.x += 20.0F;
+    p.y -= 20.0F;
+    arb_frame(&p, 1);
+    TEST_ASSERT_EQUAL_UINT32(CLAY_ID("arb_row").id, s_fx.ctx->captures[0].active_id);
+    TEST_ASSERT_FALSE(s_child_in.gesture_pending);
+    TEST_ASSERT_TRUE(float_near(arb_list()->raw[1], 0.0F, 0.001F));
+
+    arb_release(&p);
+    arb_frame(&p, 1);
+    s_scene.body = body_inner_list_with_bar;
+    p = arb_pointer(100.0F, 50.0F);
+    arb_warm(&p);
+    arb_press(&p);
+    arb_frame(&p, 1);
+    arb_hold(&p);
+    p.y -= 30.0F;
+    arb_frame(&p, 1);
+    TEST_ASSERT_EQUAL_UINT32(SCROLL_ID + 1U, s_fx.ctx->captures[0].active_id);
+}
+
+/* A scroll that stops being declared takes nothing: the press pending on it ends. */
+static void test_arb_vanished_scroll_takes_nothing(void) {
+    nt_pointer_t p = arb_pointer(100.0F, 150.0F);
+    arb_warm(&p);
+    arb_press(&p);
+    arb_frame(&p, 1);
+    TEST_ASSERT_EQUAL_UINT32(SCROLL_ID, s_fx.ctx->captures[0].pending_scroll);
+    arb_hold(&p);
+    s_scene.hide = true;
+    arb_frame(&p, 1);
+    p.y -= 40.0F;
+    arb_frame(&p, 1);
+    TEST_ASSERT_EQUAL_UINT32(0U, s_fx.ctx->captures[0].active_id);
+    TEST_ASSERT_EQUAL_UINT32(0U, s_fx.ctx->captures[0].pending_scroll);
+    TEST_ASSERT_FALSE(nt_ui_wants_pointer(s_fx.ctx));
+}
+
 /* A pointer slot the game stops passing holds no pending gesture. */
 static void test_arb_dropped_pointer_slot_holds_no_gesture(void) {
     nt_pointer_t ps[2] = {arb_pointer(700.0F, 500.0F), arb_pointer(100.0F, 150.0F)};
@@ -2781,6 +2830,8 @@ int main(void) {
     RUN_TEST(test_arb_inner_bar_over_outer_bar_takes_the_press);
     RUN_TEST(test_arb_wheel_does_not_move_a_held_thumb);
     RUN_TEST(test_arb_dropped_pointer_slot_holds_no_gesture);
+    RUN_TEST(test_arb_equal_crossings_go_to_the_widget_then_the_inner_scroll);
+    RUN_TEST(test_arb_vanished_scroll_takes_nothing);
     RUN_TEST(test_arb_tap_gesture_does_not_outlive_its_frame);
     RUN_TEST(test_arb_thumb_over_row_takes_the_thumb);
     RUN_TEST(test_arb_pending_press_wants_pointer_off_the_list);
