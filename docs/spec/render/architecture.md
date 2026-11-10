@@ -92,6 +92,17 @@ the sanitized unmasked string. API version is not a portable driver version.
 The bridge reads `getParameter` strings directly into the snapshot because
 Emscripten's `glGetString` caches strings across context recreation.
 
+### GPU selection
+
+The web context sets no `powerPreference`. Chrome, Edge and Firefox on Windows
+ignore it anyway: the browser uses one adapter for every page, so a page cannot
+request the discrete GPU. On a hybrid-GPU laptop that adapter is the integrated
+GPU unless the user sets the browser to High performance in Windows Settings >
+Display > Graphics. Players on such laptops therefore run the game on the
+integrated GPU: budget web frame time for it, and check `nt_gfx_device_info()`
+before reading a measurement as discrete-GPU numbers. Native Windows builds
+request the discrete GPU through `NT_HYBRID_HPG` (see `docs/build.md`).
+
 ### Draw-phase command stream
 
 Draw-phase calls are deferred. At the call, the front-end validates and updates
