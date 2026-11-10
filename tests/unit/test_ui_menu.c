@@ -985,6 +985,39 @@ static void test_menu_item_begin_press_beside_child(void) {
     TEST_ASSERT_EQUAL_UINT32(nt_ui_menu_test_item_id(MENU_A, KEY_NEW), menu_focus_id());
 }
 
+/* ---- A drag captured by one row's control does not hover another row: pressing row A's control and
+ *      dragging onto row B's control leaves hover focus on A, as every query ignores a pointer captured
+ *      elsewhere. ---- */
+#define MENU_ROW_B_CHILD_ID 0x1B7702U
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_menu_item_begin_captured_drag_keeps_focus(void) {
+    nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
+    nt_ui_menu_state_t st = {0};
+    menu_im_open(&st, 120.0F, 80.0F);
+    for (int frame = 0; frame < 5; ++frame) {
+        const nt_ui_bbox_t ca = nt_ui_get_bbox(s_fx.ctx, MENU_ROW_CHILD_ID);
+        const nt_ui_bbox_t cb = nt_ui_get_bbox(s_fx.ctx, MENU_ROW_B_CHILD_ID);
+        const nt_ui_bbox_t c = (frame < 3) ? ca : cb; /* press on A's control, then drag onto B's */
+        nt_pointer_t p = {.x = c.x + (c.width * 0.5F), .y = c.y + (c.height * 0.5F), .active = true};
+        p.buttons[NT_BUTTON_LEFT].is_down = (frame >= 2);
+        p.buttons[NT_BUTTON_LEFT].is_pressed = (frame == 2);
+        nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = &p, .pointer_count = 1});
+        nt_ui_menu_begin(&s_menu, s_fx.ctx, NULL, 0U, MENU_A, &st, &style);
+        if (nt_ui_menu_item_begin(&s_menu, KEY_NEW, (nt_ui_menu_item_opts_t){0})) {
+            CLAY({.id = (Clay_ElementId){.id = MENU_ROW_CHILD_ID}, .layout = {.sizing = {CLAY_SIZING_FIXED(60), CLAY_SIZING_FIXED(20)}}}) { (void)nt_ui_step(s_fx.ctx, MENU_ROW_CHILD_ID, NULL); }
+        }
+        (void)nt_ui_menu_item_end(&s_menu);
+        if (nt_ui_menu_item_begin(&s_menu, KEY_OPEN, (nt_ui_menu_item_opts_t){0})) {
+            CLAY({.id = (Clay_ElementId){.id = MENU_ROW_B_CHILD_ID}, .layout = {.sizing = {CLAY_SIZING_FIXED(60), CLAY_SIZING_FIXED(20)}}}) { (void)nt_ui_step(s_fx.ctx, MENU_ROW_B_CHILD_ID, NULL); }
+        }
+        (void)nt_ui_menu_item_end(&s_menu);
+        nt_ui_menu_end(&s_menu);
+        nt_ui_end(s_fx.ctx);
+    }
+    TEST_ASSERT_EQUAL_UINT32(MENU_ROW_CHILD_ID, nt_ui_test_capture_active_id(s_fx.ctx, 0U));
+    TEST_ASSERT_EQUAL_UINT32(nt_ui_menu_test_item_id(MENU_A, KEY_NEW), menu_focus_id());
+}
+
 /* ---- Custom row leak: a CLOSED (present-only) menu's item_begin returns false so the game skips
  *      the custom body — the inner child must NOT lay out (no bbox) when the menu is closed, so it can
  *      never leak onto the scene. ---- */
@@ -1510,6 +1543,7 @@ int main(void) {
     RUN_TEST(test_menu_record_nav_focuses_recorded_item);
     RUN_TEST(test_menu_item_begin_child_owns_its_press);
     RUN_TEST(test_menu_item_begin_press_beside_child);
+    RUN_TEST(test_menu_item_begin_captured_drag_keeps_focus);
     RUN_TEST(test_menu_item_begin_closed_skips_body);
     RUN_TEST(test_menu_item_begin_closed_guarded_no_poison);
     RUN_TEST(test_menu_item_begin_disabled_never_activates);

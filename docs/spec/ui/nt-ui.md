@@ -613,8 +613,9 @@ interactive child declared inside the row wins the press over its own area; the
 rest of the row activates it. Over the child the child is the front-most record,
 so a query on the row reports no hover there: a combo or tab row drops its hover
 look. A menu row instead counts the pointer inside its box while the front-most
-record is in the row's tree root, so it keeps highlight, hover focus and the leaf
-collapse over its own control. A rich-text block
+record is in the row's tree root and the pointer is not captured by another
+record, so it keeps highlight, hover focus and the leaf collapse over its own
+control. A rich-text block
 with links is one record over its whole box, so inside a row it takes the press
 over all of its text, not only over the links. A menu row with `non_activatable`
 has no action of its own (for a row that only hosts a control): it never steps,

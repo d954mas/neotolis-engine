@@ -2387,9 +2387,11 @@ bool nt_ui_internal_pointer_within(nt_ui_context_t *ctx, uint32_t id) {
     for (uint32_t i = 0; i < ctx->frame_pointer_count && !within; ++i) {
         const nt_pointer_t *p = &ctx->frame_pointers[i];
         const uint32_t hot = ctx->pointer_hot[i].id;
+        const uint32_t holder = ctx->captures[i].active_id;
         const int32_t hot_slot = (hot != 0U) ? nt_ui_clay_priv_hashmap_slot_for_id(ctx->clay, hot) : -1;
         uint32_t order = 0U;
-        within = p->active && hot_slot >= 0 && ctx->hit_generation[hot_slot] == ctx->current_generation && ui_hit_test(ctx, id, p->x, p->y, NULL, NULL, &order) &&
+        /* A pointer captured by anything but its hot record is bound elsewhere, as in every query. */
+        within = p->active && (holder == 0U || holder == hot) && hot_slot >= 0 && ctx->hit_generation[hot_slot] == ctx->current_generation && ui_hit_test(ctx, id, p->x, p->y, NULL, NULL, &order) &&
                  (order >> 16U) == (ctx->hit_baked[hot_slot].order >> 16U);
     }
     Clay_SetCurrentContext(saved);
