@@ -620,14 +620,14 @@ void nt_ui_set_gesture_constants(nt_ui_context_t *ctx, float dbl_window_secs, fl
  * whatever sits underneath. pad_lrtb inflates the block area (NULL = none, asserts >= 0). */
 void nt_ui_block_pointer(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lrtb[4]);
 
-/* True when any capture is active OR a pointer is over a widget this frame. */
+/* True when any capture or pending scroll gesture is active OR a pointer is over a widget this frame. */
 bool nt_ui_wants_pointer(const nt_ui_context_t *ctx);
 
-/* Front-most interactive record under the pointer this frame (3D: nearest within the occlusion
- * cutoff, coplanar hits by zIndex; 2D: highest effective zIndex, tie → last-registered = later
- * nt_ui_step call, which equals declaration/paint order when widgets step in declaration order).
- * Resolved by nt_ui_begin from the prev-frame registry: stepped widgets, blockers and scroll surfaces
- * (a scroll id over its empty area). id 0 = none. */
+/* Front-most interactive record under the pointer this frame: the hit painted last (3D: nearest
+ * within the occlusion cutoff first; then the later floating tree root — band, then declaration; then
+ * the later nt_ui_step call, which is declaration order when widgets step in declaration order).
+ * Resolved by nt_ui_begin from the prev-frame registry: stepped widgets, blockers, scroll surfaces
+ * (a scroll id over its empty area) and scrollbars. id 0 = none. */
 nt_ui_hot_t nt_ui_pointer_hot(const nt_ui_context_t *ctx, uint32_t pointer_index);
 // #endregion
 

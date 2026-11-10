@@ -44,10 +44,9 @@ int32_t nt_ui_clay_priv_open_floating_z(Clay_Context *clay) {
     return (len > 0) ? Clay__int32_tArray_GetValue(&clay->openFloatingZStack, len - 1) : 0;
 }
 
-uint32_t nt_ui_clay_priv_open_element_id(Clay_Context *clay) {
-    NT_ASSERT(clay != NULL && clay->openLayoutElementStack.length > 0 && "nt_ui_clay_priv_open_element_id: no open element");
-    const int32_t index = Clay__int32_tArray_GetValue(&clay->openLayoutElementStack, clay->openLayoutElementStack.length - 1);
-    return Clay_LayoutElementArray_Get(&clay->layoutElements, index)->id;
+int32_t nt_ui_clay_priv_open_element_count(Clay_Context *clay) {
+    NT_ASSERT(clay != NULL && "nt_ui_clay_priv_open_element_count: clay must be non-NULL");
+    return clay->openLayoutElementStack.length;
 }
 
 float nt_ui_clay_priv_layout_width(Clay_Context *clay) {
@@ -443,7 +442,7 @@ static void compose_transform_level(const nt_ui_transform_t *t, float cx, float 
 
 /* Floating descendants skipped (handled by outer roots loop). Text leaves have no .children. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void bt_dfs_subtree(nt_ui_context_t *ctx, Clay_Context *cc, int32_t root_elem_idx, const nt_ui_baked_xform_t *seed, int16_t root_zindex) {
+static void bt_dfs_subtree(nt_ui_context_t *ctx, Clay_Context *cc, int32_t root_elem_idx, const nt_ui_baked_xform_t *seed, int16_t root_zindex, uint16_t paint_root) {
     nt_ui_dfs_frame_t *S = ctx->tree_dfs_stack;
     int32_t sp = 0;
     NT_ASSERT(sp < NT_UI_TREE_DFS_DEPTH_CAP);
@@ -481,6 +480,7 @@ static void bt_dfs_subtree(nt_ui_context_t *ctx, Clay_Context *cc, int32_t root_
             ctx->tree_baked[f->elem_idx].opacity = op;
             ctx->tree_baked[f->elem_idx].hierarchy_depth = f->hierarchy_depth;
             ctx->tree_baked[f->elem_idx].zindex = root_zindex; /* uniform per Clay tree root */
+            ctx->tree_baked[f->elem_idx].paint_root = paint_root;
             memcpy(f->m, m_cur, sizeof m_cur);
             f->opacity = op;
         }
@@ -530,6 +530,7 @@ void nt_ui_internal_build_tree(nt_ui_context_t *ctx) {
     // #endregion
 
     // #region elem-to-root-map
+    NT_ASSERT(R <= (int32_t)UINT16_MAX && "build_tree: tree roots exceed the paint-order field");
     for (int32_t k = 0; k < R; ++k) {
         Clay__LayoutElementTreeRoot *root = Clay__LayoutElementTreeRootArray_Get(&cc->layoutElementTreeRoots, k);
         ctx->tree_root_for_elem[root->layoutElementIndex] = k;
@@ -562,7 +563,8 @@ void nt_ui_internal_build_tree(nt_ui_context_t *ctx) {
             seed = ctx->tree_baked[p_elem_idx];
             seed.hierarchy_depth = (uint16_t)(seed.hierarchy_depth + 1U);
         }
-        bt_dfs_subtree(ctx, cc, elem_idx, &seed, root_zindex);
+        /* Clay sorted the tree roots by band, stably: the index is the paint order. */
+        bt_dfs_subtree(ctx, cc, elem_idx, &seed, root_zindex, (uint16_t)root_idx);
     }
     // #endregion
 

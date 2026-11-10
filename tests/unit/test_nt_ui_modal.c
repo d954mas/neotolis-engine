@@ -352,7 +352,7 @@ static void test_modal_wants_pointer_while_open(void) {
     nt_ui_modal_end(s_fx.ctx);
     nt_ui_end(s_fx.ctx);
 
-    /* Frame 2: the prev-frame backdrop wins topmost-z; query resolves pointer_over_any -> wants_pointer. */
+    /* Frame 2: the prev-frame backdrop wins topmost-z; the hot record is declared again -> wants_pointer. */
     ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1, 0);
     nt_ui_modal_begin(s_fx.ctx, MODAL_A, &st, true);
     nt_ui_modal_end(s_fx.ctx);

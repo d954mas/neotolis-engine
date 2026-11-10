@@ -117,12 +117,13 @@ void test_focus_lost_then_press_same_button(void) {
     TEST_ASSERT_TRUE(b.is_pressed && b.is_down && !b.is_released);
 }
 
-/* Up at one point and down at another between two polls: the release is published where it happened,
-   the press and its position one frame later. */
+/* Up at one point, a hover and down at another between two polls: the release is published where it
+   happened; the press, its position and the motion since the release one frame later. */
 void test_release_then_press_takes_two_frames(void) {
     nt_input_feed(nt_test_mouse(5.0F, 5.0F, 1));
     nt_input_poll();
     nt_input_feed(nt_test_mouse(6.0F, 5.0F, 0));
+    nt_input_feed(nt_test_mouse(50.0F, 20.0F, 0));
     nt_input_feed(nt_test_mouse(90.0F, 40.0F, 1));
     nt_input_feed(nt_test_mouse(92.0F, 40.0F, 1));
     nt_input_poll();
@@ -130,12 +131,46 @@ void test_release_then_press_takes_two_frames(void) {
     TEST_ASSERT_TRUE(m->buttons[NT_BUTTON_LEFT].is_released && !m->buttons[NT_BUTTON_LEFT].is_pressed && !m->buttons[NT_BUTTON_LEFT].is_down);
     TEST_ASSERT_EQUAL_INT(6, (int)m->x);
     TEST_ASSERT_EQUAL_INT(5, (int)m->y);
+    TEST_ASSERT_EQUAL_INT(1, (int)m->dx);
     nt_input_poll();
     TEST_ASSERT_TRUE(m->buttons[NT_BUTTON_LEFT].is_pressed && m->buttons[NT_BUTTON_LEFT].is_down && !m->buttons[NT_BUTTON_LEFT].is_released);
     TEST_ASSERT_EQUAL_INT(92, (int)m->x);
     TEST_ASSERT_EQUAL_INT(40, (int)m->y);
+    TEST_ASSERT_EQUAL_INT(86, (int)m->dx);
+    TEST_ASSERT_EQUAL_INT(35, (int)m->dy);
     nt_input_poll();
     TEST_ASSERT_TRUE(m->buttons[NT_BUTTON_LEFT].is_down && !m->buttons[NT_BUTTON_LEFT].is_pressed);
+}
+
+/* A bot's button event has no position: a waiting press keeps the one it was made at. */
+void test_waiting_press_keeps_its_position_through_a_buttons_event(void) {
+    nt_input_inject(nt_test_mouse(5.0F, 5.0F, 1));
+    nt_input_poll();
+    nt_input_inject(nt_test_mouse_buttons(0));
+    nt_input_inject(nt_test_mouse(90.0F, 40.0F, 1));
+    nt_input_inject(nt_test_mouse_buttons(0));
+    nt_input_poll();
+    nt_input_poll();
+    const nt_pointer_t *m = &g_nt_input.pointers[0];
+    TEST_ASSERT_TRUE(m->buttons[NT_BUTTON_LEFT].is_pressed && m->buttons[NT_BUTTON_LEFT].is_released);
+    TEST_ASSERT_EQUAL_INT(90, (int)m->x);
+    TEST_ASSERT_EQUAL_INT(40, (int)m->y);
+}
+
+/* A waiting tap is published before a mouse that left in the same frame is gone. */
+void test_waiting_tap_survives_a_leave(void) {
+    nt_input_feed(nt_test_mouse(5.0F, 5.0F, 1));
+    nt_input_poll();
+    nt_input_feed(nt_test_mouse(5.0F, 5.0F, 0));
+    nt_input_feed(nt_test_mouse(5.0F, 5.0F, 1));
+    nt_input_feed(nt_test_mouse(5.0F, 5.0F, 0));
+    nt_input_feed(nt_test_leave());
+    nt_input_poll();
+    TEST_ASSERT_TRUE(nt_input_mouse_is_released(NT_BUTTON_LEFT) && !nt_input_mouse_is_pressed(NT_BUTTON_LEFT));
+    nt_input_poll();
+    TEST_ASSERT_TRUE(nt_input_mouse_is_pressed(NT_BUTTON_LEFT) && nt_input_mouse_is_released(NT_BUTTON_LEFT));
+    nt_input_poll();
+    TEST_ASSERT_FALSE(g_nt_input.pointers[0].active);
 }
 
 /* A tap that follows a release in the same frame is published whole one frame later; a press that
@@ -421,6 +456,8 @@ int main(void) {
     RUN_TEST(test_focus_lost_then_press_same_key);
     RUN_TEST(test_focus_lost_then_press_same_button);
     RUN_TEST(test_release_then_press_takes_two_frames);
+    RUN_TEST(test_waiting_press_keeps_its_position_through_a_buttons_event);
+    RUN_TEST(test_waiting_tap_survives_a_leave);
     RUN_TEST(test_release_then_tap_and_tap_then_press);
     RUN_TEST(test_waiting_press_keeps_the_mouse_through_a_leave);
     RUN_TEST(test_mouse_focus_lost_drops_pressure);

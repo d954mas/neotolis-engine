@@ -260,8 +260,9 @@ result, and `double_clicked` only from there. Capture is per-pointer:
 a press records `active_id`; release clears. Other widgets are
 `exclusive_gated` while one holds capture. A frame carries a pointer's release or a
 whole tap, never a release with a newer press: `nt_input` publishes that press one frame
-later ([Input](../io/input.md)), and `nt_ui_begin` asserts it for pointers built by
-hand. **Orphan cleanup** at
+later ([Input](../io/input.md)), and `nt_ui_begin` asserts the one shape it can see in a
+pointer built by hand (pressed, released and still down). A press always starts a new
+gesture: whatever the pointer still held is dropped. **Orphan cleanup** at
 `nt_ui_begin` drops `active_id` if the widget didn't call step last
 frame — covers scene switches, conditional disable, and widget hide. It also drops
 `active_id` when a pointer has no release edge and its button is up or newly pressed:
@@ -280,9 +281,12 @@ nearest world ray-distance within a game-fed occlusion cutoff
 (`nt_ui_frame_desc_t.occlusion`) so UI can't be clicked through
 world geometry — the game owns the raycast, the engine only takes the cutoff distance;
 `nt_ui_interaction_t.distance` reports the hit distance. Hits within 1e-5 of the nearest
-distance (relative, floored at one unit) are coplanar and compete like 2D. 2D ctx: highest effective Clay
-zIndex (tie → last-registered, i.e. the later `nt_ui_step` call; widget code should
-step in declaration order so this matches paint order). `nt_ui_wants_pointer` is true
+distance (relative, floored at one unit) are coplanar and compete like 2D. 2D ctx: the hit
+that is painted last. Clay paints its tree roots (the document and every floating element)
+by band, then by declaration, so the later root wins: a floating element is over the
+content it floats on, whatever order the two were stepped in. Inside one root the later
+record wins, i.e. the later `nt_ui_step` call; widget code should step in declaration
+order so this matches paint order. `nt_ui_wants_pointer` is true
 while a pointer holds a capture or a pending scroll gesture, or its front-most record is declared again this frame (a
 record that vanished this frame is not UI under the pointer). A free pointer drives a
 widget only if it is the resolved hot
@@ -417,10 +421,15 @@ that clip it, innermost first: it is read from last frame's clip tree, the one t
 test walks, so no declaration order or bookkeeping is involved. A floating element takes
 no clip unless it asks for one (`clipTo`), so everything inside a popup (dropdown, menu,
 modal, tooltip) and the menu occluder has an empty chain, and a drag inside a popup never
-reaches a scroll behind it; the same holds for a game's own unclipped floating element
-declared inside a scroll. Scrollbars clip to their scroll, so they belong to its chain
-(the wheel over a bar scrolls it); `scroll_end` adds their hit records after the
-content's, so a press on a bar never goes to a row under it, and a faded-out bar has none.
+reaches a scroll behind it (a scroll declared inside the popup, a dropdown list, is on the
+chain of its own content); the same holds for a game's own unclipped floating element
+declared inside a scroll: neither a drag nor the wheel over it reaches that scroll.
+Scrollbars clip to their scroll, so they belong to its chain (the wheel over a bar
+scrolls it). A bar has a hit record only while it shows a thumb that can move: thumb art,
+an overflowing axis and not faded out; otherwise its strip belongs to the content under
+it. `nt_ui_scroll_begin` / `_end` must balance: `nt_ui_end` asserts that no element is left
+open. A scroll's own id is its surface and must not be stepped as a widget (checked under
+`NT_UI_CHECKS`).
 
 A press starts a gesture record on the chain of the front-most record under it; a press on a bar that can move makes the pointer its scroll's owner by the thumb
 at once (a thumb has no slop; one owner per scroll, by content or by a thumb), and a chain with no eligible axis decides at once (widgets
@@ -458,7 +467,7 @@ out `bar_hide_delay` seconds after the last motion, via one `nt_ui_anim` value_t
 A thumb press grabs at the press offset inside the thumb (no jump-to-center); a press
 on the track off the thumb centers the thumb under the pointer: a held press at once, a
 tap within one frame smoothly (`nt_ui_scroll_to`). A
-thin bar gets a wider touch target from the style's `bar_hit_pad` (default 12, a 24-wide target): extra hit width from the visual bar toward the content only, since the container clips the outer side; that zone wins over the content under it, and 0 leaves the visual bar alone. The
+thin bar gets a wider touch target from the style's `bar_hit_pad` (default 12, a 24-wide target): extra hit width from the visual bar toward the content only, since the container clips the outer side; the bar floats over the content, so that zone takes presses from the content under it; 0 leaves the visual bar alone. The
 "Scissor limitation" note below still holds (AABB clip of a rotated scroll
 container is unchanged).
 

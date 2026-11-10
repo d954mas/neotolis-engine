@@ -21,6 +21,7 @@
 #include "test_helpers/ui_walker_fixture.h"
 #include "ui/nt_ui.h"
 #include "ui/nt_ui_internal.h"
+#include "ui/nt_ui_popup.h"
 #include "ui/nt_ui_scroll.h"
 #include "unity.h"
 
@@ -2050,8 +2051,8 @@ static void arb_frame(const nt_pointer_t *pointers, uint32_t count) {
 }
 
 static void arb_scene_reset(void) {
-    s_scene = (arb_scene_t){.style = nt_ui_scroll_style_defaults(), .content_h = 1000.0F};
-    s_scene.style.rubber_band_c = 0.0F; /* raw == the routed drag, easy to read */
+    s_scene = (arb_scene_t){.style = bar_style(NT_UI_SCROLLBAR_ALWAYS), .content_h = 1000.0F}; /* bar art: a bar takes presses only with a thumb */
+    s_scene.style.rubber_band_c = 0.0F;                                                        /* raw == the routed drag, easy to read */
     s_arb_dt = 1.0F / 60.0F;
     s_child_in = (nt_ui_interaction_t){0};
     s_fg_in = (nt_ui_interaction_t){0};
@@ -2423,7 +2424,7 @@ static void test_arb_thumb_press_takes_list_from_content_drag(void) {
     TEST_ASSERT_EQUAL_UINT32(0U, s_fx.ctx->captures[0].active_id);
 }
 
-/* A floating panel declared inside the list behind a popup barrier keeps its drags. */
+/* A floating panel declared inside the list takes no clip, so no scroll is on its chain: it keeps its drags. */
 static void body_barrier_panel(void) {
     CLAY({.id = CLAY_ID("arb_popup"),
           .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .zIndex = 10, .offset = {.x = 50.0F, .y = 50.0F}},
@@ -2432,7 +2433,7 @@ static void body_barrier_panel(void) {
     }
 }
 
-static void test_arb_popup_barrier_keeps_drag_from_list(void) {
+static void test_arb_unclipped_floating_keeps_drag_from_list(void) {
     arb_scene_reset();
     s_scene.body = body_barrier_panel;
     nt_pointer_t p = arb_pointer(90.0F, 90.0F);
@@ -2444,6 +2445,32 @@ static void test_arb_popup_barrier_keeps_drag_from_list(void) {
     p.y = 50.0F;
     arb_frame(&p, 1);
     TEST_ASSERT_EQUAL_UINT32(CLAY_ID("arb_popup").id, s_fx.ctx->captures[0].active_id);
+    TEST_ASSERT_TRUE(float_near(arb_list()->raw[1], 0.0F, 0.001F));
+}
+
+/* A real popup opened from inside a list: a drag on its content never scrolls the list behind it. */
+static void body_real_popup(void) {
+    nt_ui_popup_style_t st = nt_ui_popup_style_defaults();
+    st.ease_speed = 0.0F;
+    const nt_ui_popup_anchor_t anchor = {.x = 40.0F, .y = 20.0F, .w = 80.0F, .h = 30.0F, .prefer_side = NT_UI_POPUP_BELOW};
+    (void)nt_ui_popup_begin(s_fx.ctx, CLAY_ID("arb_real_popup").id, &st, &anchor, true);
+    CLAY({.id = CLAY_ID("arb_popup_btn"), .layout = {.sizing = {CLAY_SIZING_FIXED(80), CLAY_SIZING_FIXED(80)}}}) { s_fg_in = nt_ui_step(s_fx.ctx, CLAY_ID("arb_popup_btn").id, NULL); }
+    nt_ui_popup_end(s_fx.ctx);
+}
+
+static void test_arb_popup_in_list_keeps_drag_from_list(void) {
+    arb_scene_reset();
+    s_scene.body = body_real_popup;
+    nt_pointer_t p = arb_pointer(80.0F, 90.0F);
+    arb_warm(&p);
+    arb_press(&p);
+    arb_frame(&p, 1);
+    TEST_ASSERT_TRUE(s_fg_in.pressed_now);
+    TEST_ASSERT_FALSE(s_fg_in.gesture_pending);
+    arb_hold(&p);
+    p.y = 50.0F;
+    arb_frame(&p, 1);
+    TEST_ASSERT_EQUAL_UINT32(CLAY_ID("arb_popup_btn").id, s_fx.ctx->captures[0].active_id);
     TEST_ASSERT_TRUE(float_near(arb_list()->raw[1], 0.0F, 0.001F));
 }
 
@@ -2510,6 +2537,75 @@ static void test_arb_thumb_drag_moves_content_the_same_frame(void) {
     /* The laid-out content, not the state cell: the offset this frame's layout was given. */
     const nt_ui_bbox_t content = nt_ui_get_bbox(s_fx.ctx, CLAY_ID("arb_content").id);
     TEST_ASSERT_TRUE(content.found && float_near(content.y, -200.0F, 0.5F));
+}
+
+/* A bar takes presses only while it shows a thumb that can move: over a list that fits, and over a
+ * bar with no art, the strip belongs to the row under it. */
+static void test_arb_bar_without_a_movable_thumb_takes_no_press(void) {
+    arb_scene_reset();
+    s_scene.body = body_button_row;
+    s_scene.content_h = 100.0F; /* fits */
+    nt_pointer_t p = arb_pointer(195.0F, 20.0F);
+    arb_warm(&p);
+    arb_press(&p);
+    arb_frame(&p, 1);
+    TEST_ASSERT_TRUE(s_child_in.pressed_now);
+
+    arb_release(&p);
+    arb_frame(&p, 1);
+    p.buttons[NT_BUTTON_LEFT] = (nt_button_state_t){0};
+    s_scene.content_h = 1000.0F;
+    s_scene.style = nt_ui_scroll_style_defaults(); /* overflows, but the bar has no art */
+    arb_warm(&p);
+    arb_press(&p);
+    arb_frame(&p, 1);
+    TEST_ASSERT_TRUE(s_child_in.pressed_now);
+}
+
+/* Nested lists with aligned right edges: the inner bar paints over the outer one and takes the press. */
+static void body_inner_list_with_bar(void) {
+    const nt_ui_scroll_style_t st = bar_style(NT_UI_SCROLLBAR_ALWAYS);
+    nt_ui_scroll_begin(s_fx.ctx, NULL, SCROLL_ID + 1U, &st, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(150)}}});
+    CLAY({.id = CLAY_ID("arb_inner_content"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(600)}}}) {}
+    nt_ui_scroll_end(s_fx.ctx);
+}
+static void test_arb_inner_bar_over_outer_bar_takes_the_press(void) {
+    arb_scene_reset();
+    s_scene.body = body_inner_list_with_bar;
+    nt_pointer_t p = arb_pointer(195.0F, 10.0F);
+    arb_warm(&p);
+    arb_press(&p);
+    arb_frame(&p, 1);
+    assert_thumb_owner(0U, SCROLL_ID + 1U, 1);
+}
+
+/* The wheel does not move the axis a thumb holds. */
+static void test_arb_wheel_does_not_move_a_held_thumb(void) {
+    arb_scene_reset();
+    nt_pointer_t p = arb_pointer(195.0F, 20.0F);
+    arb_warm(&p);
+    arb_press(&p);
+    arb_frame(&p, 1);
+    arb_hold(&p);
+    p.y = 60.0F;
+    arb_frame(&p, 1);
+    const float held = arb_list()->pos[1];
+    p.wheel_dy = 1.0F;
+    arb_frame(&p, 1);
+    TEST_ASSERT_TRUE(float_near(arb_list()->pos[1], held, 0.001F));
+}
+
+/* A pointer slot the game stops passing holds no pending gesture. */
+static void test_arb_dropped_pointer_slot_holds_no_gesture(void) {
+    arb_scene_reset();
+    nt_pointer_t ps[2] = {arb_pointer(700.0F, 500.0F), arb_pointer(100.0F, 150.0F)};
+    arb_frame(ps, 2);
+    arb_frame(ps, 2);
+    arb_press(&ps[1]);
+    arb_frame(ps, 2);
+    TEST_ASSERT_TRUE(nt_ui_wants_pointer(s_fx.ctx));
+    arb_frame(ps, 1);
+    TEST_ASSERT_FALSE(nt_ui_wants_pointer(s_fx.ctx));
 }
 
 /* The container clips its bar: a press past its edge is not a thumb press. */
@@ -2676,6 +2772,16 @@ static void release_with_newer_press_frame(void) {
     arb_frame(&p, 1);
 }
 static void test_assert_release_with_newer_press(void) { NT_TEST_EXPECT_ASSERT(release_with_newer_press_frame()); }
+
+/* A begin without its end leaves an element open at nt_ui_end. */
+static void missing_scroll_end_frame(void) {
+    nt_pointer_t p = arb_pointer(0.0F, 0.0F);
+    const nt_ui_scroll_style_t style = nt_ui_scroll_style_defaults();
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .dt = 1.0F / 60.0F, .pointers = &p, .pointer_count = 1});
+    nt_ui_scroll_begin(s_fx.ctx, NULL, SCROLL_ID, &style, NULL);
+    nt_ui_end(s_fx.ctx);
+}
+static void test_assert_missing_scroll_end(void) { NT_TEST_EXPECT_ASSERT(missing_scroll_end_frame()); }
 #endif /* NT_ASSERT_MODE == NT_ASSERT_FULL */
 
 int main(void) {
@@ -2684,6 +2790,10 @@ int main(void) {
     RUN_TEST(test_arb_bar_hit_pad_is_the_style_s);
     RUN_TEST(test_arb_thumb_drag_moves_content_the_same_frame);
     RUN_TEST(test_arb_bar_is_clipped_to_its_container);
+    RUN_TEST(test_arb_bar_without_a_movable_thumb_takes_no_press);
+    RUN_TEST(test_arb_inner_bar_over_outer_bar_takes_the_press);
+    RUN_TEST(test_arb_wheel_does_not_move_a_held_thumb);
+    RUN_TEST(test_arb_dropped_pointer_slot_holds_no_gesture);
     RUN_TEST(test_arb_tap_scope_does_not_outlive_its_frame);
     RUN_TEST(test_arb_thumb_over_row_takes_the_thumb);
     RUN_TEST(test_arb_pending_press_wants_pointer_off_the_list);
@@ -2705,7 +2815,8 @@ int main(void) {
     RUN_TEST(test_arb_release_crossing_outside_flings);
     RUN_TEST(test_arb_thumb_press_during_fling_grabs_bar);
     RUN_TEST(test_arb_thumb_press_takes_list_from_content_drag);
-    RUN_TEST(test_arb_popup_barrier_keeps_drag_from_list);
+    RUN_TEST(test_arb_unclipped_floating_keeps_drag_from_list);
+    RUN_TEST(test_arb_popup_in_list_keeps_drag_from_list);
     RUN_TEST(test_arb_wheel_over_bar_scrolls_list);
     RUN_TEST(test_arb_content_take_keeps_last_thumb_move);
     RUN_TEST(test_arb_second_finger_takes_held_bar);
@@ -2769,6 +2880,7 @@ int main(void) {
     RUN_TEST(test_scrollbar_nested_clipped_to_outer);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_assert_release_with_newer_press);
+    RUN_TEST(test_assert_missing_scroll_end);
 #endif
     return UNITY_END();
 }

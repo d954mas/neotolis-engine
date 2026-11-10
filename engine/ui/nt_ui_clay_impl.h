@@ -34,8 +34,9 @@ int32_t nt_ui_clay_priv_layout_elements_length(Clay_Context *clay);
  * Clay adds to the next floating's declared delta, and — once that floating is configured — its own
  * accumulated band (NT patch 4). Valid only mid-layout. */
 int32_t nt_ui_clay_priv_open_floating_z(Clay_Context *clay);
-/* Id of the innermost element open right now. Valid only mid-layout, inside an open element. */
-uint32_t nt_ui_clay_priv_open_element_id(Clay_Context *clay);
+/* Entries on the open-element stack; mid-layout Clay holds its root container there twice, so 2 means
+ * nothing else is open. */
+int32_t nt_ui_clay_priv_open_element_count(Clay_Context *clay);
 float nt_ui_clay_priv_pointer_x(Clay_Context *clay);
 float nt_ui_clay_priv_pointer_y(Clay_Context *clay);
 /* 1 if state == PRESSED or PRESSED_THIS_FRAME. */

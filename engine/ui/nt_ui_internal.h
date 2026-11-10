@@ -61,8 +61,10 @@ typedef struct {
     float m[16];
     float opacity;
     uint16_t hierarchy_depth;
-    int16_t zindex; /* effective Clay zIndex (the owning floating tree-root's); 0 for base content. */
-    float _pad[2];
+    int16_t zindex;      /* effective Clay zIndex (the owning floating tree-root's); 0 for base content. */
+    uint16_t paint_root; /* the owning tree root's place in paint order: band, then declaration */
+    uint16_t _pad16;
+    float _pad;
 } nt_ui_baked_xform_t;
 _Static_assert(sizeof(nt_ui_baked_xform_t) == 80, "nt_ui_baked_xform_t fixed at 80B");
 
@@ -141,8 +143,13 @@ static inline int nt_ui_clampi(int v, int lo, int hi) {
 
 /* Identity baked xform — DFS seed + walker OOB fallback. */
 static inline nt_ui_baked_xform_t nt_ui_internal_identity_baked(void) {
-    nt_ui_baked_xform_t bx = {
-        .m = {1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F}, .opacity = 1.0F, .hierarchy_depth = 0U, .zindex = 0, ._pad = {0.0F, 0.0F}};
+    nt_ui_baked_xform_t bx = {.m = {1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F},
+                              .opacity = 1.0F,
+                              .hierarchy_depth = 0U,
+                              .zindex = 0,
+                              .paint_root = 0U,
+                              ._pad16 = 0U,
+                              ._pad = 0.0F};
     return bx;
 }
 
@@ -168,7 +175,7 @@ typedef struct {
 typedef struct {
     uint32_t active_id; /* widget this pointer captured; 0 = none */
     float press_pos[2]; /* UI-space press origin */
-    float pos[2];       /* current UI-space pos; drag = pos - press_pos */
+    float pos[2];       /* the press point, then a scroll owner's last routed position */
     float hold_secs;    /* dt accumulated since the press */
     float hold_prev_secs;
     /* Scroll gesture of this press: the scope chain still deciding it (0 = decided or none). Lives

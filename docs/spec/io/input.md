@@ -58,11 +58,16 @@ position and deltas in framebuffer pixels (fractional, never rounded), wheel not
 `is_down`/`is_pressed`/`is_released`.
 
 - **A frame never reads a release together with a newer press.** A pointer button that is released
-  and pressed again between two polls publishes the release first, at the position it happened;
-  the press, its position and the moves after it are published one frame later (as a whole tap when
-  the button was lifted again meanwhile). Anything further in that frame folds into that press. A
-  press and its release from an up button still read together: `is_pressed && is_released` always
-  means "pressed, then released". Keys keep both edges in one frame.
+  and pressed again between two polls publishes the release first, with the pointer where the
+  release happened (a hover between the release and the press is not in that frame). The press,
+  the position and the motion since the release (`dx`/`dy` cover it) are published one frame later,
+  as a whole tap when the button was lifted again meanwhile; a pointer that leaves or loses focus
+  in that frame is published once more for that tap. Anything further in that frame folds into that
+  press. A press and its release from an up button still read together: `is_pressed && is_released`
+  always means "pressed, then released". Keys keep both edges in one frame. The wait is per
+  button, the held position per pointer: another button's edge, the wheel and the pressure of that
+  frame are published with the release, at the release position. A bot's waiting press is published
+  by the next poll even when that tick does not advance the game.
 - **`pointers[0]` is the mouse.** It is active while the cursor is over the window, or while a
   button is held (a drag outside the window keeps it). A button release keeps it; after a leave
   or a focus loss it is published once more (that frame still reads the release) and then

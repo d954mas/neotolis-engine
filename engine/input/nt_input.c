@@ -14,10 +14,12 @@ static bool s_player_enabled = true;
 
 /* A pointer button shows one direction change after a release per frame: a press that follows a
    release before the poll waits for the next frame, so a frame never reads a release together with
-   a newer press. Bit b = button b; the pointer stays where the release happened until then. */
+   a newer press. Bit b = button b. The frame of the release shows the pointer where the release
+   happened; where it went since waits with the press. */
 static uint8_t s_waiting_press[NT_INPUT_MAX_POINTERS];
 static uint8_t s_waiting_down[NT_INPUT_MAX_POINTERS]; /* that press is still held */
 static float s_waiting_pos[NT_INPUT_MAX_POINTERS][2];
+static float s_release_pos[NT_INPUT_MAX_POINTERS][2]; /* the pointer at its last release edge */
 
 /* ---- Pointer helpers ---- */
 
@@ -47,6 +49,15 @@ static void apply_buttons_mask(nt_pointer_t *ptr, uint8_t buttons_mask) {
     for (int b = 0; b < NT_BUTTON_MAX; b++) {
         bool now = (buttons_mask & masks[b]) != 0;
         if ((s_waiting_press[i] & masks[b]) != 0U || (now && ptr->buttons[b].is_released)) {
+            if (s_waiting_press[i] == 0U) {
+                /* Back to where the release happened, taking the hover since then out of the deltas. */
+                s_waiting_pos[i][0] = ptr->x;
+                s_waiting_pos[i][1] = ptr->y;
+                ptr->dx -= ptr->x - s_release_pos[i][0];
+                ptr->dy -= ptr->y - s_release_pos[i][1];
+                ptr->x = s_release_pos[i][0];
+                ptr->y = s_release_pos[i][1];
+            }
             s_waiting_press[i] |= masks[b];
             s_waiting_down[i] = (uint8_t)(now ? (s_waiting_down[i] | masks[b]) : (s_waiting_down[i] & ~masks[b]));
             continue;
@@ -56,6 +67,8 @@ static void apply_buttons_mask(nt_pointer_t *ptr, uint8_t buttons_mask) {
         }
         if (!now && ptr->buttons[b].is_down) {
             ptr->buttons[b].is_released = true;
+            s_release_pos[i][0] = ptr->x;
+            s_release_pos[i][1] = ptr->y;
         }
         ptr->buttons[b].is_down = now;
     }
@@ -138,7 +151,7 @@ void nt_input_poll(void) {
     s_next.char_count = 0;
     for (int i = 0; i < NT_INPUT_MAX_POINTERS; i++) {
         nt_pointer_t *p = &s_next.pointers[i];
-        if (p->deactivate_pending) {
+        if (p->deactivate_pending && s_waiting_press[i] == 0U) { /* a waiting tap is published first */
             p->active = false;
             p->deactivate_pending = false;
         }
@@ -153,6 +166,8 @@ void nt_input_poll(void) {
                 p->buttons[b].is_pressed = true;
                 p->buttons[b].is_down = (s_waiting_down[i] & (1U << b)) != 0U;
                 p->buttons[b].is_released = !p->buttons[b].is_down; /* lifted again meanwhile: a whole tap */
+                p->dx += s_waiting_pos[i][0] - p->x;                /* the move the wait held back */
+                p->dy += s_waiting_pos[i][1] - p->y;
                 p->x = s_waiting_pos[i][0];
                 p->y = s_waiting_pos[i][1];
             }
@@ -210,8 +225,8 @@ static void apply_mouse_move(float x, float y, uint8_t buttons) {
     }
     m->deactivate_pending = false; /* back before the leave took effect: keep this frame's edges */
     m->pressure = buttons != 0U ? 1.0F : 0.0F;
-    apply_buttons_mask(m, buttons);
     move_pointer(m, x, y, tracked);
+    apply_buttons_mask(m, buttons);
 }
 
 static void apply_contact_down(uint32_t id, float x, float y, float pressure, uint8_t type, uint8_t buttons) {
@@ -225,8 +240,8 @@ static void apply_contact_down(uint32_t id, float x, float y, float pressure, ui
         *ptr = (nt_pointer_t){.id = id, .type = type, .active = true};
     }
     ptr->pressure = pressure;
-    apply_buttons_mask(ptr, buttons);
     move_pointer(ptr, x, y, false);
+    apply_buttons_mask(ptr, buttons);
 }
 
 static void apply_contact_move(uint32_t id, float x, float y, float pressure, uint8_t buttons) {
@@ -235,15 +250,16 @@ static void apply_contact_move(uint32_t id, float x, float y, float pressure, ui
         return; /* a contact exists only from its down to its up (a hovering pen has no slot) */
     }
     ptr->pressure = pressure;
-    apply_buttons_mask(ptr, buttons);
     move_pointer(ptr, x, y, true);
+    apply_buttons_mask(ptr, buttons);
 }
 
 static void apply_mouse_buttons(uint8_t buttons) {
     const nt_pointer_t *m = &s_next.pointers[0];
     NT_ASSERT(buttons <= 7U);
-    if (m->active && !m->deactivate_pending) { /* no press at (0,0) for a mouse that is not over the window */
-        apply_mouse_move(m->x, m->y, buttons);
+    if (m->active && !m->deactivate_pending) {         /* no press at (0,0) for a mouse that is not over the window */
+        const bool waiting = s_waiting_press[0] != 0U; /* then the mouse is where the waiting press put it */
+        apply_mouse_move(waiting ? s_waiting_pos[0][0] : m->x, waiting ? s_waiting_pos[0][1] : m->y, buttons);
     }
 }
 

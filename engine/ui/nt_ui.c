@@ -244,6 +244,7 @@ nt_ui_context_t *nt_ui_create_context(void *arena, size_t arena_size, const nt_u
     /* Touch-friendly baseline, looser than ImGui's mouse 6px/0.3s: the engine targets mobile/WASM. */
     ctx->gesture_dbl_window_secs = 0.50F;
     ctx->gesture_move_radius_dp = 16.0F;
+    NT_ASSERT(NT_UI_DRAG_SLOP_DP > 0.0F && "nt_ui_create_context: NT_UI_DRAG_SLOP_DP must be > 0");
     const size_t tree_baked_bytes = NT_ALIGN_UP(sizeof(nt_ui_baked_xform_t) * desc->max_elements, NT_UI_CACHE_LINE);
     const size_t tree_root_bytes = NT_ALIGN_UP(sizeof(*ctx->tree_root_for_elem) * desc->max_elements, NT_UI_CACHE_LINE);
     const size_t tree_dfs_bytes = NT_ALIGN_UP(sizeof(nt_ui_dfs_frame_t) * NT_UI_TREE_DFS_DEPTH_CAP, NT_UI_CACHE_LINE);
@@ -485,8 +486,9 @@ void nt_ui_begin(nt_ui_context_t *ctx, const nt_ui_frame_desc_t *frame) {
         /* nt_input never publishes it: a press that follows a release waits for the next frame. */
         NT_ASSERT(!(btn.is_pressed && btn.is_released && btn.is_down) && "nt_ui_begin: a release and a newer press of one pointer in one frame");
         nt_ui_capture_t *cap = &ctx->captures[i];
-        if (!btn.is_released && (!btn.is_down || btn.is_pressed)) {
-            /* Frames without nt_ui_begin swallow edges: no release edge, yet the button is up or newly pressed. */
+        if (btn.is_pressed || (!btn.is_released && !btn.is_down)) {
+            /* Frames without nt_ui_begin swallow edges. A press always starts a new gesture, and a button
+             * that is up with no release edge ended one unseen. */
             cap->active_id = 0U;
             cap->scroll_scope = 0U;
         }
@@ -496,6 +498,9 @@ void nt_ui_begin(nt_ui_context_t *ctx, const nt_ui_frame_desc_t *frame) {
     for (uint32_t i = 0; i < NT_INPUT_MAX_POINTERS; ++i) {
         if (ctx->captures[i].active_id != 0U && ctx->capture_seen[i] == 0U) {
             ctx->captures[i].active_id = 0U;
+        }
+        if (i >= count) {
+            ctx->captures[i].scroll_scope = 0U; /* a slot the game no longer passes holds no gesture */
         }
         if (ctx->captures[i].active_id != 0U) {
             ctx->captures[i].hold_prev_secs = ctx->captures[i].hold_secs;
@@ -606,6 +611,7 @@ void nt_ui_end(nt_ui_context_t *ctx) {
     }
 #endif
 
+    NT_ASSERT(nt_ui_clay_priv_open_element_count(ctx->clay) == 2 && "nt_ui_end: an element is still open (a begin without its end)");
     /* Times the Clay layout solve only, not the begin->end span. */
 #if NT_UI_TIMING_ENABLED
     const double layout_t0 = nt_time_now();
@@ -2306,11 +2312,11 @@ static bool map_pointer_to_local(const nt_ui_context_t *ctx, const nt_ui_baked_x
     return true;
 }
 
-/* out_t / out_zindex (both nullable, valid only when this returns true): out_t = world distance from
- * the near plane to the hit in 3D ctx (0 in 2D); out_zindex = the hit element's effective Clay zIndex
+/* out_t / out_paint (both nullable, valid only when this returns true): out_t = world distance from
+ * the near plane to the hit in 3D ctx (0 in 2D); out_paint = the paint order of the hit element's tree root
  * (its floating tree-root's), used for 2D front-most arbitration. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static bool ui_hit_test(const nt_ui_context_t *ctx, uint32_t id, float px, float py, const int16_t pad_lrtb[4], float *out_t, int16_t *out_zindex) {
+static bool ui_hit_test(const nt_ui_context_t *ctx, uint32_t id, float px, float py, const int16_t pad_lrtb[4], float *out_t, int32_t *out_paint) {
     if (id == 0U) {
         return false;
     }
@@ -2341,8 +2347,8 @@ static bool ui_hit_test(const nt_ui_context_t *ctx, uint32_t id, float px, float
 
     const Clay_BoundingBox box = d.boundingBox;
     const nt_ui_baked_xform_t b = ctx->hit_baked[slot];
-    if (out_zindex != NULL) {
-        *out_zindex = b.zindex; /* slot already gated by hit_generation above */
+    if (out_paint != NULL) {
+        *out_paint = (int32_t)b.paint_root; /* slot already gated by hit_generation above */
     }
     float lx;
     float ly;
@@ -2590,9 +2596,9 @@ nt_ui_interaction_t nt_ui_query_interaction(nt_ui_context_t *ctx, uint32_t id) {
 
 /* One registry record against a pointer: NONE when missed, occluded (3D cutoff) or a see-through
  * scroll surface; PANE for an inspector pane; HIT otherwise. */
-static nt_ui_hit_kind_t hot_candidate(nt_ui_context_t *ctx, const nt_ui_interactive_t *rec, uint32_t pidx, float *out_t, int16_t *out_zi) {
+static nt_ui_hit_kind_t hot_candidate(nt_ui_context_t *ctx, const nt_ui_interactive_t *rec, uint32_t pidx, float *out_t, int32_t *out_paint) {
     const nt_pointer_t *p = &ctx->frame_pointers[pidx];
-    if (!ui_hit_test(ctx, rec->id, p->x, p->y, rec->pad, out_t, out_zi)) {
+    if (!ui_hit_test(ctx, rec->id, p->x, p->y, rec->pad, out_t, out_paint)) {
         return NT_UI_HIT_NONE;
     }
     const nt_ui_hit_kind_t kind = nt_ui_internal_record_kind(ctx, rec->id);
@@ -2602,9 +2608,10 @@ static nt_ui_hit_kind_t hot_candidate(nt_ui_context_t *ctx, const nt_ui_interact
     return kind;
 }
 
-/* nt_ui_begin's front-most record per pointer, from LAST frame's registry and layout. 3D: nearest
- * world distance within the occlusion cutoff; 2D: highest effective zIndex (tie → last-registered,
- * i.e. later nt_ui_step call). Game records share one view_proj; inspector panes win outright. */
+/* nt_ui_begin's front-most record per pointer, from LAST frame's registry and layout: the hit that
+ * is painted last. 3D: nearest world distance within the occlusion cutoff first. Then the later tree
+ * root in paint order (band, then declaration: a floating element is over the content it floats on),
+ * then the later record inside one root. Game records share one view_proj; inspector panes win outright. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void resolve_hot(nt_ui_context_t *ctx) {
     for (uint32_t pidx = 0; pidx < ctx->frame_pointer_count; ++pidx) {
@@ -2618,35 +2625,34 @@ static void resolve_hot(nt_ui_context_t *ctx) {
         float nearest_t = INFINITY;
         for (uint32_t k = 0; ctx->use_raycast_input && k < ctx->interactive_prev_count; ++k) {
             float t = 0.0F;
-            int16_t zi = 0;
-            if (hot_candidate(ctx, &ctx->interactive_prev[k], pidx, &t, &zi) == NT_UI_HIT) {
+            int32_t paint = 0;
+            if (hot_candidate(ctx, &ctx->interactive_prev[k], pidx, &t, &paint) == NT_UI_HIT) {
                 nearest_t = fminf(nearest_t, t);
             }
         }
         const float band = nearest_t + (1.0e-5F * fmaxf(fabsf(nearest_t), 1.0F));
         nt_ui_hot_t best = {0};
-        int16_t best_zindex = INT16_MIN;
+        int32_t best_paint = -1;
         for (uint32_t k = 0; k < ctx->interactive_prev_count; ++k) {
             const nt_ui_interactive_t *rec = &ctx->interactive_prev[k];
             float t = 0.0F;
-            int16_t zi = 0;
-            const nt_ui_hit_kind_t kind = hot_candidate(ctx, rec, pidx, &t, &zi);
+            int32_t paint = 0;
+            const nt_ui_hit_kind_t kind = hot_candidate(ctx, rec, pidx, &t, &paint);
             if (kind == NT_UI_HIT_NONE || (ctx->use_raycast_input && kind == NT_UI_HIT && t > band)) {
                 continue;
             }
-            /* Highest effective zIndex wins; >= so a later-registered tie overwrites. Registry order =
-             * nt_ui_step call order = declaration (paint) order when the game steps in declaration order.
+            /* The later tree root wins; >= so a later record of one root overwrites (registry order =
+             * nt_ui_step call order = declaration order when the game steps in declaration order).
              * An inspector pane floats above the game in any view_proj, so it wins outright. */
-            int16_t z = zi;
 #if NT_UI_DEBUG_TOOLS
             if (kind == NT_UI_HIT_PANE) {
-                z = INT16_MAX;
+                paint = INT32_MAX;
             }
 #endif
-            if (z >= best_zindex) {
+            if (paint >= best_paint) {
                 best.id = rec->id;
                 best.distance = ctx->use_raycast_input ? t : 0.0F;
-                best_zindex = z;
+                best_paint = paint;
             }
         }
         /* best stays {0} when nothing was hit OR all hits were occluded — both gate to skip. */
@@ -2715,8 +2721,6 @@ nt_ui_interaction_t nt_ui_step(nt_ui_context_t *ctx, uint32_t id, const nt_ui_st
         } else if (!owner_over) {
             cap->hold_live = false;
         }
-        cap->pos[0] = p->x;
-        cap->pos[1] = p->y;
         cap->drag_axes = drag_axes;
         /* Marks not-orphan for next begin's cleanup. */
         ctx->capture_seen[pidx] = 1U;

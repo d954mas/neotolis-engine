@@ -32,11 +32,6 @@ extern const nt_ui_widget_def_t NT_UI_SCROLLBAR_DEF;
 #define NT_UI_SCROLL_FLAG_SCROLL_TO ((uint8_t)(1U << 0))
 /* Bit 1 is engine-internal (nt_ui_internal.h). */
 
-/* This frame declared the x / y bar: nt_ui_scroll_end adds its hit record after the content's, so a
- * row under the bar never outranks it. */
-#define NT_UI_SCROLL_FLAG_BAR_X ((uint8_t)(1U << 2))
-#define NT_UI_SCROLL_FLAG_BAR_Y ((uint8_t)(1U << 3))
-
 /* Per-container retained state in the nt_ui_state pool. pos/vel/target in Clay's
  * negative-down sign convention. 44B; under NT_UI_STATE_PAYLOAD_MAX. */
 typedef struct {
@@ -48,7 +43,6 @@ typedef struct {
     float thumb_grab; /* offset of the press point within the thumb (track-axis px); set on thumb-press */
     uint8_t flags;
     uint8_t bar_axis; /* 1 + axis while the owner drags this scroll by a thumb; 0 = content drag */
-    uint16_t bar_pad; /* this frame's bar hit padding (style bar_hit_pad) */
 } nt_ui_scroll_state_t;
 
 /* Scrollbar visibility (defined here so the style stays one struct). Bars always float
@@ -65,7 +59,8 @@ typedef struct {
     /* scrollbar visual */
     nt_ui_scrollbar_visibility_t bar_visibility;
     float bar_thickness;
-    float bar_hit_pad; /* extra hit width from the visual bar toward the content (touch target); 0 = the bar only */
+    float bar_hit_pad; /* extra hit width from the visual bar toward the content (touch target); 0 = the bar only.
+                        * A bar takes presses only while it shows a thumb that can move (thumb art, overflow). */
     float bar_thumb_min_px;
     float bar_fade_speed; /* AUTO_HIDE fade via nt_ui_anim value_t */
     float bar_hide_delay; /* AUTO_HIDE: seconds of idle before the bar fades out (iOS/macOS overlay linger ~1.2s) */
@@ -84,8 +79,8 @@ nt_ui_scroll_style_t nt_ui_scroll_style_defaults(void);
  * with nt_ui_scroll_end. */
 void nt_ui_scroll_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint32_t id, const nt_ui_scroll_style_t *style, const Clay_ElementDeclaration *decl);
 /* Closes the container. The scrollbars are floating children declared by nt_ui_scroll_begin at the
- * container's own band (delta 0); their hit records are added here, after the content's, so a press on
- * a bar never goes to a row under it. */
+ * container's own band (delta 0): they paint, and take presses, over the container's content and under
+ * a floating declared after them in the same band. */
 void nt_ui_scroll_end(nt_ui_context_t *ctx);
 
 /* Set the target offset (Clay sign: negative = down/right) and ease there.
