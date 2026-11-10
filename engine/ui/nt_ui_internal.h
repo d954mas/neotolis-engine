@@ -211,8 +211,6 @@ struct nt_ui_context {
      * here by alignment (after the 4B-aligned captures) to avoid adding struct padding. */
     nt_ui_hot_t pointer_hot[NT_INPUT_MAX_POINTERS];
     float pointer_occlusion[NT_INPUT_MAX_POINTERS]; /* max world ray distance; default +inf = no cutoff */
-    /* Layout index of each pointer's target (its capture holder, else its hot) in last frame's layout; -1 = none. */
-    int32_t pointer_target[NT_INPUT_MAX_POINTERS];
     /* Per pointer and axis (0 = x, 1 = y): the scroll allowed to consume this frame's wheel. */
     uint32_t wheel_owner[NT_INPUT_MAX_POINTERS][2];
     /* Top-modal targeting with the standard 1-frame IM lag: _cur tracks the DEEPEST modal id seen

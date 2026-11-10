@@ -2626,7 +2626,6 @@ static nt_ui_hit_kind_t hot_candidate(nt_ui_context_t *ctx, const nt_ui_interact
 static void resolve_hot(nt_ui_context_t *ctx) {
     for (uint32_t pidx = 0; pidx < ctx->frame_pointer_count; ++pidx) {
         const nt_pointer_t *p = &ctx->frame_pointers[pidx];
-        ctx->pointer_target[pidx] = -1;
         if (!p->active) {
             continue; /* a gone pointer hovers nothing (its hot stays 0) */
         }
@@ -2665,12 +2664,6 @@ static void resolve_hot(nt_ui_context_t *ctx) {
         }
         /* best stays {0} when nothing was hit OR all hits were occluded — both gate to skip. */
         ctx->pointer_hot[pidx] = best;
-        /* The target nt_ui_hovered_within tests: a held pointer stays its holder's, wherever it moves. */
-        const uint32_t target = (ctx->captures[pidx].active_id != 0U) ? ctx->captures[pidx].active_id : best.id;
-        const int32_t slot = (target != 0U) ? nt_ui_clay_priv_hashmap_slot_for_id(ctx->clay, target) : -1;
-        if (slot >= 0 && ctx->hit_generation[slot] == ctx->current_generation) {
-            ctx->pointer_target[pidx] = (int32_t)(ctx->hit_baked[slot].order & 0xFFFFU);
-        }
     }
 }
 
@@ -2912,11 +2905,17 @@ bool nt_ui_hovered_within(const nt_ui_context_t *ctx, uint32_t id) {
         return false;
     }
     /* Clay indexes elements in open order, so everything declared inside id is [id's index, last_inside]. */
-    const int32_t first = (int32_t)(ctx->hit_baked[slot].order & 0xFFFFU);
-    const int32_t last = (int32_t)ctx->hit_baked[slot].last_inside;
+    const uint32_t first = ctx->hit_baked[slot].order & 0xFFFFU;
+    const uint32_t last = ctx->hit_baked[slot].last_inside;
     for (uint32_t i = 0; i < ctx->frame_pointer_count; ++i) {
-        if (ctx->pointer_target[i] >= first && ctx->pointer_target[i] <= last) {
-            return true;
+        /* The live target: a held pointer stays its holder's, wherever it moves. */
+        const uint32_t target = (ctx->captures[i].active_id != 0U) ? ctx->captures[i].active_id : ctx->pointer_hot[i].id;
+        const int32_t t_slot = (ctx->frame_pointers[i].active && target != 0U) ? nt_ui_clay_priv_hashmap_slot_for_id(ctx->clay, target) : -1;
+        if (t_slot >= 0 && ctx->hit_generation[t_slot] == ctx->current_generation) {
+            const uint32_t t = ctx->hit_baked[t_slot].order & 0xFFFFU;
+            if (t >= first && t <= last) {
+                return true;
+            }
         }
     }
     return false;

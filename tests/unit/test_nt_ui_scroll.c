@@ -163,9 +163,11 @@ static void scroll_frame_dt(nt_pointer_t *p, const nt_ui_scroll_style_t *style, 
 
 static void scroll_frame(nt_pointer_t *p, const nt_ui_scroll_style_t *style) { scroll_frame_dt(p, style, 1.0F / 60.0F); }
 
+static bool s_child_within; /* nt_ui_hovered_within(interactive_content) right after nt_ui_begin */
 static nt_ui_interaction_t scroll_child_frame(nt_pointer_t *p, const nt_ui_scroll_style_t *style) {
     nt_ui_interaction_t interaction = {0};
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .dt = 1.0F / 60.0F, .pointers = p, .pointer_count = 1});
+    s_child_within = nt_ui_hovered_within(s_fx.ctx, CLAY_ID("interactive_content").id);
     CLAY({.id = CLAY_ID("root"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(200)}}}) {
         nt_ui_scroll_begin(s_fx.ctx, NULL, SCROLL_ID, style, NULL);
         CLAY({.id = CLAY_ID("interactive_content"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(1000)}}}) {
@@ -233,10 +235,13 @@ static void test_scroll_takes_real_child_and_tracks_the_pointer(void) {
     scroll_child_frame(&p, &style);
     TEST_ASSERT_EQUAL_UINT32(CLAY_ID("interactive_content").id, s_fx.ctx->captures[0].active_id);
 
+    TEST_ASSERT_TRUE(s_child_within);
+
     p.buttons[NT_BUTTON_LEFT].is_pressed = false;
     p.y = 80.0F;
     scroll_child_frame(&p, &style);
     TEST_ASSERT_EQUAL_UINT32(SCROLL_ID, s_fx.ctx->captures[0].active_id);
+    TEST_ASSERT_FALSE(s_child_within); /* the list took the pointer this frame: the row is no longer its target */
     const nt_ui_scroll_state_t *s = nt_ui_state_find(s_fx.ctx, SCROLL_ID);
     TEST_ASSERT_NOT_NULL(s);
     TEST_ASSERT_TRUE(float_near(s->raw[1], -12.0F, 0.001F)); /* the 20 px move minus the 8 dp slop */
