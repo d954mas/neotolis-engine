@@ -509,7 +509,7 @@ void nt_ui_internal_scroll_arbitrate(nt_ui_context_t *ctx) {
  * whether an owner dragged this frame, the release frame included. */
 static bool scroll_route_owner(nt_ui_context_t *ctx, uint32_t id, nt_ui_scroll_state_t *s, uint8_t axes) {
     if (s->bar_axis != 0U) {
-        return false; /* a thumb owner: scrollbar_drive maps it after the bars are laid out */
+        return false; /* a thumb owner: scrollbar_drive maps it */
     }
     bool dragged = false;
     for (uint32_t i = 0; i < ctx->frame_pointer_count; ++i) {
@@ -614,15 +614,26 @@ static void scrollbar_hit_pad(int axis, uint16_t pad, int16_t out[4]) {
     out[(axis == 1) ? 0 : 2] = (int16_t)pad;
 }
 
-/* The arbiter turns a press on a bar into the scroll's thumb owner. The thumb owner maps the pointer
- * so the grabbed point stays under it; a track press centers the thumb under the pointer (a held one
- * at once, a tap smoothly). Returns whether a thumb drag is live. */
+/* The arbiter turns a press on a bar into the scroll's thumb owner (s->bar_axis). The thumb owner maps
+ * the pointer so the grabbed point stays under it; a track press centers the thumb under the pointer
+ * (a held one at once, a tap smoothly). Runs before the integrator, so the content and the thumb follow
+ * the pointer in the same frame. Returns whether a thumb drag is live. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static bool scrollbar_drive(nt_ui_context_t *ctx, uint32_t scroll_id, int axis, nt_ui_scroll_state_t *s, float content, float container, float bar_origin, float track_len, float thumb_off,
-                            float thumb_len) {
-    if (s->bar_axis != (uint8_t)(axis + 1) || !nt_ui_internal_overflows(content, container) || track_len - thumb_len <= 0.0F) {
+static bool scrollbar_drive(nt_ui_context_t *ctx, uint32_t scroll_id, const nt_ui_scroll_style_t *style, nt_ui_scroll_state_t *s, const float contents[2], const float containers[2],
+                            const Clay_ElementData *cbb) {
+    if (s->bar_axis == 0U) {
         return false;
     }
+    const int axis = (int)s->bar_axis - 1;
+    const float content = contents[axis];
+    const float container = containers[axis];
+    const float track_len = container;
+    const float thumb_len = scrollbar_thumb_len(track_len, content, container, style->bar_thumb_min_px);
+    const float thumb_off = scrollbar_thumb_pos(s->pos[axis], content, container, track_len, thumb_len);
+    if (!cbb->found || !nt_ui_internal_overflows(content, container) || track_len - thumb_len <= 0.0F) {
+        return false;
+    }
+    const float bar_origin = (axis == 1) ? cbb->boundingBox.y : cbb->boundingBox.x; /* the bar spans the container's edge */
     const float over = content - container;
     for (uint32_t i = 0; i < ctx->frame_pointer_count; ++i) {
         if (ctx->captures[i].active_id != scroll_id) {
@@ -665,7 +676,7 @@ static bool scrollbar_drive(nt_ui_context_t *ctx, uint32_t scroll_id, int axis, 
  * ONE nt_ui_anim call on the bar's derived id. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void scrollbar_emit_axis(nt_ui_context_t *ctx, uint32_t scroll_id, int axis, const nt_ui_scroll_style_t *style, nt_ui_scroll_state_t *s, const float content[2], const float container[2],
-                                const Clay_ElementData *cbb, uint8_t bar_layer) {
+                                bool dragging, uint8_t bar_layer) {
     const float clen = container[axis];
     const float ccontent = content[axis];
     if (clen <= 0.0F) {
@@ -680,15 +691,6 @@ static void scrollbar_emit_axis(nt_ui_context_t *ctx, uint32_t scroll_id, int ax
     const float track_len = clen;
     const float thumb_len = scrollbar_thumb_len(track_len, ccontent, clen, style->bar_thumb_min_px);
     const float thumb_off = scrollbar_thumb_pos(s->pos[axis], ccontent, clen, track_len, thumb_len);
-
-    /* Bar origin in the container's local space (floating attaches at the container edge). Reuse the
-     * container bbox cached by scroll_begin (one fetch/frame); frame 1 (!found) leaves it at 0. */
-    float bar_origin = 0.0F;
-    if (cbb->found) {
-        bar_origin = (axis == 1) ? cbb->boundingBox.y : cbb->boundingBox.x;
-    }
-
-    const bool dragging = scrollbar_drive(ctx, scroll_id, axis, s, ccontent, clen, bar_origin, track_len, thumb_off, thumb_len);
 
     /* AUTO_HIDE: visible on scroll activity (idle within the linger window), thumb-drag, or bar-hover;
      * fades out once s->idle passes bar_hide_delay. The integrator resets s->idle on any scroll motion,
@@ -785,13 +787,13 @@ static void scrollbar_emit_axis(nt_ui_context_t *ctx, uint32_t scroll_id, int ax
 }
 
 /* Emits enabled-axis scrollbars as floating children of the open scroll container. */
-static void scrollbar_emit(nt_ui_context_t *ctx, uint32_t scroll_id, const nt_ui_scroll_style_t *style, nt_ui_scroll_state_t *s, const float content[2], const float container[2],
-                           const Clay_ElementData *cbb, uint8_t bar_layer) {
+static void scrollbar_emit(nt_ui_context_t *ctx, uint32_t scroll_id, const nt_ui_scroll_style_t *style, nt_ui_scroll_state_t *s, const float content[2], const float container[2], bool thumb_drag,
+                           uint8_t bar_layer) {
     if (style->scroll_x) {
-        scrollbar_emit_axis(ctx, scroll_id, 0, style, s, content, container, cbb, bar_layer);
+        scrollbar_emit_axis(ctx, scroll_id, 0, style, s, content, container, thumb_drag && s->bar_axis == 1U, bar_layer);
     }
     if (style->scroll_y) {
-        scrollbar_emit_axis(ctx, scroll_id, 1, style, s, content, container, cbb, bar_layer);
+        scrollbar_emit_axis(ctx, scroll_id, 1, style, s, content, container, thumb_drag && s->bar_axis == 2U, bar_layer);
     }
 }
 
@@ -831,11 +833,12 @@ void nt_ui_scroll_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
     const float content[2] = {scd.contentDimensions.width, scd.contentDimensions.height};
     const float container[2] = {scd.scrollContainerDimensions.width, scd.scrollContainerDimensions.height};
 
-    /* One bbox fetch per container per frame — the bar origin. */
+    /* One bbox fetch per container per frame: the origin a thumb drag maps the pointer from. */
     const Clay_ElementData cbb = Clay_GetElementData((Clay_ElementId){.id = id});
 
     float wheel[2];
     const bool dragging = scroll_gather_input(ctx, id, s, &scd, wheel);
+    const bool thumb_drag = scrollbar_drive(ctx, id, style, s, content, container, &cbb);
 
     scroll_integrate(s, wheel, ctx->frame_dt, content, container, style, dragging);
 
@@ -854,7 +857,7 @@ void nt_ui_scroll_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
      * the container's own layer so it isn't buried under higher-layer content (e.g. a dropdown panel). */
     const uint8_t bar_layer = (data != NULL) ? data->layer : 0U;
     s->flags &= (uint8_t)~(NT_UI_SCROLL_FLAG_BAR_X | NT_UI_SCROLL_FLAG_BAR_Y);
-    scrollbar_emit(ctx, id, style, s, content, container, &cbb, bar_layer);
+    scrollbar_emit(ctx, id, style, s, content, container, thumb_drag, bar_layer);
 
 #ifdef NT_TEST_ACCESS
     s_last_child_offset[0] = s->pos[0];

@@ -2496,6 +2496,22 @@ static void test_arb_bar_hit_pad_is_the_style_s(void) {
     TEST_ASSERT_TRUE(s_child_in.pressed_now);
 }
 
+/* A thumb drag moves the content in the frame of the move: grabbed 20 into a 40 thumb on a 200 track,
+ * the pointer at 60 is frac (60 - 20) / 160 of the 800 overflow. */
+static void test_arb_thumb_drag_moves_content_the_same_frame(void) {
+    arb_scene_reset();
+    nt_pointer_t p = arb_pointer(195.0F, 20.0F);
+    arb_warm(&p);
+    arb_press(&p);
+    arb_frame(&p, 1);
+    arb_hold(&p);
+    p.y = 60.0F;
+    arb_frame(&p, 1);
+    /* The laid-out content, not the state cell: the offset this frame's layout was given. */
+    const nt_ui_bbox_t content = nt_ui_get_bbox(s_fx.ctx, CLAY_ID("arb_content").id);
+    TEST_ASSERT_TRUE(content.found && float_near(content.y, -200.0F, 0.5F));
+}
+
 /* The container clips its bar: a press past its edge is not a thumb press. */
 static void test_arb_bar_is_clipped_to_its_container(void) {
     arb_scene_reset();
@@ -2666,6 +2682,7 @@ int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_arb_foreground_outside_list_not_stolen);
     RUN_TEST(test_arb_bar_hit_pad_is_the_style_s);
+    RUN_TEST(test_arb_thumb_drag_moves_content_the_same_frame);
     RUN_TEST(test_arb_bar_is_clipped_to_its_container);
     RUN_TEST(test_arb_tap_scope_does_not_outlive_its_frame);
     RUN_TEST(test_arb_thumb_over_row_takes_the_thumb);
