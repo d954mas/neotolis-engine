@@ -123,10 +123,10 @@ bool nt_ui_tooltip(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8
     /* Engine-tracked hover-delay timer in the state pool. */
     nt_ui_tooltip_cell_t *c = nt_ui_state(ctx, tooltip_timer_id(target_id), sizeof *c, NT_UI_STATE_TAG('t', 'i', 'p', ' '));
 
-    /* IDEMPOTENT read of the target's hover — must NOT become a second mutating step on the target id.
-     * The game's own nt_ui_step stays the sole capture mutator. */
-    const nt_ui_interaction_t in = nt_ui_query_interaction(ctx, target_id);
-    if (in.hovered) {
+    /* Read-only, so the game's own nt_ui_step stays the sole capture mutator. Hover within: a tooltip on a
+     * container stays up while the pointer is on an interactive element declared inside it. */
+    const bool hovered = nt_ui_hovered_within(ctx, target_id);
+    if (hovered) {
         c->hover += ctx->frame_dt;
     } else {
         c->hover = 0.0F;
@@ -134,7 +134,7 @@ bool nt_ui_tooltip(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8
 
     /* Gate on hover: delay_secs==0 is legal (instant tooltip), but `0 >= 0` would then read open every
      * frame even with the cursor away (hover resets to 0). */
-    const bool open = in.hovered && (c->hover >= style->delay_secs);
+    const bool open = hovered && (c->hover >= style->delay_secs);
 
     /* Anchor below the target; popup-core edge-flips ABOVE near the bottom border. */
     nt_ui_popup_anchor_t anc = {.prefer_side = NT_UI_POPUP_BELOW};

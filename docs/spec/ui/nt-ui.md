@@ -303,6 +303,16 @@ while a pointer of the current frame holds a capture or a pending scroll gesture
 record that vanished this frame is not UI under the pointer). A free pointer drives a
 widget only if it is the resolved hot
 widget or already holds capture; `nt_ui_pointer_hot` exposes the resolved id.
+
+Two hover questions have two answers. `hovered` means "this record is the pointer's
+target and the pointer is over it": it is exclusive, like the press. `nt_ui_hovered_within(ctx, id)`
+means "the pointer's target is `id` or an element declared inside `id`" (CSS `:hover` on an
+ancestor), where the target is the pointer's capture holder if it has one, else its hot.
+Clay indexes elements in open order, so what is declared inside an element is the range
+from its index to the last index opened before it closed (NT patch 10), floating children
+included; `nt_ui` bakes that end per element, so the test is two compares. `id` need not be
+interactive. A held pointer stays its holder's: dragging one row's control over another row
+hovers only the first.
 Consequence: a freshly-shown widget registers on its first step and only
 becomes eligible the NEXT frame; on the first frame (empty registry) nothing
 reacts — reliability over instant first-frame response, no raw-hit fallback
@@ -610,12 +620,11 @@ A custom-content row (`item_begin..item_end`, `selectable_begin..selectable_end`
 `preview_begin..preview_end`, and a tab's `nt_ui_tab_begin..nt_ui_tab_end`) steps
 in its `_end`, after its children, but the stacking order is declaration, so an
 interactive child declared inside the row wins the press over its own area; the
-rest of the row activates it. Over the child the child is the front-most record,
-so a query on the row reports no hover there: a combo or tab row drops its hover
-look. A menu row instead counts the pointer inside its box while the front-most
-record is in the row's tree root and the pointer is not captured by another
-record, so it keeps highlight, hover focus and the leaf collapse over its own
-control. A rich-text block
+rest of the row activates it. Over the child the row's own `hovered` is false,
+but it is hovered within: combo rows, the combo trigger and tabs keep their hover
+look, and a menu row keeps highlight, hover focus and the leaf collapse. A tooltip
+also reads hover within, so a tooltip on a container stays up over the
+interactive elements inside it. A rich-text block
 with links is one record over its whole box, so inside a row it takes the press
 over all of its text, not only over the links. A menu row with `non_activatable`
 has no action of its own (for a row that only hosts a control): it never steps,

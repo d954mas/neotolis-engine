@@ -629,6 +629,11 @@ bool nt_ui_wants_pointer(const nt_ui_context_t *ctx);
  * Resolved by nt_ui_begin from the prev-frame registry: stepped widgets, blockers, scroll surfaces
  * (a scroll id over its empty area) and scrollbars. id 0 = none. */
 nt_ui_hot_t nt_ui_pointer_hot(const nt_ui_context_t *ctx, uint32_t pointer_index);
+
+/* True when a pointer's target (its capture holder, else its front-most record) is id or an element
+ * declared inside id, floating ones included (CSS :hover on an ancestor). id need not be interactive.
+ * Last frame's layout, like every query. Read-only; `hovered` stays "this record is the target". */
+bool nt_ui_hovered_within(const nt_ui_context_t *ctx, uint32_t id);
 // #endregion
 
 // #region test_access

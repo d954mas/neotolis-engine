@@ -62,7 +62,7 @@ typedef struct {
     float m[16];
     float opacity;
     uint16_t hierarchy_depth;
-    uint16_t _pad16;
+    uint16_t last_inside; /* last layout element index declared inside this one: [own index, last_inside] */
     /* Stacking order for painting and hit: (tree root index in Clay's sorted root order: band, then
      * declaration) << 16 | layout element index (declaration order, preorder inside one root). */
     uint32_t order;
@@ -207,10 +207,12 @@ struct nt_ui_context {
     /* capture_seen[] tracks who touched the capture this frame — orphans cleared on begin. */
     nt_ui_capture_t captures[NT_INPUT_MAX_POINTERS];
     /* Per-pointer front-most interactive widget + game-fed occlusion cutoff (3D), resolved by
-     * nt_ui_begin from prev-frame layout (3D: nearest ray-t within cutoff; then tree root, then record). Ordered here
-     * by alignment (after the 4B-aligned captures) to avoid adding struct padding. */
+     * nt_ui_begin from prev-frame layout (3D: nearest ray-t within cutoff; then the highest stacking order). Ordered
+     * here by alignment (after the 4B-aligned captures) to avoid adding struct padding. */
     nt_ui_hot_t pointer_hot[NT_INPUT_MAX_POINTERS];
     float pointer_occlusion[NT_INPUT_MAX_POINTERS]; /* max world ray distance; default +inf = no cutoff */
+    /* Layout index of each pointer's target (its capture holder, else its hot) in last frame's layout; -1 = none. */
+    int32_t pointer_target[NT_INPUT_MAX_POINTERS];
     /* Per pointer and axis (0 = x, 1 = y): the scroll allowed to consume this frame's wheel. */
     uint32_t wheel_owner[NT_INPUT_MAX_POINTERS][2];
     /* Top-modal targeting with the standard 1-frame IM lag: _cur tracks the DEEPEST modal id seen
@@ -577,10 +579,6 @@ void nt_ui_internal_register_interactive(nt_ui_context_t *ctx, uint32_t id, cons
 /* Prev-frame transform-aware point-in-bbox test (same 1-frame IM lag as step/query), with optional
  * L/R/T/B padding. Sets the Clay current-ctx internally. Used by the modal close-on-backdrop guard. */
 bool nt_ui_internal_hit_test_padded(nt_ui_context_t *ctx, uint32_t id, float px, float py, const int16_t pad_lrtb[4]);
-
-/* A pointer that is free or held by its hot record is over id's box, and that record lies in id's tree
- * root: id is under the pointer even while a record declared inside it (its own child) is hot. */
-bool nt_ui_internal_pointer_within(nt_ui_context_t *ctx, uint32_t id);
 
 /* Map device pointer (px,py) into element `id`'s LOCAL Clay-layout coords via the element's baked
  * transform — the SAME inverse-affine / raycast path as the standard widget hit-test. Sets the Clay

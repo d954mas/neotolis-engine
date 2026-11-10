@@ -2379,25 +2379,6 @@ bool nt_ui_internal_hit_test_padded(nt_ui_context_t *ctx, uint32_t id, float px,
     return hit;
 }
 
-bool nt_ui_internal_pointer_within(nt_ui_context_t *ctx, uint32_t id) {
-    NT_ASSERT(ctx != NULL && "nt_ui_internal_pointer_within: ctx must be non-NULL");
-    Clay_Context *saved = Clay_GetCurrentContext();
-    Clay_SetCurrentContext(ctx->clay);
-    bool within = false;
-    for (uint32_t i = 0; i < ctx->frame_pointer_count && !within; ++i) {
-        const nt_pointer_t *p = &ctx->frame_pointers[i];
-        const uint32_t hot = ctx->pointer_hot[i].id;
-        const uint32_t holder = ctx->captures[i].active_id;
-        const int32_t hot_slot = (hot != 0U) ? nt_ui_clay_priv_hashmap_slot_for_id(ctx->clay, hot) : -1;
-        uint32_t order = 0U;
-        /* A pointer captured by anything but its hot record is bound elsewhere, as in every query. */
-        within = p->active && (holder == 0U || holder == hot) && hot_slot >= 0 && ctx->hit_generation[hot_slot] == ctx->current_generation && ui_hit_test(ctx, id, p->x, p->y, NULL, NULL, &order) &&
-                 (order >> 16U) == (ctx->hit_baked[hot_slot].order >> 16U);
-    }
-    Clay_SetCurrentContext(saved);
-    return within;
-}
-
 /* Inner resolve for nt_ui_internal_pointer_to_local — caller owns the Clay current-ctx scope.
  * Same id-resolve + staleness + clip-chain gate as ui_hit_test, then maps the pointer to local. */
 static bool pointer_to_local_resolved(const nt_ui_context_t *ctx, uint32_t id, float px, float py, float *out_lx, float *out_ly) {
@@ -2645,6 +2626,7 @@ static nt_ui_hit_kind_t hot_candidate(nt_ui_context_t *ctx, const nt_ui_interact
 static void resolve_hot(nt_ui_context_t *ctx) {
     for (uint32_t pidx = 0; pidx < ctx->frame_pointer_count; ++pidx) {
         const nt_pointer_t *p = &ctx->frame_pointers[pidx];
+        ctx->pointer_target[pidx] = -1;
         if (!p->active) {
             continue; /* a gone pointer hovers nothing (its hot stays 0) */
         }
@@ -2683,6 +2665,12 @@ static void resolve_hot(nt_ui_context_t *ctx) {
         }
         /* best stays {0} when nothing was hit OR all hits were occluded — both gate to skip. */
         ctx->pointer_hot[pidx] = best;
+        /* The target nt_ui_hovered_within tests: a held pointer stays its holder's, wherever it moves. */
+        const uint32_t target = (ctx->captures[pidx].active_id != 0U) ? ctx->captures[pidx].active_id : best.id;
+        const int32_t slot = (target != 0U) ? nt_ui_clay_priv_hashmap_slot_for_id(ctx->clay, target) : -1;
+        if (slot >= 0 && ctx->hit_generation[slot] == ctx->current_generation) {
+            ctx->pointer_target[pidx] = (int32_t)(ctx->hit_baked[slot].order & 0xFFFFU);
+        }
     }
 }
 
@@ -2915,6 +2903,23 @@ nt_ui_hot_t nt_ui_pointer_hot(const nt_ui_context_t *ctx, uint32_t pointer_index
     NT_ASSERT(ctx != NULL && "nt_ui_pointer_hot: ctx must be non-NULL");
     NT_ASSERT(pointer_index < NT_INPUT_MAX_POINTERS && "nt_ui_pointer_hot: pointer_index out of range");
     return ctx->pointer_hot[pointer_index];
+}
+
+bool nt_ui_hovered_within(const nt_ui_context_t *ctx, uint32_t id) {
+    NT_ASSERT(ctx != NULL && "nt_ui_hovered_within: ctx must be non-NULL");
+    const int32_t slot = (id != 0U) ? nt_ui_clay_priv_hashmap_slot_for_id(ctx->clay, id) : -1;
+    if (slot < 0 || ctx->hit_generation[slot] != ctx->current_generation) {
+        return false;
+    }
+    /* Clay indexes elements in open order, so everything declared inside id is [id's index, last_inside]. */
+    const int32_t first = (int32_t)(ctx->hit_baked[slot].order & 0xFFFFU);
+    const int32_t last = (int32_t)ctx->hit_baked[slot].last_inside;
+    for (uint32_t i = 0; i < ctx->frame_pointer_count; ++i) {
+        if (ctx->pointer_target[i] >= first && ctx->pointer_target[i] <= last) {
+            return true;
+        }
+    }
+    return false;
 }
 // #endregion
 

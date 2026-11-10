@@ -132,6 +132,32 @@ static void test_tooltip_delayed_reveal(void) {
     TEST_ASSERT_TRUE(saw_reveal);
 }
 
+/* ---- A tooltip on a non-interactive container reveals while the pointer is on an interactive child
+ *      declared inside it (hover within), and hides once the pointer leaves the container. ---- */
+#define TGT_CHILD_ID 0x7A1D02U
+static bool container_tooltip_frame(const nt_pointer_t *p, nt_ui_tooltip_style_t *st) {
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = DT, .pointers = p, .pointer_count = 1});
+    CLAY({.id = (Clay_ElementId){.id = TGT_ID}, .layout = {.sizing = {CLAY_SIZING_FIXED(TGT_W), CLAY_SIZING_FIXED(TGT_H)}}}) {
+        CLAY({.id = (Clay_ElementId){.id = TGT_CHILD_ID}, .layout = {.sizing = {CLAY_SIZING_FIXED(20), CLAY_SIZING_FIXED(TGT_H)}}}) { (void)nt_ui_step(s_fx.ctx, TGT_CHILD_ID, NULL); }
+    }
+    const bool shown = nt_ui_tooltip(s_fx.ctx, NT_UI_DATA_LAYER(1), 2U, TGT_ID, "hint text", st);
+    nt_ui_end(s_fx.ctx);
+    return shown;
+}
+
+static void test_tooltip_on_container_reveals_over_its_child(void) {
+    nt_ui_tooltip_style_t st = test_style();
+    const nt_pointer_t over = pointer_at(10.0F, TGT_H * 0.5F);
+    bool shown = false;
+    for (int i = 0; i < (int)ceilf(DELAY / DT) + 4 && !shown; ++i) {
+        shown = container_tooltip_frame(&over, &st);
+    }
+    TEST_ASSERT_TRUE(shown);
+    const nt_pointer_t away = pointer_at(VIEW_W - 10.0F, VIEW_H - 10.0F);
+    (void)container_tooltip_frame(&away, &st);
+    TEST_ASSERT_FALSE(container_tooltip_frame(&away, &st));
+}
+
 /* ---- Hide on leave: once revealed, moving the cursor off the target resets the timer to 0 and hides
  *      the tooltip. ---- */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -396,6 +422,7 @@ int main(void) {
     RUN_TEST(test_tooltip_defaults_valid);
     RUN_TEST(test_tooltip_delayed_reveal);
     RUN_TEST(test_tooltip_hide_on_leave);
+    RUN_TEST(test_tooltip_on_container_reveals_over_its_child);
     RUN_TEST(test_tooltip_declares_no_catcher);
     RUN_TEST(test_tooltip_no_double_mutation);
     RUN_TEST(test_tooltip_caret_on_first_frame);

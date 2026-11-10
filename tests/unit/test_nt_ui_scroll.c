@@ -2788,6 +2788,70 @@ static void test_front_most_inside_a_root_is_declaration_order(void) {
     TEST_ASSERT_FALSE(s_decl_card.clicked);
 }
 
+/* Hover within: a row holding a control and a floating part, then an unrelated row. Each frame records
+ * which elements the pointer's target is inside of. */
+static bool s_in_row;
+static bool s_in_ctl;
+static bool s_in_other;
+static void within_frame(const nt_pointer_t *p) {
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .dt = 1.0F / 60.0F, .pointers = p, .pointer_count = 1});
+    s_in_row = nt_ui_hovered_within(s_fx.ctx, CLAY_ID("w_row").id);
+    s_in_ctl = nt_ui_hovered_within(s_fx.ctx, CLAY_ID("w_ctl").id);
+    s_in_other = nt_ui_hovered_within(s_fx.ctx, CLAY_ID("w_other").id);
+    CLAY({.id = CLAY_ID("w_root"), .layout = {.layoutDirection = CLAY_TOP_TO_BOTTOM}}) {
+        CLAY({.id = CLAY_ID("w_row"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(40)}}}) {
+            CLAY({.id = CLAY_ID("w_ctl"), .layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(40)}}}) { (void)nt_ui_step(s_fx.ctx, CLAY_ID("w_ctl").id, NULL); }
+            CLAY(
+                {.id = CLAY_ID("w_pop"), .floating = {.attachTo = CLAY_ATTACH_TO_PARENT, .offset = {.x = 100.0F, .y = 100.0F}}, .layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(40)}}}) {
+                (void)nt_ui_step(s_fx.ctx, CLAY_ID("w_pop").id, NULL);
+            }
+        }
+        CLAY({.id = CLAY_ID("w_other"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(40)}}}) { (void)nt_ui_step(s_fx.ctx, CLAY_ID("w_other").id, NULL); }
+    }
+    nt_ui_end(s_fx.ctx);
+}
+
+static void within_at(nt_pointer_t *p, float x, float y) {
+    p->x = x;
+    p->y = y;
+    within_frame(p);
+    within_frame(p);
+}
+
+static void test_hovered_within_follows_declaration(void) {
+    nt_pointer_t p = arb_pointer(0.0F, 0.0F);
+    within_at(&p, 20.0F, 20.0F); /* the row's control: inside the row, not the other row */
+    TEST_ASSERT_TRUE(s_in_row);
+    TEST_ASSERT_TRUE(s_in_ctl);
+    TEST_ASSERT_FALSE(s_in_other);
+    within_at(&p, 120.0F, 120.0F); /* the row's floating part, outside the row's box */
+    TEST_ASSERT_TRUE(s_in_row);
+    TEST_ASSERT_FALSE(s_in_ctl);
+    within_at(&p, 20.0F, 60.0F);
+    TEST_ASSERT_FALSE(s_in_row);
+    TEST_ASSERT_TRUE(s_in_other);
+    within_at(&p, 500.0F, 500.0F);
+    TEST_ASSERT_FALSE(s_in_row);
+    TEST_ASSERT_FALSE(s_in_other);
+}
+
+static void test_hovered_within_follows_capture(void) {
+    nt_pointer_t p = arb_pointer(0.0F, 0.0F);
+    within_at(&p, 20.0F, 20.0F);
+    arb_press(&p);
+    within_frame(&p);
+    arb_hold(&p);
+    within_at(&p, 20.0F, 60.0F); /* dragged onto the other row: still the control's */
+    TEST_ASSERT_TRUE(s_in_row);
+    TEST_ASSERT_FALSE(s_in_other);
+    arb_release(&p);
+    within_frame(&p);
+    p.buttons[NT_BUTTON_LEFT].is_released = false;
+    within_at(&p, 20.0F, 60.0F); /* released: the other row again */
+    TEST_ASSERT_FALSE(s_in_row);
+    TEST_ASSERT_TRUE(s_in_other);
+}
+
 /* A pointer slot the game stops passing holds no pending gesture. */
 static void test_arb_dropped_pointer_slot_holds_no_gesture(void) {
     nt_pointer_t ps[2] = {arb_pointer(700.0F, 500.0F), arb_pointer(100.0F, 150.0F)};
@@ -2978,6 +3042,8 @@ int main(void) {
     RUN_TEST(test_arb_dropped_pointer_slot_holds_no_gesture);
     RUN_TEST(test_front_most_is_structural_not_by_layer);
     RUN_TEST(test_front_most_inside_a_root_is_declaration_order);
+    RUN_TEST(test_hovered_within_follows_declaration);
+    RUN_TEST(test_hovered_within_follows_capture);
     RUN_TEST(test_arb_equal_crossings_go_to_the_widget_then_the_inner_scroll);
     RUN_TEST(test_arb_vanished_scroll_takes_nothing);
     RUN_TEST(test_arb_tap_gesture_does_not_outlive_its_frame);

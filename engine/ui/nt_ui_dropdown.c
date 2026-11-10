@@ -201,8 +201,8 @@ static nt_ui_interaction_t combo_emit_row_decl(nt_ui_context_t *ctx, uint8_t fil
         st = &style->row_selected;
     } else if (in.pressed && in.hovered) {
         st = &style->row_pressed;
-    } else if (in.hovered) {
-        st = &style->row_hover;
+    } else if (nt_ui_hovered_within(ctx, row_id)) {
+        st = &style->row_hover; /* also over the row's own interactive child */
     }
 
     const nt_ui_anim_target_t tgt = {.scale_x = st->scale, .scale_y = st->scale, .scale_z = 1.0F, .opacity = st->opacity};
@@ -279,8 +279,8 @@ static void combo_open_trigger(nt_ui_context_t *ctx, uint8_t fill_layer, uint8_t
     nt_ui_dd_state_t *st = &style->trigger_idle;
     if (in.pressed && in.hovered) {
         st = &style->trigger_pressed;
-    } else if (in.hovered) {
-        st = &style->trigger_hover;
+    } else if (nt_ui_hovered_within(ctx, id)) {
+        st = &style->trigger_hover; /* also over an interactive child of the preview content */
     }
 
     const nt_ui_anim_target_t tgt = {.scale_x = st->scale, .scale_y = st->scale, .scale_z = 1.0F, .opacity = st->opacity, .value_t = *open ? 1.0F : 0.0F};

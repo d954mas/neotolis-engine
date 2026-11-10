@@ -456,6 +456,8 @@ static void bt_dfs_subtree(nt_ui_context_t *ctx, Clay_Context *cc, int32_t root_
     while (sp > 0) {
         nt_ui_dfs_frame_t *f = &S[sp - 1];
         Clay_LayoutElement *elem = Clay_LayoutElementArray_Get(&cc->layoutElements, f->elem_idx);
+        /* Text leaves have no .children, and never close, so their nt_last_index stays 0. */
+        const bool is_text = Clay__ElementHasConfig(elem, CLAY__ELEMENT_CONFIG_TYPE_TEXT);
 
         if (f->children_cursor == 0) {
             nt_ui_element_data_t *ad = bt_scan_userdata(elem);
@@ -480,12 +482,11 @@ static void bt_dfs_subtree(nt_ui_context_t *ctx, Clay_Context *cc, int32_t root_
             ctx->tree_baked[f->elem_idx].opacity = op;
             ctx->tree_baked[f->elem_idx].hierarchy_depth = f->hierarchy_depth;
             ctx->tree_baked[f->elem_idx].order = ((uint32_t)root_idx << 16U) | (uint32_t)f->elem_idx;
+            ctx->tree_baked[f->elem_idx].last_inside = (uint16_t)(is_text ? f->elem_idx : elem->nt_last_index);
             memcpy(f->m, m_cur, sizeof m_cur);
             f->opacity = op;
         }
 
-        /* Text leaves have no .children. */
-        const bool is_text = Clay__ElementHasConfig(elem, CLAY__ELEMENT_CONFIG_TYPE_TEXT);
         const int32_t child_count = is_text ? 0 : elem->childrenOrTextContent.children.length;
 
         if (f->children_cursor < child_count) {
