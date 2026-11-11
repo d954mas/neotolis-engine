@@ -37,7 +37,6 @@ static nt_font_t make_resolved_test_font(const char *name, uint8_t **out_blob) {
     nt_font_create_desc_t fd = {
         .max_glyphs = 16,
         .measure_cache_size = 256,
-        .max_payloads = 2,
     };
     nt_font_t font = nt_font_create(&fd);
 

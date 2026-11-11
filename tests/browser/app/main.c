@@ -1533,13 +1533,11 @@ int main(int argc, char *argv[]) {
     nt_ui_set_text_material(s_ctx, s_text_material);
 
     s_font = nt_font_create(&(nt_font_create_desc_t){
-        .max_payloads = 8,
         .max_glyphs = 256,
         .measure_cache_size = 256,
     });
     for (uint32_t i = 0; i < 4U; i++) {
         s_rich_font[i] = nt_font_create(&(nt_font_create_desc_t){
-            .max_payloads = 8,
             .max_glyphs = 256,
             .measure_cache_size = 256,
         });

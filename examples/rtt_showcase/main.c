@@ -610,7 +610,6 @@ int main(void) {
     nt_ui_set_sprite_material(s_ui_ctx, s_sprite_material);
     nt_ui_set_text_material(s_ui_ctx, s_text_material);
     s_font = nt_font_create(&(nt_font_create_desc_t){
-        .max_payloads = 8,
         .max_glyphs = 256,
         .measure_cache_size = 256,
     });

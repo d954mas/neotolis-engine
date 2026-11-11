@@ -33,9 +33,9 @@ typedef struct nt_font_slot_s nt_font_slot_t;
 struct nt_font_slot_s {
     nt_font_metrics_t metrics;
 
-    uint8_t **payloads;
-    uint8_t payload_count;
-    uint8_t max_payloads;
+    uint8_t *data; /* one owned payload; each fill merges into its sorted glyph table */
+    uint32_t data_size;
+    uint32_t fill_count;
 
     nt_texture_t curve_texture; /* RGBA16F, NT_FONT_GLYPH_TEXELS x max_glyphs: row i = cache slot i */
 
@@ -53,10 +53,8 @@ struct nt_font_slot_s {
     /* Fast-path gate: most Latin fonts have no kern table. */
     bool has_any_kern;
 
-    /* For codepoint < 128, ascii_glyph_idx[cp] is the glyph position inside
-     * payload ascii_glyph_payload[cp]. NONE sentinel = not in any payload. */
+    /* For codepoint < 128, ascii_glyph_idx[cp] is the glyph position in data. NONE = absent. */
     uint16_t ascii_glyph_idx[128];
-    uint8_t ascii_glyph_payload[128];
 
 #ifdef NT_TEST_ACCESS
     uint32_t test_measure_cache_hits;

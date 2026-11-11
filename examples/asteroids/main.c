@@ -2290,7 +2290,7 @@ int main(int argc, char **argv) {
     nt_resource_register_type(NT_ASSET_TEXTURE, &(nt_resource_type_desc_t){.activate = nt_gfx_activate_texture, .deactivate = nt_gfx_deactivate_texture});
     nt_resource_register_type(NT_ASSET_SHADER_CODE, &(nt_resource_type_desc_t){.activate = nt_gfx_activate_shader, .deactivate = nt_gfx_deactivate_shader});
     nt_font_init(&(nt_font_desc_t){.max_fonts = 1});
-    s_font = nt_font_create(&(nt_font_create_desc_t){.max_payloads = 8, .max_glyphs = 128, .measure_cache_size = 128});
+    s_font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 128, .measure_cache_size = 128});
 
     nt_material_init(&(nt_material_desc_t){.max_materials = 2});
     s_text_material = nt_material_create(&(nt_material_create_desc_t){.blend = nt_blend_alpha_premultiplied(), .cull_mode = NT_CULL_NONE, .label = "asteroids_text"});

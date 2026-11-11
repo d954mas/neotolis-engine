@@ -56,7 +56,7 @@ void setUp(void) {
 
     uint32_t size = 0;
     s_blob = nt_test_font_blob('A', 'B', &size);
-    s_font = nt_font_create(&(nt_font_create_desc_t){.max_payloads = 8, .max_glyphs = MAX_GLYPHS});
+    s_font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = MAX_GLYPHS});
     nt_font_fill(s_font, s_blob, size);
 
     nt_font_step();

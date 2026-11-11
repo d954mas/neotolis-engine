@@ -642,7 +642,7 @@ int main(int argc, char **argv) {
         .label = "stats_overlay",
     });
     s_overlay_font = nt_font_create(&(nt_font_create_desc_t){
-        .max_payloads = 8, .max_glyphs = 256, .measure_cache_size = 0, /* bunnymark never calls nt_font_measure*; disable to skip the alloc. */
+        .max_glyphs = 256, .measure_cache_size = 0, /* bunnymark never calls nt_font_measure*; disable to skip the alloc. */
     });
 
     nt_resource_set_activate_time_budget(0);

@@ -184,7 +184,6 @@ void setUp(void) {
     /* Build font and create handle */
     s_blob = nt_test_font_blob('A', 'C', &s_blob_size);
     nt_font_create_desc_t desc = {
-        .max_payloads = 8,
         .max_glyphs = 16,
     };
     s_font = nt_font_create(&desc);
@@ -386,7 +385,7 @@ void test_quad_covers_fp16_rounded_tofu(void) {
         hdr.descent = cases[i].descent;
         memcpy(blob, &hdr, sizeof hdr);
 
-        nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_payloads = 8, .max_glyphs = 16});
+        nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 16});
         nt_font_fill(font, blob, blob_size);
 
         nt_font_step();
@@ -514,7 +513,7 @@ void test_a_call_without_quads_records_nothing(void) {
 /* Two draws of one font and material are one GPU draw; another font splits it with only a texture set. */
 void test_equal_draws_merge_and_a_font_change_splits(void) {
     nt_text_style_t style = plain();
-    nt_font_t other = nt_font_create(&(nt_font_create_desc_t){.max_payloads = 8, .max_glyphs = 16});
+    nt_font_t other = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 16});
     nt_font_fill(other, s_blob, s_blob_size);
 
     nt_font_step();
@@ -681,7 +680,6 @@ void test_a_reused_program_slot_does_not_hit_the_dead_entry(void) {
 void test_full_glyph_cache_still_draws_the_entire_run(void) {
     nt_text_style_t style = plain();
     nt_font_create_desc_t desc = {
-        .max_payloads = 8,
         .max_glyphs = 2,
     };
     nt_font_t tiny_font = nt_font_create(&desc);
@@ -1264,7 +1262,7 @@ void test_embolden_off_rejects_nonzero_before_drawing(void) {
 /* A merged draw keeps its note before a CACHE draw; a font without a loaded resource notes its skip. */
 void test_notes_survive_merges_and_an_unloaded_font_notes_its_skip(void) {
     nt_text_style_t style = plain();
-    nt_font_t empty = nt_font_create(&(nt_font_create_desc_t){.max_payloads = 8, .max_glyphs = 16});
+    nt_font_t empty = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 16});
     nt_gfx_capture_request();
     next_frame();
     nt_text_renderer_draw(&style, s_identity, ""); /* empty: no note */

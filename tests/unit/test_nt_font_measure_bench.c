@@ -35,7 +35,7 @@
 
 static nt_font_create_desc_t bench_font_desc(void) {
     return (nt_font_create_desc_t){
-        .max_payloads = 8, .max_glyphs = 16, .measure_cache_size = 256, /* benchmark measures cache hit/miss — explicit opt-in */
+        .max_glyphs = 16, .measure_cache_size = 256, /* benchmark measures cache hit/miss — explicit opt-in */
     };
 }
 

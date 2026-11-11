@@ -26,14 +26,12 @@ static inline nt_font_desc_t nt_font_desc_defaults(void) {
 typedef struct {
     uint16_t max_glyphs;         /* glyph-cache slots incl. tofu, one curve-texture row each (16 KB); 2..2048 */
     uint16_t measure_cache_size; /* POT if non-zero; 0 = disabled; max 32768 */
-    uint8_t max_payloads;        /* retained compact payloads; positive, no hidden growth */
 } nt_font_create_desc_t;
 
 static inline nt_font_create_desc_t nt_font_create_desc_defaults(void) {
     return (nt_font_create_desc_t){
         .max_glyphs = 256,
         .measure_cache_size = 1024,
-        .max_payloads = 8,
     };
 }
 
@@ -115,9 +113,9 @@ nt_font_t nt_font_create(const nt_font_create_desc_t *desc);
 void nt_font_destroy(nt_font_t font);
 bool nt_font_valid(nt_font_t font);
 
-/* Copies a trusted FONT payload before returning; caller bytes may then be freed.
- * Outside a render pass, before layout. Overlap, incompatible metrics, invalid structure,
- * capacity exhaustion and OOM assert. Existing glyphs stay valid; destroy frees all copies. */
+/* Merges a trusted FONT payload into the font's one owned copy before returning; caller
+ * bytes may then be freed. Outside a render pass, before layout. Overlap, incompatible
+ * metrics, invalid structure, more than 65535 glyphs and OOM assert. Existing glyphs stay valid. */
 void nt_font_fill(nt_font_t font, const uint8_t *data, uint32_t size);
 /* Zero before the first fill; advances on fill only, not glyph-cache eviction or GPU recovery. */
 uint32_t nt_font_content_revision(nt_font_t font);

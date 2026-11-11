@@ -145,7 +145,7 @@ static uint8_t *build_font_blob_codepoints(uint16_t units_per_em, int16_t ascent
 
 static nt_font_create_desc_t test_font_desc(void) {
     return (nt_font_create_desc_t){
-        .max_payloads = 8, .max_glyphs = 16, .measure_cache_size = 256, /* match v1.7 default; FONT-02 cases assert against this */
+        .max_glyphs = 16, .measure_cache_size = 256, /* match v1.7 default; FONT-02 cases assert against this */
     };
 }
 
@@ -212,7 +212,7 @@ static void test_font_pool_exhaustion_asserts(void) {
 }
 
 static void test_font_fill_preserves_glyphs_and_refreshes_measurement(void) {
-    nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 8, .measure_cache_size = 16, .max_payloads = 2});
+    nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 8, .measure_cache_size = 16});
     uint32_t size = 0;
     uint8_t *blob = build_test_font_blob(&size);
     nt_font_fill(font, blob, size);
@@ -234,7 +234,7 @@ static void test_font_fill_preserves_glyphs_and_refreshes_measurement(void) {
 }
 
 static void test_font_fill_overlap_preserves_existing_data(void) {
-    nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 8, .max_payloads = 2});
+    nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 8});
     uint32_t size = 0;
     uint8_t *blob = build_test_font_blob(&size);
     nt_font_fill(font, blob, size);
@@ -246,7 +246,7 @@ static void test_font_fill_overlap_preserves_existing_data(void) {
 }
 
 static void test_second_fill_adds_kerning(void) {
-    nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 8, .measure_cache_size = 16, .max_payloads = 2});
+    nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 8, .measure_cache_size = 16});
     uint32_t size = 0;
     uint8_t *base = build_test_font_blob(&size);
     nt_font_fill(font, base, size);
@@ -269,8 +269,8 @@ static void test_second_fill_adds_kerning(void) {
     nt_font_destroy(font);
 }
 
-static void test_font_fill_rejects_header_metrics_and_capacity_before_mutation(void) {
-    nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 8, .max_payloads = 1});
+static void test_font_fill_rejects_header_and_metrics_before_mutation(void) {
+    nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 8});
     uint32_t size = 0;
     uint8_t *blob = build_test_font_blob(&size);
     NtFontAssetHeader *header = (NtFontAssetHeader *)blob;
@@ -284,15 +284,10 @@ static void test_font_fill_rejects_header_metrics_and_capacity_before_mutation(v
     NT_TEST_EXPECT_ASSERT(nt_font_fill(font, blob, sizeof(*header)));
     TEST_ASSERT_EQUAL_UINT32(0, nt_font_content_revision(font));
     nt_font_fill(font, blob, size);
-    NtFontAssetHeader empty = *header;
-    empty.glyph_count = 0;
-    NT_TEST_EXPECT_ASSERT(nt_font_fill(font, (const uint8_t *)&empty, sizeof empty));
-    TEST_ASSERT_EQUAL_UINT32(1, nt_font_content_revision(font));
-    nt_font_destroy(font);
-    font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 8, .max_payloads = 2});
-    nt_font_fill(font, blob, size);
-    empty.ascent++;
-    NT_TEST_EXPECT_ASSERT(nt_font_fill(font, (const uint8_t *)&empty, sizeof empty));
+    NtFontAssetHeader other = *header;
+    other.glyph_count = 0;
+    other.ascent++;
+    NT_TEST_EXPECT_ASSERT(nt_font_fill(font, (const uint8_t *)&other, sizeof other));
     TEST_ASSERT_EQUAL_INT16(800, nt_font_get_metrics(font).ascent);
     TEST_ASSERT_EQUAL_UINT32(1, nt_font_content_revision(font));
     nt_font_destroy(font);
@@ -334,7 +329,7 @@ void test_font_init_shutdown(void) {
     nt_font_shutdown();
 
     nt_font_init(&(nt_font_desc_t){.max_fonts = 4});
-    nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_payloads = 8, .max_glyphs = 2});
+    nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 2});
     TEST_ASSERT_TRUE(nt_font_valid(font));
     nt_font_destroy(font);
     /* tearDown will call shutdown */
@@ -592,7 +587,6 @@ void test_font_tofu_measure_matches_glyph_advance_with_odd_upm(void) {
 
 void test_font_get_stats(void) {
     nt_font_create_desc_t desc = {
-        .max_payloads = 8,
         .max_glyphs = 8,
     };
     nt_font_t font = nt_font_create(&desc);
@@ -623,7 +617,6 @@ void test_font_get_stats(void) {
 void test_font_lru_eviction(void) {
     /* Small cache: max_glyphs = 4, so A + B + C + tofu = full */
     nt_font_create_desc_t desc = {
-        .max_payloads = 8,
         .max_glyphs = 4,
     };
     nt_font_t font = nt_font_create(&desc);
@@ -1020,7 +1013,7 @@ void test_font_shared_contours_padding_and_empty_glyph_remain_valid(void) {
         glyph.curve_count = i == 2U ? 0 : 3;
         memcpy(blob + sizeof header + (i * sizeof glyph), &glyph, sizeof glyph);
     }
-    nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_payloads = 8, .max_glyphs = 4});
+    nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 4});
     nt_font_fill(font, blob, size);
 
     nt_font_step();
@@ -1057,7 +1050,7 @@ static uint32_t build_ring_font_blob(uint8_t *blob, uint16_t contours, uint16_t 
 }
 
 static void assert_font_blob_activates(const uint8_t *blob, uint32_t size) {
-    nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_payloads = 8, .max_glyphs = 4});
+    nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 4});
 
     nt_font_fill(font, blob, size);
 
@@ -1076,7 +1069,7 @@ void test_font_contour_points_above_curve_cap_stay_valid(void) {
 
 /* Packs are trusted, so glyph decode asserts the bounds its static buffers rely on. */
 static void expect_glyph_decode_assert(const uint8_t *blob, uint32_t size, const char *expr) {
-    nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_payloads = 8, .max_glyphs = 4});
+    nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 4});
     nt_font_fill(font, blob, size);
 
     nt_font_step();
@@ -1362,7 +1355,7 @@ void test_fp16_rounding_keeps_curves_in_adjacent_bands(void) {
         memcpy(blob, &hdr, sizeof hdr);
         memcpy(blob + sizeof hdr, &glyph, sizeof glyph);
         uint32_t blob_size = glyph.data_offset + build_contour_blob_1(blob + glyph.data_offset, pts, 4);
-        nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_payloads = 8, .max_glyphs = 16});
+        nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 16});
         nt_font_fill(font, blob, blob_size);
 
         nt_font_step();
@@ -1452,7 +1445,7 @@ void test_font_bands_sorted_by_fp16_max(void) {
     memcpy(blob, &hdr, sizeof hdr);
     memcpy(blob + sizeof hdr, &glyph, sizeof glyph);
     const uint32_t blob_size = glyph.data_offset + build_contour_blob_1(blob + glyph.data_offset, (const int16_t(*)[2])pts, POINTS);
-    nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_payloads = 8, .max_glyphs = 4});
+    nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 4});
     nt_font_fill(font, blob, blob_size);
 
     nt_font_step();
@@ -1477,7 +1470,7 @@ void test_font_full_cache_never_evicts_this_frame(void) {
     const uint32_t cps[] = {'A', 'B', 'C', 'D'};
     uint32_t blob_size = 0;
     uint8_t *blob = build_font_blob_codepoints(1000, 800, -200, 0, cps, 4U, 500, &blob_size);
-    nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_payloads = 8, .max_glyphs = 4}); /* tofu + 3 glyphs */
+    nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 4}); /* tofu + 3 glyphs */
     nt_font_fill(font, blob, blob_size);
 
     nt_font_step();
@@ -1537,7 +1530,7 @@ void test_font_glyph_over_slot_texels_drops_bands(void) {
     memcpy(blob, &hdr, sizeof hdr);
     memcpy(blob + sizeof hdr, &glyph, sizeof glyph);
     const uint32_t blob_size = glyph.data_offset + build_contour_blob_1(blob + glyph.data_offset, (const int16_t(*)[2])pts, POINTS);
-    nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_payloads = 8, .max_glyphs = 4});
+    nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 4});
     nt_font_fill(font, blob, blob_size);
 
     nt_font_step();
@@ -2169,7 +2162,7 @@ void test_font_weight_over_curve_cap_draws_regular(void) {
     memcpy(blob, &hdr, sizeof hdr);
     memcpy(blob + sizeof hdr, &glyph, sizeof glyph);
     const uint32_t blob_size = glyph.data_offset + build_contour_blob_1(blob + glyph.data_offset, (const int16_t(*)[2])pts, POINTS);
-    nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_payloads = 8, .max_glyphs = 4});
+    nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 4});
     nt_font_fill(font, blob, blob_size);
 
     nt_font_step();
@@ -2199,7 +2192,6 @@ void test_font_weight_over_curve_cap_draws_regular(void) {
 void test_cache_evict_chain_integrity(void) {
     /* Small cache: 4 glyph slots. tofu takes one, leaving 3 evictable. */
     nt_font_create_desc_t desc = {
-        .max_payloads = 8,
         .max_glyphs = 4,
     };
     nt_font_t font = nt_font_create(&desc);
@@ -2613,7 +2605,7 @@ int main(void) {
     RUN_TEST(test_font_fill_preserves_glyphs_and_refreshes_measurement);
     RUN_TEST(test_font_fill_overlap_preserves_existing_data);
     RUN_TEST(test_second_fill_adds_kerning);
-    RUN_TEST(test_font_fill_rejects_header_metrics_and_capacity_before_mutation);
+    RUN_TEST(test_font_fill_rejects_header_and_metrics_before_mutation);
     RUN_TEST(test_font_blob_valid);
     RUN_TEST(test_font_shared_contours_padding_and_empty_glyph_remain_valid);
     RUN_TEST(test_font_contour_points_above_curve_cap_stay_valid);

@@ -489,7 +489,6 @@ int main(int argc, char *argv[]) {
 
     /* 14. Create font and add font resources */
     s_font = nt_font_create(&(nt_font_create_desc_t){
-        .max_payloads = 8,
         .max_glyphs = 256,
         .measure_cache_size = 256,
     });

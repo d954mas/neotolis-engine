@@ -54,12 +54,12 @@ runtime CPU/GPU assets or total process memory; there is no mirrored allocation
 accounting.
 
 Owned FONT and BLOB data have separate construction and steady-state costs. With
-source pack size P and owned payloads totaling C (one copy per font fill, one
-per canonical BLOB), those bytes occupy P + C while the pack is resident and C
-after byte eviction. BLOB aliases share their canonical copy; separate font
-objects own separate payloads. Glyph caches, GPU textures, metadata, registry
-storage and allocator overhead are additional. A fill temporarily holds both
-the caller's new bytes and their owned copy; existing payloads remain intact.
+source pack size P and owned payloads totaling C (each font's merged copy of
+its fills, one per canonical BLOB), those bytes occupy P + C while the pack is
+resident and C after byte eviction. BLOB aliases share their canonical copy;
+separate font objects own separate payloads. Glyph caches, GPU textures, metadata, registry
+storage and allocator overhead are additional. A font fill temporarily holds
+the caller's new bytes, the font's old copy and the merged copy.
 
 ## Core concepts
 
@@ -359,8 +359,8 @@ program bumps its slot generation, so `nt_gfx_program_ready(info->program)`
 reports false. Material handles remain unchanged; ECS components, the UI context,
 and game-side structures need no re-binding.
 
-A font retains its own compact payloads. GPU restore
-does not invalidate FONT: its independent CPU payloads survive context loss.
+A font retains its own compact payload. GPU restore
+does not invalidate FONT: its independent CPU payload survives context loss.
 `nt_resource_invalidate(NT_ASSET_FONT)` asserts. `nt_font_step` rebuilds glyph
 textures locally; call it after `nt_gfx_begin_frame` and before any render pass.
 No refill or source reread is needed. An atlas keeps its parsed regions and needs
@@ -474,19 +474,20 @@ Additional types (material, audio) will be added as needed.
 
 `nt_font_init(desc)` initializes an independent font pool. It needs no resource
 registry. The descriptor requires positive `max_fonts`; invalid arguments,
-double initialization and allocation failure assert. Each `nt_font_t` owns a
-list of compact payload copies, bounded by `nt_font_create_desc_t.max_payloads`.
+double initialization and allocation failure assert. Each `nt_font_t` owns one
+compact payload: the merge of all its fills, at most 65535 glyphs.
 `nt_font_create` asserts on invalid configuration, pool exhaustion and allocation
-failure. Payload count also determines whether metrics are present; no separate
-readiness flag is stored.
+failure. A present payload also means metrics are present; no separate readiness
+flag is stored.
 
-`nt_font_fill(font, bytes, size)` copies one trusted FONT payload synchronously.
+`nt_font_fill(font, bytes, size)` merges one trusted FONT payload synchronously:
+one linear pass over both sorted glyph tables, then the old copy is freed.
 The caller may free its input after return. Fill happens outside a render pass,
 before layout. Existing glyphs and GPU cache rows stay valid. Overlapping
-codepoints, incompatible units-per-em/ascent/descent/line-gap, capacity overflow,
-invalid headers and OOM assert before publication. The first fill owns decoration
+codepoints, incompatible units-per-em/ascent/descent/line-gap, more than 65535
+glyphs, invalid headers and OOM assert before publication. The first fill owns decoration
 metrics. Ranges are selected in the builder; runtime replacement is not provided
-yet. Destroy and shutdown free all owned copies.
+yet. Destroy and shutdown free the owned copy.
 
 FONT pack entries are raw inputs, with no activator and no resource slot.
 `nt_resource_entry_bytes(pack, entry, &size)` reads a resident entry without I/O
@@ -581,7 +582,7 @@ metrics stay unchanged.
 
 **Decoration metrics.** The 24-byte header ends with four `int16` decoration-metric fields (`underline_position`, `underline_thickness`, `strikeout_position`, `strikeout_size`). The builder reads these raw from the source font's `post` (`underlinePosition`@8, `underlineThickness`@10) and `OS/2` (`yStrikeoutSize`@26, `yStrikeoutPosition`@28) tables (big-endian, UPM-rescaled with the other metrics); when a table is absent it bakes a metric-correct heuristic (underline just below baseline, strike near mid x-height) so the runtime never sees garbage. This keeps decoration metrics in the builder — the runtime stays a parser-free safety net.
 
-**Fill checks.** FONT fill asserts magic, version, minimum header size and that the glyph table fits the blob. Payload values are trusted builder output. It checks incoming codepoints against existing payloads before copying in O(bytes); glyph decode asserts each glyph's point and curve counts on first use. Shared glyph payloads, trailing padding and zero-curve glyphs are valid. Coordinate and metric values are builder guarantees.
+**Fill checks.** FONT fill asserts magic, version, minimum header size and that the glyph table fits the blob. Payload values are trusted builder output. It checks incoming codepoints against the existing table in one linear pass before merging; glyph decode asserts each glyph's point and curve counts on first use. Shared glyph payloads, trailing padding and zero-curve glyphs are valid. Coordinate and metric values are builder guarantees.
 
 ### NT_ASSET_ATLAS binary format
 
