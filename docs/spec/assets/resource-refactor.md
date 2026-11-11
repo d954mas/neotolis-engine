@@ -184,7 +184,7 @@ if (!s_cjk_filled) {
 
 - `fill` merges the payload into the font's copy and publishes before returning, so old glyphs stay valid and no partial
   addition is visible. It clears the font's measure cache and advances the global font content epoch. It is
-  legal outside a pass, before layout.
+  legal at any point of the frame, before layout.
 - An incoming codepoint that already exists asserts. The builder selects ranges and emits disjoint
   subsets; there is no runtime range selector, source order or fallback stack.
 - Overlapping replacement is deferred until a caller needs it.

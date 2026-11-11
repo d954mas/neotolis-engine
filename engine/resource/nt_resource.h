@@ -139,7 +139,7 @@ nt_result_t nt_resource_set_priority(nt_hash32_t pack_id, int16_t new_priority);
 /* A file mount accepts one parse; repeats and unknown manifest types return NT_ERR_INVALID_ARG. Remount to replace data.
  * Missing non-FONT activators assert before records or ownership change; register them before mounting.
  * Success borrows blob until unmount/shutdown, never evicted: caller keeps it valid and unchanged.
- * Calling while a load or retry of this pack is in flight asserts. Failure retains nothing. */
+ * Calling on an unparsed pack while its load or retry is in flight asserts. Failure retains nothing. */
 nt_result_t nt_resource_parse_pack(nt_hash32_t pack_id, const uint8_t *blob, uint32_t blob_size);
 
 /* ---- Resource access ---- */

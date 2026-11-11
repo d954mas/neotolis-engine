@@ -1412,13 +1412,14 @@ bool nt_font_valid(nt_font_t font) {
 /* Merges two sorted glyph tables into one owned payload. Per-glyph data blocks are copied
  * unchanged after the table, so only data offsets and kern glyph indices are rewritten.
  * Each source keeps its order in the merge, so remapped kern lists stay sorted. Kern indices
- * are read from the sources, so a data block shared by several glyphs is rewritten consistently. */
+ * are read from the sources, so a data block shared by several glyphs is rewritten consistently.
+ * Both sources passed the fill structure checks, so offsets and kern indices are in range. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static uint8_t *merge_payloads(const uint8_t *a, uint32_t a_size, const uint8_t *b, uint32_t b_size, uint32_t *out_size) {
     const uint32_t na = ((const NtFontAssetHeader *)a)->glyph_count;
     const uint32_t nb = ((const NtFontAssetHeader *)b)->glyph_count;
     const uint32_t n = na + nb;
-    NT_ASSERT(n <= UINT16_MAX && "glyph and kern indices are 16-bit");
+    NT_ASSERT(nb != 0 && n <= UINT16_MAX && "glyph and kern indices are 16-bit");
     const uint32_t a_table = (uint32_t)(sizeof(NtFontAssetHeader) + (na * sizeof(NtFontGlyphEntry)));
     const uint32_t b_table = (uint32_t)(sizeof(NtFontAssetHeader) + (nb * sizeof(NtFontGlyphEntry)));
     const uint32_t table = (uint32_t)(sizeof(NtFontAssetHeader) + (n * sizeof(NtFontGlyphEntry)));
@@ -1452,12 +1453,10 @@ static uint8_t *merge_payloads(const uint8_t *a, uint32_t a_size, const uint8_t 
     j = 0;
     for (uint32_t k = 0; k < n; k++) {
         if (j == nb || (i < na && ga[i].codepoint < gb[j].codepoint)) {
-            NT_ASSERT(ga[i].data_offset >= a_table);
             g[k] = ga[i];
             g[k].data_offset += table - a_table;
             remap[i++] = (uint16_t)k;
         } else {
-            NT_ASSERT(gb[j].data_offset >= b_table);
             g[k] = gb[j];
             g[k].data_offset += table + a_data - b_table;
             remap[na + j++] = (uint16_t)k;
@@ -1466,12 +1465,10 @@ static uint8_t *merge_payloads(const uint8_t *a, uint32_t a_size, const uint8_t 
     for (uint32_t s = 0; s < n; s++) {
         const bool from_a = s < na;
         const uint16_t *map = from_a ? remap : remap + na;
-        const uint32_t own_count = from_a ? na : nb;
         const NtFontGlyphEntry *e = from_a ? &ga[s] : &gb[s - na];
         const NtFontKernEntry *src = (const NtFontKernEntry *)((from_a ? a : b) + e->data_offset);
         NtFontKernEntry *kern = (NtFontKernEntry *)(out + g[remap[s]].data_offset);
         for (uint32_t q = 0; q < e->kern_count; q++) {
-            NT_ASSERT(src[q].right_glyph_index < own_count);
             kern[q].right_glyph_index = map[src[q].right_glyph_index];
         }
     }
@@ -1490,8 +1487,22 @@ void nt_font_fill(nt_font_t font, const uint8_t *data, uint32_t size) {
     NT_ASSERT(slot->data == NULL ||
               (slot->metrics.units_per_em == hdr->units_per_em && slot->metrics.ascent == hdr->ascent && slot->metrics.descent == hdr->descent && slot->metrics.line_gap == hdr->line_gap));
     const NtFontGlyphEntry *glyphs = (const NtFontGlyphEntry *)(data + sizeof(*hdr));
+    const uint64_t table = sizeof(*hdr) + ((uint64_t)hdr->glyph_count * sizeof(NtFontGlyphEntry));
+    bool has_kern = false;
+    for (uint32_t gi = 0; gi < hdr->glyph_count; gi++) {
+        const NtFontGlyphEntry *g = &glyphs[gi];
+        NT_ASSERT(g->data_offset >= table && g->data_offset + ((uint64_t)g->kern_count * sizeof(NtFontKernEntry)) <= size && "glyph data outside the payload");
+        const NtFontKernEntry *kern = (const NtFontKernEntry *)(data + g->data_offset);
+        for (uint32_t q = 0; q < g->kern_count; q++) {
+            NT_ASSERT(kern[q].right_glyph_index < hdr->glyph_count && "kern index outside the payload");
+        }
+        has_kern |= g->kern_count != 0;
+    }
 
     const bool first = slot->data == NULL;
+    if (!first && hdr->glyph_count == 0) {
+        return; /* adds no glyphs: content, measurements and epoch stay */
+    }
     uint8_t *owned = NULL;
     uint32_t owned_size = size;
     if (first) {
@@ -1516,9 +1527,7 @@ void nt_font_fill(nt_font_t font, const uint8_t *data, uint32_t size) {
                                             .strikeout_position = hdr->strikeout_position,
                                             .strikeout_size = hdr->strikeout_size};
     }
-    for (uint32_t gi = 0; gi < hdr->glyph_count; gi++) {
-        slot->has_any_kern |= glyphs[gi].kern_count != 0;
-    }
+    slot->has_any_kern |= has_kern;
     /* The table is sorted, so ASCII glyphs are its prefix. */
     const NtFontGlyphEntry *merged = (const NtFontGlyphEntry *)(slot->data + sizeof(NtFontAssetHeader));
     const uint32_t merged_count = ((const NtFontAssetHeader *)slot->data)->glyph_count;

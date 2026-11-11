@@ -3033,10 +3033,15 @@ nt_mesh_t nt_gfx_make_mesh(const nt_mesh_desc_t *desc) {
     NT_ASSERT(desc->stream_count > 0 && desc->stream_count <= NT_MESH_MAX_STREAMS && desc->index_type <= 2);
     uint32_t stride = mesh_stream_stride(desc->streams, desc->stream_count);
     uint64_t vertex_bytes = (uint64_t)desc->vertex_count * stride;
-    uint64_t index_bytes = (uint64_t)desc->index_count * (desc->index_type == 1 ? 2U : 4U);
+    uint64_t index_bytes = (uint64_t)desc->index_count * (desc->index_type == NT_INDEX_UINT16 ? 2U : 4U);
     NT_ASSERT(vertex_bytes > 0 && vertex_bytes <= UINT32_MAX && index_bytes <= UINT32_MAX);
     NT_ASSERT(desc->index_count == 0 || (desc->index_type != 0 && desc->indices != NULL));
     NT_ASSERT((desc->index_count != 0 ? desc->index_count : desc->vertex_count) % 3 == 0);
+    /* Game data, unlike trusted packs: WebGL drops a draw that reads past the vertex buffer. */
+    for (uint32_t i = 0; i < desc->index_count; i++) {
+        const uint32_t index = desc->index_type == NT_INDEX_UINT16 ? ((const uint16_t *)desc->indices)[i] : ((const uint32_t *)desc->indices)[i];
+        NT_ASSERT(index < desc->vertex_count && "mesh index past vertex_count");
+    }
     nt_buffer_t vbo = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_IMMUTABLE, .data = desc->vertices, .size = (uint32_t)vertex_bytes});
     if (vbo.id == 0) {
         return NT_MESH_INVALID;

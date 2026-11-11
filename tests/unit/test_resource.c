@@ -1928,6 +1928,26 @@ void test_parse_while_loading_asserts(void) {
     free(blob);
 }
 
+/* A parsed pack keeps returning NT_ERR_INVALID_ARG, even while its reread is in flight. */
+void test_parse_parsed_pack_during_reread_returns_error(void) {
+    nt_resource_register_type(NT_ASSET_MESH, &(nt_resource_type_desc_t){.activate = fake_activate, .deactivate = fake_deactivate});
+    const char *path = "build/test_parse_reread.ntpack";
+    nt_hash32_t pid = nt_hash32_str("parse_reread_pack");
+    write_test_pack_file(path, nt_hash64_str("parse_reread").value, NT_ASSET_MESH);
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
+    nt_resource_evict(pid);
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pid, path));
+    nt_resource_step();
+    nt_resource_step();
+    TEST_ASSERT_EQUAL_UINT8(0, nt_resource_test_pack_blob_resident(0));
+    nt_resource_invalidate(NT_ASSET_MESH); /* schedules the reread */
+    uint32_t size = 0;
+    uint8_t *blob = build_pack_with_rid(nt_hash64_str("parse_reread").value, NT_ASSET_MESH, &size);
+    TEST_ASSERT_EQUAL(NT_ERR_INVALID_ARG, nt_resource_parse_pack(pid, blob, size));
+    free(blob);
+    (void)remove(path);
+}
+
 /* ---- Load URL on native (should fail gracefully) ---- */
 
 void test_load_url_native_fails(void) {
@@ -3536,6 +3556,7 @@ int main(void) {
     RUN_TEST(test_load_file_nonexistent);
     RUN_TEST(test_parse_after_failed_load_keeps_caller_bytes);
     RUN_TEST(test_parse_while_loading_asserts);
+    RUN_TEST(test_parse_parsed_pack_during_reread_returns_error);
     RUN_TEST(test_pack_state_api);
     RUN_TEST(test_pack_progress);
 

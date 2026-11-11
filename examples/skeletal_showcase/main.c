@@ -1490,8 +1490,7 @@ static void init_humanoid_meshes(void) {
     const uint32_t sources[3] = {RIG_HUMANOID, CPU_CLOTHES, CPU_ORDER_CLOTHES};
     for (uint32_t i = 0; i < 3; ++i) {
         const cpu_mesh_t *source = &s_cpu_mesh[sources[i]];
-        s_procedural_mesh[i] = nt_gfx_make_mesh(&source->mesh);
-        NT_ASSERT(s_procedural_mesh[i].id != 0);
+        s_procedural_mesh[i] = nt_gfx_make_mesh(&source->mesh); /* INVALID on a loss; the restore path remakes it */
     }
 }
 

@@ -642,7 +642,6 @@ void nt_resource_step(void) {
                     NT_ASSERT(h->checksum == pack->checksum && h->header_size <= loaded_size && nt_crc32(loaded_blob + h->header_size, loaded_size - h->header_size) == pack->checksum &&
                               "re-downloaded pack bytes differ -- remount to replace content");
                     pack->pack_state = NT_PACK_STATE_READY;
-
                     s_resource.needs_resolve = true;
                 } else {
                     /* First load: full parse */
@@ -716,7 +715,6 @@ void nt_resource_step(void) {
                     meta->state = NT_ASSET_STATE_FAILED;
                 }
                 s_resource.needs_resolve = true;
-
                 activated_any = true;
 #if NT_LOG_MIN_LEVEL == 0
                 activated_count++;
@@ -1054,7 +1052,9 @@ nt_result_t nt_resource_parse_pack(nt_hash32_t pack_id, const uint8_t *blob, uin
     if (s_resource.initialized) {
         idx = find_pack(pack_id.value);
     }
-    NT_ASSERT((idx < 0 || (s_resource.packs[idx].io_request_id == 0 && s_resource.packs[idx].retry_time_ms == 0)) && "parse_pack while resource I/O loads the pack");
+    /* A parsed pack returns NT_ERR_INVALID_ARG below, even while a reread is in flight. */
+    NT_ASSERT((idx < 0 || s_resource.packs[idx].blob_size != 0 || (s_resource.packs[idx].io_request_id == 0 && s_resource.packs[idx].retry_time_ms == 0)) &&
+              "parse_pack while resource I/O loads the pack");
     const nt_result_t result = pack_parse(pack_id, blob, blob_size);
     if (result == NT_OK) {
         s_resource.packs[idx].io_type = NT_IO_NONE;

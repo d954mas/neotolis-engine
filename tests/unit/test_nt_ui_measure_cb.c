@@ -202,6 +202,8 @@ static void test_measure_callback_out_of_range_font_asserts(void) {
     NT_TEST_EXPECT_ASSERT(declare_and_measure_text(ctx, "ABC", NT_UI_MAX_FONTS, 14U));
 }
 
+static uint32_t font_measure_calls(nt_font_t font) { return nt_font_test_measure_cache_hits(font) + nt_font_test_measure_cache_misses(font); }
+
 static void test_layout_refreshes_after_fill_and_rebind(void) {
     uint8_t *blob = NULL;
     nt_font_t font = make_resolved_test_font("fill", &blob);
@@ -212,6 +214,12 @@ static void test_layout_refreshes_after_fill_and_rebind(void) {
     nt_ui_set_font(inactive, 0, font);
     TEST_ASSERT_EQUAL_INT32(10, (int32_t)declare_and_measure_text(ctx, "D", 0, 20).width);
     TEST_ASSERT_EQUAL_INT32(10, (int32_t)declare_and_measure_text(inactive, "D", 0, 20).width);
+    /* Steady frames and a same-handle rebind keep Clay's cache: the font is not asked again. */
+    const uint32_t calls = font_measure_calls(font);
+    (void)declare_and_measure_text(ctx, "D", 0, 20);
+    nt_ui_set_font(ctx, 0, font);
+    (void)declare_and_measure_text(ctx, "D", 0, 20);
+    TEST_ASSERT_EQUAL_UINT32(calls, font_measure_calls(font));
     uint32_t size = 0;
     blob = nt_test_font_blob('D', 'D', &size);
     ((NtFontGlyphEntry *)(blob + sizeof(NtFontAssetHeader)))->advance = 700;
@@ -224,7 +232,9 @@ static void test_layout_refreshes_after_fill_and_rebind(void) {
     blob = nt_test_font_blob('E', 'E', &size);
     nt_font_fill(other, blob, size);
     free(blob);
-    TEST_ASSERT_EQUAL_INT32(14, (int32_t)declare_and_measure_text(ctx, "D", 0, 20).width); /* epoch seen */
+    const uint32_t before_other_fill = font_measure_calls(font);
+    TEST_ASSERT_EQUAL_INT32(14, (int32_t)declare_and_measure_text(ctx, "D", 0, 20).width);
+    TEST_ASSERT_GREATER_THAN_UINT32(before_other_fill, font_measure_calls(font)); /* another font's fill resets Clay */
     nt_ui_set_font(ctx, 0, other);
     TEST_ASSERT_EQUAL_INT32(10, (int32_t)declare_and_measure_text(ctx, "D", 0, 20).width);
     nt_ui_destroy_context(ctx);

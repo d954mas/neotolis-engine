@@ -98,7 +98,8 @@ Each context keeps the last `nt_font_content_epoch` it saw. Before layout,
 including when this context was inactive during the fill. `nt_ui_set_font`
 forces the next reset when a different handle is bound under the same font ID.
 GPU glyph eviction and texture recovery do not change the epoch. A destroyed
-font may stay bound while no text uses its font ID; measuring such text asserts.
+font may stay bound while no text uses its font ID; using it is invalid, and the
+measurement callback or text rendering asserts.
 Fill fonts before layout; a fill after layout requires rebuilding that layout.
 
 ## Widget IDs

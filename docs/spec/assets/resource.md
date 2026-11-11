@@ -361,7 +361,9 @@ and game-side structures need no re-binding.
 
 A font retains its own compact payload. GPU restore
 does not invalidate FONT: its independent CPU payload survives context loss.
-`nt_resource_invalidate(NT_ASSET_FONT)` asserts. `nt_font_step` rebuilds glyph
+`nt_resource_invalidate(NT_ASSET_FONT)` asserts. BLOB and skeletal objects are
+CPU-only too and need no invalidation; invalidating them destroys their objects
+and views and rereads the packs. `nt_font_step` rebuilds glyph
 textures locally; call it after `nt_gfx_begin_frame` and before any render pass.
 No refill or source reread is needed. An atlas keeps its parsed regions and needs
 its page textures resolved again.
@@ -483,10 +485,11 @@ failure.
 
 `nt_font_fill(font, bytes, size)` merges one trusted FONT payload synchronously:
 one linear pass over both sorted glyph tables, then the old copy is freed.
-The caller may free its input after return. Fill happens outside a render pass,
-before layout. Existing glyphs and GPU cache rows stay valid. Overlapping
-codepoints, incompatible units-per-em/ascent/descent/line-gap, more than 65535
-glyphs, invalid headers and OOM assert before publication. The first fill owns decoration
+The caller may free its input after return. Fill happens before layout, at any
+point of the frame. Existing glyphs and GPU cache rows stay valid. Overlapping
+codepoints, incompatible units-per-em/ascent/descent/line-gap, glyph data or kern
+indices outside the payload, more than 65535 glyphs, invalid headers and OOM
+assert before publication. The first fill owns decoration
 metrics. Ranges are selected in the builder; runtime replacement is not provided
 yet. Destroy and shutdown free the owned copy.
 

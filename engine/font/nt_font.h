@@ -114,8 +114,8 @@ void nt_font_destroy(nt_font_t font);
 bool nt_font_valid(nt_font_t font);
 
 /* Merges a trusted FONT payload into the font's one owned copy before returning; caller
- * bytes may then be freed. Outside a render pass, before layout. Overlap, incompatible
- * metrics, invalid structure, more than 65535 glyphs and OOM assert. Existing glyphs stay valid. */
+ * bytes may then be freed. Fill before layout. Overlap, incompatible metrics, glyph data or
+ * kern indices outside the payload, more than 65535 glyphs and OOM assert. Existing glyphs stay valid. */
 void nt_font_fill(nt_font_t font, const uint8_t *data, uint32_t size);
 /* Advances on every fill of any font, never on glyph-cache eviction or GPU recovery.
  * Valid without nt_font_init; UI compares it to reset text measurements. */

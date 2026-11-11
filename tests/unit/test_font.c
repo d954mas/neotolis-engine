@@ -347,9 +347,27 @@ static void test_font_fill_rejects_header_and_metrics_before_mutation(void) {
     NT_TEST_EXPECT_ASSERT(nt_font_fill(font, blob, sizeof(*header) - 1U));
     const uint32_t epoch = nt_font_content_epoch();
     NT_TEST_EXPECT_ASSERT(nt_font_fill(font, blob, sizeof(*header)));
+    NtFontGlyphEntry *glyphs = (NtFontGlyphEntry *)(blob + sizeof(*header));
+    const uint32_t offset = glyphs[0].data_offset;
+    glyphs[0].data_offset = sizeof(*header); /* inside the glyph table */
+    NT_TEST_EXPECT_ASSERT(nt_font_fill(font, blob, size));
+    glyphs[0].data_offset = offset;
+    const struct {
+        NtFontAssetHeader header;
+        NtFontGlyphEntry glyph;
+        NtFontKernEntry kern;
+    } bad_kern = {
+        .header = {.magic = NT_FONT_MAGIC, .version = NT_FONT_VERSION, .glyph_count = 1, .units_per_em = 1000, .ascent = 800, .descent = -200},
+        .glyph = {.codepoint = 'Q', .kern_count = 1, .data_offset = sizeof(NtFontAssetHeader) + sizeof(NtFontGlyphEntry)},
+        .kern = {.right_glyph_index = 1},
+    };
+    NT_TEST_EXPECT_ASSERT(nt_font_fill(font, (const uint8_t *)&bad_kern, sizeof bad_kern));
     TEST_ASSERT_EQUAL_UINT32(epoch, nt_font_content_epoch());
     nt_font_fill(font, blob, size);
     NtFontAssetHeader other = *header;
+    other.glyph_count = 0;
+    nt_font_fill(font, (const uint8_t *)&other, sizeof other); /* adds nothing */
+    TEST_ASSERT_EQUAL_UINT32(epoch + 1U, nt_font_content_epoch());
     other.glyph_count = 0;
     other.ascent++;
     NT_TEST_EXPECT_ASSERT(nt_font_fill(font, (const uint8_t *)&other, sizeof other));
@@ -549,6 +567,10 @@ void test_font_fill_sets_metrics(void) {
 
     nt_font_metrics_t m = nt_font_get_metrics(font);
     TEST_ASSERT_EQUAL_INT16(800, m.ascent);
+    TEST_ASSERT_EQUAL_INT16(-200, m.descent);
+    TEST_ASSERT_EQUAL_INT16(0, m.line_gap);
+    TEST_ASSERT_EQUAL_UINT16(1000, m.units_per_em);
+    TEST_ASSERT_EQUAL_INT16(1000, m.line_height);
 
     nt_font_destroy(font);
     free(blob);
@@ -1181,6 +1203,7 @@ void test_font_disjoint_payloads(void) {
     TEST_ASSERT_FALSE(cjk->is_tofu);
     TEST_ASSERT_EQUAL_UINT32(0x4E2DU, cjk->codepoint);
     TEST_ASSERT_EQUAL_INT16(500, cjk->advance);
+    TEST_ASSERT_EQUAL_INT16(700, nt_font_lookup_metrics(font, 0x4E2EU).advance); /* non-ASCII search in the second payload */
 
     const nt_glyph_cache_entry_t *a = nt_font_lookup_glyph(font, 'A');
     TEST_ASSERT_NOT_NULL(a);
