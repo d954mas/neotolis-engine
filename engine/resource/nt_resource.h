@@ -146,7 +146,8 @@ nt_result_t nt_resource_parse_pack(nt_hash32_t pack_id, const uint8_t *blob, uin
 /* Zero names, out-of-range types and FONT assert before creating a slot. */
 nt_resource_t nt_resource_request(nt_hash64_t resource_id, uint8_t asset_type);
 
-/* Pure lookup of a named entry in one pack. No I/O, activation or resource slot.
+/* Bridge until the pack registry owns entry bytes.
+ * Pure lookup of a named entry in one pack. No I/O, activation or resource slot.
  * Returns NULL if absent or nonresident; out_size may be NULL, receives 0 on miss.
  * Borrowed bytes remain valid until pack byte eviction, unmount or shutdown.
  * Copy/fill before then. FONT entries are inputs to nt_font_fill, not resources. */
@@ -223,7 +224,8 @@ void nt_resource_set_http_idle_timeout(uint32_t idle_timeout_ms);
 
 /* Release owned pack bytes at the end of step, after activation and AUX resolve.
  * Future activation rereads the source and releases those bytes again. Caller-owned
- * parse_pack bytes stay borrowed until unmount/shutdown. Unmounted pack asserts. */
+ * parse_pack bytes stay borrowed until unmount/shutdown. Unmounted pack asserts.
+ * Fill fonts from the pack's FONT entries first: the bytes may go in the same step. */
 void nt_resource_evict(nt_hash32_t pack_id);
 
 /* ---- Context loss recovery ---- */

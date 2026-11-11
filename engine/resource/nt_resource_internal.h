@@ -92,8 +92,7 @@ typedef struct {
     /* Retry state */
     uint16_t attempt_count;
     uint32_t retry_delay_ms;
-    uint32_t retry_time_ms; /* wall clock ms of next retry */
-    /* Blob eviction */
+    uint32_t retry_time_ms;   /* wall clock ms of next retry */
     uint32_t activate_cursor; /* no activation-eligible owner lies below this registry index */
     /* Original load path for retry and re-download after invalidation */
     char load_path[256];

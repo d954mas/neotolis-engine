@@ -1897,6 +1897,26 @@ void test_activation_failure_sets_failed(void) {
     (void)remove("build/test_act_fail.ntpack");
 }
 
+/* A permanently failed load drops I/O ownership: bytes parse_pack gets later stay the caller's. */
+void test_parse_after_failed_load_keeps_caller_bytes(void) {
+    nt_resource_register_type(NT_ASSET_MESH, &(nt_resource_type_desc_t){.activate = fake_activate, .deactivate = fake_deactivate});
+    nt_hash32_t pid = nt_hash32_str("fail_then_parse_pack");
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
+    nt_resource_set_retry_policy(1, 100, 1000);
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pid, "nonexistent_file_that_does_not_exist.ntpack"));
+    nt_resource_step();
+    TEST_ASSERT_EQUAL(NT_PACK_STATE_FAILED, nt_resource_pack_state(pid));
+
+    uint32_t size = 0;
+    uint8_t *blob = build_pack_with_rid(nt_hash64_str("fail_then_parse").value, NT_ASSET_MESH, &size);
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid, blob, size));
+    nt_resource_evict(pid);
+    nt_resource_step();
+    TEST_ASSERT_EQUAL_UINT8(1, nt_resource_test_pack_blob_resident(0));
+    nt_resource_unmount(pid);
+    free(blob);
+}
+
 /* ---- Load URL on native (should fail gracefully) ---- */
 
 void test_load_url_native_fails(void) {
@@ -3503,6 +3523,7 @@ int main(void) {
     RUN_TEST(test_load_file_transitions_state);
     RUN_TEST(test_load_file_empty_pack_fails);
     RUN_TEST(test_load_file_nonexistent);
+    RUN_TEST(test_parse_after_failed_load_keeps_caller_bytes);
     RUN_TEST(test_pack_state_api);
     RUN_TEST(test_pack_progress);
 

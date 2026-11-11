@@ -641,6 +641,24 @@ begin_frame that restores the context makes new buffers, which that frame's data
 reaches. A frame buffer that cannot be made asserts unless the context is lost. `nt_gfx_stub` has zero capacity: every allocation
 asserts.
 
+### Direct mesh construction
+
+`nt_gfx_make_mesh` accepts tightly interleaved vertex bytes, optional UINT16/UINT32
+indices, counts and the existing `NtStreamDesc` layout. It uploads the bytes and
+copies the descriptors; no input pointers survive the call. The mesh owns its GPU
+buffers and lazily created vertex inputs until `nt_gfx_destroy_mesh` or gfx shutdown.
+Invalid layouts/counts and pool exhaustion assert. Device loss returns INVALID.
+
+The pack activator keeps sequential decode/upload: vertex staging is reused by
+index decoding, so peak staging stays max(vertex bytes, decoded index bytes).
+Both constructors share object finalization, not a public buffer-adoption layer.
+
+A live mesh whose buffers were lost still has queryable metadata. Its vertex-input
+lookup returns INVALID and the renderer skips it until the game reconstructs it.
+Readiness derives from owned buffer state. Stale mesh handles remain errors in
+draw/vertex-input paths. Resource invalidation destroys pack-owned meshes before
+rebuilding; procedural objects are recreated by the game.
+
 ### Mesh draws
 
 The mesh renderer records its draws at the call, in the current pass. One
@@ -1681,22 +1699,3 @@ When adding a new renderer, classify first:
 - Domain-specific layout/data → **specialized**
 
 `nt_sprite_renderer.c` is not a renderer template. Its complexity earns its keep at 60k items/frame; a 100-item UI overlay doesn't need any of it.
-
-
-## Direct mesh construction
-
-`nt_gfx_make_mesh` accepts tightly interleaved vertex bytes, optional UINT16/UINT32
-indices, counts and the existing `NtStreamDesc` layout. It uploads the bytes and
-copies the descriptors; no input pointers survive the call. The mesh owns its GPU
-buffers and lazily created vertex inputs until `nt_gfx_destroy_mesh` or gfx shutdown.
-Invalid layouts/counts and pool exhaustion assert. Device loss returns INVALID.
-
-The pack activator keeps sequential decode/upload: vertex staging is reused by
-index decoding, so peak staging stays max(vertex bytes, decoded index bytes).
-Both constructors share object finalization, not a public buffer-adoption layer.
-
-A live mesh whose buffers were lost still has queryable metadata. Its vertex-input
-lookup returns INVALID and the renderer skips it until the game reconstructs it.
-Readiness derives from owned buffer state. Stale mesh handles remain errors in
-draw/vertex-input paths. Resource invalidation destroys pack-owned meshes before
-rebuilding; procedural objects are recreated by the game.

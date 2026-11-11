@@ -19,7 +19,6 @@
 #include "nt_atlas_format.h"
 #include "nt_blob_format.h"
 #include "nt_crc32.h"
-#include "nt_font_format.h"
 #include "nt_mesh_format.h"
 #include "nt_pack_format.h"
 #include "nt_shader_format.h"
@@ -424,9 +423,8 @@ static void resource_resolve_pass(void) {
 /* ---- Asset header check ---- */
 
 /* Every activator payload starts with its type's {u32 magic; u16 version}. */
-_Static_assert(offsetof(NtMeshAssetHeader, version) == 4 && offsetof(NtTextureAssetHeader, version) == 4 && offsetof(NtShaderCodeHeader, version) == 4 && offsetof(NtFontAssetHeader, version) == 4 &&
-                   offsetof(NtAtlasHeader, version) == 4 && offsetof(NtSklHeader, version) == 4 && offsetof(NtSknHeader, version) == 4 && offsetof(NtAnmHeader, version) == 4 &&
-                   offsetof(NtBlobAssetHeader, version) == 4,
+_Static_assert(offsetof(NtMeshAssetHeader, version) == 4 && offsetof(NtTextureAssetHeader, version) == 4 && offsetof(NtShaderCodeHeader, version) == 4 && offsetof(NtAtlasHeader, version) == 4 &&
+                   offsetof(NtSklHeader, version) == 4 && offsetof(NtSknHeader, version) == 4 && offsetof(NtAnmHeader, version) == 4 && offsetof(NtBlobAssetHeader, version) == 4,
                "asset headers share the {u32 magic; u16 version} prefix");
 static const struct {
     uint32_t magic;
@@ -437,7 +435,6 @@ static const struct {
     [NT_ASSET_TEXTURE] = {NT_TEXTURE_MAGIC, NT_TEXTURE_VERSION, sizeof(NtTextureAssetHeader)},
     [NT_ASSET_SHADER_CODE] = {NT_SHADER_CODE_MAGIC, NT_SHADER_CODE_VERSION, sizeof(NtShaderCodeHeader)},
     [NT_ASSET_BLOB] = {NT_BLOB_MAGIC, NT_BLOB_VERSION, sizeof(NtBlobAssetHeader)},
-    [NT_ASSET_FONT] = {NT_FONT_MAGIC, NT_FONT_VERSION, sizeof(NtFontAssetHeader)},
     [NT_ASSET_ATLAS] = {NT_ATLAS_MAGIC, NT_ATLAS_VERSION, sizeof(NtAtlasHeader)},
     [NT_ASSET_SKELETON] = {NT_SKL_MAGIC, NT_SKELETAL_FORMAT_VERSION, sizeof(NtSklHeader)},
     [NT_ASSET_SKIN_BINDING] = {NT_SKN_MAGIC, NT_SKELETAL_FORMAT_VERSION, sizeof(NtSknHeader)},
@@ -477,6 +474,7 @@ static void resource_handle_load_failure(NtPackMeta *pack) {
     if (s_resource.retry_max_attempts == 1 || (s_resource.retry_max_attempts > 1 && pack->attempt_count >= s_resource.retry_max_attempts)) {
         /* Max attempts reached -- FAILED permanently */
         pack->pack_state = NT_PACK_STATE_FAILED;
+        pack->io_type = NT_IO_NONE; /* bytes a later parse_pack passes stay caller-owned */
         NT_LOG_ERROR("pack 0x%08X FAILED after %d attempts", pack->pack_id, pack->attempt_count);
         return;
     }
@@ -650,10 +648,10 @@ void nt_resource_step(void) {
                     nt_result_t res = nt_resource_parse_pack((nt_hash32_t){pack->pack_id}, loaded_blob, loaded_size);
                     if (res == NT_OK) {
                         pack->pack_state = NT_PACK_STATE_READY;
-
                     } else {
                         free(loaded_blob);
                         pack->pack_state = NT_PACK_STATE_FAILED;
+                        pack->io_type = NT_IO_NONE;
                         NT_LOG_ERROR("pack 0x%08X parse failed", pack->pack_id);
                     }
                 }
@@ -1473,6 +1471,7 @@ void nt_resource_register_type(uint8_t asset_type, const nt_resource_type_desc_t
     NT_ASSERT(s_resource.next_mount_seq == 1);
     NT_ASSERT(asset_type < NT_RESOURCE_MAX_ASSET_TYPES);
     NT_ASSERT(desc != NULL);
+    NT_ASSERT(asset_type != NT_ASSET_FONT && "FONT entries fill direct font objects");
     NT_ASSERT((desc->behavior_flags & ~NT_RESOURCE_BEHAVIOR_AUX_BACKED) == 0);
     NT_ASSERT(desc->on_resolve == NULL || desc->on_cleanup != NULL);
     NT_ASSERT((desc->behavior_flags & NT_RESOURCE_BEHAVIOR_AUX_BACKED) == 0 || (desc->on_resolve != NULL && desc->on_cleanup != NULL));
@@ -1506,7 +1505,7 @@ void nt_resource_evict(nt_hash32_t pack_id) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_resource_invalidate(uint8_t asset_type) {
-    NT_ASSERT(asset_type != NT_ASSET_FONT);
+    NT_ASSERT(asset_type != NT_ASSET_FONT && asset_type != NT_ASSET_BLOB && "CPU-only objects survive context loss");
     /* Pass 1: Deactivate and mark assets back to REGISTERED */
     for (uint32_t i = 0; i < s_resource.asset_hwm; i++) {
         NtAssetMeta *meta = &s_resource.assets[i];

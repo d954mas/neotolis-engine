@@ -2936,7 +2936,7 @@ static NT_NOINLINE uint32_t mesh_stream_stride(const NtStreamDesc *streams, uint
 /* Pack invariants for a mesh blob; the builder writes them, the resource core checked the header.
  * 64-bit sums so a size field cannot wrap a check into a pass. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void mesh_blob_check(const uint8_t *data, uint32_t size) {
+static uint32_t mesh_blob_check(const uint8_t *data, uint32_t size) {
     const NtMeshAssetHeader *hdr = (const NtMeshAssetHeader *)data;
     NT_ASSERT(hdr->index_type <= 2 && hdr->vertex_wire <= NT_MESH_WIRE_VTX_SOA && hdr->index_wire <= NT_MESH_WIRE_IDX_MESHOPT && "mesh index type or wire tag invalid");
     NT_ASSERT(hdr->stream_count != 0 && hdr->stream_count <= NT_MESH_MAX_STREAMS && "mesh stream_count invalid");
@@ -2960,6 +2960,7 @@ static void mesh_blob_check(const uint8_t *data, uint32_t size) {
     /* GL draws meshes only as GL_TRIANGLES; a trailing partial triangle would be dropped. */
     const uint32_t draw_count = (hdr->index_count > 0) ? hdr->index_count : hdr->vertex_count;
     NT_ASSERT(draw_count % 3 == 0 && "mesh draw count is not a multiple of 3");
+    return stride;
 }
 
 /* Uploads the IBO from the wire index block (decoding MESHOPT first).
@@ -3004,9 +3005,9 @@ static void destroy_unpublished_buffer(nt_buffer_t buf) {
     NT_GFX_END(destroy_buffer(buf));
 }
 
-static uint32_t mesh_finish(const nt_mesh_desc_t *desc, nt_buffer_t vbo, nt_buffer_t ibo) {
+static uint32_t mesh_finish(const nt_mesh_desc_t *desc, uint32_t stride, nt_buffer_t vbo, nt_buffer_t ibo) {
     uint32_t mesh_id = nt_pool_alloc(&s_gfx.mesh_pool);
-    NT_ASSERT(mesh_id != 0 && "activate_mesh: mesh pool full -- raise nt_gfx_desc_t.max_meshes");
+    NT_ASSERT(mesh_id != 0 && "mesh pool full -- raise nt_gfx_desc_t.max_meshes");
 
     uint32_t slot = nt_pool_slot_index(mesh_id);
     memset(&s_gfx.mesh_table[slot], 0, sizeof(nt_gfx_mesh_info_t));
@@ -3020,15 +3021,8 @@ static uint32_t mesh_finish(const nt_mesh_desc_t *desc, nt_buffer_t vbo, nt_buff
     s_gfx.mesh_table[slot].index_type = desc->index_type;
 
     /* Copy stream descriptors for render module vertex layout building */
-    const NtStreamDesc *src_streams = desc->streams;
-    memcpy(s_gfx.mesh_table[slot].streams, src_streams, (size_t)desc->stream_count * sizeof(NtStreamDesc));
-
-    /* Compute stride: sum of all stream sizes (type_size * count) */
-    uint16_t stride = 0;
-    for (uint8_t i = 0; i < desc->stream_count; i++) {
-        stride += (uint16_t)(nt_stream_type_size(src_streams[i].type) * src_streams[i].count);
-    }
-    s_gfx.mesh_table[slot].stride = stride;
+    memcpy(s_gfx.mesh_table[slot].streams, desc->streams, (size_t)desc->stream_count * sizeof(NtStreamDesc));
+    s_gfx.mesh_table[slot].stride = (uint16_t)stride;
 
     return mesh_id;
 }
@@ -3055,12 +3049,12 @@ nt_mesh_t nt_gfx_make_mesh(const nt_mesh_desc_t *desc) {
             return NT_MESH_INVALID;
         }
     }
-    return (nt_mesh_t){mesh_finish(desc, vbo, ibo)};
+    return (nt_mesh_t){mesh_finish(desc, stride, vbo, ibo)};
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 uint32_t nt_gfx_activate_mesh(const uint8_t *data, uint32_t size) {
-    mesh_blob_check(data, size);
+    const uint32_t stride = mesh_blob_check(data, size);
     const NtMeshAssetHeader *hdr = (const NtMeshAssetHeader *)data;
     uint32_t streams_size = (uint32_t)hdr->stream_count * (uint32_t)sizeof(NtStreamDesc);
     const uint8_t *vertex_data = data + sizeof(NtMeshAssetHeader) + streams_size;
@@ -3108,7 +3102,7 @@ uint32_t nt_gfx_activate_mesh(const uint8_t *data, uint32_t size) {
                                          .index_count = hdr->index_count,
                                          .stream_count = hdr->stream_count,
                                          .index_type = hdr->index_type},
-                       vbo, ibo);
+                       stride, vbo, ibo);
 }
 
 uint32_t nt_gfx_activate_shader(const uint8_t *data, uint32_t size) {

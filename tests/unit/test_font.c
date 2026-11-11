@@ -226,7 +226,9 @@ static void test_font_fill_preserves_glyphs_and_refreshes_measurement(void) {
     blob = build_font_blob_codepoints(1000, 800, -200, 0, &codepoint, 1, 700, &size);
     nt_font_fill(font, blob, size);
     free(blob);
+    const uint32_t uploads = nt_gfx_fake_update_texture_count();
     TEST_ASSERT_EQUAL_PTR(a, nt_font_lookup_glyph(font, 'A'));
+    TEST_ASSERT_EQUAL_UINT32(uploads, nt_gfx_fake_update_texture_count()); /* cached row reused, no re-decode */
     TEST_ASSERT_EQUAL_UINT16(row, a->band_row);
     TEST_ASSERT_TRUE(fabsf(14.0F - nt_font_measure(font, "D", 20.0F, 0.0F).width) < 0.001F);
     TEST_ASSERT_FALSE(nt_font_lookup_glyph(font, 'D')->is_tofu);
@@ -266,6 +268,35 @@ static void test_second_fill_adds_kerning(void) {
     TEST_ASSERT_EQUAL_INT16(-100, nt_font_get_kern(font, 'D', 'E'));
     TEST_ASSERT_EQUAL_INT16(0, nt_font_get_kern(font, 'A', 'E'));
     TEST_ASSERT_TRUE(fabsf(nt_font_measure(font, "DE", 20.0F, 0.0F).width - 18.0F) < 0.001F);
+    nt_font_destroy(font);
+}
+
+static void test_fill_merge_remaps_existing_kerning(void) {
+    nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 8, .measure_cache_size = 16});
+    const struct {
+        NtFontAssetHeader header;
+        NtFontGlyphEntry glyphs[2];
+        NtFontKernEntry kern;
+    } first = {
+        .header = {.magic = NT_FONT_MAGIC, .version = NT_FONT_VERSION, .glyph_count = 2, .units_per_em = 1000, .ascent = 800, .descent = -200},
+        .glyphs = {{.codepoint = 'B', .advance = 500, .kern_count = 1, .data_offset = sizeof(NtFontAssetHeader) + (2U * sizeof(NtFontGlyphEntry))},
+                   {.codepoint = 'D', .advance = 500, .data_offset = sizeof(NtFontAssetHeader) + (2U * sizeof(NtFontGlyphEntry)) + sizeof(NtFontKernEntry)}},
+        .kern = {.right_glyph_index = 1, .value = -100},
+    };
+    nt_font_fill(font, (const uint8_t *)&first, sizeof first);
+    TEST_ASSERT_EQUAL_INT16(-100, nt_font_get_kern(font, 'B', 'D'));
+    /* Interleaved codepoints move B and D to merged positions 1 and 3. */
+    const uint32_t codepoints[] = {'A', 'C', 'E'};
+    uint32_t size = 0;
+    uint8_t *blob = build_font_blob_codepoints(1000, 800, -200, 0, codepoints, 3, 500, &size);
+    nt_font_fill(font, blob, size);
+    free(blob);
+    TEST_ASSERT_EQUAL_INT16(-100, nt_font_get_kern(font, 'B', 'D'));
+    TEST_ASSERT_EQUAL_INT16(0, nt_font_get_kern(font, 'B', 'B'));
+    TEST_ASSERT_EQUAL_INT16(0, nt_font_get_kern(font, 'B', 'C'));
+    TEST_ASSERT_EQUAL_INT16(0, nt_font_get_kern(font, 'A', 'D'));
+    TEST_ASSERT_TRUE(fabsf(nt_font_measure(font, "BD", 20.0F, 0.0F).width - 18.0F) < 0.001F);
+    TEST_ASSERT_TRUE(fabsf(nt_font_measure(font, "CD", 20.0F, 0.0F).width - 20.0F) < 0.001F);
     nt_font_destroy(font);
 }
 
@@ -2605,6 +2636,7 @@ int main(void) {
     RUN_TEST(test_font_fill_preserves_glyphs_and_refreshes_measurement);
     RUN_TEST(test_font_fill_overlap_preserves_existing_data);
     RUN_TEST(test_second_fill_adds_kerning);
+    RUN_TEST(test_fill_merge_remaps_existing_kerning);
     RUN_TEST(test_font_fill_rejects_header_and_metrics_before_mutation);
     RUN_TEST(test_font_blob_valid);
     RUN_TEST(test_font_shared_contours_padding_and_empty_glyph_remain_valid);

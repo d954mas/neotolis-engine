@@ -283,8 +283,6 @@ Explicit unmount deactivates canonical runtime objects once and releases their
 asset records and pack data. Owned per-slot auxiliary data is updated or cleaned
 up by the next resolve, or cleaned up during shutdown.
 
-## GPU context loss recovery
-
 `nt_blob` owns a fixed-capacity generational pool independent of the registry.
 The game calls `nt_blob_init(max_blobs)` and registers `nt_blob_activate` /
 `nt_blob_deactivate` for BLOB packs. `nt_blob_create` copies caller bytes,
@@ -292,6 +290,8 @@ The game calls `nt_blob_init(max_blobs)` and registers `nt_blob_activate` /
 and `nt_blob_destroy` frees it. An empty BLOB has a valid handle and {NULL, 0}
 view. Stale reads/destroys and pool/OOM failures assert; destroying zero is a no-op.
 The resource registry shuts down before the BLOB pool so deactivation can finish.
+
+## GPU context loss recovery
 
 `nt_gfx_begin_frame()`, the first gfx call of each host iteration, restores the
 context and sets `g_nt_gfx.context_restored` until the next begin_frame. Detection
@@ -490,7 +490,8 @@ metrics. Ranges are selected in the builder; runtime replacement is not provided
 yet. Destroy and shutdown free the owned copy.
 
 FONT pack entries are raw inputs, with no activator and no resource slot.
-`nt_resource_entry_bytes(pack, entry, &size)` reads a resident entry without I/O
+`nt_resource_entry_bytes(pack, entry, &size)` is a temporary bridge; #504 replaces it
+with `nt_pack_entry_bytes`. It reads a resident entry without I/O
 or activation; absence/nonresidency returns NULL and size 0. The view is borrowed
 until byte eviction, unmount or shutdown. The game fills its font before evicting.
 Requesting or registering FONT as a resource asserts.
