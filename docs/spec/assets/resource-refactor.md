@@ -169,7 +169,7 @@ until unload, replacement or shutdown, independent of pack eviction.
 
 ### 4.3 Font
 
-`nt_font_t` owns retained compact payloads, glyph indexing and its caches. Glyph decode stays lazy.
+`nt_font_t` owns one merged payload, glyph indexing and its caches. Glyph decode stays lazy.
 
 ```c
 if (!s_cjk_filled) {
@@ -182,16 +182,18 @@ if (!s_cjk_filled) {
 }
 ```
 
-- `fill` copies the payload and publishes before returning, so old glyphs stay valid and no partial
-  addition is visible. It clears the font's measure cache and advances the content revision. It is
-  legal outside a pass, before layout.
+- `fill` merges the payload into the font's copy and publishes before returning, so old glyphs stay valid and no partial
+  addition is visible. It clears the font's measure cache and advances the global font content epoch. It is
+  legal at any point of the frame, before layout.
 - An incoming codepoint that already exists asserts. The builder selects ranges and emits disjoint
   subsets; there is no runtime range selector, source order or fallback stack.
 - Overlapping replacement is deferred until a caller needs it.
 - Font-wide metrics compatibility keeps its existing assert. The first fill owns decoration metrics.
-- A font keeps a list of payloads bounded by an explicit per-font capacity, independent of the
-  registry. Glyph access allocates nothing. Payloads are not merged: kerning indices and glyph
-  offsets are per payload, and merging would hold both copies at once.
+- A font keeps one payload, independent of the registry. A later fill merges the sorted glyph
+  tables in one linear pass, rewrites data offsets and kern glyph indices, and frees the old copy.
+  Glyph access allocates nothing and does one search. The total is limited to 65535 glyphs, the
+  range of the 16-bit glyph and kern indices. A fill briefly holds the caller bytes, the old copy
+  and the merged copy.
 - A font works with no registry. CPU data survives context loss; the font rebuilds its glyph
   textures locally without reading a pack.
 
@@ -259,11 +261,11 @@ step is gone before consumers run, which is legal because the step precedes the 
 
 ### 5.4 Font and UI caches
 
-A font carries a content revision that advances on a successful fill, including a font used without
-a registry. GPU-only glyph cache rebuild or eviction does not change it, and keeps the existing
-glyph generation and preflush contract.
+One global font content epoch advances on every successful fill, including a font used without a
+registry. GPU-only glyph cache rebuild or eviction does not change it. Disjoint fills preserve existing
+glyph rows; the existing protection of rows used in the current frame remains.
 
-Before Clay layout, each UI context compares its bound `(font, revision)` pairs and clears Clay's
+Before Clay layout, each UI context compares the epoch it last saw and clears Clay's
 measurement cache on a change, including an inactive context on next use and a different font under
 the same UI font ID. If metrics change after a layout was prepared, rebuild it before drawing.
 

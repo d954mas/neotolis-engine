@@ -107,7 +107,6 @@ static nt_ui_context_t *s_ctx;
 
 static nt_hash32_t s_pack_id;
 static nt_resource_t s_atlas_handle;
-static nt_resource_t s_font_resource;
 
 static nt_material_t s_sprite_material;
 static nt_material_t s_text_material;
@@ -178,8 +177,10 @@ static void try_bind_resources(void) {
         nt_log_info("slice9_demo: atlas white region bound");
     }
 
-    if (!s_font_bound && nt_resource_is_ready(s_font_resource)) {
-        nt_font_add(s_font, s_font_resource);
+    if (!s_font_bound && nt_resource_pack_state(s_pack_id) == NT_PACK_STATE_READY) {
+        uint32_t size = 0;
+        const uint8_t *bytes = nt_resource_entry_bytes(s_pack_id, ASSET_FONT_SLICE9_DEMO_FONT, &size);
+        nt_font_fill(s_font, bytes, size);
         nt_ui_set_font(s_ctx, 0U, s_font);
         s_font_bound = true;
         nt_log_info("slice9_demo: font bound at slot 0");
@@ -345,9 +346,9 @@ static void frame(void) {
         nt_program_ref_drop(&s_text_program);
         nt_resource_invalidate(NT_ASSET_SHADER_CODE);
         s_atlas_bound = false;
-        /* The font keeps its sources across a restore -- only its GPU textures
+        /* The font keeps its CPU data across a restore -- only its GPU textures
          * died, and nt_font_step rebuilds those itself. Clearing this would make
-         * the gate call nt_font_add twice, which asserts on the duplicate. */
+         * the gate call nt_font_fill twice, which asserts on the duplicate. */
     }
     if (!nt_example_frames_on()) {
         nt_input_poll();
@@ -606,7 +607,6 @@ int main(int argc, char *argv[]) {
     s_text_program.label = "slice9_demo/text";
     s_text_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_FRAG, NT_ASSET_SHADER_CODE);
     s_atlas_handle = nt_resource_request(ASSET_ATLAS_SLICE9_DEMO_ATLAS, NT_ASSET_ATLAS);
-    s_font_resource = nt_resource_request(ASSET_FONT_SLICE9_DEMO_FONT, NT_ASSET_FONT);
 
     /* Handle is valid immediately; fill late-bound art refs upfront. */
     init_atlas_refs();

@@ -91,6 +91,17 @@ Clay's pinned API (`CLAY_PINNED_MAJOR/MINOR` enforced via
 publicly-promised surface; bumping Clay can require coordinated
 game-side changes.
 
+## Font measurements
+
+Each context keeps the last `nt_font_content_epoch` it saw. Before layout,
+`nt_ui_begin` resets Clay's measurement cache if any font was filled since,
+including when this context was inactive during the fill. `nt_ui_set_font`
+forces the next reset when a different handle is bound under the same font ID.
+GPU glyph eviction and texture recovery do not change the epoch. A destroyed
+font may stay bound while no text uses its font ID; using it is invalid, and the
+measurement callback or text rendering asserts.
+Fill fonts before layout; a fill after layout requires rebuilding that layout.
+
 ## Widget IDs
 
 Never assign sibling widget IDs as `base_id + index`: Clay's anonymous child IDs

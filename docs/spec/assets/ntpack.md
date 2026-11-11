@@ -88,7 +88,7 @@ reserved or records modified. Parsing requires a file mount; virtual packs
 accept registrations only. Invalid ranges, zero resource IDs or malformed
 owner links reject the pack through the existing recoverable parse error; a
 corrected pack can load into the same mount. Manifest types outside the defined
-`NT_ASSET_MESH..NT_ASSET_LAST` range also reject the pack. Every non-BLOB file
+`NT_ASSET_MESH..NT_ASSET_LAST` range also reject the pack. Every non-FONT file
 type requires an activator configured before the first mount; missing one asserts
 before reserving records or retaining bytes. Capacity exhaustion asserts.
 
@@ -98,7 +98,9 @@ registered assets, metadata and original blob size. Resource-managed I/O restore
 evicted bytes without parsing the manifest again. The URL/path must return
 identical bytes for the mount's lifetime: reload asserts that the size and the
 `checksum` match the first parse, and does not re-read the manifest. Unmount and
-mount again to replace the pack.
+mount again to replace the pack. A direct parse of an unparsed pack asserts while
+resource-managed I/O loads it; a successful direct parse makes the bytes
+caller-owned, so eviction and unmount never free them.
 
 For direct parsing without resource-managed I/O, success retains the caller's
 blob pointer without copying or taking ownership. The caller keeps the bytes

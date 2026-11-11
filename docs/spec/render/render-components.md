@@ -177,11 +177,11 @@ Sprite is a separate render kind, not a special mode of mesh.
 
 ```text
 text_comp fields (planned):
-  font   nt_font_t   /* handle from nt_font_create / nt_font_add */
+  font   nt_font_t   /* handle from nt_font_create */
   text   StringId    /* intern-table reference, design TBD */
 ```
 
-`nt_font_t` is a pool-backed handle to a font instance. A font instance owns one GPU curve texture and a glyph cache with one texture row per slot (see the resource chapter, "NT_ASSET_FONT binary format"). Font data comes from one or more `nt_resource_t` assets attached via `nt_font_add()`, allowing fallback chains (base font + CJK extension pack, etc.). Glyphs are decoded and uploaded to GPU on first lookup, not on asset load.
+`nt_font_t` is a pool-backed handle to a font instance. A font instance owns one GPU curve texture and a glyph cache with one texture row per slot (see the resource chapter, "NT_ASSET_FONT binary format"). Font data is one owned payload that merges every `nt_font_fill`, for example disjoint Latin and CJK subsets from separate packs. Overlaps assert; the builder selects ranges. Glyphs are decoded and uploaded to GPU on first lookup, not on asset load.
 
 StringId references a string in a string pool/intern table (detail deferred to implementation phase).
 

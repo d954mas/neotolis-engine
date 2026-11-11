@@ -19,8 +19,6 @@
 #include "nt_font_format.h"
 #include "nt_half.h"
 #include "nt_pack_format.h"
-#include "resource/nt_resource.h"
-#include "resource/nt_resource_internal.h"
 #include "stb_truetype.h"
 #include "test_helpers/nt_assert_trap.h"
 #include "test_helpers/nt_test_pack.h"
@@ -142,10 +140,6 @@ static uint8_t *build_font_blob_codepoints(uint16_t units_per_em, int16_t ascent
 }
 
 /* The fixture owns its parsed pack wrapper; publication copies the FONT payload. */
-static nt_resource_t register_font_resource(const char *name, const uint8_t *blob, uint32_t blob_size) {
-    (void)name;
-    return nt_font_test_resource(nt_font_test_register_data(blob, blob_size));
-}
 
 /* ---- Default create descriptor for tests ---- */
 
@@ -195,123 +189,197 @@ void setUp(void) {
     nt_gfx_init(&NT_GFX_TEST_DESC(.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 8, .max_textures = 32, .max_meshes = 8, .max_vertex_inputs = 16, .max_render_targets = 16));
     nt_gfx_begin_frame();
     nt_hash_init(&(nt_hash_desc_t){0});
-    nt_resource_init(&(nt_resource_desc_t){0});
+
     nt_font_init(&(nt_font_desc_t){.max_fonts = 4});
 }
 
 void tearDown(void) {
     nt_log_remove_sink(capture_errors, NULL);
-    nt_font_shutdown(); /* frees the test-only pack wrappers it owns */
-    nt_resource_shutdown();
+    nt_font_shutdown();
+
     nt_hash_shutdown();
     nt_gfx_shutdown();
 }
 
 /* ---- Test 0: Blob self-test ---- */
 
-static void test_font_virtual_provider_asserts(void) {
-    const nt_hash32_t pack = nt_hash32_str("virtual_font_pack");
-    const nt_hash64_t id = nt_hash64_str("virtual_font");
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_create_pack(pack, 0));
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_register(pack, id, NT_ASSET_FONT, 7));
-    (void)nt_resource_request(id, NT_ASSET_FONT);
-    NT_TEST_EXPECT_ASSERT(nt_resource_step());
+static void test_font_pool_exhaustion_asserts(void) {
+    const nt_font_create_desc_t desc = test_font_desc();
+    for (uint32_t i = 0; i < 4; i++) {
+        TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_font_create(&desc).id);
+    }
+    NT_TEST_EXPECT_ASSERT((void)nt_font_create(&desc));
 }
 
-static void test_font_virtual_replacement_asserts(void) {
+static void test_font_fill_preserves_glyphs_and_refreshes_measurement(void) {
+    nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 8, .measure_cache_size = 16});
     uint32_t size = 0;
     uint8_t *blob = build_test_font_blob(&size);
-    nt_resource_t resource = register_font_resource("file_font", blob, size);
+    nt_font_fill(font, blob, size);
+    memset(blob, 0xCD, size);
     free(blob);
-    nt_resource_step();
-    TEST_ASSERT_TRUE(nt_resource_is_ready(resource));
-    TEST_ASSERT_NOT_NULL(nt_resource_peek_user_data(resource));
-
-    nt_resource_asset_info_t asset;
-    TEST_ASSERT_TRUE(nt_resource_asset_info(0, &asset));
-    const nt_hash32_t pack = nt_hash32_str("virtual_font_pack");
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_create_pack(pack, 1));
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_register(pack, (nt_hash64_t){asset.resource_id}, NT_ASSET_FONT, 7));
-    NT_TEST_EXPECT_ASSERT(nt_resource_step());
+    const nt_glyph_cache_entry_t *a = nt_font_lookup_glyph(font, 'A');
+    TEST_ASSERT_FALSE(a->is_tofu);
+    const uint16_t row = a->band_row;
+    TEST_ASSERT_TRUE(fabsf(10.0F - nt_font_measure(font, "D", 20.0F, 0.0F).width) < 0.001F);
+    const uint32_t codepoint = 'D';
+    blob = build_font_blob_codepoints(1000, 800, -200, 0, &codepoint, 1, 700, &size);
+    nt_font_fill(font, blob, size);
+    free(blob);
+    const uint32_t uploads = nt_gfx_fake_update_texture_count();
+    TEST_ASSERT_EQUAL_PTR(a, nt_font_lookup_glyph(font, 'A'));
+    TEST_ASSERT_EQUAL_UINT32(uploads, nt_gfx_fake_update_texture_count()); /* cached row reused, no re-decode */
+    TEST_ASSERT_EQUAL_UINT16(row, a->band_row);
+    TEST_ASSERT_TRUE(fabsf(14.0F - nt_font_measure(font, "D", 20.0F, 0.0F).width) < 0.001F);
+    TEST_ASSERT_FALSE(nt_font_lookup_glyph(font, 'D')->is_tofu);
+    nt_font_destroy(font);
 }
 
-static void test_font_add_rejects_non_font_resource(void) {
-    nt_resource_t texture = nt_resource_request(nt_hash64_str("foreign_texture"), NT_ASSET_TEXTURE);
+static void test_font_fill_overlap_preserves_existing_data(void) {
     nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 8});
-    NT_TEST_EXPECT_ASSERT(nt_font_add(font, texture));
+    uint32_t size = 0;
+    uint8_t *blob = build_test_font_blob(&size);
+    nt_font_fill(font, blob, size);
+    const uint32_t epoch = nt_font_content_epoch();
+    NT_TEST_EXPECT_ASSERT(nt_font_fill(font, blob, size));
+    free(blob);
+    const uint32_t mid_table[] = {'0', 'B'}; /* collides only after the walk advances */
+    blob = build_font_blob_codepoints(1000, 800, -200, 0, mid_table, 2, 700, &size);
+    NT_TEST_EXPECT_ASSERT(nt_font_fill(font, blob, size));
+    free(blob);
+    TEST_ASSERT_EQUAL_INT16(500, nt_font_lookup_metrics(font, 'A').advance);
+    TEST_ASSERT_FALSE(nt_font_lookup_metrics(font, '0').found);
+    TEST_ASSERT_EQUAL_UINT32(epoch, nt_font_content_epoch());
     nt_font_destroy(font);
+}
+
+static void test_second_fill_adds_kerning(void) {
+    nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 8, .measure_cache_size = 16});
+    uint32_t size = 0;
+    uint8_t *base = build_test_font_blob(&size);
+    nt_font_fill(font, base, size);
+    free(base);
+    TEST_ASSERT_TRUE(fabsf(nt_font_measure(font, "DE", 20.0F, 0.0F).width - 20.0F) < 0.001F);
+    const struct {
+        NtFontAssetHeader header;
+        NtFontGlyphEntry glyphs[2];
+        NtFontKernEntry kern;
+    } payload = {
+        .header = {.magic = NT_FONT_MAGIC, .version = NT_FONT_VERSION, .glyph_count = 2, .units_per_em = 1000, .ascent = 800, .descent = -200},
+        .glyphs = {{.codepoint = 'D', .advance = 700, .kern_count = 1, .data_offset = sizeof(NtFontAssetHeader) + (2U * sizeof(NtFontGlyphEntry))},
+                   {.codepoint = 'E', .advance = 300, .data_offset = sizeof(NtFontAssetHeader) + (2U * sizeof(NtFontGlyphEntry)) + sizeof(NtFontKernEntry)}},
+        .kern = {.right_glyph_index = 1, .value = -100},
+    };
+    nt_font_fill(font, (const uint8_t *)&payload, sizeof payload);
+    TEST_ASSERT_EQUAL_INT16(-100, nt_font_get_kern(font, 'D', 'E'));
+    TEST_ASSERT_EQUAL_INT16(0, nt_font_get_kern(font, 'A', 'E'));
+    TEST_ASSERT_TRUE(fabsf(nt_font_measure(font, "DE", 20.0F, 0.0F).width - 18.0F) < 0.001F);
+    nt_font_destroy(font);
+}
+
+static void test_fill_merge_remaps_existing_kerning(void) {
+    nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 8, .measure_cache_size = 16});
+    enum { TABLE = sizeof(NtFontAssetHeader) + (3U * sizeof(NtFontGlyphEntry)) };
+    /* B and F share one data block: kern to D, then no contours. D's empty block follows it. */
+    const struct {
+        NtFontAssetHeader header;
+        NtFontGlyphEntry glyphs[3];
+        NtFontKernEntry kern;
+    } first = {
+        .header = {.magic = NT_FONT_MAGIC, .version = NT_FONT_VERSION, .glyph_count = 3, .units_per_em = 1000, .ascent = 800, .descent = -200},
+        .glyphs = {{.codepoint = 'B', .advance = 500, .kern_count = 1, .data_offset = TABLE},
+                   {.codepoint = 'D', .advance = 500, .data_offset = TABLE + sizeof(NtFontKernEntry)},
+                   {.codepoint = 'F', .advance = 500, .kern_count = 1, .data_offset = TABLE}},
+        .kern = {.right_glyph_index = 1, .value = -100},
+    };
+    nt_font_fill(font, (const uint8_t *)&first, sizeof first);
+    TEST_ASSERT_EQUAL_INT16(-100, nt_font_get_kern(font, 'B', 'D'));
+    /* Interleaved codepoints move D from index 1 to 3; a third fill merges the merged copy again. */
+    const uint32_t interleaved[] = {'A', 'C', 'E'};
+    const uint32_t tail[] = {'G'};
+    for (uint32_t fill = 0; fill < 2; fill++) {
+        uint32_t size = 0;
+        uint8_t *blob = fill == 0 ? build_font_blob_codepoints(1000, 800, -200, 0, interleaved, 3, 500, &size) : build_font_blob_codepoints(1000, 800, -200, 0, tail, 1, 500, &size);
+        nt_font_fill(font, blob, size);
+        free(blob);
+        TEST_ASSERT_EQUAL_INT16(-100, nt_font_get_kern(font, 'B', 'D'));
+        TEST_ASSERT_EQUAL_INT16(-100, nt_font_get_kern(font, 'F', 'D'));
+        TEST_ASSERT_EQUAL_INT16(0, nt_font_get_kern(font, 'B', 'B'));
+        TEST_ASSERT_EQUAL_INT16(0, nt_font_get_kern(font, 'B', 'C'));
+        TEST_ASSERT_EQUAL_INT16(0, nt_font_get_kern(font, 'A', 'D'));
+        TEST_ASSERT_TRUE(fabsf(nt_font_measure(font, "BD", 20.0F, 0.0F).width - 18.0F) < 0.001F);
+        TEST_ASSERT_TRUE(fabsf(nt_font_measure(font, "CD", 20.0F, 0.0F).width - 20.0F) < 0.001F);
+    }
+    nt_font_destroy(font);
+}
+
+static void test_fill_merge_asserts_past_16_bit_glyph_indices(void) {
+    nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 8});
+    enum { COUNT = 40000 };
+    const uint32_t size = (uint32_t)(sizeof(NtFontAssetHeader) + (COUNT * sizeof(NtFontGlyphEntry)));
+    uint8_t *blob = calloc(1, size);
+    TEST_ASSERT_NOT_NULL(blob);
+    *(NtFontAssetHeader *)blob = (NtFontAssetHeader){.magic = NT_FONT_MAGIC, .version = NT_FONT_VERSION, .glyph_count = COUNT, .units_per_em = 1000, .ascent = 800, .descent = -200};
+    NtFontGlyphEntry *glyphs = (NtFontGlyphEntry *)(blob + sizeof(NtFontAssetHeader));
+    for (uint32_t i = 0; i < COUNT; i++) {
+        glyphs[i] = (NtFontGlyphEntry){.codepoint = 0x10000U + (2U * i), .advance = 500, .data_offset = size};
+    }
+    nt_font_fill(font, blob, size);
+    for (uint32_t i = 0; i < COUNT; i++) {
+        glyphs[i].codepoint++;
+    }
+    NT_TEST_EXPECT_ASSERT(nt_font_fill(font, blob, size));
+    nt_font_destroy(font);
+    free(blob);
+}
+
+static void test_font_fill_rejects_header_and_metrics_before_mutation(void) {
+    nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 8});
+    uint32_t size = 0;
+    uint8_t *blob = build_test_font_blob(&size);
+    NtFontAssetHeader *header = (NtFontAssetHeader *)blob;
+    header->magic = 0;
+    NT_TEST_EXPECT_ASSERT(nt_font_fill(font, blob, size));
+    header->magic = NT_FONT_MAGIC;
+    header->version++;
+    NT_TEST_EXPECT_ASSERT(nt_font_fill(font, blob, size));
+    header->version = NT_FONT_VERSION;
+    NT_TEST_EXPECT_ASSERT(nt_font_fill(font, blob, sizeof(*header) - 1U));
+    const uint32_t epoch = nt_font_content_epoch();
+    NT_TEST_EXPECT_ASSERT(nt_font_fill(font, blob, sizeof(*header)));
+    NtFontGlyphEntry *glyphs = (NtFontGlyphEntry *)(blob + sizeof(*header));
+    const uint32_t offset = glyphs[0].data_offset;
+    glyphs[0].data_offset = sizeof(*header); /* inside the glyph table */
+    NT_TEST_EXPECT_ASSERT(nt_font_fill(font, blob, size));
+    glyphs[0].data_offset = offset;
+    const struct {
+        NtFontAssetHeader header;
+        NtFontGlyphEntry glyph;
+        NtFontKernEntry kern;
+    } bad_kern = {
+        .header = {.magic = NT_FONT_MAGIC, .version = NT_FONT_VERSION, .glyph_count = 1, .units_per_em = 1000, .ascent = 800, .descent = -200},
+        .glyph = {.codepoint = 'Q', .kern_count = 1, .data_offset = sizeof(NtFontAssetHeader) + sizeof(NtFontGlyphEntry)},
+        .kern = {.right_glyph_index = 1},
+    };
+    NT_TEST_EXPECT_ASSERT(nt_font_fill(font, (const uint8_t *)&bad_kern, sizeof bad_kern));
+    TEST_ASSERT_EQUAL_UINT32(epoch, nt_font_content_epoch());
+    nt_font_fill(font, blob, size);
+    NtFontAssetHeader other = *header;
+    other.glyph_count = 0;
+    nt_font_fill(font, (const uint8_t *)&other, sizeof other); /* adds nothing */
+    TEST_ASSERT_EQUAL_UINT32(epoch + 1U, nt_font_content_epoch());
+    other.glyph_count = 0;
+    other.ascent++;
+    NT_TEST_EXPECT_ASSERT(nt_font_fill(font, (const uint8_t *)&other, sizeof other));
+    TEST_ASSERT_EQUAL_INT16(800, nt_font_get_metrics(font).ascent);
+    TEST_ASSERT_EQUAL_UINT32(epoch + 1U, nt_font_content_epoch());
+    nt_font_destroy(font);
+    free(blob);
 }
 
 static void restore_lost_context(void);
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- Unity assertions inflate the metric.
-static void test_font_source_survives_pack_eviction(void) {
-    uint32_t font_size = 0;
-    uint8_t *font_blob = build_test_font_blob(&font_size);
-    const uint32_t header_size = 128;
-    const uint32_t pack_size = header_size + font_size;
-    uint8_t *pack_blob = calloc(1, pack_size);
-    TEST_ASSERT_NOT_NULL(pack_blob);
-    NtPackHeader *header = (NtPackHeader *)pack_blob;
-    *header = (NtPackHeader){.magic = NT_PACK_MAGIC, .version = NT_PACK_VERSION, .header_size = header_size, .total_size = pack_size, .asset_count = 2};
-    NtAssetEntry *entries = (NtAssetEntry *)(pack_blob + sizeof(*header));
-    const nt_hash64_t owner_id = nt_hash64_str("owned_font");
-    const nt_hash64_t alias_id = nt_hash64_str("owned_font_alias");
-    entries[0] = (NtAssetEntry){.resource_id = owner_id.value, .asset_type = NT_ASSET_FONT, .offset = header_size, .size = font_size};
-    entries[1] = entries[0];
-    entries[1].resource_id = alias_id.value;
-    memcpy(pack_blob + header_size, font_blob, font_size);
-    free(font_blob);
-    nt_test_seal_pack(pack_blob);
-    const nt_hash32_t pack = nt_hash32_str("owned_font_pack");
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pack, 0));
-    /* Ownership transfers through the I/O fixture hook; eviction frees this buffer. */
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pack, pack_blob, pack_size));
-    nt_resource_test_set_pack_io_type(0, NT_IO_FS);
-    nt_resource_t owner = nt_resource_request(owner_id, NT_ASSET_FONT);
-    nt_resource_t alias = nt_resource_request(alias_id, NT_ASSET_FONT);
-    nt_font_t first = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 8});
-    nt_font_t second = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 8});
-    nt_font_add(first, owner);
-    nt_font_add(second, alias);
-    nt_resource_step();
-    nt_font_step();
-    TEST_ASSERT_EQUAL_UINT64(pack_size, nt_resource_get_resident_bytes().blob_bytes);
-    TEST_ASSERT_EQUAL_UINT16(1, nt_font_get_stats(first).glyphs_cached);
-    TEST_ASSERT_EQUAL_UINT16(1, nt_font_get_stats(second).glyphs_cached);
-    TEST_ASSERT_FALSE(nt_font_lookup_glyph(first, 'A')->is_tofu);
-    memset(pack_blob + header_size, 0xCD, font_size);   /* a kept pointer would decode garbage */
-    nt_resource_set_blob_policy(pack, NT_BLOB_AUTO, 1); // NOLINT(clang-analyzer-unix.Malloc) -- eviction frees pack_blob
-    nt_time_sleep(0.01);
-    nt_resource_step();
-    TEST_ASSERT_FALSE(nt_resource_test_pack_blob_resident(0));
-    TEST_ASSERT_EQUAL_UINT64(0, nt_resource_get_resident_bytes().blob_bytes);
-    nt_gfx_fake_set_context_lost(true);
-    nt_gfx_end_frame();
-    nt_gfx_begin_frame();
-    TEST_ASSERT_TRUE(g_nt_gfx.context_lost);
-    nt_font_step();
-    TEST_ASSERT_EQUAL_UINT16(1000, nt_font_get_metrics(second).units_per_em);
-    TEST_ASSERT_NULL(nt_font_lookup_glyph(first, 'B'));
-    restore_lost_context();
-    nt_font_step();
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_set_priority(pack, 1)); /* forces a resolve, the only path that schedules a reread */
-    nt_resource_step();
-    TEST_ASSERT_FALSE(nt_resource_test_pack_blob_resident(0));
-    TEST_ASSERT_EQUAL(NT_PACK_STATE_READY, nt_resource_pack_state(pack));
-    TEST_ASSERT_TRUE(nt_gfx_texture_ready(nt_font_get_curve_texture(first)));
-    TEST_ASSERT_TRUE(nt_gfx_texture_ready(nt_font_get_curve_texture(second)));
-    TEST_ASSERT_TRUE(nt_font_measure_n(second, "BC", 2, 20.0F, 0.0F).width == 20.0F);
-    TEST_ASSERT_FALSE(nt_font_lookup_glyph(first, 'B')->is_tofu);
-    TEST_ASSERT_FALSE(nt_font_lookup_glyph(second, 'C')->is_tofu);
-    nt_font_destroy(first);
-    TEST_ASSERT_FALSE(nt_font_lookup_glyph(second, 'B')->is_tofu);
-    nt_resource_unmount(pack);
-    nt_resource_step();
-    nt_font_step();
-    TEST_ASSERT_EQUAL_UINT16(0, nt_font_get_metrics(second).units_per_em);
-    nt_font_destroy(second);
-}
 
 void test_font_blob_valid(void) {
     uint32_t size = 0;
@@ -342,8 +410,7 @@ void test_font_blob_valid(void) {
 void test_font_init_shutdown(void) {
     /* setUp already called init -- shutdown and re-init */
     nt_font_shutdown();
-    nt_resource_shutdown();
-    nt_resource_init(&(nt_resource_desc_t){0});
+
     nt_font_init(&(nt_font_desc_t){.max_fonts = 4});
     nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 2});
     TEST_ASSERT_TRUE(nt_font_valid(font));
@@ -381,8 +448,9 @@ void test_font_unready_texture_keeps_cpu_queries_gpu_free(void) {
     TEST_ASSERT_FALSE(nt_gfx_texture_ready(original));
     uint32_t blob_size = 0;
     uint8_t *blob = build_test_font_blob(&blob_size);
-    nt_font_add(font, register_font_resource("font_unready", blob, blob_size));
-    nt_resource_step();
+    nt_font_fill(font, blob, blob_size);
+    const uint32_t epoch = nt_font_content_epoch();
+
     nt_font_step();
     TEST_ASSERT_FALSE(nt_gfx_texture_ready(nt_font_get_curve_texture(font)));
 
@@ -415,6 +483,7 @@ void test_font_unready_texture_keeps_cpu_queries_gpu_free(void) {
     const uint32_t creates = nt_gfx_fake_texture_create_count();
     nt_font_step(); /* a ready texture is not made again */
     TEST_ASSERT_EQUAL_UINT32(creates, nt_gfx_fake_texture_create_count());
+    TEST_ASSERT_EQUAL_UINT32(epoch, nt_font_content_epoch()); /* recovery is not new content */
     nt_font_destroy(font);
     free(blob);
 }
@@ -432,8 +501,7 @@ void test_font_destroy_frees_unready_texture(void) {
             nt_font_destroy(font);
         } else {
             nt_font_shutdown();
-            nt_resource_shutdown();
-            nt_resource_init(&(nt_resource_desc_t){0});
+
             nt_font_init(&(nt_font_desc_t){.max_fonts = 4});
         }
         TEST_ASSERT_EQUAL_UINT32(0U, s_error_count);
@@ -446,8 +514,8 @@ void test_font_cached_glyph_waits_for_rebuilt_textures(void) {
     nt_font_t font = nt_font_create(&desc);
     uint32_t blob_size = 0;
     uint8_t *blob = build_test_font_blob(&blob_size);
-    nt_font_add(font, register_font_resource("font_cached_restore", blob, blob_size));
-    nt_resource_step();
+    nt_font_fill(font, blob, blob_size);
+
     nt_font_step();
     TEST_ASSERT_NOT_NULL(nt_font_lookup_glyph(font, 'A'));
     TEST_ASSERT_EQUAL_UINT16(2U, nt_font_get_stats(font).glyphs_cached); /* tofu + 'A' */
@@ -486,20 +554,23 @@ void test_font_cached_glyph_waits_for_rebuilt_textures(void) {
 
 /* ---- Test 3: Add resource (FONT-04) ---- */
 
-void test_font_add_resource(void) {
+void test_font_fill_sets_metrics(void) {
     nt_font_create_desc_t desc = test_font_desc();
     nt_font_t font = nt_font_create(&desc);
 
     uint32_t blob_size = 0;
     uint8_t *blob = build_test_font_blob(&blob_size);
-    nt_resource_t res = register_font_resource("test_font_add", blob, blob_size);
 
-    nt_font_add(font, res);
-    nt_resource_step(); /* trigger resolve so nt_resource_get returns handle */
-    nt_font_step();     /* resolve resource and parse metrics */
+    nt_font_fill(font, blob, blob_size);
+
+    nt_font_step(); /* recover GPU cache if needed */
 
     nt_font_metrics_t m = nt_font_get_metrics(font);
     TEST_ASSERT_EQUAL_INT16(800, m.ascent);
+    TEST_ASSERT_EQUAL_INT16(-200, m.descent);
+    TEST_ASSERT_EQUAL_INT16(0, m.line_gap);
+    TEST_ASSERT_EQUAL_UINT16(1000, m.units_per_em);
+    TEST_ASSERT_EQUAL_INT16(1000, m.line_height);
 
     nt_font_destroy(font);
     free(blob);
@@ -513,10 +584,9 @@ void test_font_get_metrics(void) {
 
     uint32_t blob_size = 0;
     uint8_t *blob = build_test_font_blob(&blob_size);
-    nt_resource_t res = register_font_resource("test_font_metrics", blob, blob_size);
 
-    nt_font_add(font, res);
-    nt_resource_step();
+    nt_font_fill(font, blob, blob_size);
+
     nt_font_step();
 
     nt_font_metrics_t m = nt_font_get_metrics(font);
@@ -538,10 +608,9 @@ void test_font_lookup_glyph_hit(void) {
 
     uint32_t blob_size = 0;
     uint8_t *blob = build_test_font_blob(&blob_size);
-    nt_resource_t res = register_font_resource("test_font_lookup", blob, blob_size);
 
-    nt_font_add(font, res);
-    nt_resource_step();
+    nt_font_fill(font, blob, blob_size);
+
     nt_font_step();
 
     const nt_glyph_cache_entry_t *e = nt_font_lookup_glyph(font, 'A');
@@ -567,10 +636,9 @@ void test_font_lookup_glyph_miss_tofu(void) {
 
     uint32_t blob_size = 0;
     uint8_t *blob = build_test_font_blob(&blob_size);
-    nt_resource_t res = register_font_resource("test_font_tofu", blob, blob_size);
 
-    nt_font_add(font, res);
-    nt_resource_step();
+    nt_font_fill(font, blob, blob_size);
+
     nt_font_step();
 
     /* 'Z' is not in our test blob (only A, B, C) */
@@ -580,6 +648,27 @@ void test_font_lookup_glyph_miss_tofu(void) {
 
     nt_font_destroy(font);
     free(blob);
+}
+
+void test_font_tofu_measure_matches_glyph_advance_with_odd_upm(void) {
+    nt_font_create_desc_t desc = test_font_desc();
+    nt_font_t font = nt_font_create(&desc);
+    uint32_t blob_size = 0;
+    uint8_t *blob = build_test_font_blob_with_metrics(1001, 800, -200, 0, &blob_size);
+    nt_font_fill(font, blob, blob_size);
+    free(blob);
+
+    const nt_glyph_cache_entry_t *glyph = nt_font_lookup_glyph(font, 'Z');
+    TEST_ASSERT_NOT_NULL(glyph);
+    TEST_ASSERT_TRUE(glyph->is_tofu);
+    TEST_ASSERT_EQUAL_INT16(500, glyph->advance);
+
+    nt_text_size_t measured = nt_font_measure(font, "ZZ", 1001.0F, 0.0F);
+    TEST_ASSERT_TRUE(fabsf(measured.width - 1000.0F) < 0.001F);
+    nt_text_size_t scaled = nt_font_measure_n(font, "ZZ", 2U, 20.02F, 1.0F);
+    TEST_ASSERT_TRUE(fabsf(scaled.width - 21.0F) < 0.001F);
+
+    nt_font_destroy(font);
 }
 
 /* ---- Test 7: Get stats (FONT-02, FONT-03) ---- */
@@ -592,10 +681,9 @@ void test_font_get_stats(void) {
 
     uint32_t blob_size = 0;
     uint8_t *blob = build_test_font_blob(&blob_size);
-    nt_resource_t res = register_font_resource("test_font_stats", blob, blob_size);
 
-    nt_font_add(font, res);
-    nt_resource_step();
+    nt_font_fill(font, blob, blob_size);
+
     nt_font_step();
 
     /* Lookup 2 glyphs to populate cache */
@@ -623,10 +711,9 @@ void test_font_lru_eviction(void) {
 
     uint32_t blob_size = 0;
     uint8_t *blob = build_test_font_blob(&blob_size);
-    nt_resource_t res = register_font_resource("test_font_evict", blob, blob_size);
 
-    nt_font_add(font, res);
-    nt_resource_step();
+    nt_font_fill(font, blob, blob_size);
+
     nt_font_step();
 
     /* Fill cache: A, B, C (plus tofu auto-generated) = 4 slots */
@@ -672,9 +759,8 @@ void test_font_lru_eviction(void) {
     const uint8_t contour_d[] = {1, 0, 3, 0, 7, 0, 0, 0, 0, 0, 0, NT_FONT_DELTA_SENTINEL, 0x20, 3, NT_FONT_DELTA_SENTINEL, 0xC2, 1, 0};
     memcpy(blob2 + hdr_sz + glyph_sz, contour_d, sizeof contour_d);
 
-    nt_resource_t res2 = register_font_resource("test_font_evict_d", blob2, total);
-    nt_font_add(font, res2);
-    nt_resource_step();
+    nt_font_fill(font, blob2, total);
+
     nt_font_step();
     nt_gfx_end_frame();
     nt_gfx_begin_frame(); /* A, B, C were looked up in the previous frame */
@@ -710,10 +796,9 @@ static nt_font_t make_resolved_test_font(const char *name, uint8_t **out_blob) {
 
     uint32_t blob_size = 0;
     uint8_t *blob = build_test_font_blob(&blob_size);
-    nt_resource_t res = register_font_resource(name, blob, blob_size);
 
-    nt_font_add(font, res);
-    nt_resource_step();
+    nt_font_fill(font, blob, blob_size);
+
     nt_font_step();
 
     *out_blob = blob;
@@ -932,9 +1017,9 @@ void test_measure_n_cache_disabled(void) {
 
     uint32_t blob_size = 0;
     uint8_t *blob = build_test_font_blob(&blob_size);
-    nt_resource_t res = register_font_resource("font_cache_off", blob, blob_size);
-    nt_font_add(font, res);
-    nt_resource_step();
+
+    nt_font_fill(font, blob, blob_size);
+
     nt_font_step();
 
     nt_font_test_reset_measure_counters();
@@ -958,91 +1043,6 @@ void test_measure_n_cache_disabled(void) {
     free(blob);
 }
 
-/* ---- FONT-02f: adding a font resource invalidates the measure cache ----
- *
- * Regression for the async fallback-chain bug: if a font handle measures a
- * string before all resources are attached (so some glyphs hit the tofu
- * fallback), the result gets cached. Once a real resource arrives, the
- * cache MUST be cleared so the next measure picks up the real glyph metrics.
- * Driven by ascii_index_dirty in nt_font_step. */
-void test_measure_n_invalidates_on_resource_change(void) {
-    uint8_t *blob_a = NULL;
-    nt_font_t font = make_resolved_test_font("font_async_a", &blob_a);
-
-    nt_font_test_reset_measure_counters();
-
-    /* Warm the cache for the same string twice — first miss, then hit. */
-    (void)nt_font_measure_n(font, "AB", 2U, 14.0F, 0.0F);
-    (void)nt_font_measure_n(font, "AB", 2U, 14.0F, 0.0F);
-    TEST_ASSERT_EQUAL_UINT32(1U, nt_font_test_measure_cache_hits(font));
-    TEST_ASSERT_EQUAL_UINT32(1U, nt_font_test_measure_cache_misses(font));
-
-    /* Attach a second resource (independent blob). nt_font_step will see a
-     * new resource handle and mark ascii_index_dirty — which must also
-     * clear the measure cache. */
-    uint32_t blob_size_b = 0;
-    uint8_t *blob_b = build_test_font_blob(&blob_size_b);
-    nt_resource_t res_b = register_font_resource("font_async_b", blob_b, blob_size_b);
-    nt_font_add(font, res_b);
-    nt_resource_step();
-    nt_font_step();
-
-    /* Re-measure the same string — without the cache invalidation fix this
-     * is a HIT (counter unchanged). With the fix it's a MISS (counter +1). */
-    (void)nt_font_measure_n(font, "AB", 2U, 14.0F, 0.0F);
-    TEST_ASSERT_EQUAL_UINT32(1U, nt_font_test_measure_cache_hits(font));   /* unchanged */
-    TEST_ASSERT_EQUAL_UINT32(2U, nt_font_test_measure_cache_misses(font)); /* +1 */
-
-    nt_font_destroy(font);
-    free(blob_a);
-    free(blob_b);
-}
-
-/* ---- Adding an ALREADY-published resource forces a rescan ----
- * Its epoch was already consumed, so the epoch gate stays closed; only the resource-set
- * dirty flag can force the rescan that flushes the measure cache (next measure MISSes). */
-void test_font_add_already_published_forces_rescan(void) {
-    nt_font_create_desc_t desc = test_font_desc();
-    nt_font_t font = nt_font_create(&desc);
-    TEST_ASSERT_NOT_EQUAL_UINT32(0U, font.id);
-
-    uint32_t size_a = 0;
-    uint8_t *blob_a = build_test_font_blob(&size_a);
-    nt_resource_t res_a = register_font_resource("font_pub_a", blob_a, size_a);
-    nt_font_add(font, res_a);
-    nt_resource_step();
-    nt_font_step();
-
-    /* Publish res_b AND let the font module consume that epoch WITHOUT adding
-     * res_b to the font — now epoch == last_resolve_epoch. */
-    uint32_t size_b = 0;
-    uint8_t *blob_b = build_test_font_blob(&size_b);
-    nt_resource_t res_b = register_font_resource("font_pub_b", blob_b, size_b);
-    nt_resource_step();
-    nt_font_step();
-
-    nt_font_test_reset_measure_counters();
-    (void)nt_font_measure_n(font, "AB", 2U, 14.0F, 0.0F);
-    (void)nt_font_measure_n(font, "AB", 2U, 14.0F, 0.0F);
-    TEST_ASSERT_EQUAL_UINT32(1U, nt_font_test_measure_cache_hits(font));
-    TEST_ASSERT_EQUAL_UINT32(1U, nt_font_test_measure_cache_misses(font));
-
-    /* Add the already-published res_b with NO intervening nt_resource_step, so
-     * the publication epoch does not move. Only the rescan flag can pick it up. */
-    nt_font_add(font, res_b);
-    nt_font_step();
-
-    /* rescan flushes the measure cache -> the next measure MISSes (the publication
-     * epoch did not move, so only the rescan flag can invalidate the cache) */
-    (void)nt_font_measure_n(font, "AB", 2U, 14.0F, 0.0F);
-    TEST_ASSERT_EQUAL_UINT32(1U, nt_font_test_measure_cache_hits(font));
-    TEST_ASSERT_EQUAL_UINT32(2U, nt_font_test_measure_cache_misses(font));
-
-    nt_font_destroy(font);
-    free(blob_a);
-    free(blob_b);
-}
-
 /* ---- FONT-02e: custom measure_cache_size (64 entries) ---- */
 
 void test_measure_n_cache_custom_size(void) {
@@ -1053,9 +1053,9 @@ void test_measure_n_cache_custom_size(void) {
 
     uint32_t blob_size = 0;
     uint8_t *blob = build_test_font_blob(&blob_size);
-    nt_resource_t res = register_font_resource("font_cache_64", blob, blob_size);
-    nt_font_add(font, res);
-    nt_resource_step();
+
+    nt_font_fill(font, blob, blob_size);
+
     nt_font_step();
 
     nt_font_test_reset_measure_counters();
@@ -1067,232 +1067,6 @@ void test_measure_n_cache_custom_size(void) {
     }
     TEST_ASSERT_EQUAL_UINT32(199U, nt_font_test_measure_cache_hits(font));
     TEST_ASSERT_EQUAL_UINT32(1U, nt_font_test_measure_cache_misses(font));
-
-    nt_font_destroy(font);
-    free(blob);
-}
-
-/* ---- FONT-02g: full pack unmount clears stale handle + metrics ----
- *
- * After unmount, measure_n short-circuits at !metrics_set and returns
- * {0,0}. The cache lookup is never reached, so counters stay frozen —
- * that's the signature of both the resource_handles cleanup and the
- * metrics reset firing. */
-void test_measure_n_invalidates_on_resource_unload(void) {
-    nt_font_create_desc_t desc = test_font_desc();
-    nt_font_t font = nt_font_create(&desc);
-    TEST_ASSERT_NOT_EQUAL_UINT32(0U, font.id);
-
-    /* Keep the token so we can unmount the pack. */
-    uint32_t blob_size = 0;
-    uint8_t *blob = build_test_font_blob(&blob_size);
-    uint32_t tok = nt_font_test_register_data(blob, blob_size);
-    nt_resource_t res = nt_font_test_resource(tok);
-
-    nt_font_add(font, res);
-    nt_resource_step();
-    nt_font_step();
-
-    nt_font_test_reset_measure_counters();
-
-    /* Warm cache: measure twice → 1 miss + 1 hit. */
-    nt_text_size_t live = nt_font_measure_n(font, "AB", 2U, 14.0F, 0.0F);
-    (void)nt_font_measure_n(font, "AB", 2U, 14.0F, 0.0F);
-    TEST_ASSERT_EQUAL_UINT32(1U, nt_font_test_measure_cache_hits(font));
-    TEST_ASSERT_EQUAL_UINT32(1U, nt_font_test_measure_cache_misses(font));
-    TEST_ASSERT_TRUE(live.width > 0.0F);
-
-    nt_font_metrics_t pre = nt_font_get_metrics(font);
-    TEST_ASSERT_NOT_EQUAL_UINT16(0U, pre.units_per_em);
-
-    nt_font_test_deactivate(tok);
-    nt_resource_step();
-    nt_font_step();
-
-    nt_font_metrics_t post = nt_font_get_metrics(font);
-    TEST_ASSERT_EQUAL_UINT16(0U, post.units_per_em);
-    TEST_ASSERT_EQUAL_INT16(0, post.ascent);
-    TEST_ASSERT_EQUAL_INT16(0, post.descent);
-
-    /* Counters frozen — measure_n hit the !metrics_set short-circuit
-     * before the cache lookup. (UNITY_EXCLUDE_FLOAT, so TEST_ASSERT_TRUE
-     * for the zero check.) */
-    nt_text_size_t after = nt_font_measure_n(font, "AB", 2U, 14.0F, 0.0F);
-    TEST_ASSERT_TRUE(after.width == 0.0F);
-    TEST_ASSERT_TRUE(after.height == 0.0F);
-    TEST_ASSERT_EQUAL_UINT32(1U, nt_font_test_measure_cache_hits(font));
-    TEST_ASSERT_EQUAL_UINT32(1U, nt_font_test_measure_cache_misses(font));
-
-    nt_font_destroy(font);
-    free(blob);
-}
-
-/* ---- FONT-02h: remount after full unmount recovers a working font ----
- *
- * Guards the invariant that nt_font_add stores resources[ri] permanently
- * (it survives unmount), so a later remount under the same pid+rid
- * re-resolves through the same slot without re-adding. */
-void test_font_recovers_after_remount(void) {
-    nt_font_create_desc_t desc = test_font_desc();
-    nt_font_t font = nt_font_create(&desc);
-    TEST_ASSERT_NOT_EQUAL_UINT32(0U, font.id);
-
-    uint32_t blob_size = 0;
-    uint8_t *blob = build_test_font_blob(&blob_size);
-    uint32_t tok = nt_font_test_register_data(blob, blob_size);
-    nt_resource_t res = nt_font_test_resource(tok);
-    nt_font_add(font, res);
-    nt_resource_step();
-    nt_font_step();
-    TEST_ASSERT_NOT_EQUAL_UINT16(0U, nt_font_get_metrics(font).units_per_em);
-
-    nt_font_test_deactivate(tok);
-    nt_resource_step();
-    nt_font_step();
-    TEST_ASSERT_EQUAL_UINT16(0U, nt_font_get_metrics(font).units_per_em);
-
-    /* Remount under the SAME (pid, rid) without re-adding to the font — the
-     * epoch-gated step must re-resolve the provider through slot->resources[ri]. */
-    nt_font_test_reregister(tok, blob, blob_size);
-    nt_resource_step();
-    nt_font_step();
-
-    nt_font_metrics_t recovered = nt_font_get_metrics(font);
-    TEST_ASSERT_NOT_EQUAL_UINT16(0U, recovered.units_per_em);
-    nt_text_size_t m = nt_font_measure_n(font, "AB", 2U, 14.0F, 0.0F);
-    TEST_ASSERT_TRUE(m.width > 0.0F);
-
-    nt_font_destroy(font);
-    free(blob);
-}
-
-/* ---- FONT-02i: single-step hot-swap with different metrics ----
- *
- * Unmount + register-different + step, with no intervening font_step.
- * From step's view this is a plain reload (handle transition, not
- * 0→N); single-provider mismatch must accept the new metrics rather
- * than trip the shared-metrics assert. */
-void test_font_hotswap_replaces_metrics_in_one_step(void) {
-    nt_font_create_desc_t desc = test_font_desc();
-    nt_font_t font = nt_font_create(&desc);
-    TEST_ASSERT_NOT_EQUAL_UINT32(0U, font.id);
-
-    uint32_t size_a = 0;
-    uint8_t *blob_a = build_test_font_blob(&size_a);
-    uint32_t tok = nt_font_test_register_data(blob_a, size_a);
-    nt_resource_t res = nt_font_test_resource(tok);
-    nt_font_add(font, res);
-    nt_resource_step();
-    nt_font_step();
-
-    nt_font_metrics_t m_a = nt_font_get_metrics(font);
-    TEST_ASSERT_EQUAL_UINT16(1000U, m_a.units_per_em);
-    TEST_ASSERT_EQUAL_INT16(800, m_a.ascent);
-
-    TEST_ASSERT_EQUAL_INT16(800, nt_font_lookup_glyph(font, 'Z')->bbox_y1); /* tofu spans the ascent */
-
-    /* reregister = unmount old + mount new under the same (pid, rid) with NO
-     * intervening font_step. Single-provider metrics mismatch -> hot-swap: accept
-     * the new metrics + flush, no shared-metrics assert. */
-    uint32_t size_b = 0;
-    uint8_t *blob_b = build_test_font_blob_with_metrics(2048, 1600, -400, 0, &size_b);
-    nt_font_test_reregister(tok, blob_b, size_b);
-    nt_resource_step();
-    nt_font_step();
-
-    nt_font_metrics_t m_b = nt_font_get_metrics(font);
-    TEST_ASSERT_EQUAL_UINT16(2048U, m_b.units_per_em);
-    TEST_ASSERT_EQUAL_INT16(1600, m_b.ascent);
-    TEST_ASSERT_EQUAL_INT16(-400, m_b.descent);
-    TEST_ASSERT_EQUAL_INT16(1600, nt_font_lookup_glyph(font, 'Z')->bbox_y1); /* tofu follows the new metrics */
-
-    nt_font_destroy(font);
-    free(blob_a);
-    free(blob_b);
-}
-
-/* ---- FONT-02j: same-metrics winner-swap flushes glyph/measure caches + ASCII index ----
- *
- * A hot-reload (or higher-priority override) to a DIFFERENT blob with IDENTICAL header metrics
- * repoints the provider and bumps the resolve epoch, but presence and metrics are unchanged. Without
- * winner-identity tracking, font_step's presence + metrics checks both pass and the glyph/measure
- * caches keep serving the OLD blob's advances (and the ASCII index maps to the old glyph table).
- * The published winner handle (unique per font_activate) is the identity token that catches this. */
-void test_font_flushes_on_same_metrics_winner_swap(void) {
-    nt_font_create_desc_t desc = test_font_desc();
-    nt_font_t font = nt_font_create(&desc);
-    TEST_ASSERT_NOT_EQUAL_UINT32(0U, font.id);
-
-    const uint32_t cps[] = {(uint32_t)'A'};
-    uint32_t size_a = 0;
-    uint8_t *blob_a = build_font_blob_codepoints(1000, 800, -200, 0, cps, 1U, 500, &size_a);
-    uint32_t tok = nt_font_test_register_data(blob_a, size_a);
-    nt_resource_t res = nt_font_test_resource(tok);
-    nt_font_add(font, res);
-    nt_resource_step();
-    nt_font_step();
-
-    /* Cache 'A' (glyph + measure) against the first winner: advance 500. */
-    const nt_glyph_cache_entry_t *a1 = nt_font_lookup_glyph(font, 'A');
-    TEST_ASSERT_NOT_NULL(a1);
-    TEST_ASSERT_EQUAL_INT16(500, a1->advance);
-    nt_text_size_t m1 = nt_font_measure(font, "A", 1000.0F, 0.0F);
-
-    /* Hot-reload the SAME (pid, rid) with IDENTICAL metrics but advance 700 — one step, no intervening
-     * font_step. Presence stays true and metrics match; only the winner handle changes. */
-    uint32_t size_b = 0;
-    uint8_t *blob_b = build_font_blob_codepoints(1000, 800, -200, 0, cps, 1U, 700, &size_b);
-    nt_font_test_reregister(tok, blob_b, size_b);
-    nt_resource_step();
-    nt_font_step();
-
-    /* Metrics unchanged -> the swap is invisible to the presence + metrics checks. */
-    TEST_ASSERT_EQUAL_UINT16(1000U, nt_font_get_metrics(font).units_per_em);
-
-    /* Identity-driven flush: glyph cache re-decodes (ASCII fast-path -> new glyph table) and the
-     * measure cache is cleared, so both report the new advance. Without the fix these stay 500. */
-    const nt_glyph_cache_entry_t *a2 = nt_font_lookup_glyph(font, 'A');
-    TEST_ASSERT_NOT_NULL(a2);
-    TEST_ASSERT_EQUAL_INT16(700, a2->advance);
-    nt_text_size_t m2 = nt_font_measure(font, "A", 1000.0F, 0.0F);
-    TEST_ASSERT_TRUE(m2.width != m1.width);
-
-    nt_font_destroy(font);
-    free(blob_a);
-    free(blob_b);
-}
-
-/* Unmount releases the source; the next font step flushes cached glyphs and metrics. */
-void test_font_file_pack_unmount_cleans_state(void) {
-    nt_font_create_desc_t desc = test_font_desc();
-    nt_font_t font = nt_font_create(&desc);
-
-    uint32_t blob_size = 0;
-    uint8_t *blob = build_test_font_blob(&blob_size);
-    uint32_t tok = nt_font_test_register_data(blob, blob_size);
-    nt_resource_t res = nt_font_test_resource(tok);
-    nt_font_add(font, res);
-    nt_resource_step();
-    nt_font_step();
-
-    nt_font_test_reset_measure_counters();
-    (void)nt_font_measure_n(font, "AB", 2U, 14.0F, 0.0F);
-    (void)nt_font_measure_n(font, "AB", 2U, 14.0F, 0.0F);
-    TEST_ASSERT_EQUAL_UINT32(1U, nt_font_test_measure_cache_hits(font));
-    TEST_ASSERT_EQUAL_UINT16(1U, nt_font_get_stats(font).glyphs_cached); /* tofu */
-
-    nt_font_test_deactivate(tok);
-    nt_resource_step(); /* publish the lost source */
-    nt_font_step();     /* epoch changed -> flush + clear metrics */
-
-    TEST_ASSERT_EQUAL_UINT16(0U, nt_font_get_metrics(font).units_per_em);
-    TEST_ASSERT_EQUAL_UINT16(0U, nt_font_get_stats(font).glyphs_cached); /* flushed, no tofu without metrics */
-
-    nt_text_size_t after = nt_font_measure_n(font, "AB", 2U, 14.0F, 0.0F);
-    TEST_ASSERT_TRUE(after.width == 0.0F);
-    TEST_ASSERT_TRUE(after.height == 0.0F);
-    TEST_ASSERT_EQUAL_UINT32(1U, nt_font_test_measure_cache_hits(font));   /* unchanged */
-    TEST_ASSERT_EQUAL_UINT32(1U, nt_font_test_measure_cache_misses(font)); /* unchanged */
 
     nt_font_destroy(font);
     free(blob);
@@ -1328,8 +1102,8 @@ void test_font_shared_contours_padding_and_empty_glyph_remain_valid(void) {
         memcpy(blob + sizeof header + (i * sizeof glyph), &glyph, sizeof glyph);
     }
     nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 4});
-    nt_font_add(font, nt_font_test_resource(nt_font_test_register_data(blob, size)));
-    nt_resource_step();
+    nt_font_fill(font, blob, size);
+
     nt_font_step();
     TEST_ASSERT_EQUAL_UINT16(1000, nt_font_get_metrics(font).units_per_em);
     for (uint32_t cp = 'A'; cp <= 'C'; cp++) {
@@ -1365,15 +1139,14 @@ static uint32_t build_ring_font_blob(uint8_t *blob, uint16_t contours, uint16_t 
 
 static void assert_font_blob_activates(const uint8_t *blob, uint32_t size) {
     nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 4});
-    const uint32_t token = nt_font_test_register_data(blob, size);
-    nt_font_add(font, nt_font_test_resource(token));
-    nt_resource_step();
+
+    nt_font_fill(font, blob, size);
+
     nt_font_step();
     const nt_glyph_cache_entry_t *glyph = nt_font_lookup_glyph(font, 'A');
     TEST_ASSERT_NOT_NULL(glyph);
     TEST_ASSERT_FALSE(glyph->is_tofu);
     nt_font_destroy(font);
-    nt_font_test_deactivate(token);
 }
 
 /* 600 off,on points decode to 300 curves: more points than the curve cap, still valid. */
@@ -1385,8 +1158,8 @@ void test_font_contour_points_above_curve_cap_stay_valid(void) {
 /* Packs are trusted, so glyph decode asserts the bounds its static buffers rely on. */
 static void expect_glyph_decode_assert(const uint8_t *blob, uint32_t size, const char *expr) {
     nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 4});
-    nt_font_add(font, nt_font_test_resource(nt_font_test_register_data(blob, size)));
-    nt_resource_step();
+    nt_font_fill(font, blob, size);
+
     nt_font_step();
     NT_TEST_EXPECT_ASSERT((void)nt_font_lookup_glyph(font, 'A'));
     TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, expr));
@@ -1402,118 +1175,52 @@ void test_font_outline_over_curve_cap_asserts_on_decode(void) {
     expect_glyph_decode_assert(blob, build_ring_font_blob(blob, 1U, NT_FONT_MAX_CURVES_PER_GLYPH + 1U, 1U), "curve cap");
 }
 
-/* A referenced source may disappear at unmount without leaving dangling payload reads. */
-void test_font_unmount_while_referenced_renders_tofu(void) {
-    nt_font_create_desc_t desc = test_font_desc();
-    nt_font_t font = nt_font_create(&desc);
-    TEST_ASSERT_NOT_EQUAL_UINT32(0U, font.id);
-
-    uint32_t blob_size = 0;
-    uint8_t *blob = build_test_font_blob(&blob_size);
-    uint32_t tok = nt_font_test_register_data(blob, blob_size);
-    nt_resource_t res = nt_font_test_resource(tok);
-    nt_font_add(font, res);
-    nt_resource_step();
-    nt_font_step();
-
-    /* 'A' is a real glyph decoded from the owned source;
-     * 'Z' is absent -> the single font-level tofu sentinel (0xFFFFFFFF). */
-    const nt_glyph_cache_entry_t *a = nt_font_lookup_glyph(font, 'A');
-    TEST_ASSERT_NOT_NULL(a);
-    TEST_ASSERT_FALSE(a->is_tofu);
-    TEST_ASSERT_NOT_EQUAL_UINT16(0U, nt_font_get_metrics(font).units_per_em);
-
-    const nt_glyph_cache_entry_t *z = nt_font_lookup_glyph(font, 'Z');
-    TEST_ASSERT_NOT_NULL(z);
-    TEST_ASSERT_TRUE(z->is_tofu);
-    TEST_ASSERT_EQUAL_UINT32(0xFFFFFFFFU, z->codepoint);
-
-    /* Unmount while referenced: the source is released once. */
-    nt_font_test_deactivate(tok);
-    nt_resource_step();
-    nt_font_step();
-
-    /* Sole provider gone -> metrics cleared; a previously-present codepoint now
-     * degrades to no-glyph (NULL) instead of dereferencing the freed provider. */
-    TEST_ASSERT_EQUAL_UINT16(0U, nt_font_get_metrics(font).units_per_em);
-    const nt_glyph_cache_entry_t *a2 = nt_font_lookup_glyph(font, 'A');
-    TEST_ASSERT_NULL(a2);
-
-    nt_font_destroy(font);
-    free(blob);
-}
-
-/* ---- FONT-04: fallback resolution ORDER (first-wins) + tofu terminal ----
- *
- * Two resources merged into ONE nt_font_t (base first, fallback second) with
- * overlapping coverage. Pins that:
- *   (a) a codepoint present in BOTH resolves to the FIRST-added resource — via
- *       glyph identity (advance), not merely "non-tofu";
- *   (b) a codepoint present only in the second resolves to the second;
- *   (c) a codepoint in NEITHER resolves to the single font-level tofu (sentinel
- *       0xFFFFFFFF) and that tofu is TERMINAL — a second distinct miss returns
- *       the SAME tofu entry, so no intermediate resource emits its own tofu. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void test_font_fallback_order_first_wins(void) {
+void test_font_disjoint_payloads(void) {
     nt_font_create_desc_t desc = test_font_desc();
     nt_font_t font = nt_font_create(&desc);
 
-    /* Base owns 'A' + shared 'M' + shared CJK 0x4E2D (advance 500);
-     * fallback owns shared 'M' + 'Z' + shared CJK 0x4E2D (advance 700).
-     * Codepoints are pre-sorted per blob (bsearch precondition). */
     const uint32_t base_cps[3] = {'A', 'M', 0x4E2DU};
-    const uint32_t fb_cps[3] = {'M', 'Z', 0x4E2DU};
+    const uint32_t fb_cps[3] = {'N', 'Z', 0x4E2EU};
     uint32_t base_sz = 0;
     uint32_t fb_sz = 0;
     uint8_t *base = build_font_blob_codepoints(1000, 800, -200, 0, base_cps, 3, 500, &base_sz);
     uint8_t *fb = build_font_blob_codepoints(1000, 800, -200, 0, fb_cps, 3, 700, &fb_sz);
 
-    nt_resource_t base_res = register_font_resource("fb_base", base, base_sz);
-    nt_resource_t fb_res = register_font_resource("fb_fallback", fb, fb_sz);
+    nt_font_fill(font, base, base_sz);
+    nt_font_fill(font, fb, fb_sz);
 
-    /* Fixed order: base FIRST, fallback SECOND → base wins shared codepoints. */
-    nt_font_add(font, base_res);
-    nt_font_add(font, fb_res);
-    nt_resource_step();
     nt_font_step();
 
-    /* (a) shared ASCII 'M' → base (advance 500), NOT fallback (700).
-     * ASCII exercises the ascii_glyph_idx fast path. */
     const nt_glyph_cache_entry_t *m = nt_font_lookup_glyph(font, 'M');
     TEST_ASSERT_NOT_NULL(m);
     TEST_ASSERT_FALSE(m->is_tofu);
     TEST_ASSERT_EQUAL_UINT32('M', m->codepoint);
     TEST_ASSERT_EQUAL_INT16(500, m->advance);
 
-    /* (a') shared non-ASCII 0x4E2D → base (500) via the bsearch first-wins loop
-     * (codepoint >= 128 bypasses the ascii fast path). */
     const nt_glyph_cache_entry_t *cjk = nt_font_lookup_glyph(font, 0x4E2DU);
     TEST_ASSERT_NOT_NULL(cjk);
     TEST_ASSERT_FALSE(cjk->is_tofu);
     TEST_ASSERT_EQUAL_UINT32(0x4E2DU, cjk->codepoint);
     TEST_ASSERT_EQUAL_INT16(500, cjk->advance);
+    TEST_ASSERT_EQUAL_INT16(700, nt_font_lookup_metrics(font, 0x4E2EU).advance); /* non-ASCII search in the second payload */
 
-    /* (b) 'A' only in base → base (500). */
     const nt_glyph_cache_entry_t *a = nt_font_lookup_glyph(font, 'A');
     TEST_ASSERT_NOT_NULL(a);
     TEST_ASSERT_FALSE(a->is_tofu);
     TEST_ASSERT_EQUAL_INT16(500, a->advance);
 
-    /* (b') 'Z' only in fallback → second resource (700). */
     const nt_glyph_cache_entry_t *z = nt_font_lookup_glyph(font, 'Z');
     TEST_ASSERT_NOT_NULL(z);
     TEST_ASSERT_FALSE(z->is_tofu);
     TEST_ASSERT_EQUAL_UINT32('Z', z->codepoint);
     TEST_ASSERT_EQUAL_INT16(700, z->advance);
 
-    /* (c) '#' in NEITHER → single font-level tofu, sentinel 0xFFFFFFFF. */
     const nt_glyph_cache_entry_t *miss1 = nt_font_lookup_glyph(font, '#');
     TEST_ASSERT_NOT_NULL(miss1);
     TEST_ASSERT_TRUE(miss1->is_tofu);
     TEST_ASSERT_EQUAL_UINT32(0xFFFFFFFFU, miss1->codepoint);
 
-    /* Terminal: a DIFFERENT miss returns the SAME tofu entry — proves one
-     * font-level tofu, not a per-resource tofu leaking through the cascade. */
     const nt_glyph_cache_entry_t *miss2 = nt_font_lookup_glyph(font, '@');
     TEST_ASSERT_NOT_NULL(miss2);
     TEST_ASSERT_TRUE(miss2->is_tofu);
@@ -1525,14 +1232,12 @@ void test_font_fallback_order_first_wins(void) {
     free(fb);
 }
 
-/* A fallback family with identical vmetrics but DIFFERENT post/OS-2 decoration must NOT trip the
- * shared-metrics mismatch assert — decoration is PRIMARY-owned, not part of the metrics invariant. */
-void test_font_fallback_decoration_primary_owned(void) {
+void test_font_first_fill_owns_decoration(void) {
     nt_font_create_desc_t desc = test_font_desc();
     nt_font_t font = nt_font_create(&desc);
 
     const uint32_t base_cps[2] = {'A', 'M'};
-    const uint32_t fb_cps[2] = {'M', 'Z'};
+    const uint32_t fb_cps[2] = {'N', 'Z'};
     uint32_t base_sz = 0;
     uint32_t fb_sz = 0;
     /* Identical vmetrics -> a valid shared-metrics family; only decoration differs (the real Latin/CJK case). */
@@ -1549,11 +1254,9 @@ void test_font_fallback_decoration_primary_owned(void) {
     fh->strikeout_position = 500;
     fh->strikeout_size = 24;
 
-    nt_resource_t base_res = register_font_resource("dec_base", base, base_sz);
-    nt_resource_t fb_res = register_font_resource("dec_fb", fb, fb_sz);
-    nt_font_add(font, base_res); /* base FIRST = primary */
-    nt_font_add(font, fb_res);
-    nt_resource_step();
+    nt_font_fill(font, base, base_sz); /* base FIRST = primary */
+    nt_font_fill(font, fb, fb_sz);
+
     nt_font_step(); /* must NOT assert on the decoration mismatch */
 
     /* Primary (base) owns decoration; the fallback's differing values are ignored. */
@@ -1562,83 +1265,6 @@ void test_font_fallback_decoration_primary_owned(void) {
     TEST_ASSERT_EQUAL_INT16(10, m.underline_thickness);
     TEST_ASSERT_EQUAL_INT16(300, m.strikeout_position);
     TEST_ASSERT_EQUAL_INT16(12, m.strikeout_size);
-
-    nt_font_destroy(font);
-    free(base);
-    free(fb);
-}
-
-/* If a FALLBACK resolves before the PRIMARY (base loads late), decoration must still flip to the
- * primary once it arrives: it is first-active-provider owned and refreshed EVERY step. */
-void test_font_fallback_first_primary_reclaims_decoration(void) {
-    nt_font_create_desc_t desc = test_font_desc();
-    nt_font_t font = nt_font_create(&desc);
-
-    const uint32_t base_cps[2] = {'A', 'M'};
-    const uint32_t fb_cps[2] = {'M', 'Z'};
-    uint32_t base_sz = 0;
-    uint32_t fb_sz = 0;
-    uint8_t *base = build_font_blob_codepoints(1000, 800, -200, 0, base_cps, 2, 500, &base_sz);
-    uint8_t *fb = build_font_blob_codepoints(1000, 800, -200, 0, fb_cps, 2, 700, &fb_sz);
-    ((NtFontAssetHeader *)base)->underline_position = 50; /* primary decoration */
-    ((NtFontAssetHeader *)fb)->underline_position = 90;   /* fallback decoration */
-
-    uint32_t tok_base = nt_font_test_register_data(base, base_sz);
-    uint32_t tok_fb = nt_font_test_register_data(fb, fb_sz);
-    nt_font_add(font, nt_font_test_resource(tok_base)); /* ri=0 = primary */
-    nt_font_add(font, nt_font_test_resource(tok_fb));   /* ri=1 = fallback */
-
-    /* Primary loads LATE: deactivate base so only the fallback resolves on the first step. */
-    nt_font_test_deactivate(tok_base);
-    nt_resource_step();
-    nt_font_step();
-    TEST_ASSERT_EQUAL_INT16_MESSAGE(90, nt_font_get_metrics(font).underline_position, "fallback resolved first -> owns decoration for now");
-
-    /* Base arrives -> the late primary must reclaim decoration. */
-    nt_font_test_reregister(tok_base, base, base_sz);
-    nt_resource_step();
-    nt_font_step();
-    TEST_ASSERT_EQUAL_INT16_MESSAGE(50, nt_font_get_metrics(font).underline_position, "late-loading primary reclaims decoration");
-
-    nt_font_destroy(font);
-    free(base);
-    free(fb);
-}
-
-/* Late-primary must reclaim already-CACHED glyphs, not just metrics: a glyph cached from the fallback (base
- * loaded late) keys only on (codepoint, weight), so a provider GAIN must flush the glyph cache — else the
- * stale fallback glyph survives even after the primary wins the codepoint by first-active order. */
-void test_font_late_primary_reclaims_cached_glyph(void) {
-    nt_font_create_desc_t desc = test_font_desc();
-    nt_font_t font = nt_font_create(&desc);
-
-    const uint32_t base_cps[2] = {'A', 'M'};
-    const uint32_t fb_cps[2] = {'M', 'Z'};
-    uint32_t base_sz = 0;
-    uint32_t fb_sz = 0;
-    uint8_t *base = build_font_blob_codepoints(1000, 800, -200, 0, base_cps, 2, 500, &base_sz); /* 'M' advance 500 */
-    uint8_t *fb = build_font_blob_codepoints(1000, 800, -200, 0, fb_cps, 2, 700, &fb_sz);       /* 'M' advance 700 */
-
-    uint32_t tok_base = nt_font_test_register_data(base, base_sz);
-    uint32_t tok_fb = nt_font_test_register_data(fb, fb_sz);
-    nt_font_add(font, nt_font_test_resource(tok_base)); /* ri=0 = primary */
-    nt_font_add(font, nt_font_test_resource(tok_fb));   /* ri=1 = fallback */
-
-    /* Primary loads late: the fallback resolves first, so 'M' caches from the fallback (advance 700). */
-    nt_font_test_deactivate(tok_base);
-    nt_resource_step();
-    nt_font_step();
-    const nt_glyph_cache_entry_t *m1 = nt_font_lookup_glyph(font, 'M');
-    TEST_ASSERT_NOT_NULL(m1);
-    TEST_ASSERT_EQUAL_INT16_MESSAGE(700, m1->advance, "fallback resolved first -> 'M' cached from fallback");
-
-    /* Base arrives -> the provider gain must flush the glyph cache so 'M' re-resolves to the primary (500). */
-    nt_font_test_reregister(tok_base, base, base_sz);
-    nt_resource_step();
-    nt_font_step();
-    const nt_glyph_cache_entry_t *m2 = nt_font_lookup_glyph(font, 'M');
-    TEST_ASSERT_NOT_NULL(m2);
-    TEST_ASSERT_EQUAL_INT16_MESSAGE(500, m2->advance, "late-loading primary reclaims the cached glyph");
 
     nt_font_destroy(font);
     free(base);
@@ -1663,9 +1289,9 @@ void test_font_cmap_bounded_no_parse(void) {
     const uint32_t cps[4] = {0x100U, 0x200U, 0x20ACU, 0x4E2DU};
     uint32_t sz = 0;
     uint8_t *blob = build_font_blob_codepoints(1000, 800, -200, 0, cps, 4, 600, &sz);
-    nt_resource_t res = register_font_resource("cmap_bounded", blob, sz);
-    nt_font_add(font, res);
-    nt_resource_step();
+
+    nt_font_fill(font, blob, sz);
+
     nt_font_step();
 
     /* Present — first, interior, interior, last all resolve to the real glyph. */
@@ -1712,13 +1338,10 @@ void test_font_merged_different_upm_no_metrics_assert(void) {
     uint8_t *latin = build_font_blob_codepoints(common_upm, asc, descent, lg, latin_cps, 2, 1024, &latin_sz);
     uint8_t *cjk = build_font_blob_codepoints(common_upm, asc, descent, lg, cjk_cps, 2, 2048, &cjk_sz);
 
-    nt_resource_t latin_res = register_font_resource("merge_latin", latin, latin_sz);
-    nt_resource_t cjk_res = register_font_resource("merge_cjk", cjk, cjk_sz);
-
     /* Primary (latin) FIRST drives line height; CJK second. Simultaneous merge. */
-    nt_font_add(font, latin_res);
-    nt_font_add(font, cjk_res);
-    nt_resource_step();
+    nt_font_fill(font, latin, latin_sz);
+    nt_font_fill(font, cjk, cjk_sz);
+
     nt_font_step(); /* must NOT abort on the shared-metrics assert */
 
     nt_font_metrics_t m = nt_font_get_metrics(font);
@@ -1822,8 +1445,8 @@ void test_fp16_rounding_keeps_curves_in_adjacent_bands(void) {
         memcpy(blob + sizeof hdr, &glyph, sizeof glyph);
         uint32_t blob_size = glyph.data_offset + build_contour_blob_1(blob + glyph.data_offset, pts, 4);
         nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 16});
-        nt_font_add(font, nt_font_test_resource(nt_font_test_register_data(blob, blob_size)));
-        nt_resource_step();
+        nt_font_fill(font, blob, blob_size);
+
         nt_font_step();
 
         const nt_glyph_cache_entry_t *entry = nt_font_lookup_glyph(font, 'A');
@@ -1912,8 +1535,8 @@ void test_font_bands_sorted_by_fp16_max(void) {
     memcpy(blob + sizeof hdr, &glyph, sizeof glyph);
     const uint32_t blob_size = glyph.data_offset + build_contour_blob_1(blob + glyph.data_offset, (const int16_t(*)[2])pts, POINTS);
     nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 4});
-    nt_font_add(font, nt_font_test_resource(nt_font_test_register_data(blob, blob_size)));
-    nt_resource_step();
+    nt_font_fill(font, blob, blob_size);
+
     nt_font_step();
 
     const nt_glyph_cache_entry_t *regular = nt_font_lookup_glyph(font, 'A');
@@ -1937,8 +1560,8 @@ void test_font_full_cache_never_evicts_this_frame(void) {
     uint32_t blob_size = 0;
     uint8_t *blob = build_font_blob_codepoints(1000, 800, -200, 0, cps, 4U, 500, &blob_size);
     nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 4}); /* tofu + 3 glyphs */
-    nt_font_add(font, register_font_resource("font_full", blob, blob_size));
-    nt_resource_step();
+    nt_font_fill(font, blob, blob_size);
+
     nt_font_step();
 
     const nt_glyph_cache_entry_t *a = nt_font_lookup_glyph(font, 'A');
@@ -1997,8 +1620,8 @@ void test_font_glyph_over_slot_texels_drops_bands(void) {
     memcpy(blob + sizeof hdr, &glyph, sizeof glyph);
     const uint32_t blob_size = glyph.data_offset + build_contour_blob_1(blob + glyph.data_offset, (const int16_t(*)[2])pts, POINTS);
     nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 4});
-    nt_font_add(font, nt_font_test_resource(nt_font_test_register_data(blob, blob_size)));
-    nt_resource_step();
+    nt_font_fill(font, blob, blob_size);
+
     nt_font_step();
     nt_log_add_sink(capture_errors, NULL);
     s_warn_count = 0;
@@ -2629,8 +2252,8 @@ void test_font_weight_over_curve_cap_draws_regular(void) {
     memcpy(blob + sizeof hdr, &glyph, sizeof glyph);
     const uint32_t blob_size = glyph.data_offset + build_contour_blob_1(blob + glyph.data_offset, (const int16_t(*)[2])pts, POINTS);
     nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 4});
-    nt_font_add(font, nt_font_test_resource(nt_font_test_register_data(blob, blob_size)));
-    nt_resource_step();
+    nt_font_fill(font, blob, blob_size);
+
     nt_font_step();
     nt_font_slot_t *slot = nt_font_get_slot(font);
     nt_log_add_sink(capture_errors, NULL);
@@ -2663,9 +2286,9 @@ void test_cache_evict_chain_integrity(void) {
     nt_font_t font = nt_font_create(&desc);
     uint32_t blob_size = 0;
     uint8_t *blob = build_test_font_blob(&blob_size); /* glyphs A,B,C */
-    nt_resource_t res = register_font_resource("font_evict_chain", blob, blob_size);
-    nt_font_add(font, res);
-    nt_resource_step();
+
+    nt_font_fill(font, blob, blob_size);
+
     nt_font_step();
     nt_font_slot_t *slot = nt_font_get_slot(font);
 
@@ -2757,9 +2380,8 @@ void test_font_decoration_metrics_from_header(void) {
     h->strikeout_position = 250;
     h->strikeout_size = 55;
 
-    nt_resource_t res = register_font_resource("font_decoration", blob, blob_size);
-    nt_font_add(font, res);
-    nt_resource_step();
+    nt_font_fill(font, blob, blob_size);
+
     nt_font_step();
 
     nt_font_metrics_t m = nt_font_get_metrics(font);
@@ -3068,10 +2690,13 @@ static void test_font_worstcase_glyph_miss_budget(void) {
 #endif
 int main(void) {
     UNITY_BEGIN();
-    RUN_TEST(test_font_virtual_provider_asserts);
-    RUN_TEST(test_font_virtual_replacement_asserts);
-    RUN_TEST(test_font_add_rejects_non_font_resource);
-    RUN_TEST(test_font_source_survives_pack_eviction);
+    RUN_TEST(test_font_pool_exhaustion_asserts);
+    RUN_TEST(test_font_fill_preserves_glyphs_and_refreshes_measurement);
+    RUN_TEST(test_font_fill_overlap_preserves_existing_data);
+    RUN_TEST(test_second_fill_adds_kerning);
+    RUN_TEST(test_fill_merge_remaps_existing_kerning);
+    RUN_TEST(test_fill_merge_asserts_past_16_bit_glyph_indices);
+    RUN_TEST(test_font_fill_rejects_header_and_metrics_before_mutation);
     RUN_TEST(test_font_blob_valid);
     RUN_TEST(test_font_shared_contours_padding_and_empty_glyph_remain_valid);
     RUN_TEST(test_font_contour_points_above_curve_cap_stay_valid);
@@ -3082,14 +2707,13 @@ int main(void) {
     RUN_TEST(test_font_unready_texture_keeps_cpu_queries_gpu_free);
     RUN_TEST(test_font_destroy_frees_unready_texture);
     RUN_TEST(test_font_cached_glyph_waits_for_rebuilt_textures);
-    RUN_TEST(test_font_add_resource);
+    RUN_TEST(test_font_fill_sets_metrics);
     RUN_TEST(test_font_get_metrics);
     RUN_TEST(test_font_lookup_glyph_hit);
     RUN_TEST(test_font_lookup_glyph_miss_tofu);
-    RUN_TEST(test_font_fallback_order_first_wins);
-    RUN_TEST(test_font_fallback_decoration_primary_owned);
-    RUN_TEST(test_font_fallback_first_primary_reclaims_decoration);
-    RUN_TEST(test_font_late_primary_reclaims_cached_glyph);
+    RUN_TEST(test_font_tofu_measure_matches_glyph_advance_with_odd_upm);
+    RUN_TEST(test_font_disjoint_payloads);
+    RUN_TEST(test_font_first_fill_owns_decoration);
     RUN_TEST(test_font_cmap_bounded_no_parse);
     RUN_TEST(test_font_merged_different_upm_no_metrics_assert);
     RUN_TEST(test_font_get_stats);
@@ -3107,14 +2731,6 @@ int main(void) {
     RUN_TEST(test_measure_n_destroy_clears_cache);
     RUN_TEST(test_measure_n_cache_disabled);
     RUN_TEST(test_measure_n_cache_custom_size);
-    RUN_TEST(test_measure_n_invalidates_on_resource_change);
-    RUN_TEST(test_font_add_already_published_forces_rescan);
-    RUN_TEST(test_measure_n_invalidates_on_resource_unload);
-    RUN_TEST(test_font_recovers_after_remount);
-    RUN_TEST(test_font_flushes_on_same_metrics_winner_swap);
-    RUN_TEST(test_font_hotswap_replaces_metrics_in_one_step);
-    RUN_TEST(test_font_file_pack_unmount_cleans_state);
-    RUN_TEST(test_font_unmount_while_referenced_renders_tofu);
     /* embolden (offset_points) */
     RUN_TEST(test_embolden_w0_identity);
     RUN_TEST(test_fp16_rounding_keeps_curves_in_adjacent_bands);

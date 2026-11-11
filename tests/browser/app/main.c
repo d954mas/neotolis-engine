@@ -97,8 +97,6 @@ static nt_resource_t s_basis_srgb_rgb_handle;
 static nt_resource_t s_srgb_texel_handle;
 /* Uncompressed RGB9E5 with values above 1, sampled scaled by 1/16. */
 static nt_resource_t s_hdr_handle;
-static nt_resource_t s_font_resource;
-static nt_resource_t s_rich_font_resource[4];
 
 static nt_material_t s_sprite_material, s_text_material;
 static nt_program_ref_t s_sprite_program, s_text_program;
@@ -314,15 +312,19 @@ static void try_bind_resources(void) {
         nt_ui_set_atlas_white_region(s_ctx, s_atlas_handle, white);
         s_atlas_bound = true;
     }
-    if (!s_font_bound && nt_resource_is_ready(s_font_resource)) {
-        nt_font_add(s_font, s_font_resource);
+    if (!s_font_bound && nt_resource_pack_state(s_pack_id) == NT_PACK_STATE_READY) {
+        uint32_t size = 0;
+        const uint8_t *bytes = nt_resource_entry_bytes(s_pack_id, ASSET_FONT_UI_SHOWCASE_FONT, &size);
+        nt_font_fill(s_font, bytes, size);
         nt_ui_set_font(s_ctx, 0U, s_font);
         s_font_bound = true;
     }
-    if (!s_rich_font_bound && nt_resource_is_ready(s_rich_font_resource[0]) && nt_resource_is_ready(s_rich_font_resource[1]) && nt_resource_is_ready(s_rich_font_resource[2]) &&
-        nt_resource_is_ready(s_rich_font_resource[3])) {
+    if (!s_rich_font_bound && nt_resource_pack_state(s_pack_id) == NT_PACK_STATE_READY) {
+        const nt_hash64_t entries[4] = {ASSET_FONT_UI_SHOWCASE_FONT_RICH_R, ASSET_FONT_UI_SHOWCASE_FONT_RICH_B, ASSET_FONT_UI_SHOWCASE_FONT_RICH_I, ASSET_FONT_UI_SHOWCASE_FONT_RICH_BI};
         for (uint32_t i = 0; i < 4U; i++) {
-            nt_font_add(s_rich_font[i], s_rich_font_resource[i]);
+            uint32_t size = 0;
+            const uint8_t *bytes = nt_resource_entry_bytes(s_pack_id, entries[i], &size);
+            nt_font_fill(s_rich_font[i], bytes, size);
         }
         s_rich_font_bound = true;
     }
@@ -1511,11 +1513,6 @@ int main(int argc, char *argv[]) {
 #endif
     s_srgb_texel_handle = nt_resource_request(nt_hash64_str("srgb_texel"), NT_ASSET_TEXTURE);
     s_hdr_handle = nt_resource_request(nt_hash64_str("hdr_rgb9e5"), NT_ASSET_TEXTURE);
-    s_font_resource = nt_resource_request(ASSET_FONT_UI_SHOWCASE_FONT, NT_ASSET_FONT);
-    s_rich_font_resource[0] = nt_resource_request(ASSET_FONT_UI_SHOWCASE_FONT_RICH_R, NT_ASSET_FONT);
-    s_rich_font_resource[1] = nt_resource_request(ASSET_FONT_UI_SHOWCASE_FONT_RICH_B, NT_ASSET_FONT);
-    s_rich_font_resource[2] = nt_resource_request(ASSET_FONT_UI_SHOWCASE_FONT_RICH_I, NT_ASSET_FONT);
-    s_rich_font_resource[3] = nt_resource_request(ASSET_FONT_UI_SHOWCASE_FONT_RICH_BI, NT_ASSET_FONT);
 
     s_sprite_material = nt_material_create(&(nt_material_create_desc_t){
         .blend = nt_blend_alpha_premultiplied(),

@@ -23,6 +23,7 @@
 #include "hash/nt_hash.h"
 #include "material/nt_material.h"
 #include "memory/nt_mem_scratch.h"
+#include "nt_font_format.h"
 #include "nt_pack_format.h"
 #include "renderers/nt_sprite_renderer.h"
 #include "renderers/nt_text_renderer.h"
@@ -49,6 +50,13 @@ static nt_material_t make_material(bool with_page_sampler) {
 }
 
 static const nt_pass_desc_t FIXTURE_PASS = {.clear_depth = 1.0F};
+
+void ui_walker_fixture_fill_stub_font(ui_walker_fixture_t *fx) {
+    const NtFontAssetHeader payload = {.magic = NT_FONT_MAGIC, .version = NT_FONT_VERSION, .units_per_em = 1000, .ascent = 800, .descent = -200};
+    nt_gfx_end_pass();
+    nt_font_fill(fx->stub_font, (const uint8_t *)&payload, sizeof payload);
+    nt_gfx_begin_pass(&FIXTURE_PASS);
+}
 
 void ui_walker_fixture_init(ui_walker_fixture_t *fx, void *arena, size_t arena_size, ui_walker_fx_bind_t bind) {
     NT_ASSERT(fx != NULL);
@@ -169,8 +177,7 @@ nt_font_t ui_walker_fixture_make_real_font(ui_walker_fixture_t *fx) {
         fx->real_font_blob = nt_test_font_blob(32U, 126U, &fx->real_font_blob_size);
     }
     const nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 16});
-    nt_font_add(font, nt_font_test_resource(nt_font_test_register_data(fx->real_font_blob, fx->real_font_blob_size)));
-    nt_resource_step();
+    nt_font_fill(font, fx->real_font_blob, fx->real_font_blob_size);
     nt_font_step();
     return font;
 }
