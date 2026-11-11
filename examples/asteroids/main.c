@@ -2144,10 +2144,12 @@ static void frame(void) {
         select_level(s_requested_level);
     }
     nt_resource_step();
-    if (nt_font_content_revision(s_font) == 0 && nt_resource_pack_state(nt_hash32_str("asteroids_core")) == NT_PACK_STATE_READY) {
+    static bool s_font_filled;
+    if (!s_font_filled && nt_resource_pack_state(nt_hash32_str("asteroids_core")) == NT_PACK_STATE_READY) {
         uint32_t size = 0;
         const uint8_t *bytes = nt_resource_entry_bytes(nt_hash32_str("asteroids_core"), nt_hash64_str("asteroids/font"), &size);
         nt_font_fill(s_font, bytes, size);
+        s_font_filled = true;
     }
     nt_font_step();
     const bool ready = prepare_gpu();

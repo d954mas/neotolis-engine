@@ -320,8 +320,6 @@ void nt_ui_context_layout_size(const nt_ui_context_t *ctx, float *out_w, float *
    bounds are only valid then — a never-begun ctx has degenerate (0) dims that trap the converters. */
 bool nt_ui_context_has_frame(const nt_ui_context_t *ctx);
 
-/* A bound font must stay alive until rebound: nt_ui_begin reads its content revision
- * and asserts on a destroyed handle. Bind (nt_font_t){0} to unbind. */
 void nt_ui_set_font(nt_ui_context_t *ctx, uint16_t font_id, nt_font_t font);
 
 /* Device->layout viewport, the ctx's single device<->layout mapping.

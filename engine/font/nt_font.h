@@ -117,8 +117,9 @@ bool nt_font_valid(nt_font_t font);
  * bytes may then be freed. Outside a render pass, before layout. Overlap, incompatible
  * metrics, invalid structure, more than 65535 glyphs and OOM assert. Existing glyphs stay valid. */
 void nt_font_fill(nt_font_t font, const uint8_t *data, uint32_t size);
-/* Zero before the first fill; advances on fill only, not glyph-cache eviction or GPU recovery. */
-uint32_t nt_font_content_revision(nt_font_t font);
+/* Advances on every fill of any font, never on glyph-cache eviction or GPU recovery.
+ * Valid without nt_font_init; UI compares it to reset text measurements. */
+uint32_t nt_font_content_epoch(void);
 
 nt_font_metrics_t nt_font_get_metrics(nt_font_t font);
 nt_font_stats_t nt_font_get_stats(nt_font_t font);

@@ -467,6 +467,8 @@ static uint32_t resource_io_issue(const char *path, uint8_t io_type) {
     return 0;
 }
 
+static nt_result_t pack_parse(nt_hash32_t pack_id, const uint8_t *blob, uint32_t blob_size);
+
 /* ---- Load failure / retry handler ---- */
 
 static void resource_handle_load_failure(NtPackMeta *pack) {
@@ -474,7 +476,6 @@ static void resource_handle_load_failure(NtPackMeta *pack) {
     if (s_resource.retry_max_attempts == 1 || (s_resource.retry_max_attempts > 1 && pack->attempt_count >= s_resource.retry_max_attempts)) {
         /* Max attempts reached -- FAILED permanently */
         pack->pack_state = NT_PACK_STATE_FAILED;
-        pack->io_type = NT_IO_NONE; /* bytes a later parse_pack passes stay caller-owned */
         NT_LOG_ERROR("pack 0x%08X FAILED after %d attempts", pack->pack_id, pack->attempt_count);
         return;
     }
@@ -645,13 +646,12 @@ void nt_resource_step(void) {
                     s_resource.needs_resolve = true;
                 } else {
                     /* First load: full parse */
-                    nt_result_t res = nt_resource_parse_pack((nt_hash32_t){pack->pack_id}, loaded_blob, loaded_size);
+                    nt_result_t res = pack_parse((nt_hash32_t){pack->pack_id}, loaded_blob, loaded_size);
                     if (res == NT_OK) {
                         pack->pack_state = NT_PACK_STATE_READY;
                     } else {
                         free(loaded_blob);
                         pack->pack_state = NT_PACK_STATE_FAILED;
-                        pack->io_type = NT_IO_NONE;
                         NT_LOG_ERROR("pack 0x%08X parse failed", pack->pack_id);
                     }
                 }
@@ -892,7 +892,7 @@ nt_result_t nt_resource_set_priority(nt_hash32_t pack_id, int16_t new_priority) 
 /* ---- Pack parsing ---- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-nt_result_t nt_resource_parse_pack(nt_hash32_t pack_id, const uint8_t *blob, uint32_t blob_size) {
+static nt_result_t pack_parse(nt_hash32_t pack_id, const uint8_t *blob, uint32_t blob_size) {
 #if NT_RESOURCE_TIMING_ENABLED
     double parse_start = nt_time_now();
     float crc_ms = 0.0F;
@@ -1045,6 +1045,20 @@ parse_done:
     s_resource.parse_ms = (float)((nt_time_now() - parse_start) * 1000.0);
     s_resource.crc_ms = crc_ms;
 #endif
+    return result;
+}
+
+/* Public bytes are caller-owned: no resource I/O may own the pack, and evict/unmount never free them. */
+nt_result_t nt_resource_parse_pack(nt_hash32_t pack_id, const uint8_t *blob, uint32_t blob_size) {
+    int16_t idx = -1;
+    if (s_resource.initialized) {
+        idx = find_pack(pack_id.value);
+    }
+    NT_ASSERT((idx < 0 || (s_resource.packs[idx].io_request_id == 0 && s_resource.packs[idx].retry_time_ms == 0)) && "parse_pack while resource I/O loads the pack");
+    const nt_result_t result = pack_parse(pack_id, blob, blob_size);
+    if (result == NT_OK) {
+        s_resource.packs[idx].io_type = NT_IO_NONE;
+    }
     return result;
 }
 
@@ -1505,7 +1519,7 @@ void nt_resource_evict(nt_hash32_t pack_id) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_resource_invalidate(uint8_t asset_type) {
-    NT_ASSERT(asset_type != NT_ASSET_FONT && asset_type != NT_ASSET_BLOB && "CPU-only objects survive context loss");
+    NT_ASSERT(asset_type != NT_ASSET_FONT && "FONT entries fill direct font objects");
     /* Pass 1: Deactivate and mark assets back to REGISTERED */
     for (uint32_t i = 0; i < s_resource.asset_hwm; i++) {
         NtAssetMeta *meta = &s_resource.assets[i];

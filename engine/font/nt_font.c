@@ -19,6 +19,8 @@
 /* ---- Module state ---- */
 
 static nt_font_state_t s_font;
+/* Outside s_font so init/shutdown never repeat an epoch a UI context already saw. */
+static uint32_t s_font_epoch;
 
 /* Forward declarations for internal helpers used before their definitions. */
 static void measure_cache_clear(nt_font_slot_t *slot);
@@ -1409,7 +1411,8 @@ bool nt_font_valid(nt_font_t font) {
 
 /* Merges two sorted glyph tables into one owned payload. Per-glyph data blocks are copied
  * unchanged after the table, so only data offsets and kern glyph indices are rewritten.
- * Each source keeps its order in the merge, so remapped kern lists stay sorted. */
+ * Each source keeps its order in the merge, so remapped kern lists stay sorted. Kern indices
+ * are read from the sources, so a data block shared by several glyphs is rewritten consistently. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static uint8_t *merge_payloads(const uint8_t *a, uint32_t a_size, const uint8_t *b, uint32_t b_size, uint32_t *out_size) {
     const uint32_t na = ((const NtFontAssetHeader *)a)->glyph_count;
@@ -1424,7 +1427,7 @@ static uint8_t *merge_payloads(const uint8_t *a, uint32_t a_size, const uint8_t 
     *out_size = table + a_data + b_data;
     const NtFontGlyphEntry *ga = (const NtFontGlyphEntry *)(a + sizeof(NtFontAssetHeader));
     const NtFontGlyphEntry *gb = (const NtFontGlyphEntry *)(b + sizeof(NtFontAssetHeader));
-    /* Separate pass before allocating: an assert test that jumps out must not leak. */
+    /* Overlap asserts before any allocation or publication. */
     uint32_t i = 0;
     uint32_t j = 0;
     while (i < na && j < nb) {
@@ -1461,13 +1464,15 @@ static uint8_t *merge_payloads(const uint8_t *a, uint32_t a_size, const uint8_t 
         }
     }
     for (uint32_t s = 0; s < n; s++) {
-        const uint16_t *map = s < na ? remap : remap + na;
-        const uint32_t own_count = s < na ? na : nb;
-        const NtFontGlyphEntry *e = &g[remap[s]];
-        NtFontKernEntry *kern = (NtFontKernEntry *)(out + e->data_offset);
+        const bool from_a = s < na;
+        const uint16_t *map = from_a ? remap : remap + na;
+        const uint32_t own_count = from_a ? na : nb;
+        const NtFontGlyphEntry *e = from_a ? &ga[s] : &gb[s - na];
+        const NtFontKernEntry *src = (const NtFontKernEntry *)((from_a ? a : b) + e->data_offset);
+        NtFontKernEntry *kern = (NtFontKernEntry *)(out + g[remap[s]].data_offset);
         for (uint32_t q = 0; q < e->kern_count; q++) {
-            NT_ASSERT(kern[q].right_glyph_index < own_count);
-            kern[q].right_glyph_index = map[kern[q].right_glyph_index];
+            NT_ASSERT(src[q].right_glyph_index < own_count);
+            kern[q].right_glyph_index = map[src[q].right_glyph_index];
         }
     }
     free(remap);
@@ -1486,9 +1491,10 @@ void nt_font_fill(nt_font_t font, const uint8_t *data, uint32_t size) {
               (slot->metrics.units_per_em == hdr->units_per_em && slot->metrics.ascent == hdr->ascent && slot->metrics.descent == hdr->descent && slot->metrics.line_gap == hdr->line_gap));
     const NtFontGlyphEntry *glyphs = (const NtFontGlyphEntry *)(data + sizeof(*hdr));
 
+    const bool first = slot->data == NULL;
     uint8_t *owned = NULL;
     uint32_t owned_size = size;
-    if (slot->data == NULL) {
+    if (first) {
         owned = malloc(size);
         NT_ASSERT(owned);
         memcpy(owned, data, size);
@@ -1496,10 +1502,9 @@ void nt_font_fill(nt_font_t font, const uint8_t *data, uint32_t size) {
         owned = merge_payloads(slot->data, slot->data_size, data, size, &owned_size);
         free(slot->data);
     }
-    const bool first = slot->data == NULL;
     slot->data = owned;
     slot->data_size = owned_size;
-    slot->fill_count++;
+    s_font_epoch++;
     if (first) {
         slot->metrics = (nt_font_metrics_t){.ascent = hdr->ascent,
                                             .descent = hdr->descent,
@@ -1526,10 +1531,7 @@ void nt_font_fill(nt_font_t font, const uint8_t *data, uint32_t size) {
     generate_tofu(slot);
 }
 
-uint32_t nt_font_content_revision(nt_font_t font) {
-    NT_ASSERT(s_font.initialized && nt_pool_valid(&s_font.pool, font.id));
-    return get_slot(font)->fill_count;
-}
+uint32_t nt_font_content_epoch(void) { return s_font_epoch; }
 
 /* ---- Query ---- */
 

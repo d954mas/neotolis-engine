@@ -183,7 +183,7 @@ if (!s_cjk_filled) {
 ```
 
 - `fill` merges the payload into the font's copy and publishes before returning, so old glyphs stay valid and no partial
-  addition is visible. It clears the font's measure cache and advances the content revision. It is
+  addition is visible. It clears the font's measure cache and advances the global font content epoch. It is
   legal outside a pass, before layout.
 - An incoming codepoint that already exists asserts. The builder selects ranges and emits disjoint
   subsets; there is no runtime range selector, source order or fallback stack.
@@ -261,11 +261,11 @@ step is gone before consumers run, which is legal because the step precedes the 
 
 ### 5.4 Font and UI caches
 
-A font carries a content revision that advances on a successful fill, including a font used without
-a registry. GPU-only glyph cache rebuild or eviction does not change it. Disjoint fills preserve existing
+One global font content epoch advances on every successful fill, including a font used without a
+registry. GPU-only glyph cache rebuild or eviction does not change it. Disjoint fills preserve existing
 glyph rows; the existing protection of rows used in the current frame remains.
 
-Before Clay layout, each UI context compares its bound `(font, revision)` pairs and clears Clay's
+Before Clay layout, each UI context compares the epoch it last saw and clears Clay's
 measurement cache on a change, including an inactive context on next use and a different font under
 the same UI font ID. If metrics change after a layout was prepared, rebuild it before drawing.
 

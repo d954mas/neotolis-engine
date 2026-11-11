@@ -93,12 +93,12 @@ game-side changes.
 
 ## Font measurements
 
-Each context keeps the last content revision of its bound fonts. Before layout,
-`nt_ui_begin` resets Clay's measurement cache if a font was filled, including
-when this context was inactive during the fill. `nt_ui_set_font` invalidates the
-observed revision when a different handle is bound under the same font ID;
-the next `nt_ui_begin` performs the cache reset, including equal-revision rebinds.
-GPU glyph eviction and texture recovery do not change the content revision.
+Each context keeps the last `nt_font_content_epoch` it saw. Before layout,
+`nt_ui_begin` resets Clay's measurement cache if any font was filled since,
+including when this context was inactive during the fill. `nt_ui_set_font`
+forces the next reset when a different handle is bound under the same font ID.
+GPU glyph eviction and texture recovery do not change the epoch. A destroyed
+font may stay bound while no text uses its font ID; measuring such text asserts.
 Fill fonts before layout; a fill after layout requires rebuilding that layout.
 
 ## Widget IDs

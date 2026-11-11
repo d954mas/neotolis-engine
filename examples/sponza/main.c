@@ -1,4 +1,3 @@
-#include "blob/nt_blob.h"
 /*
  * Sponza Demo -- Neotolis Engine
  *
@@ -29,6 +28,7 @@
  */
 
 #include "app/nt_app.h"
+#include "blob/nt_blob.h"
 #include "core/nt_core.h"
 #include "core/nt_platform.h"
 #include "drawable_comp/nt_drawable_comp.h"

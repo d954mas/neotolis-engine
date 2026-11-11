@@ -398,7 +398,7 @@ void nt_ui_set_font(nt_ui_context_t *ctx, uint16_t font_id, nt_font_t font) {
     NT_ASSERT(!ctx->in_frame && "nt_ui_set_font: must be called outside begin/end");
     NT_ASSERT(font_id < NT_UI_MAX_FONTS && "nt_ui_set_font: font_id >= NT_UI_MAX_FONTS");
     if (ctx->fonts[font_id].id != font.id) {
-        ctx->font_revisions[font_id] = UINT32_MAX; /* no fill count can equal this */
+        ctx->font_epoch = UINT32_MAX; /* the next begin resets measurements */
     }
     ctx->fonts[font_id] = font;
 }
@@ -443,13 +443,8 @@ void nt_ui_begin(nt_ui_context_t *ctx, const nt_ui_frame_desc_t *frame) {
     /* MUST be first so subsequent Clay calls operate on ctx->clay. */
     Clay_SetCurrentContext(ctx->clay);
 
-    bool fonts_changed = false;
-    for (uint32_t i = 0; i < NT_UI_MAX_FONTS; i++) {
-        uint32_t revision = ctx->fonts[i].id != 0 ? nt_font_content_revision(ctx->fonts[i]) : 0;
-        fonts_changed |= revision != ctx->font_revisions[i];
-        ctx->font_revisions[i] = revision;
-    }
-    if (fonts_changed) {
+    if (ctx->font_epoch != nt_font_content_epoch()) {
+        ctx->font_epoch = nt_font_content_epoch();
         Clay_ResetMeasureTextCache();
     }
 

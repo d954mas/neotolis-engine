@@ -35,7 +35,7 @@ separately executing Web callbacks; activation does not measure GPU completion.
 
 OFF removes the four diagnostic result fields and additional clock reads,
 including the activation duration used by the INFO log; timing getters return
-zero. Budget, retry and eviction clocks retain their operational purpose.
+zero. Budget and retry clocks retain their operational purpose.
 There is no measurement history, per-asset timer or diagnostic allocation.
 The host may forward values to its existing metrics collector; the last parse
 must not be reported as the cost of every frame. JS memory peaks and JS-to-WASM
@@ -367,6 +367,8 @@ No refill or source reread is needed. An atlas keeps its parsed regions and need
 its page textures resolved again.
 
 Invalidation schedules a reread only for packs with matching canonical owners.
+A reread must match the retained size and payload CRC, or it asserts; the
+catalog is not compared until #504/#508.
 An evicted empty or FONT-only pack remains evicted. Ready objects of unrelated
 types remain intact.
 
@@ -477,8 +479,7 @@ registry. The descriptor requires positive `max_fonts`; invalid arguments,
 double initialization and allocation failure assert. Each `nt_font_t` owns one
 compact payload: the merge of all its fills, at most 65535 glyphs.
 `nt_font_create` asserts on invalid configuration, pool exhaustion and allocation
-failure. A present payload also means metrics are present; no separate readiness
-flag is stored.
+failure.
 
 `nt_font_fill(font, bytes, size)` merges one trusted FONT payload synchronously:
 one linear pass over both sorted glyph tables, then the old copy is freed.
@@ -496,9 +497,9 @@ or activation; absence/nonresidency returns NULL and size 0. The view is borrowe
 until byte eviction, unmount or shutdown. The game fills its font before evicting.
 Requesting or registering FONT as a resource asserts.
 
-Fill increments `nt_font_content_revision` and clears only the font measurement
-cache. CPU data survives GPU context loss, so texture recovery needs no pack
-read. UI consumes the revision before layout; see [font measurements](../ui/nt-ui.md#font-measurements).
+Fill advances the global `nt_font_content_epoch` and clears only the font
+measurement cache. CPU data survives GPU context loss, so texture recovery needs
+no pack read. UI compares the epoch before layout; see [font measurements](../ui/nt-ui.md#font-measurements).
 
 Builder produces font assets from TTF/OTF sources. Binary layout:
 

@@ -13,6 +13,7 @@ typedef struct {
 
 /* Independent fixed-capacity pool. Zero capacity, double init and OOM assert. */
 void nt_blob_init(uint16_t max_blobs);
+/* After nt_resource_shutdown when BLOB packs were registered: unmount deactivates blobs. */
 void nt_blob_shutdown(void);
 /* Copies caller bytes; NULL is allowed only for size 0. Capacity/OOM assert. */
 nt_blob_t nt_blob_create(const void *data, uint32_t size);

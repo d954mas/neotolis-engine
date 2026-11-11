@@ -651,11 +651,10 @@ Invalid layouts/counts and pool exhaustion assert. Device loss returns INVALID.
 
 The pack activator keeps sequential decode/upload: vertex staging is reused by
 index decoding, so peak staging stays max(vertex bytes, decoded index bytes).
-Both constructors share object finalization, not a public buffer-adoption layer.
 
 A live mesh whose buffers were lost still has queryable metadata. Its vertex-input
 lookup returns INVALID and the renderer skips it until the game reconstructs it.
-Readiness derives from owned buffer state. Stale mesh handles remain errors in
+Stale mesh handles remain errors in
 draw/vertex-input paths. Resource invalidation destroys pack-owned meshes before
 rebuilding; procedural objects are recreated by the game.
 

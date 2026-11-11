@@ -224,7 +224,7 @@ static void test_layout_refreshes_after_fill_and_rebind(void) {
     blob = nt_test_font_blob('E', 'E', &size);
     nt_font_fill(other, blob, size);
     free(blob);
-    TEST_ASSERT_EQUAL_UINT32(nt_font_content_revision(font), nt_font_content_revision(other));
+    TEST_ASSERT_EQUAL_INT32(14, (int32_t)declare_and_measure_text(ctx, "D", 0, 20).width); /* epoch seen */
     nt_ui_set_font(ctx, 0, other);
     TEST_ASSERT_EQUAL_INT32(10, (int32_t)declare_and_measure_text(ctx, "D", 0, 20).width);
     nt_ui_destroy_context(ctx);

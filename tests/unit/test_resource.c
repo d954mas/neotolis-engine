@@ -1917,6 +1917,17 @@ void test_parse_after_failed_load_keeps_caller_bytes(void) {
     free(blob);
 }
 
+/* Resource I/O owns a loading pack, so caller bytes cannot take its place. */
+void test_parse_while_loading_asserts(void) {
+    nt_hash32_t pid = nt_hash32_str("parse_while_loading_pack");
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pid, "nonexistent_file_that_does_not_exist.ntpack"));
+    uint32_t size = 0;
+    uint8_t *blob = build_pack_with_rid(nt_hash64_str("parse_while_loading").value, NT_ASSET_MESH, &size);
+    EXPECT_ASSERT(nt_resource_parse_pack(pid, blob, size));
+    free(blob);
+}
+
 /* ---- Load URL on native (should fail gracefully) ---- */
 
 void test_load_url_native_fails(void) {
@@ -3524,6 +3535,7 @@ int main(void) {
     RUN_TEST(test_load_file_empty_pack_fails);
     RUN_TEST(test_load_file_nonexistent);
     RUN_TEST(test_parse_after_failed_load_keeps_caller_bytes);
+    RUN_TEST(test_parse_while_loading_asserts);
     RUN_TEST(test_pack_state_api);
     RUN_TEST(test_pack_progress);
 

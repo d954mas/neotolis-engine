@@ -35,7 +35,6 @@ struct nt_font_slot_s {
 
     uint8_t *data; /* one owned payload; each fill merges into its sorted glyph table */
     uint32_t data_size;
-    uint32_t fill_count;
 
     nt_texture_t curve_texture; /* RGBA16F, NT_FONT_GLYPH_TEXELS x max_glyphs: row i = cache slot i */
 

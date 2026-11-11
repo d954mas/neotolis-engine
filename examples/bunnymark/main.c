@@ -291,10 +291,12 @@ static void frame(void) {
 #endif
 
     nt_resource_step();
-    if (nt_font_content_revision(s_overlay_font) == 0 && nt_resource_pack_state(s_pack_id) == NT_PACK_STATE_READY) {
+    static bool s_overlay_font_filled;
+    if (!s_overlay_font_filled && nt_resource_pack_state(s_pack_id) == NT_PACK_STATE_READY) {
         uint32_t size = 0;
         const uint8_t *bytes = nt_resource_entry_bytes(s_pack_id, ASSET_FONT_BUNNYMARK_FONT_OVERLAY, &size);
         nt_font_fill(s_overlay_font, bytes, size);
+        s_overlay_font_filled = true;
     }
     link_programs();
     nt_sprite_comp_sync_resources();
