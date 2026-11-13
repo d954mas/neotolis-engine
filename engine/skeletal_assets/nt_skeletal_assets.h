@@ -9,15 +9,12 @@
 /*
  * nt_skeletal_assets — the NSKL / NSKN / NANM adapters.
  *
- * Each activator asserts the structure of the whole pack payload (packs are
- * trusted builder output), copies it into one allocation and points a runtime
- * view at the copy: the wire layout is the runtime layout (skeletal spec,
- * Builder, codec, wire formats), so nothing is transposed or re-indexed. The
- * pack blob is never read again, so any blob policy may drop it after
- * activation. Structure is what a view needs to address memory, and the one float
- * read is the grid shape (sample_count, a finite duration >= 0); no value is
- * checked here (the locked rule of the same spec section). Payload arrays are
- * read in place from the malloc copy, whose alignment carries them.
+ * Each activator asserts structure before allocating one owned buffer. NSKL
+ * and NSKN copy their arrays; NANM decodes sampled rows into FP32 and normalizes
+ * FP16 sampled quaternions once. Source pack bytes are not retained by this
+ * module; blob retention follows the resource policy. No numeric values are
+ * validated here: duration is used only to validate grid structure (skeletal
+ * spec, Builder, codec, wire formats).
  *
  * The module registers nothing itself. An application that links animation
  * registers the three pairs like any other type:

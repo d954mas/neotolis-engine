@@ -30,6 +30,8 @@
 #define MKDIR(p) mkdir(p, 0755)
 #endif
 
+#define CLIP_FP32 ((nt_builder_clip_layout_t){NT_SKELETAL_FORMAT_FP32, NT_SKELETAL_FORMAT_FP32, NT_SKELETAL_FORMAT_FP32})
+
 #define TMP_DIR "build/tests/tmp"
 #define PACK_PATH TMP_DIR "/builder_skeletal.ntpack"
 
@@ -170,10 +172,10 @@ static void fixture_clip(nt_skeletal_clip_t *clip) {
     clip->n_s = 1;
 }
 
-/* Hand-computed offsets of the fixture clip: header 44, three base entries,
+/* Hand-computed offsets of the fixture clip: header 48, three base entries,
  * blocks 5 x 13 floats, then the three joint tables. */
 enum {
-    FIX_OFF_BASE = 44,
+    FIX_OFF_BASE = 48,
     FIX_OFF_BLOCKS = FIX_OFF_BASE + (CLIP_JOINTS * 40),
     FIX_OFF_T_JOINT = FIX_OFF_BLOCKS + (CLIP_SAMPLES * CLIP_STRIDE * 4),
     FIX_OFF_Q_JOINT = FIX_OFF_T_JOINT + 4,
@@ -260,12 +262,14 @@ void test_encode_skin_binding_wire_layout(void) {
 
 // #region NANM
 void test_encode_clip_header_counts(void) {
+    TEST_ASSERT_EQUAL_UINT16(6, NT_SKELETAL_FORMAT_VERSION);
+    TEST_ASSERT_EQUAL_UINT32(48, sizeof(NtAnmHeader));
     nt_skeletal_clip_t clip;
     fixture_clip(&clip);
 
     uint8_t *payload = NULL;
     uint32_t size = 0;
-    nt_builder_encode_clip(&clip, &payload, &size);
+    nt_builder_encode_clip(&clip, CLIP_FP32, &payload, &size);
     TEST_ASSERT_NOT_NULL(payload);
     TEST_ASSERT_EQUAL_UINT32(FIX_SIZE, size);
 
@@ -285,7 +289,10 @@ void test_encode_clip_header_counts(void) {
     TEST_ASSERT_EQUAL_UINT16(2, header.n_t);
     TEST_ASSERT_EQUAL_UINT16(1, header.n_q);
     TEST_ASSERT_EQUAL_UINT16(1, header.n_s);
-    TEST_ASSERT_EQUAL_UINT16(0, header._pad);
+    TEST_ASSERT_EQUAL_UINT8(0, header.t_format);
+    TEST_ASSERT_EQUAL_UINT8(0, header.q_format);
+    TEST_ASSERT_EQUAL_UINT8(0, header.s_format);
+    TEST_ASSERT_EACH_EQUAL_UINT8(0, header._pad, 3);
 
     free(payload);
 }
@@ -297,7 +304,7 @@ void test_encode_clip_array_layout(void) {
 
     uint8_t *payload = NULL;
     uint32_t size = 0;
-    nt_builder_encode_clip(&clip, &payload, &size);
+    nt_builder_encode_clip(&clip, CLIP_FP32, &payload, &size);
     TEST_ASSERT_NOT_NULL(payload);
 
     /* The base pose comes first, one 40-byte TRS per joint. */
@@ -346,10 +353,10 @@ void test_encode_clip_single_sample_has_no_blocks(void) {
 
     uint8_t *payload = NULL;
     uint32_t size = 0;
-    nt_builder_encode_clip(&clip, &payload, &size);
+    nt_builder_encode_clip(&clip, CLIP_FP32, &payload, &size);
     TEST_ASSERT_NOT_NULL(payload);
 
-    TEST_ASSERT_EQUAL_UINT32(44U + 40U, size);
+    TEST_ASSERT_EQUAL_UINT32(48U + 40U, size);
     NtAnmHeader header;
     memcpy(&header, payload, sizeof(header));
     TEST_ASSERT_EQUAL_UINT32(1U, header.sample_count);
@@ -358,7 +365,7 @@ void test_encode_clip_single_sample_has_no_blocks(void) {
     TEST_ASSERT_EQUAL_UINT16(0, header.n_q);
     TEST_ASSERT_EQUAL_UINT16(0, header.n_s);
     for (size_t c = 0; c < 3; c++) {
-        TEST_ASSERT_EQUAL_HEX32(f32_bits(k_base[0].t[c]), rd_u32(payload + 44 + (4 * c)));
+        TEST_ASSERT_EQUAL_HEX32(f32_bits(k_base[0].t[c]), rd_u32(payload + 48 + (4 * c)));
     }
 
     free(payload);
@@ -412,7 +419,7 @@ void test_add_skeletal_assets_writes_typed_entries(void) {
 
     nt_builder_add_skeleton(ctx, &skel, "rigs/hero.nskl");
     nt_builder_add_skin_binding(ctx, &binding, "rigs/hero.nskn");
-    nt_builder_add_clip(ctx, &clip, "clips/hero_run.nanm");
+    nt_builder_add_clip(ctx, &clip, CLIP_FP32, "clips/hero_run.nanm");
 
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
     nt_builder_free_pack(ctx);
@@ -444,7 +451,7 @@ void test_add_skeletal_assets_writes_typed_entries(void) {
     /* The clip entry is byte-identical to what the encoder produced. */
     uint8_t *expected = NULL;
     uint32_t expected_size = 0;
-    nt_builder_encode_clip(&clip, &expected, &expected_size);
+    nt_builder_encode_clip(&clip, CLIP_FP32, &expected, &expected_size);
     const NtAssetEntry *clip_entry = NULL;
     for (uint32_t i = 0; i < pack->asset_count; i++) {
         if (entries[i].asset_type == NT_ASSET_CLIP) {
@@ -526,34 +533,129 @@ void test_encode_clip_asserts_on_broken_structure(void) {
 
     fixture_clip(&clip);
     clip.base = NULL;
-    EXPECT_BUILD_ASSERT_MATCH(nt_builder_encode_clip(&clip, &payload, &size), "clip has no base pose");
+    EXPECT_BUILD_ASSERT_MATCH(nt_builder_encode_clip(&clip, CLIP_FP32, &payload, &size), "clip has no base pose");
 
     /* One sample cannot carry a sampled row, whatever the duration says. */
     fixture_clip(&clip);
     clip.sample_count = 1;
-    EXPECT_BUILD_ASSERT_MATCH(nt_builder_encode_clip(&clip, &payload, &size), "sampled rows need frame blocks, at least two samples and a positive duration");
+    EXPECT_BUILD_ASSERT_MATCH(nt_builder_encode_clip(&clip, CLIP_FP32, &payload, &size), "sampled rows need frame blocks, at least two samples and a positive duration");
 
     fixture_clip(&clip);
     clip.blocks = NULL;
-    EXPECT_BUILD_ASSERT_MATCH(nt_builder_encode_clip(&clip, &payload, &size), "sampled rows need frame blocks, at least two samples and a positive duration");
+    EXPECT_BUILD_ASSERT_MATCH(nt_builder_encode_clip(&clip, CLIP_FP32, &payload, &size), "sampled rows need frame blocks, at least two samples and a positive duration");
 
     fixture_clip(&clip);
     clip.q_joint = NULL;
-    EXPECT_BUILD_ASSERT_MATCH(nt_builder_encode_clip(&clip, &payload, &size), "a joint table is NULL while its row count is not");
+    EXPECT_BUILD_ASSERT_MATCH(nt_builder_encode_clip(&clip, CLIP_FP32, &payload, &size), "a joint table is NULL while its row count is not");
 
     /* The header stores a float duration; a double the float cannot hold would
      * move the grid the samples were taken on. */
     fixture_clip(&clip);
     clip.duration = 1.0 + 1e-12;
-    EXPECT_BUILD_ASSERT_MATCH(nt_builder_encode_clip(&clip, &payload, &size), "exactly representable as float");
+    EXPECT_BUILD_ASSERT_MATCH(nt_builder_encode_clip(&clip, CLIP_FP32, &payload, &size), "exactly representable as float");
 
     fixture_clip(&clip);
     clip.r_root = -0.5F;
-    EXPECT_BUILD_ASSERT_MATCH(nt_builder_encode_clip(&clip, &payload, &size), "clip bounds must be finite and non-negative");
+    EXPECT_BUILD_ASSERT_MATCH(nt_builder_encode_clip(&clip, CLIP_FP32, &payload, &size), "clip bounds must be finite and non-negative");
 
     TEST_ASSERT_NULL(payload);
 }
 // #endregion
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_encode_clip_all_layouts_have_independent_wire_bytes(void) {
+    const float blocks[2][10] = {
+        {1.0003F, -0.0F, 0x1p-25F, 0.25F, 0.5F, 0.5F, 0.6614378F, -2.0F, 0.0F, 0x1p-24F},
+        {2.0003F, -1.0F, -0x1p-26F, -0.25F, -0.5F, -0.5F, -0.6614378F, -1.0F, 1.5F, 65504.0F},
+    };
+    const uint16_t halves[2][10] = {
+        {0x3C00, 0x8000, 0, 0x3400, 0x3800, 0x3800, 0x394B, 0xC000, 0, 1},
+        {0x4000, 0xBC00, 0x8000, 0xB400, 0xB800, 0xB800, 0xB94B, 0xBC00, 0x3E00, 0x7BFF},
+    };
+    const uint16_t joints[3] = {2, 0, 1};
+    for (uint32_t bits = 0; bits < 8U; ++bits) {
+        const nt_builder_clip_layout_t layout = {(nt_skeletal_format_t)(bits & 1U), (nt_skeletal_format_t)((bits >> 1U) & 1U), (nt_skeletal_format_t)((bits >> 2U) & 1U)};
+        const nt_skeletal_clip_t clip = {.base = k_base,
+                                         .blocks = &blocks[0][0],
+                                         .t_joint = joints,
+                                         .q_joint = joints + 1,
+                                         .s_joint = joints + 2,
+                                         .joint_count = 3,
+                                         .sample_count = 2,
+                                         .duration = 1.0,
+                                         .n_t = 1,
+                                         .n_q = 1,
+                                         .n_s = 1};
+        uint8_t *payload = NULL;
+        uint32_t size = 0;
+        nt_builder_encode_clip(&clip, layout, &payload, &size);
+        const uint32_t stride = ((bits & 1U) ? 6U : 12U) + ((bits & 2U) ? 8U : 16U) + ((bits & 4U) ? 6U : 12U);
+        TEST_ASSERT_EQUAL_UINT32(48U + 120U + (2U * stride) + 6U, size);
+        TEST_ASSERT_EQUAL_UINT8(bits & 1U, payload[42]);
+        TEST_ASSERT_EQUAL_UINT8((bits >> 1U) & 1U, payload[43]);
+        TEST_ASSERT_EQUAL_UINT8((bits >> 2U) & 1U, payload[44]);
+        TEST_ASSERT_EACH_EQUAL_UINT8(0, payload + 45, 3);
+        TEST_ASSERT_EQUAL_MEMORY(k_base, payload + 48, 120);
+        size_t offset = 168;
+        for (uint32_t frame = 0; frame < 2U; ++frame) {
+            for (uint32_t lane = 0; lane < 10U; ++lane) {
+                uint32_t bit = 4U;
+                if (lane < 3U) {
+                    bit = 1U;
+                } else if (lane < 7U) {
+                    bit = 2U;
+                }
+                if ((bits & bit) != 0U) {
+                    TEST_ASSERT_EQUAL_HEX16(halves[frame][lane], rd_u16(payload + offset));
+                    offset += 2;
+                } else {
+                    TEST_ASSERT_EQUAL_HEX32(f32_bits(blocks[frame][lane]), rd_u32(payload + offset));
+                    offset += 4;
+                }
+            }
+        }
+        TEST_ASSERT_EQUAL_MEMORY(joints, payload + offset, sizeof(joints));
+        free(payload);
+    }
+}
+
+void test_encode_clip_half_admission(void) {
+    nt_skeletal_clip_t clip;
+    fixture_clip(&clip);
+    uint8_t *payload = NULL;
+    uint32_t size = 0;
+    nt_builder_clip_layout_t layout = CLIP_FP32;
+    /* Invalid caller input must be rejected before narrowing to a wire byte. */
+    // NOLINTNEXTLINE(clang-analyzer-optin.core.EnumCastOutOfRange)
+    layout.t_format = (nt_skeletal_format_t)256;
+    EXPECT_BUILD_ASSERT_MATCH(nt_builder_encode_clip(&clip, layout, &payload, &size), "unsupported clip format");
+    layout.t_format = NT_SKELETAL_FORMAT_FP16;
+    const float bad[] = {nextafterf(65504.0F, INFINITY), -65505.0F, INFINITY, -INFINITY, NAN};
+    for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); ++i) {
+        g_blocks[0] = bad[i];
+        EXPECT_BUILD_ASSERT_MATCH(nt_builder_encode_clip(&clip, layout, &payload, &size), "clip FP16 sample outside finite half range");
+    }
+    fixture_clip(&clip);
+    layout = CLIP_FP32;
+    layout.q_format = NT_SKELETAL_FORMAT_FP16;
+    g_blocks[9] = 2.0F;
+    EXPECT_BUILD_ASSERT_MATCH(nt_builder_encode_clip(&clip, layout, &payload, &size), "clip FP16 quaternion must be unit");
+}
+
+void test_encode_clip_expanded_limit(void) {
+    nt_skeletal_clip_t clip;
+    fixture_clip(&clip);
+    uint8_t *payload = NULL;
+    uint32_t size = 0;
+    nt_builder_clip_layout_t layout = CLIP_FP32;
+    clip.sample_count = 400000000U;
+    clip.n_t = 1;
+    clip.n_q = 0;
+    clip.n_s = 0;
+    layout.t_format = NT_SKELETAL_FORMAT_FP16;
+    EXPECT_BUILD_ASSERT_MATCH(nt_builder_encode_clip(&clip, layout, &payload, &size), "decoded clip exceeds 4 GB");
+    TEST_ASSERT_NULL(payload);
+}
 
 int main(void) {
     UNITY_BEGIN();
@@ -566,5 +668,8 @@ int main(void) {
     RUN_TEST(test_encode_skeleton_asserts_on_a_broken_hierarchy);
     RUN_TEST(test_encode_skin_binding_asserts_on_broken_radii);
     RUN_TEST(test_encode_clip_asserts_on_broken_structure);
+    RUN_TEST(test_encode_clip_all_layouts_have_independent_wire_bytes);
+    RUN_TEST(test_encode_clip_half_admission);
+    RUN_TEST(test_encode_clip_expanded_limit);
     return UNITY_END();
 }

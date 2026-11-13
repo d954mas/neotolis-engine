@@ -578,13 +578,16 @@ void nt_builder_decompose_trs(const float m[16], const char *name, nt_skeletal_t
  *
  * The encoders assert structure (non-NULL arrays, counts, preorder, bounds
  * finite and >= 0, a float-representable duration); values (finite samples,
- * unit quaternions, unique joint ids, rig_compat_id) are the producer's: the
- * importer checks them once, with the node names its diagnostics can show. */
+ * unit quaternions, unique joint ids, rig_compat_id) otherwise belong to the
+ * producer. FP16 sampled lanes additionally require finite half range and
+ * source unit Q, checked independently of NT_SKELETAL_CHECKS. Procedural bounds
+ * must cover decoded selected-layout poses; the encoder has no skeleton to
+ * measure them. Both wire and decoded sizes must fit UINT32_MAX. */
 void nt_builder_add_skin_binding(NtBuilderContext *ctx, const nt_skin_binding_t *binding, const char *resource_id);
-void nt_builder_add_clip(NtBuilderContext *ctx, const nt_skeletal_clip_t *clip, const char *resource_id);
+void nt_builder_add_clip(NtBuilderContext *ctx, const nt_skeletal_clip_t *clip, nt_builder_clip_layout_t layout, const char *resource_id);
 void nt_builder_encode_skeleton(const nt_skeletal_skeleton_t *skel, uint8_t **out, uint32_t *out_size);
 void nt_builder_encode_skin_binding(const nt_skin_binding_t *binding, uint8_t **out, uint32_t *out_size);
-void nt_builder_encode_clip(const nt_skeletal_clip_t *clip, uint8_t **out, uint32_t *out_size);
+void nt_builder_encode_clip(const nt_skeletal_clip_t *clip, nt_builder_clip_layout_t layout, uint8_t **out, uint32_t *out_size);
 
 /* Atlas geometry primitives live in nt_builder_atlas_geometry.h and are
  * called directly by tests. Vpack-internal test access is in nt_builder_atlas_vpack.c. */
