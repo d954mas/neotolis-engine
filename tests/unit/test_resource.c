@@ -14,6 +14,7 @@
 #include "nt_crc32.h"
 #include "nt_mesh_format.h"
 #include "nt_pack_format.h"
+#include "nt_skeletal_format.h"
 #include "core/nt_assert.h"
 #include "unity.h"
 #include "test_helpers/nt_test_pack.h"
@@ -1099,8 +1100,17 @@ static void expect_asset_header_assert(uint8_t asset_type, uint32_t which) {
         blob[entry->offset] ^= 1U;
     } else if (which == 1) {
         blob[entry->offset + 4U] ^= 1U;
+    } else if (which == 3) {
+        const uint16_t old_version = 5;
+        memcpy(blob + entry->offset + 4U, &old_version, sizeof(old_version));
     } else {
-        entry->size = (uint32_t)(asset_type == NT_ASSET_BLOB ? sizeof(NtBlobAssetHeader) : sizeof(NtMeshAssetHeader)) - 1U;
+        uint32_t header_size = sizeof(NtMeshAssetHeader);
+        if (asset_type == NT_ASSET_CLIP) {
+            header_size = sizeof(NtAnmHeader);
+        } else if (asset_type == NT_ASSET_BLOB) {
+            header_size = sizeof(NtBlobAssetHeader);
+        }
+        entry->size = header_size - 1U;
     }
     const NtPackHeader *ph = (const NtPackHeader *)blob;
     ((NtPackHeader *)blob)->checksum = nt_crc32(blob + ph->header_size, size - ph->header_size);
@@ -1163,6 +1173,10 @@ void test_asset_magic_mismatch_asserts(void) { expect_asset_header_assert(NT_ASS
 void test_asset_version_mismatch_asserts(void) { expect_asset_header_assert(NT_ASSET_MESH, 1); }
 void test_asset_shorter_than_header_asserts(void) { expect_asset_header_assert(NT_ASSET_MESH, 2); }
 void test_blob_magic_mismatch_asserts(void) { expect_asset_header_assert(NT_ASSET_BLOB, 0); }
+void test_skeleton_v5_is_rejected_before_activation(void) { expect_asset_header_assert(NT_ASSET_SKELETON, 3); }
+void test_binding_v5_is_rejected_before_activation(void) { expect_asset_header_assert(NT_ASSET_SKIN_BINDING, 3); }
+void test_clip_v5_is_rejected_before_activation(void) { expect_asset_header_assert(NT_ASSET_CLIP, 3); }
+void test_clip_short_header_is_rejected_before_activation(void) { expect_asset_header_assert(NT_ASSET_CLIP, 2); }
 
 void test_equal_range_self_owners_keep_independent_runtime_objects(void) {
     nt_resource_register_type(NT_ASSET_MESH, &(nt_resource_type_desc_t){.activate = fake_activate_seq, .deactivate = fake_deactivate});
@@ -3509,6 +3523,10 @@ int main(void) {
     RUN_TEST(test_parse_alias_ranges_preserve_activation_order);
     RUN_TEST(test_asset_magic_mismatch_asserts);
     RUN_TEST(test_asset_version_mismatch_asserts);
+    RUN_TEST(test_skeleton_v5_is_rejected_before_activation);
+    RUN_TEST(test_binding_v5_is_rejected_before_activation);
+    RUN_TEST(test_clip_v5_is_rejected_before_activation);
+    RUN_TEST(test_clip_short_header_is_rejected_before_activation);
     RUN_TEST(test_asset_shorter_than_header_asserts);
     RUN_TEST(test_blob_magic_mismatch_asserts);
     RUN_TEST(test_winner_gen_changes_with_each_published_winner);

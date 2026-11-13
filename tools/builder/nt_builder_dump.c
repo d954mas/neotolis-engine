@@ -321,6 +321,14 @@ static void print_skin_binding_details(const uint8_t *asset_data, uint32_t asset
 }
 
 static void print_clip_details(const uint8_t *asset_data, uint32_t asset_size) {
+    if (asset_data && asset_size >= 6U) {
+        uint16_t version;
+        memcpy(&version, asset_data + 4, sizeof(version));
+        if (version != NT_SKELETAL_FORMAT_VERSION) {
+            NT_LOG_INFO("    NANM unsupported version %u (expected %u)", version, NT_SKELETAL_FORMAT_VERSION);
+            return;
+        }
+    }
     if (!asset_data || asset_size < sizeof(NtAnmHeader)) {
         return;
     }
@@ -329,7 +337,15 @@ static void print_clip_details(const uint8_t *asset_data, uint32_t asset_size) {
     if (header.magic != NT_ANM_MAGIC) {
         return;
     }
-    NT_LOG_INFO("    NANM v%u joints:%u rig:0x%016llX bytes:%u (expect %u)", header.version, header.joint_count, (unsigned long long)header.rig_compat_id, asset_size, (unsigned)nt_anm_size(&header));
+    if (nt_skeletal_format_size((nt_skeletal_format_t)header.t_format) == 0U || nt_skeletal_format_size((nt_skeletal_format_t)header.q_format) == 0U ||
+        nt_skeletal_format_size((nt_skeletal_format_t)header.s_format) == 0U) {
+        NT_LOG_INFO("    NANM unsupported layout t:%u q:%u s:%u", header.t_format, header.q_format, header.s_format);
+        return;
+    }
+    NT_LOG_INFO("    NANM v%u joints:%u rig:0x%016llX bytes:%u (expect %llu) decoded:%llu", header.version, header.joint_count, (unsigned long long)header.rig_compat_id, asset_size,
+                (unsigned long long)nt_anm_size(&header), (unsigned long long)nt_anm_decoded_size(&header));
+    NT_LOG_INFO("    layout t:FP%u q:FP%u s:FP%u", nt_skeletal_format_size((nt_skeletal_format_t)header.t_format) * 8U, nt_skeletal_format_size((nt_skeletal_format_t)header.q_format) * 8U,
+                nt_skeletal_format_size((nt_skeletal_format_t)header.s_format) * 8U);
     NT_LOG_INFO("    duration:%.3fs samples:%u sampled rows t:%u q:%u s:%u", (double)header.duration, header.sample_count, header.n_t, header.n_q, header.n_s);
     NT_LOG_INFO("    bounds r_joints:%g r_root:%g s_max:%g", (double)header.r_joints, (double)header.r_root, (double)header.s_max);
 }

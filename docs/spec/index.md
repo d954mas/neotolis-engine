@@ -97,7 +97,7 @@ lifetime, and naming vocabulary.
 | `engine/ui` | [ui/nt-ui.md](ui/nt-ui.md) (`nt_ui`), [ui/radial-widgets.md](ui/radial-widgets.md), [ui/rich-text.md](ui/rich-text.md) (optional `nt_ui_rich` / `nt_ui_rich_fx`) |
 | `engine/input` | [io/input.md](io/input.md); automation: [debug/logging-errors-debugging.md](debug/logging-errors-debugging.md) |
 | *(audio — planned module, no dir yet)* | [io/audio.md](io/audio.md) |
-| `engine/skeletal` | [skeletal/skeletal-animation.md](skeletal/skeletal-animation.md) (`nt_skeletal.h` pose ABI/FK/rig identity, skin binding + palette, clip sampling, `nt_skeletal_clip_view`) |
+| `engine/skeletal` | [skeletal/skeletal-animation.md](skeletal/skeletal-animation.md) (`nt_skeletal.h` pose ABI/FK/rig identity, skin binding + palette, clip sampling, `nt_skeletal_clip_decode`) |
 | `engine/skeletal_assets` | [skeletal/skeletal-animation.md, Resources and lifetimes](skeletal/skeletal-animation.md#resources-and-lifetimes) (NSKL/NSKN/NANM activators and views), [assets/resource.md](assets/resource.md) (activator contract) |
 | Frame storage (`nt_gfx_frame_alloc`, `engine/graphics`) | [render/architecture.md](render/architecture.md#frame-storage) (streams, alignment, capacity, upload, restore) |
 | Capture notes and markers (`NT_GFX_NOTE`, `NT_GFX_MARKER_PUSH`) | [render/architecture.md](render/architecture.md#notes-and-markers) |

@@ -200,10 +200,8 @@ void nt_skin_palette_build(const nt_skin_binding_t *binding, const nt_skeletal_m
  * A clip is an immutable borrowed view with the same ownership contract as
  * nt_skeletal_skeleton_t: the owner (a clip activator or a test fixture) built
  * the arrays, keeps them alive and unchanged until it republishes or destroys
- * them, and the kernels neither store nor free them. The NANM payload
- * (shared/include/nt_skeletal_format.h) holds exactly these tables, so an
- * activator copies the payload and points this view into the copy through
- * nt_skeletal_clip_view.
+ * them, and the kernels neither store nor free them. NANM sampled wire rows
+ * decode once into these FP32 tables through nt_skeletal_clip_decode.
  *
  * base is the whole local pose the clip starts from: the rig's rest with every
  * constant channel written in. Sampled rows live in sample_count frame blocks
@@ -242,12 +240,15 @@ typedef struct {
  * of joint_count entries that must not overlap base. */
 void nt_skeletal_sample(const nt_skeletal_clip_t *clip, double time, nt_skeletal_trs_t *out);
 
-/* Points *out at the tables of a NANM payload in place: no validation, no
- * allocation, no copy. The payload must be 4-aligned (asserted), stay alive as
- * long as the view and hold exactly nt_anm_size(header) bytes; the table
- * entries are not range-checked here. The builder measures its own encoder
- * output through the same function. */
-void nt_skeletal_clip_view(const uint8_t *payload, nt_skeletal_clip_t *out);
+/* Decodes a structurally validated NANM payload of nt_anm_size(header) bytes
+ * into caller-owned storage, at least nt_anm_decoded_size(header) bytes.
+ * Both buffers must be 4-aligned and disjoint; out must overlap neither.
+ * Pointers, alignment, format tags, the UINT32_MAX decoded limit and capacity
+ * are asserted before writes. No allocation, table-index or numeric validation.
+ * Only FP16 sampled Q is normalized; FP32 rows and base retain their bits.
+ * out borrows storage until its owner changes or frees it. The source is not
+ * retained. Builder measurements use this same decoder. */
+void nt_skeletal_clip_decode(const uint8_t *payload, void *storage, size_t storage_size, nt_skeletal_clip_t *out);
 // #endregion
 
 // #region composition

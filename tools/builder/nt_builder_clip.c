@@ -502,9 +502,10 @@ static void clip_dense_pass(clip_pass_t *p, uint32_t n_grid, float duration) {
 
 // #region export
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void nt_builder_add_scene_clip(NtBuilderContext *ctx, const nt_glb_scene_t *scene, const char *animation_name, const nt_builder_rig_t *rig, float sample_fps, const char *resource_id,
-                               nt_builder_clip_report_t *report) {
+void nt_builder_add_scene_clip(NtBuilderContext *ctx, const nt_glb_scene_t *scene, const char *animation_name, const nt_builder_rig_t *rig, float sample_fps, nt_builder_clip_layout_t layout,
+                               const char *resource_id, nt_builder_clip_report_t *report) {
     NT_BUILD_ASSERT(ctx && scene && rig && resource_id && report && "invalid add_scene_clip args");
+    NT_BUILD_ASSERT(nt_skeletal_format_size(layout.t_format) != 0U && nt_skeletal_format_size(layout.q_format) != 0U && nt_skeletal_format_size(layout.s_format) != 0U && "unsupported clip format");
     const cgltf_data *data = (const cgltf_data *)scene->_internal;
     NT_BUILD_ASSERT(data && "add_scene_clip: scene is not parsed");
     if (!nt_builder_finite(sample_fps) || !(sample_fps > 0.0F)) {
@@ -650,11 +651,21 @@ void nt_builder_add_scene_clip(NtBuilderContext *ctx, const nt_glb_scene_t *scen
     float *blocks = (float *)malloc((stride == 0U ? 1U : ((size_t)n_grid * stride)) * sizeof(float));
     NT_BUILD_ASSERT(blocks && "add_scene_clip: alloc failed (OOM)");
     float *w = blocks;
+    const nt_skeletal_format_t formats[3] = {layout.t_format, layout.q_format, layout.s_format};
     for (uint32_t i = 0; i < n_grid; i++) {
         for (uint32_t kind = 0; kind < 3; kind++) {
             const uint32_t comps = (kind == 1U) ? 4U : 3U;
             for (uint32_t k = 0; k < n_rows[kind]; k++) {
                 memcpy(w, samples + ((size_t)rows[kind][k] * n_grid * 4U) + ((size_t)i * comps), comps * sizeof(float));
+                if (formats[kind] == NT_SKELETAL_FORMAT_FP16) {
+                    const clip_track_t *track = &tracks[rows[kind][k]];
+                    for (uint32_t c = 0; c < comps; ++c) {
+                        if (!(w[c] >= -65504.0F && w[c] <= 65504.0F)) {
+                            NT_BUILD_FAIL("clip FP16 sample outside finite half range", "%s: %s.%s sample %u at %.9g s component %u: %g is outside FP16 range", label,
+                                          track->channel->target_node->name, clip_path_name(track->channel->target_path), i, (double)i * (double)duration / (double)(n_grid - 1U), c, (double)w[c]);
+                        }
+                    }
+                }
                 w += comps;
             }
         }
@@ -680,12 +691,24 @@ void nt_builder_add_scene_clip(NtBuilderContext *ctx, const nt_glb_scene_t *scen
      * the report measures what the game will sample, not a builder mirror. */
     uint8_t *payload = NULL;
     uint32_t payload_size = 0;
-    nt_builder_encode_clip(&clip, &payload, &payload_size);
+    nt_builder_encode_clip(&clip, layout, &payload, &payload_size);
+    free(blocks);
+    free(row_track);
+    free(tables);
+    free(base);
+    free(still);
+    free(samples);
+    free(track_of);
+    NtAnmHeader header;
+    memcpy(&header, payload, sizeof(header));
+    const size_t decoded_size = (size_t)nt_anm_decoded_size(&header);
+    void *decoded = malloc(decoded_size);
+    NT_BUILD_ASSERT(decoded && "add_scene_clip: alloc failed (OOM)");
     nt_skeletal_clip_t view;
-    nt_skeletal_clip_view(payload, &view);
+    nt_skeletal_clip_decode(payload, decoded, decoded_size, &view);
 
     memset(report, 0, sizeof(*report));
-    report->sample_count = clip.sample_count;
+    report->sample_count = header.sample_count;
     report->duration = duration;
     clip_pass_t pass = {
         .skel = skel,
@@ -708,22 +731,18 @@ void nt_builder_add_scene_clip(NtBuilderContext *ctx, const nt_glb_scene_t *scen
     free(pass.g_rt);
     free(pass.local_ex);
     free(pass.local_rt);
-    free(payload);
+    free(decoded);
 
-    clip.r_joints = nt_builder_round_up(pass.r_joints);
-    clip.r_root = nt_builder_round_up(pass.r_root);
-    clip.s_max = nt_builder_round_up(pass.s_max);
-    nt_builder_add_clip(ctx, &clip, resource_id);
+    header.r_joints = nt_builder_round_up(pass.r_joints);
+    header.r_root = nt_builder_round_up(pass.r_root);
+    header.s_max = nt_builder_round_up(pass.s_max);
+    NT_BUILD_ASSERT(nt_builder_finite(header.r_joints) && header.r_joints >= 0.0F && nt_builder_finite(header.r_root) && header.r_root >= 0.0F && nt_builder_finite(header.s_max) &&
+                    header.s_max >= 0.0F && "clip bounds must be finite and non-negative");
+    memcpy(payload, &header, sizeof(header));
+    nt_builder_add_entry(ctx, resource_id, NT_BUILD_ASSET_CLIP, NULL, payload, payload_size, nt_hash64(payload, payload_size).value);
     // #endregion
 
-    free(blocks);
-    free(row_track);
-    free(tables);
-    free(base);
-    free(still);
-    free(samples);
     free(arena);
-    free(track_of);
     free(tracks);
 }
 // #endregion

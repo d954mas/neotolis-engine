@@ -11,8 +11,9 @@
 #include "hash/nt_hash.h"
 #include "nt_atlas_format.h" /* NT_ATLAS_XFORM_* stored transform values */
 #include "nt_build_assert.h"
-#include "nt_font_format.h"       /* NtFontAssetHeader, NtFontGlyphEntry, etc. */
-#include "nt_mesh_format.h"       /* nt_stream_type_t */
+#include "nt_font_format.h" /* NtFontAssetHeader, NtFontGlyphEntry, etc. */
+#include "nt_mesh_format.h" /* nt_stream_type_t */
+#include "nt_skeletal_format.h"
 #include "nt_texture_format.h"    /* nt_texture_pixel_format_t */
 #include "nt_vertex_locations.h"  /* NT_LOC_* for NtStreamLayout.location */
 #include "skeletal/nt_skeletal.h" /* nt_skeletal_skeleton_t, nt_skin_binding_t */
@@ -644,6 +645,14 @@ void nt_builder_add_scene_skinned_mesh(NtBuilderContext *ctx, const nt_builder_r
  * pads for. any_pose_radius follows from it and the rig's rest hierarchy. */
 void nt_builder_add_scene_skin_binding(NtBuilderContext *ctx, const nt_builder_rig_t *rig, const char *resource_id);
 
+/* Explicit per-clip sampled storage. Base remains FP32; activation decodes
+ * once to FP32. A zero descriptor deliberately selects FP32 for every group. */
+typedef struct {
+    nt_skeletal_format_t t_format;
+    nt_skeletal_format_t q_format;
+    nt_skeletal_format_t s_format;
+} nt_builder_clip_layout_t;
+
 /* What the clip export measured, so the build script decides whether the
  * sample rate was enough: the builder never fails a build on interpolation
  * error. Both errors compare the runtime (nt_skeletal_sample on the encoded
@@ -677,8 +686,8 @@ typedef struct {
  * channel the animation does not touch keeps the rig's rest there. report
  * receives what the export measured. Content errors log a diagnostic and
  * assert; the builder spec (Builder validation) lists every one. */
-void nt_builder_add_scene_clip(NtBuilderContext *ctx, const nt_glb_scene_t *scene, const char *animation_name, const nt_builder_rig_t *rig, float sample_fps, const char *resource_id,
-                               nt_builder_clip_report_t *report);
+void nt_builder_add_scene_clip(NtBuilderContext *ctx, const nt_glb_scene_t *scene, const char *animation_name, const nt_builder_rig_t *rig, float sample_fps, nt_builder_clip_layout_t layout,
+                               const char *resource_id, nt_builder_clip_report_t *report);
 
 /* Encodes and registers a skeleton; skel->rig_compat_id is written as given,
  * so a procedural rig fills it first (skeletal spec, Skeleton (NSKL)). Joint

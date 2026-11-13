@@ -1713,6 +1713,27 @@ if(EMSCRIPTEN)
 
 endif()
 
+# Wire decoding and activation use literal fixtures without the native builder.
+add_executable(test_skeletal_decode unit/test_skeletal_decode.c unit/test_helpers/nt_assert_trap.c)
+target_include_directories(test_skeletal_decode PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit" "${CMAKE_SOURCE_DIR}/shared/include")
+target_link_libraries(test_skeletal_decode PRIVATE nt_skeletal_assets nt_resource nt_skeletal nt_hash nt_http_stub nt_log_stub unity)
+if(EMSCRIPTEN)
+    nt_set_warning_flags(test_skeletal_decode)
+    nt_set_sanitizer_flags(test_skeletal_decode)
+    set_target_properties(test_skeletal_decode PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
+    )
+    target_link_options(test_skeletal_decode PRIVATE "SHELL:-sENVIRONMENT=node")
+    if(NT_NODE_EXECUTABLE)
+        add_test(NAME test_skeletal_decode COMMAND "${NT_NODE_EXECUTABLE}" "$<TARGET_FILE:test_skeletal_decode>")
+    else()
+        message(STATUS "Node.js not found; skipping CTest registration for test_skeletal_decode")
+    endif()
+else()
+    target_link_libraries(test_skeletal_decode PRIVATE nt_fs_stub)
+    nt_setup_test_target(test_skeletal_decode)
+endif()
+
 # Crash output survives on EVERY test exe, incl. raw add_executable targets
 # that bypass nt_setup_test_target (MSVC CRT buffers stdout to pipes).
 get_directory_property(_nt_test_targets BUILDSYSTEM_TARGETS)

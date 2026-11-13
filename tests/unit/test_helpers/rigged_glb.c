@@ -179,7 +179,15 @@ void rigged_glb_write(const char *path, const rigged_glb_opts_t *opts) {
     }
     const uint32_t step_keys = o.animation_step_past_end ? 3U : 2U;
     const float anim_j3_s[3][3] = {{1.0F, 1.0F, 1.0F}, {2.0F, 2.0F, 2.0F}, {3.0F, 3.0F, 3.0F}};
-    const float anim_j4_t[2][3] = {{0.0F, 0.5F, 0.0F}, {0.0F, 0.5F, 0.0F}};
+    float anim_j4_t[2][3] = {{0.0F, 0.5F, 0.0F}, {0.0F, 0.5F, 0.0F}};
+    if (o.animation_large_constant) {
+        anim_j4_t[0][1] = 70000.0F;
+        anim_j4_t[1][1] = 70000.0F;
+    }
+    if (o.animation_half_overflow) {
+        anim_j4_t[0][1] = 0.0F;
+        anim_j4_t[1][1] = 70000.0F;
+    }
     // #endregion
 
     // #region vertex data

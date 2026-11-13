@@ -297,6 +297,19 @@ bash scripts/check.sh --push            # before pushing
 bash scripts/check.sh --full            # whole-tree format/tidy sweep
 ```
 
+`test_skeletal_decode` uses literal NANM fixtures without the native builder.
+It runs natively and under Node in Emscripten builds. FULL asserts exercise
+invalid layouts, alignment, capacity and decoded-size overflow; TRAP runs the
+positive decode/activation cases. Configure both engine and test together:
+
+```bash
+cmake --build --preset native-debug --target test_skeletal_decode
+ctest --preset native-debug --output-on-failure --no-tests=error -R '^test_skeletal_decode$'
+emcmake cmake --preset wasm-debug
+cmake --build --preset wasm-debug --target test_skeletal_decode
+ctest --preset wasm-debug --output-on-failure --no-tests=error -R '^test_skeletal_decode$'
+```
+
 `format_and_check.sh` runs the formatter under the same lock as the check;
 `check.sh` alone is read-only. Modes pass through, so
 `bash scripts/format_and_check.sh --push` combines formatting and the push gate.

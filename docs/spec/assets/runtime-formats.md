@@ -22,7 +22,7 @@ Examples:
 
 Packs are trusted builder output. Runtime asserts magic, version, type, sizes/offsets, so a stale or broken pack crashes early instead of reading out of bounds. Required source attributes (POSITION) are a builder guarantee — the runtime sees stream locations, not attribute names, and cannot identify them. Builder validation is primary; runtime asserts are the safety net.
 
-The skeletal activators (NSKL/NSKN/NANM) pin the boundary of that safety net as a locked rule: an activator asserts only the structure a view needs to address memory, of which the one float it reads is the grid shape (`sample_count`, a finite `duration ≥ 0`), and never a value inside a sound structure; the rule, its list and its rationale live in [skeletal animation](../skeletal/skeletal-animation.md), "Builder, codec, wire formats".
+The skeletal activators (NSKL/NSKN/NANM) pin the boundary of that safety net as a locked rule: an activator asserts only the structure a view needs to address memory, of which the one float used for structural validation is the grid shape (`sample_count`, a finite `duration ≥ 0`), and never validates a numeric value inside a sound structure; the rule, its list and its rationale live in [skeletal animation](../skeletal/skeletal-animation.md), "Builder, codec, wire formats".
 
 ## Texture activation (TTEX)
 
@@ -109,8 +109,7 @@ Attributes: POSITION (required), NORMAL (optional), UV0 (optional), COLOR0 (opti
 
 Preferred data types: position float16 or float32, normals snorm8 packed, uv unorm16, colors uint8 normalized.
 
-Avoid runtime parsing/conversion of asset content — with one deliberate
-exception: the **wire → GPU transform** at mesh activation. The pack stores a
+Avoid runtime parsing/conversion of asset content — with explicit activation transforms: NANM sampled FP16 rows decode once to FP32 (sampled Q is normalized), and the **wire → GPU transform** runs at mesh activation. The pack stores a
 wire form chosen for HTTP gzip/brotli compressibility; `nt_gfx_activate_mesh`
 decodes it into the byte-exact GPU form before upload (precedent: basis
 texture transcoding). The transform is a fixed byte permutation plus an index
