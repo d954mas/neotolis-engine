@@ -196,7 +196,10 @@ EM_JS(void, nt_input_web_register_listeners, (void), {
 
     canvas.addEventListener("pointerdown", function(e) {
         canvas.focus();
-        canvas.setPointerCapture(e.pointerId);
+        /* Pointer lock already routes mouse input here; explicit capture would throw. */
+        if (!document.pointerLockElement) {
+            canvas.setPointerCapture(e.pointerId);
+        }
         if (isContact(e)) {
             contact(0, e);
         } else {
