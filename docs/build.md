@@ -58,6 +58,10 @@ check.sh also rejects a native build tree configured with another compiler.
 - **Editors:** point clangd at `~/.neotolis/toolchain/llvm-<version>/bin/clangd`
   so editor diagnostics match the pinned clang-tidy.
 
+CI runs on explicit runner images (`ubuntu-26.04`, `windows-2025-vs2026`), never
+`*-latest`: the image still provides glibc and libstdc++, the MSVC STL and
+Windows SDK, Mesa, CMake and Ninja. Move to a new image in its own change.
+
 Bumping a version is one change to `.toolchain-versions` (new SHA-256 values
 from the release archives), a whole-tree reformat commit when clang-format
 changes, and a green full CI graph.

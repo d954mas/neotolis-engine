@@ -42,7 +42,7 @@ jobs:
   # #region producers
   packs:
     name: Native Release & Packs
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
@@ -109,7 +109,7 @@ jobs:
   # The full Basis baseline feeds every wasm test_basisu_trimmed run.
   goldens:
     name: Basis Goldens
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
@@ -137,7 +137,7 @@ jobs:
   # #region wasm
   wasm-debug:
     name: WASM Debug
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     needs: [packs, goldens]
     steps:
       - uses: actions/checkout@v7
@@ -193,7 +193,7 @@ jobs:
 
   wasm-release:
     name: WASM Release & Sizes
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     needs: [packs, goldens]
     steps:
       - uses: actions/checkout@v7
@@ -287,7 +287,7 @@ jobs:
 
   wasm-analysis:
     name: WASM Analysis & Reports
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     needs: [packs, goldens]
     steps:
       - uses: actions/checkout@v7
@@ -368,7 +368,7 @@ jobs:
   # display tests alone on the shared xvfb display.
   native-release:
     name: Native Release Tests
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
@@ -398,7 +398,7 @@ jobs:
   # devapi + ui/obs/entity_write/capture groups ON so the devapi test targets build and run.
   native-debug:
     name: Native Debug Tests
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
@@ -439,7 +439,7 @@ jobs:
   # Compile and link only: no other job builds the Windows recorder backend (Media Foundation).
   windows-recorder:
     name: Windows Recorder Build
-    runs-on: windows-2022
+    runs-on: windows-2025-vs2026
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
@@ -454,7 +454,7 @@ jobs:
   # Debug configurations that differ from native-debug in one feature set.
   native-variants:
     name: Native Feature Variants
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
@@ -512,7 +512,7 @@ jobs:
   # #region lint and smoke
   lint:
     name: Format & Tidy
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
@@ -556,7 +556,7 @@ jobs:
 
   devapi-smoke:
     name: DevAPI Smoke (live socket UAT)
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v7
       # No LFS: devapi_host clears a two-tone pattern and loads no asset pack.
@@ -599,7 +599,7 @@ jobs:
   # path) only runs in a real headless Chromium: the same Python scenarios through PlaywrightTransport.
   web-smoke:
     name: Web Smoke (devapi, blocking)
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v7
       # No LFS / pack builder: devapi_host loads no asset pack.
@@ -660,7 +660,7 @@ jobs:
   # release diagnostics rows.
   browser-test:
     name: Browser (${{ matrix.part }})
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     strategy:
       fail-fast: false
       matrix:
@@ -745,7 +745,7 @@ jobs:
 
   deploy:
     name: Deploy
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     needs: [packs, wasm-debug, wasm-release, wasm-analysis, native-release, native-debug, windows-recorder, native-variants, lint, devapi-smoke, web-smoke, browser-test]
     if: github.ref == 'refs/heads/master' && github.event_name == 'push'
     permissions:
@@ -856,7 +856,7 @@ jobs:
 
   persist-sizes:
     name: Persist Size Data
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     needs: [wasm-release, wasm-analysis]
     if: github.ref == 'refs/heads/master' && github.event_name == 'push'
     permissions:
@@ -942,7 +942,7 @@ jobs:
 
   pr-size-comment:
     name: PR Size Comment
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     needs: [wasm-release, wasm-analysis]
     if: github.event_name == 'pull_request'
     permissions:
