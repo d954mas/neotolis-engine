@@ -69,6 +69,12 @@ Bumping a version is one change to `.toolchain-versions` (new SHA-256 values
 from the release archives), a whole-tree reformat commit when clang-format
 changes, and a green full CI graph.
 
+Web builds pin the minimum browsers Emscripten writes the JS loader for:
+Chrome 85, Firefox 79, Safari 15.0 (`MIN_*_VERSION` on `nt_app`'s link
+interface, so every web game gets them), the oldest Emscripten supports. Safari 15.0 is also the
+first with WebGL2. Raising them is a deliberate change: Emscripten then drops
+fallbacks, and old browsers stop loading the game.
+
 ### Example packs
 
 Native example builds generate packs through `cmake/nt_example_packs.cmake`.

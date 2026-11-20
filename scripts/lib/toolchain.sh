@@ -15,6 +15,9 @@ else
     EMSDK="$NT_TOOLCHAIN_DIR/emsdk-$EMSDK_VERSION"
 fi
 export EMSDK EM_CONFIG="$EMSDK/.emscripten"
+# A globally activated emsdk (emsdk activate --permanent) exports these; emcc would run on that
+# SDK's Python instead of the pinned one and fail its minimum-version check.
+unset EMSDK_PYTHON EMSDK_NODE
 export PATH="$NT_TOOLCHAIN_DIR/llvm-$LLVM_VERSION/bin:$NT_TOOLCHAIN_DIR/cmake-$CMAKE_VERSION/bin:$NT_TOOLCHAIN_DIR/ninja-$NINJA_VERSION:$NT_TOOLCHAIN_DIR/emsdk-$EMSDK_VERSION:$NT_TOOLCHAIN_DIR/emsdk-$EMSDK_VERSION/upstream/emscripten:$PATH"
 
 toolchain_fail() {

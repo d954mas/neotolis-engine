@@ -76,6 +76,11 @@ function(nt_basisu_transcoder_settings target)
     if(NOT WIN32 AND NOT EMSCRIPTEN)
         target_link_libraries(${target} PUBLIC stdc++)
     endif()
+    # Consumers link with emcc: CXX is enabled only in this directory, so CMake never picks em++
+    # for them, and emcc no longer adds libc++ by default.
+    if(EMSCRIPTEN)
+        target_link_options(${target} INTERFACE -sDEFAULT_TO_CXX)
+    endif()
     set_target_properties(${target} PROPERTIES
         ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/engine/${NT_PRESET_NAME}"
         CXX_STANDARD 17
