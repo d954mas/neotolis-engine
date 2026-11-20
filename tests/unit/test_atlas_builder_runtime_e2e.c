@@ -162,7 +162,7 @@ void test_builder_pack_resolves_in_runtime_atlas(void) {
     TEST_ASSERT_TRUE_MESSAGE((NT_ATLAS_TRANSFORMS_ROTATIONS & (uint8_t)(1U << root->transform)) != 0U, "root transform escaped the build mask");
     TEST_ASSERT_EQUAL_UINT8_MESSAGE(NT_ATLAS_XFORM_IDENTITY, filler->transform, "an unfolded lone sprite ships at identity");
 
-    const float(*positions)[2] = nt_atlas_test_positions(ad);
+    const float (*positions)[2] = nt_atlas_test_positions(ad);
     uint32_t corner_mask = 0;
     for (uint32_t v = 0; v < root->vertex_count; v++) {
         const float *xy = positions[root->vertex_start + v];
@@ -251,7 +251,7 @@ void test_builder_ready_positions_follow_ppu_on_cache_hit(void) {
         TEST_ASSERT_TRUE(fabsf(r->origin_x - 0.25F) <= 1e-6F);
         TEST_ASSERT_TRUE(fabsf(r->origin_y - 0.25F) <= 1e-6F);
         TEST_ASSERT_EQUAL_UINT8(4, r->vertex_count);
-        const float(*positions)[2] = nt_atlas_test_positions(ad);
+        const float (*positions)[2] = nt_atlas_test_positions(ad);
         const nt_atlas_uv_t *uvs = &nt_atlas_test_uvs(ad)[r->vertex_start];
         uint32_t corner_mask = 0;
         for (uint32_t v = 0; v < 4; v++) {

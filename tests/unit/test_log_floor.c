@@ -44,8 +44,8 @@ void tearDown(void) { nt_log_remove_sink(record, NULL); }
             NT_LOG_##upper##_ONCE("domain-once-" #lower " %d", argument());                                                                                                                            \
             bool first = nt_log_##lower##_unique("unique-" #lower " %d", argument());                                                                                                                  \
             bool named = NT_LOG_##upper##_UNIQUE("domain-unique-" #lower " %d", argument());                                                                                                           \
-            TEST_ASSERT_EQUAL(enabled &&i == 0, first);                                                                                                                                                \
-            TEST_ASSERT_EQUAL(enabled &&i == 0, named);                                                                                                                                                \
+            TEST_ASSERT_EQUAL(enabled && i == 0, first);                                                                                                                                               \
+            TEST_ASSERT_EQUAL(enabled && i == 0, named);                                                                                                                                               \
         }                                                                                                                                                                                              \
         TEST_ASSERT_EQUAL_UINT(enabled ? 10U : 0U, s_arguments);                                                                                                                                       \
         TEST_ASSERT_EQUAL_UINT(enabled ? 8U : 0U, s_messages);                                                                                                                                         \

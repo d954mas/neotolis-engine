@@ -58,7 +58,7 @@ static void test_build_assert_handler(const char *expr, const char *file, int li
         }                                                                                                                                                                                              \
         NT_TEST_LSAN_ENABLE();                                                                                                                                                                         \
         nt_build_assert_handler = NULL;                                                                                                                                                                \
-        TEST_ASSERT_TRUE_MESSAGE(s_build_assert_expr &&strstr(s_build_assert_expr, (expected)), "a different NT_BUILD_ASSERT fired: " expected);                                                       \
+        TEST_ASSERT_TRUE_MESSAGE(s_build_assert_expr && strstr(s_build_assert_expr, (expected)), "a different NT_BUILD_ASSERT fired: " expected);                                                      \
     } while (0)
 
 #endif /* NT_TEST_HELPER_BUILD_ASSERT_TRAP_H */

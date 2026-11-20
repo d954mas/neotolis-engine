@@ -28,7 +28,9 @@ static ui_walker_fixture_t s_fx;
 
 /* Shared style for happy-path tests: font_id=0 (stub_font), size=14, red. */
 static const nt_ui_label_style_t s_style_body = {
-    .font_id = 0, .font_size = 14, .color = NT_RGBA8(255, 0, 0, 255),
+    .font_id = 0,
+    .font_size = 14,
+    .color = NT_RGBA8(255, 0, 0, 255),
     /* wrap_mode = 0 = CLAY_TEXT_WRAP_WORDS, align = 0 = CLAY_TEXT_ALIGN_LEFT */
 };
 
@@ -157,7 +159,11 @@ static void test_label_zero_init_wraps_words_left(void) {
  * align are layout-only fields not surfaced post-layout. */
 static void test_label_full_field_passthrough(void) {
     static const nt_ui_label_style_t s = {
-        .font_id = 0, .font_size = 16, .color = NT_RGBA8(128, 64, 32, 200), .line_height = 24, .letter_tracking = 4,
+        .font_id = 0,
+        .font_size = 16,
+        .color = NT_RGBA8(128, 64, 32, 200),
+        .line_height = 24,
+        .letter_tracking = 4,
         /* wrap_mode + align left zero-init (WORDS + LEFT). */
     };
     nt_pointer_t mouse = {0};

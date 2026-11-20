@@ -1191,7 +1191,7 @@ static bool vpack_try_page(VPackContext *ctx, const VPackPage *page, const VPack
         par->nfp_build.relevant_buf = ctx->relevant_buf;
         par->nfp_build.relevant_count = relevant_count;
         par->nfp_build.orient_neg = (const Point2D(*)[8][32])od->neg;
-        par->nfp_build.orient_neg_xy = (const int32_t(*)[8][VPACK_PLACED_MAX_VERTS * 2]) od->neg_xy;
+        par->nfp_build.orient_neg_xy = (const int32_t (*)[8][VPACK_PLACED_MAX_VERTS * 2]) od->neg_xy;
         par->nfp_build.orient_counts = od->counts;
         par->nfp_build.orient_neg_hashes = od->neg_hashes;
         par->nfp_build.orient_count = od->count;
@@ -1408,7 +1408,7 @@ static bool vpack_try_page(VPackContext *ctx, const VPackPage *page, const VPack
             .nfps = ctx->nfps,
             .nfp_count = nfp_count,
             .nfp_words = nfp_words,
-            .nfp_grid = (const uint64_t(*)[VPACK_GRID_WORDS])ctx->nfp_grid,
+            .nfp_grid = (const uint64_t (*)[VPACK_GRID_WORDS])ctx->nfp_grid,
             .grid_dim = ctx->grid_dim,
             .use_grid = use_grid,
             .eff_min_x = eff_min_x,
@@ -1925,7 +1925,7 @@ uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2D **h
 
     /* Pre-allocate NFP spatial grid on heap (reused across orientations+sprites) */
     uint32_t grid_dim = (max_size / VPACK_GRID_CELL) + 1;
-    uint64_t(*nfp_grid)[VPACK_GRID_WORDS] = (uint64_t(*)[VPACK_GRID_WORDS])calloc((size_t)grid_dim * grid_dim, sizeof(uint64_t[VPACK_GRID_WORDS]));
+    uint64_t (*nfp_grid)[VPACK_GRID_WORDS] = (uint64_t (*)[VPACK_GRID_WORDS])calloc((size_t)grid_dim * grid_dim, sizeof(uint64_t[VPACK_GRID_WORDS]));
     NT_BUILD_ASSERT(nfp_grid && "vector_pack: grid alloc failed");
 
     /* NFP cache: avoid recomputing Minkowski for identical shape pairs */
