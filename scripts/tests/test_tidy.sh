@@ -9,6 +9,7 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 LLVM_VERSION="$(sed -n 's/^LLVM_VERSION=//p' "$ROOT_DIR/.toolchain-versions")"
 FAKE_BIN="$TMP_DIR/.neotolis/toolchain/llvm-$LLVM_VERSION/bin"
 mkdir -p "$FAKE_BIN" "$TMP_DIR/build"
+touch "$FAKE_BIN/../.installed"
 ROOT_WIN="$ROOT_DIR"
 command -v cygpath > /dev/null 2>&1 && ROOT_WIN="$(cygpath -m "$ROOT_DIR")"
 printf '[{"file":"%s/engine/core/nt_core.c","command":"clang"},{"file":"%s/engine/hash/nt_hash.c","command":"clang"}]\n' "$ROOT_WIN" "$ROOT_WIN" \
@@ -17,10 +18,6 @@ printf '[{"file":"%s/engine/core/nt_core.c","command":"clang"},{"file":"%s/engin
 write_fake() {
     cat > "$FAKE_BIN/clang-tidy" <<'EOF'
 #!/usr/bin/env bash
-if [ "$1" = "--version" ]; then
-    echo "LLVM version $FAKE_LLVM_VERSION"
-    exit 0
-fi
 case "${FAKE_TIDY_MODE:?}" in
     success)
         count=0
@@ -50,7 +47,6 @@ write_fake
 export HOME="$TMP_DIR"
 export USERPROFILE="$TMP_DIR"
 command -v cygpath > /dev/null 2>&1 && USERPROFILE="$(cygpath -w "$TMP_DIR")"
-export FAKE_LLVM_VERSION="$LLVM_VERSION"
 export ROOT_FOR_FAKE="$ROOT_DIR"
 
 export FAKE_TIDY_MODE=success

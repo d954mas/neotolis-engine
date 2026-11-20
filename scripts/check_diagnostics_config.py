@@ -154,8 +154,8 @@ class Checks:
         source = work / "parent"
         shutil.copytree(FIXTURE, source)
         common = [self.args.cmake, "-G", self.args.generator,
-                  f"-DENGINE_ROOT={ROOT.as_posix()}", f"-DCMAKE_C_COMPILER={self.args.cc}",
-                  f"-DCMAKE_CXX_COMPILER={self.args.cxx}", "-DCMAKE_BUILD_TYPE=Release",
+                  f"-DENGINE_ROOT={ROOT.as_posix()}", f"-DCMAKE_TOOLCHAIN_FILE={(ROOT / 'cmake/nt_llvm_toolchain.cmake').as_posix()}",
+                  "-DCMAKE_BUILD_TYPE=Release",
                   "-DNT_BUILD_TESTS=OFF", "-DNT_STATIC_CRT=OFF",
                   "-DNT_DEVAPI_ENABLED=OFF", "-DNT_UI_DEBUG_TOOLS=OFF",
                   "-DNT_DEVAPI_GROUP_UI=ON", "-DNT_DEVAPI_GROUP_OBS=ON", "-DNT_DEVAPI_GROUP_ENTITY_WRITE=ON"]
@@ -246,7 +246,6 @@ class Checks:
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cc", default=os.environ.get("CC", "clang"))
-    parser.add_argument("--cxx", default=os.environ.get("CXX", "clang++"))
     parser.add_argument("--nm", default="llvm-nm")
     parser.add_argument("--cmake", default="cmake")
     parser.add_argument("--generator", default="Ninja")

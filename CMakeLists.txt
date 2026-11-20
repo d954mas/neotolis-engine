@@ -1,5 +1,8 @@
 cmake_minimum_required(VERSION 3.25)
 project(neotolis-engine LANGUAGES C)
+if(PROJECT_IS_TOP_LEVEL)
+    include(cmake/nt_toolchain_check.cmake)
+endif()
 
 # Engine root — use instead of CMAKE_SOURCE_DIR for paths to deps/
 # (CMAKE_SOURCE_DIR points to the top-level project, not engine root when used as submodule)

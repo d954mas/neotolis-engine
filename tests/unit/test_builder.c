@@ -8916,9 +8916,9 @@ typedef struct {
 static atlas_position_view_t atlas_blob_vertices(const uint8_t *pack_buf);
 
 static Point2D atlas_local_vertex(atlas_position_view_t view, const NtAtlasRegion *region, uint32_t index) {
-    TEST_ASSERT_TRUE(isfinite(view.ipu) && view.ipu > 0.0F);
+    TEST_ASSERT_TRUE(view.positions != NULL && isfinite(view.ipu) && view.ipu > 0.0F);
     const float *position = view.positions[region->vertex_start + index];
-    const float x = roundf(position[0] / view.ipu); // NOLINT(clang-analyzer-core.NullDereference): every view has positions
+    const float x = roundf(position[0] / view.ipu);
     const float y = roundf(position[1] / view.ipu);
     TEST_ASSERT_TRUE(isfinite(x) && isfinite(y) && x >= 0.0F && x <= UINT16_MAX && y >= 0.0F && y <= UINT16_MAX);
     TEST_ASSERT_TRUE(x * view.ipu == position[0] && y * view.ipu == position[1]);

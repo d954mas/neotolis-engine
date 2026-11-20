@@ -69,9 +69,6 @@ function(nt_basisu_transcoder_settings target)
     target_link_libraries(${target} PUBLIC nt_basisu_transcoder_interface)
     # The vendored transcoder type-puns block data and needs -fno-strict-aliasing.
     target_compile_options(${target} PRIVATE -fno-strict-aliasing)
-    # Transcoded bytes must not depend on the target ISA: FMA contraction (x86-64-v3, ARM64)
-    # changes the float rounding of the ETC1S to BC7 path and breaks the pinned goldens.
-    target_compile_options(${target} PRIVATE -ffp-contract=off)
     # Suppress warnings in vendored C++ code
     target_compile_options(${target} PRIVATE -w)
     nt_set_static_crt_cxx(${target})

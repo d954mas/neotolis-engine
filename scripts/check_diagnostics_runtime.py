@@ -59,7 +59,8 @@ def main():
         if floor == 3:
             targets += CRASH_TARGETS
             tests += CRASH_TESTS
-        configure = ["cmake", "--preset", "native-release-test", "-B", str(args.output / name),
+        # The matrix owns these trees: --fresh keeps one configured by an older toolchain from failing.
+        configure = ["cmake", "--preset", "native-release-test", "--fresh", "-B", str(args.output / name),
                      f"-DNT_PRESET_NAME={name}", f"-DNT_LOG_MIN_LEVEL={floor}",
                      f"-DNT_RESOURCE_TIMING_ENABLED={resource}", f"-DNT_UI_TIMING_ENABLED={ui}", f"-DNT_GFX_GPU_TIMING_ENABLED={gpu}",
                      f"-DNT_GFX_CAPTURE_ENABLED={capture}",

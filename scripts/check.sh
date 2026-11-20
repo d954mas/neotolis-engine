@@ -91,15 +91,15 @@ source "$SCRIPT_DIR/lib/check_output.sh"
 # shellcheck source=lib/toolchain.sh
 source "$SCRIPT_DIR/lib/toolchain.sh"
 
-step "toolchain versions (.toolchain-versions)"
-require_llvm clang clang++ clang-format clang-tidy
+step "toolchain (.toolchain-versions)"
+require_installed llvm cmake ninja
 require_python
-require_node
-require_buildtools
 ok
 
 if [ "$FORMAT_FIRST" -eq 1 ]; then
+    step "clang-format (apply to changed files)"
     bash "$SCRIPT_DIR/fmt.sh"
+    ok
 fi
 
 # #region changed files
@@ -138,7 +138,12 @@ ensure_tidy_ci() {
         cmake --preset native-debug -B "$TIDY_CI_DIR" "${TIDY_CI_FLAGS[@]}"
         return
     fi
-    require_build_compiler "$TIDY_CI_DIR"
+    # check.sh owns this tree: a pin bump rebuilds it from scratch instead of failing the check.
+    if [ .toolchain-versions -nt "$db" ]; then
+        echo "tidy-ci predates .toolchain-versions — reconfiguring from scratch..."
+        cmake --preset native-debug -B "$TIDY_CI_DIR" "${TIDY_CI_FLAGS[@]}" --fresh > /dev/null
+        return
+    fi
     # Stale DB silently SKIPS new TUs in tidy (fail-open) — reconfigure when any
     # build file is newer than the DB. Warm reconfigure costs ~1 s.
     local stale
@@ -210,7 +215,6 @@ if [ ! -f "$NATIVE_BUILD_DIR/CMakeCache.txt" ]; then
     echo "  cmake --preset native-debug"
     exit 1
 fi
-require_build_compiler "$NATIVE_BUILD_DIR"
 cmake --build "$NATIVE_BUILD_DIR"
 ok
 
@@ -295,22 +299,16 @@ if [ "$MODE" = "push" ]; then
     # Re-applying the preset restores every preset-owned value a stale or hand-edited cache drifted
     # from (TRAP asserts, tests OFF); options the preset does not set, such as NT_SKIP_EXAMPLE_PACKS, stay.
     cmake --preset native-release > /dev/null
-    require_build_compiler build/_cmake/native-release
     cmake --build build/_cmake/native-release
     ok
 
     step "build (wasm-debug)"
-    if ! command -v emcc > /dev/null 2>&1; then
-        echo "ERROR: emcc not found in PATH — the wasm-debug build is required before push."
-        echo "Activate emsdk version $(cat .emsdk-version 2> /dev/null || echo '(see .emsdk-version)'):"
-        echo "  source ~/.neotolis/toolchain/emsdk-$(cat .emsdk-version)/emsdk_env.sh   (bash scripts/setup_emsdk.sh installs it)"
-        echo "Then configure once: emcmake cmake --preset wasm-debug"
-        exit 1
-    fi
-    require_emcc
+    # PATH node runs the wasm tests registered through NT_NODE_EXECUTABLE (the rest use emsdk's).
+    require_installed emsdk
+    require_node
     if [ ! -d "build/_cmake/wasm-debug" ]; then
         echo "ERROR: build/_cmake/wasm-debug missing — configure the preset first:"
-        echo "  emcmake cmake --preset wasm-debug"
+        echo "  cmake --preset wasm-debug"
         exit 1
     fi
     cmake --preset wasm-debug > /dev/null
@@ -322,7 +320,7 @@ if [ "$MODE" = "push" ]; then
     step "build (wasm-release)"
     if [ ! -d "build/_cmake/wasm-release" ]; then
         echo "ERROR: build/_cmake/wasm-release missing — configure the preset first:"
-        echo "  emcmake cmake --preset wasm-release"
+        echo "  cmake --preset wasm-release"
         exit 1
     fi
     cmake --preset wasm-release > /dev/null
@@ -336,7 +334,6 @@ if [ "$MODE" = "push" ]; then
     if [ ! -f "$SUBMODULE_DIR/CMakeCache.txt" ]; then
         cmake -S tests/submodule -B "$SUBMODULE_DIR" -DENGINE_ROOT=../.. -DCMAKE_TOOLCHAIN_FILE="$ROOT_DIR/cmake/nt_llvm_toolchain.cmake" -G Ninja
     fi
-    require_build_compiler "$SUBMODULE_DIR"
     cmake --build "$SUBMODULE_DIR"
     "./$SUBMODULE_DIR/submodule_test"
     python scripts/check_ui_composition.py "$SUBMODULE_DIR"

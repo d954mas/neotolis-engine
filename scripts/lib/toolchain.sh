@@ -1,32 +1,40 @@
-# Pinned tool versions (.toolchain-versions, .emsdk-version). Sourcing this puts the
-# repo-local LLVM first on PATH; the require_* functions reject any other version of a
-# tool before a check uses it, so a local run cannot pass with tools CI does not have.
+# The pinned toolchain (.toolchain-versions) for a shell. Sourcing this puts the installs of
+# scripts/setup_toolchain.py first on PATH and activates the pinned emsdk, as CI does. CMake rejects
+# a tree built with anything else (cmake/nt_toolchain_check.cmake); the require_* functions cover
+# what CMake does not run: clang-format, clang-tidy, Python and Node.
 
 NT_TOOLCHAIN_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # shellcheck source=../../.toolchain-versions
 source "$NT_TOOLCHAIN_ROOT/.toolchain-versions"
-# Per-user installs shared by every checkout and worktree (scripts/setup.sh).
-NT_TOOLCHAIN_DIR="${USERPROFILE:-$HOME}/.neotolis/toolchain"
-command -v cygpath > /dev/null 2>&1 && NT_TOOLCHAIN_DIR="$(cygpath -u "$NT_TOOLCHAIN_DIR")"
-NT_LLVM_BIN="$NT_TOOLCHAIN_DIR/llvm-$LLVM_VERSION/bin"
-NT_BUILDTOOLS_DIR="$NT_TOOLCHAIN_DIR/buildtools-cmake-$CMAKE_VERSION-ninja-$NINJA_VERSION"
-# The native cmake (cmake/data/bin) ahead of the wheel launchers in bin/, which also holds ninja.
-NT_BUILDTOOLS_BIN="$NT_BUILDTOOLS_DIR/cmake/data/bin:$NT_BUILDTOOLS_DIR/bin"
-export PATH="$NT_LLVM_BIN:$NT_BUILDTOOLS_BIN:$PATH"
+# Python's Path.home(): USERPROFILE on Windows, HOME elsewhere.
+if command -v cygpath > /dev/null 2>&1; then
+    NT_TOOLCHAIN_DIR="$(cygpath -u "$USERPROFILE")/.neotolis/toolchain"
+    EMSDK="$(cygpath -m "$NT_TOOLCHAIN_DIR/emsdk-$EMSDK_VERSION")"
+else
+    NT_TOOLCHAIN_DIR="$HOME/.neotolis/toolchain"
+    EMSDK="$NT_TOOLCHAIN_DIR/emsdk-$EMSDK_VERSION"
+fi
+export EMSDK EM_CONFIG="$EMSDK/.emscripten"
+export PATH="$NT_TOOLCHAIN_DIR/llvm-$LLVM_VERSION/bin:$NT_TOOLCHAIN_DIR/cmake-$CMAKE_VERSION/bin:$NT_TOOLCHAIN_DIR/ninja-$NINJA_VERSION:$NT_TOOLCHAIN_DIR/emsdk-$EMSDK_VERSION:$NT_TOOLCHAIN_DIR/emsdk-$EMSDK_VERSION/upstream/emscripten:$PATH"
 
 toolchain_fail() {
     echo "toolchain: $1" >&2
-    echo "  install the pinned versions: bash scripts/setup.sh (Python and Node: docs/build.md#pinned-toolchain)" >&2
+    echo "  install the pinned versions: python scripts/setup_toolchain.py (Python and Node: docs/build.md#pinned-toolchain)" >&2
     exit 1
 }
 
-# require_llvm clang clang-format ...: each tool resolves to the pinned LLVM release.
-require_llvm() {
-    local tool found
+# require_installed llvm cmake ninja emsdk: setup_toolchain.py writes each marker last, and the
+# directories above come first on PATH, so a marker means the pinned binary is the one that runs.
+require_installed() {
+    local tool version
     for tool in "$@"; do
-        found="$("$tool" --version 2> /dev/null | grep -o 'version [0-9][0-9.]*' | head -1 || true)"
-        found="${found#version }"
-        [ "$found" = "$LLVM_VERSION" ] || toolchain_fail "$tool: expected $LLVM_VERSION, found ${found:-none}"
+        case "$tool" in
+            llvm) version="$LLVM_VERSION" ;;
+            cmake) version="$CMAKE_VERSION" ;;
+            ninja) version="$NINJA_VERSION" ;;
+            emsdk) version="$EMSDK_VERSION" ;;
+        esac
+        [ -f "$NT_TOOLCHAIN_DIR/$tool-$version/.installed" ] || toolchain_fail "$tool $version is not installed in $NT_TOOLCHAIN_DIR"
     done
 }
 
@@ -40,45 +48,4 @@ require_node() {
     local found
     found="$(node --version 2> /dev/null | sed -n 's/^v\([0-9]*\)\..*/\1/p' || true)"
     [ "$found" = "$NODE_VERSION" ] || toolchain_fail "node: expected $NODE_VERSION.x, found ${found:-none}"
-}
-
-require_buildtools() {
-    local found
-    found="$(cmake --version 2> /dev/null | sed -n 's/^cmake version //p' || true)"
-    [ "$found" = "$CMAKE_VERSION" ] || toolchain_fail "cmake: expected $CMAKE_VERSION, found ${found:-none}"
-    # The PyPI build reports 1.13.2.git.kitware...; the pin is its release number.
-    found="$(ninja --version 2> /dev/null | sed -E -n 's/^([0-9]+[.][0-9]+[.][0-9]+).*/\1/p' || true)"
-    [ "$found" = "$NINJA_VERSION" ] || toolchain_fail "ninja: expected $NINJA_VERSION, found ${found:-none}"
-}
-
-require_emcc() {
-    local expected found
-    expected="$(tr -d '[:space:]' < "$NT_TOOLCHAIN_ROOT/.emsdk-version")"
-    found="$(emcc --version 2> /dev/null | head -1 | grep -o ') [0-9][0-9.]*' | tr -d ') ' || true)"
-    [ "$found" = "$expected" ] || toolchain_fail "emcc: expected $expected (.emsdk-version), found ${found:-none}"
-}
-
-# require_build_compiler <build dir>: the tree was configured by the pinned CMake and Ninja and
-# its C and C++ compilers are the pinned LLVM, so a tree configured before a version change
-# cannot keep building with the old tools.
-require_build_compiler() {
-    local dir="$1" lang found cmake_version
-    found="$(sed -n 's/^CMAKE_COMMAND:INTERNAL=//p' "$dir/CMakeCache.txt" 2> /dev/null)"
-    case "$found" in
-        */buildtools-cmake-"$CMAKE_VERSION"-ninja-"$NINJA_VERSION"/*) ;;
-        *) toolchain_fail "$dir: configured by ${found:-unknown cmake}, expected CMake $CMAKE_VERSION from ~/.neotolis/toolchain; reconfigure the tree with --fresh" ;;
-    esac
-    found="$(sed -n 's/^CMAKE_MAKE_PROGRAM:[A-Z]*=//p' "$dir/CMakeCache.txt" 2> /dev/null)"
-    case "$found" in
-        */buildtools-cmake-"$CMAKE_VERSION"-ninja-"$NINJA_VERSION"/*) ;;
-        *) toolchain_fail "$dir: builds with ${found:-unknown ninja}, expected Ninja $NINJA_VERSION from ~/.neotolis/toolchain; reconfigure the tree with --fresh" ;;
-    esac
-    cmake_version="$(cmake --version | sed -n 's/^cmake version //p')"
-    for lang in C CXX; do
-        found="$(sed -n "s/^set(CMAKE_${lang}_COMPILER \"\(.*\)\")/\1/p" "$dir/CMakeFiles/$cmake_version/CMake${lang}Compiler.cmake" 2> /dev/null)"
-        case "$found" in
-            */.neotolis/toolchain/llvm-"$LLVM_VERSION"/bin/*) ;;
-            *) toolchain_fail "$dir: $lang compiler is ${found:-unset}, expected LLVM $LLVM_VERSION from ~/.neotolis/toolchain; reconfigure the tree with --fresh" ;;
-        esac
-    done
 }

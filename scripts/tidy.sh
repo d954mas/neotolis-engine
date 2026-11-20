@@ -10,7 +10,7 @@ if command -v cygpath > /dev/null 2>&1; then
 fi
 # shellcheck source=lib/toolchain.sh
 source "$SCRIPT_DIR/lib/toolchain.sh"
-require_llvm clang-tidy
+require_installed llvm
 BUILD_DIR="${1:-build/_cmake/native-debug}"
 if [ "$#" -gt 0 ]; then shift; fi
 

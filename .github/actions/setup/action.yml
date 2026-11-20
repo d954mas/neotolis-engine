@@ -12,7 +12,7 @@ inputs:
     description: Additional apt packages.
     default: ""
   emsdk:
-    description: Activate the emsdk pinned by .emsdk-version, plus the pinned Node.
+    description: Install the pinned emsdk, plus the pinned Node.
     default: "false"
   ccache-key:
     description: ccache key; empty disables ccache.
@@ -33,18 +33,33 @@ runs:
       with:
         python-version: ${{ steps.versions.outputs.PYTHON_VERSION }}
 
-    # Every job configures or builds with CMake and Ninja: the same pinned wheels as locally.
-    - name: Install pinned CMake and Ninja
+    # The same per-user directories setup_toolchain.py installs locally; it adds them to
+    # GITHUB_PATH and GITHUB_ENV itself. CMake and Ninja serve every job.
+    - uses: actions/cache@v6
+      with:
+        path: |
+          ~/.neotolis/toolchain/cmake-${{ steps.versions.outputs.CMAKE_VERSION }}
+          ~/.neotolis/toolchain/ninja-${{ steps.versions.outputs.NINJA_VERSION }}
+        key: toolchain-build-${{ steps.versions.outputs.CMAKE_VERSION }}-${{ steps.versions.outputs.NINJA_VERSION }}-${{ runner.os }}
+
+    - uses: actions/cache@v6
+      if: inputs.native == 'true'
+      with:
+        path: ~/.neotolis/toolchain/llvm-${{ steps.versions.outputs.LLVM_VERSION }}
+        key: toolchain-llvm-${{ steps.versions.outputs.LLVM_VERSION }}-${{ runner.os }}-${{ hashFiles('scripts/setup_toolchain.py') }}
+
+    # The per-job key also keeps the Emscripten system libraries that job built.
+    - uses: actions/cache@v6
+      if: inputs.emsdk == 'true'
+      with:
+        path: ~/.neotolis/toolchain/emsdk-${{ steps.versions.outputs.EMSDK_VERSION }}
+        key: toolchain-emsdk-${{ steps.versions.outputs.EMSDK_VERSION }}-${{ inputs.ccache-key }}
+        restore-keys: toolchain-emsdk-${{ steps.versions.outputs.EMSDK_VERSION }}-
+
+    - name: Install the pinned toolchain
       shell: bash
       run: |
-        python scripts/setup_buildtools.py
-        dir="${USERPROFILE:-$HOME}/.neotolis/toolchain/buildtools-cmake-${{ steps.versions.outputs.CMAKE_VERSION }}-ninja-${{ steps.versions.outputs.NINJA_VERSION }}"
-        if command -v cygpath > /dev/null; then dir="$(cygpath -m "$dir")"; fi
-        # GITHUB_PATH prepends, so the native cmake added last wins over the bin/ launchers.
-        echo "$dir/bin" >> "$GITHUB_PATH"
-        echo "$dir/cmake/data/bin" >> "$GITHUB_PATH"
-        "$dir/cmake/data/bin/cmake" --version | head -1
-        "$dir/bin/ninja" --version
+        python scripts/setup_toolchain.py build ${{ inputs.native == 'true' && 'llvm' || '' }} ${{ inputs.emsdk == 'true' && 'emsdk' || '' }}
 
     - name: Create LFS file list
       if: inputs.lfs == 'true'
@@ -62,24 +77,6 @@ runs:
       shell: bash
       run: git lfs pull
 
-    # The same per-user directory scripts/setup_llvm.py installs into locally.
-    - uses: actions/cache@v6
-      if: inputs.native == 'true'
-      id: llvm-cache
-      with:
-        path: ~/.neotolis/toolchain/llvm-${{ steps.versions.outputs.LLVM_VERSION }}
-        key: llvm-${{ steps.versions.outputs.LLVM_VERSION }}-${{ runner.os }}-${{ hashFiles('scripts/setup_llvm.py') }}
-
-    - name: Install pinned LLVM
-      if: inputs.native == 'true'
-      shell: bash
-      run: |
-        python scripts/setup_llvm.py
-        bin="${USERPROFILE:-$HOME}/.neotolis/toolchain/llvm-${{ steps.versions.outputs.LLVM_VERSION }}/bin"
-        if command -v cygpath > /dev/null; then bin="$(cygpath -m "$bin")"; fi
-        echo "$bin" >> "$GITHUB_PATH"
-        "$bin/clang" --version
-
     # libgl1-mesa-dri: llvmpipe, the software GL behind xvfb for the real-GL tests.
     - name: Install native packages
       if: runner.os == 'Linux' && (inputs.native == 'true' || inputs.extra-packages != '')
@@ -91,32 +88,6 @@ runs:
             libwayland-dev wayland-protocols libxkbcommon-dev libgl-dev libgl1-mesa-dri libssl-dev xvfb $packages"
         fi
         sudo apt-get update && sudo apt-get install -y $packages
-
-    - name: Read emsdk version
-      if: inputs.emsdk == 'true'
-      id: emsdk-version
-      shell: bash
-      run: echo "version=$(cat .emsdk-version)" >> "$GITHUB_OUTPUT"
-
-    # A fixed install path keeps sysroot header paths, and so ccache keys, stable across
-    # runs; the per-job key also keeps the Emscripten system libraries that job built.
-    - uses: actions/cache@v6
-      if: inputs.emsdk == 'true'
-      with:
-        path: ~/.neotolis/toolchain/emsdk-${{ steps.emsdk-version.outputs.version }}
-        key: emsdk-${{ steps.emsdk-version.outputs.version }}-${{ inputs.ccache-key }}
-        restore-keys: emsdk-${{ steps.emsdk-version.outputs.version }}-
-
-    - name: Install emsdk
-      if: inputs.emsdk == 'true'
-      shell: bash
-      run: |
-        bash scripts/setup_emsdk.sh
-        dir="$HOME/.neotolis/toolchain/emsdk-${{ steps.emsdk-version.outputs.version }}"
-        echo "EMSDK=$dir" >> "$GITHUB_ENV"
-        echo "EM_CONFIG=$dir/.emscripten" >> "$GITHUB_ENV"
-        echo "$dir" >> "$GITHUB_PATH"
-        echo "$dir/upstream/emscripten" >> "$GITHUB_PATH"
 
     - uses: actions/setup-node@v7
       if: inputs.emsdk == 'true'

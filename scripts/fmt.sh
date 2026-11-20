@@ -9,7 +9,7 @@ cd "$(cd "$SCRIPT_DIR/.." && pwd)"
 source "$SCRIPT_DIR/lib/changed_files.sh"
 # shellcheck source=lib/toolchain.sh
 source "$SCRIPT_DIR/lib/toolchain.sh"
-require_llvm clang-format
+require_installed llvm
 
 FILES="$(compute_changed_files | grep -E '\.(c|h)$' | grep -v 'deps/\|/generated/' || true)"
 if [ -z "$FILES" ]; then

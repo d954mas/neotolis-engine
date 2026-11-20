@@ -15,59 +15,52 @@ launch WSL, which is not the supported shell for this Windows build.
 
 ```bash
 git lfs pull
-bash scripts/setup.sh
-source ~/.neotolis/toolchain/emsdk-$(cat .emsdk-version)/emsdk_env.sh
+python scripts/setup_toolchain.py
+source scripts/lib/toolchain.sh
 cmake --preset native-debug
 cmake --preset native-release
-emcmake cmake --preset wasm-debug
-emcmake cmake --preset wasm-release
+cmake --preset wasm-debug
+cmake --preset wasm-release
 bash scripts/check.sh
 ```
 
-`setup.sh` installs the pinned LLVM and emsdk (below). Activate that SDK again
-in later shell sessions. LFS checkout is required: asset pointer files are not usable example
-assets or benchmark inputs.
+`source scripts/lib/toolchain.sh` again in every new shell that runs `cmake`
+by hand; the check scripts source it themselves. LFS checkout is required:
+asset pointer files are not usable example assets or benchmark inputs.
 
 ### Pinned toolchain
 
-Local checks and every CI job use one set of tool versions.
-`.toolchain-versions` pins the LLVM release (clang, clang++, clang-format,
-clang-tidy, clangd), CMake, Ninja, the Python minor version and the Node major
-version; `.emsdk-version` pins Emscripten. `scripts/check.sh`, `fmt.sh` and `tidy.sh`
-fail with the expected and the found version when a local tool differs, and
-check.sh also rejects a native build tree configured with another compiler.
+Local checks and every CI job use one set of tool versions, all in
+`.toolchain-versions`: LLVM (clang, clang++, lld, clang-format, clang-tidy,
+clangd), CMake, Ninja and the Emscripten SDK by exact version with the SHA-256
+of each release archive, Python by minor and Node by major version.
 
-- **LLVM:** `python scripts/setup_llvm.py` (run by `setup.sh`) downloads the
-  official release archive for Windows x64 or Linux x64, checks the SHA-256
-  pinned next to the version and installs it into
-  `~/.neotolis/toolchain/llvm-<version>/` (`%USERPROFILE%\.neotolis\toolchain`
-  on Windows). Every checkout and worktree shares that directory, and branches
-  with different pins coexist in it. CI runs the same script. The native
-  presets select it for C and C++ through `cmake/nt_llvm_toolchain.cmake`; the
-  system or image compiler is never used. After a version change, reconfigure
-  each native build tree with `cmake --preset <name> --fresh`.
-- **CMake and Ninja:** `python scripts/setup_buildtools.py` (run by `setup.sh`)
-  unpacks the PyPI wheels of the pinned versions under `~/.neotolis/toolchain/`
-  (no venv, so no second python on PATH); CI runs the same script. check.sh also rejects a
-  build tree configured by another CMake or Ninja.
-- **Emscripten:** `bash scripts/setup_emsdk.sh` (run by `setup.sh`) clones the
-  emsdk tag of the `.emsdk-version` release into
-  `~/.neotolis/toolchain/emsdk-<version>/`, installs and activates it; CI runs
-  the same script. `check.sh --push` rejects an active emcc of another version.
-- **Python:** install the pinned minor version (Windows: the python.org
-  installer; Linux: the distro package, deadsnakes or `uv python install`).
-  `setup_llvm.py` needs it for `compression.zstd`.
-- **Node:** install the pinned major version (Windows: the nodejs.org
-  installer; Linux: NodeSource or nvm). Wasm tests run under it.
-- **Shell:** `source scripts/lib/toolchain.sh` puts the pinned LLVM, CMake and
-  Ninja first on PATH for hand-run `cmake --preset` commands; the check
-  scripts do it themselves.
+- **Install:** `python scripts/setup_toolchain.py [llvm] [build] [emsdk]`
+  installs LLVM, CMake plus Ninja, and emsdk (default: all) into
+  `~/.neotolis/toolchain/<tool>-<version>/` (`%USERPROFILE%` on Windows). Every
+  checkout and worktree shares those directories, and branches with different
+  pins coexist in them. CI runs the same script. Native presets select clang,
+  clang++ and the linker through `cmake/nt_llvm_toolchain.cmake`; the system or
+  image compiler is never used.
+- **Enforcement:** `cmake/nt_toolchain_check.cmake` fails the configure unless
+  CMake, Ninja and the compiler (Emscripten for wasm trees) are the pinned
+  versions. `.toolchain-versions` is a configure dependency, so after a version
+  bump the next build of any tree stops there: reconfigure it with
+  `cmake --preset <name> --fresh`. check.sh rebuilds its own `tidy-ci` tree.
+- **Python and Node:** install them yourself (Windows: the python.org and
+  nodejs.org installers; Linux: the distro packages, deadsnakes or
+  `uv python install`, NodeSource or nvm); check.sh rejects other versions.
+  `setup_toolchain.py` needs Python 3.14 for `compression.zstd`. PATH Node runs
+  Playwright, the push checks and the wasm tests registered through
+  `NT_NODE_EXECUTABLE`; the other wasm tests run under the Node bundled with
+  the pinned emsdk.
 - **Editors:** point clangd at `~/.neotolis/toolchain/llvm-<version>/bin/clangd`
   so editor diagnostics match the pinned clang-tidy.
 
 CI runs on explicit runner images (`ubuntu-26.04`, `windows-2025-vs2026`), never
-`*-latest`: the image still provides glibc and libstdc++, the MSVC STL and
-Windows SDK and Mesa. Move to a new image in its own change.
+`*-latest`: the image still provides glibc, libstdc++ and the GCC crt objects
+on Linux, the MSVC STL and Windows SDK, Mesa, and the apt tools wabt, ffmpeg
+and ccache. Move to a new image in its own change.
 
 Bumping a version is one change to `.toolchain-versions` (new SHA-256 values
 from the release archives), a whole-tree reformat commit when clang-format
@@ -225,10 +218,7 @@ compressed targets are enabled. It writes the 12 fixtures and 60 transcodes
 listed in `tests/unit/basisu_fixtures.h` into `build/tests/basisu_golden/` and
 checks all 72 files against `tests/fixtures/basisu_golden.sha256`. The
 fixtures encode test-owned level chains, so the baseline pins the encoder and
-the transcoder, never the builder's mip filtering. Both build with
-`-ffp-contract=off`: FMA contraction (an `x86-64-v3` or ARM64 target) changes
-the float rounding of the ETC1S to BC7 transcode, so the baseline would
-otherwise depend on the compiler's default target. Regenerate
+the transcoder, never the builder's mip filtering. Regenerate
 that checksum file only for an intentional baseline change:
 `sha256sum *.basis *.bin | LC_ALL=C sort -k2` inside the golden directory.
 `test_basisu_trimmed` decodes them byte-for-byte with the runtime library of
@@ -364,8 +354,8 @@ format/tidy; review changes to them separately.
 
 Tidy uses the DevAPI-enabled compile database in `build/_cmake/tidy-ci`, matching
 CI. Before pushing new test/tool C files, run
-`bash scripts/tidy.sh build/_cmake/tidy-ci <file>` directly (pinned clang-tidy,
-vendored headers as system includes); new files can otherwise be missed. Rebuild native-debug after adding a C source to refresh its compile DB;
+`clang-tidy -p build/_cmake/tidy-ci <file>` directly in a shell that sourced
+`scripts/lib/toolchain.sh`; new files can otherwise be missed. Rebuild native-debug after adding a C source to refresh its compile DB;
 new-file and platform-`#if` clangd diagnostics need confirmation by a real build.
 
 The push gate additionally builds native-release, wasm-debug and wasm-release,

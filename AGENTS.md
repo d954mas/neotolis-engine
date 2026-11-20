@@ -65,7 +65,7 @@ alternative, what each catches. The developer decides.
 - Before push: `bash scripts/check.sh --push`. `bash scripts/format_and_check.sh --push` combines both requirements; `bash scripts/check.sh --full` runs the full format/tidy sweep.
 - Fix failures before committing. A fresh full gate is authoritative; targeted tests alone can use stale binaries.
 - Never run two `check.sh`/`ctest` processes in one tree at once, including subagents. Remove `build/.check.lock` only after confirming its owner is dead.
-- Before pushing new C test/tool files, run `bash scripts/tidy.sh build/_cmake/tidy-ci <file>` directly; see [check details](docs/build.md#checks).
+- Before pushing new C test/tool files, run `clang-tidy -p build/_cmake/tidy-ci <file>` directly after `source scripts/lib/toolchain.sh`; see [check details](docs/build.md#checks).
 - Commit deterministic regenerated `examples/*/generated/*.h` and `tools/*/generated/*.h` when pack builds reveal stale committed copies.
 
 ## Evidence and review
