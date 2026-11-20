@@ -72,15 +72,7 @@ function(nt_basisu_transcoder_settings target)
     # Suppress warnings in vendored C++ code
     target_compile_options(${target} PRIVATE -w)
     nt_set_static_crt_cxx(${target})
-    # Link C++ stdlib — needed on Linux where C linker doesn't pull it automatically
-    if(NOT WIN32 AND NOT EMSCRIPTEN)
-        target_link_libraries(${target} PUBLIC stdc++)
-    endif()
-    # Consumers link with emcc: CXX is enabled only in this directory, so CMake never picks em++
-    # for them, and emcc no longer adds libc++ by default.
-    if(EMSCRIPTEN)
-        target_link_options(${target} INTERFACE -sDEFAULT_TO_CXX)
-    endif()
+    nt_link_cxx_runtime(${target})
     set_target_properties(${target} PROPERTIES
         ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/engine/${NT_PRESET_NAME}"
         CXX_STANDARD 17
