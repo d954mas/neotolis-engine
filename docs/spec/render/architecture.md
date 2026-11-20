@@ -330,7 +330,7 @@ silently rewired into whichever vertex input is bound, and core-profile GL
 rejects the bind with VAO 0. Vertex inputs die with a lost context
 and are not auto-restored: loss itself frees their pool slots, so a handle
 held across a loss goes stale and `nt_gfx_vertex_input_valid` reports false.
-A mesh's vertex input is made again on its first use after the restore; renderer
+A reconstructed mesh's vertex input is made on first use after restore; renderer
 caches validate on lookup and self-heal. This is the rule for baked objects — pipelines, vertex
 inputs and render targets, all assembled from other handles and remade by their
 users (renderer caches self-heal on lookup; the restore recipe remakes render
@@ -466,8 +466,8 @@ stream's draws keep their own instance offsets, and one base vertex input for
 every other buffer. The identity is (mesh, frame stream): materials do not
 shape vertex inputs, so every material on a mesh shares them, and the renderers
 keep no vertex-input cache. They die with the mesh (the destroy cascade) and
-with a context loss; the next use makes them again, also after the caller
-destroys one. The mesh renderer binds them with the instance layout of each draw; the
+with a context loss; the next use makes them again when the mesh buffers are live,
+also after the caller destroys one. A lost mesh must first be reconstructed. The mesh renderer binds them with the instance layout of each draw; the
 engine layouts share the instance head (`NT_INST_LOC_*`, see
 [shader, Attribute locations](shader.md#attribute-locations)). Two instance
 layouts of one mesh drawn from one stream, or from game buffers (which share
@@ -640,6 +640,23 @@ storage sent. An upload goes through the same checks as
 begin_frame that restores the context makes new buffers, which that frame's data
 reaches. A frame buffer that cannot be made asserts unless the context is lost. `nt_gfx_stub` has zero capacity: every allocation
 asserts.
+
+### Direct mesh construction
+
+`nt_gfx_make_mesh` accepts tightly interleaved vertex bytes, optional UINT16/UINT32
+indices, counts and the existing `NtStreamDesc` layout. It uploads the bytes and
+copies the descriptors; no input pointers survive the call. The mesh owns its GPU
+buffers and lazily created vertex inputs until `nt_gfx_destroy_mesh` or gfx shutdown.
+Invalid layouts/counts and pool exhaustion assert. Device loss returns INVALID.
+
+The pack activator keeps sequential decode/upload: vertex staging is reused by
+index decoding, so peak staging stays max(vertex bytes, decoded index bytes).
+
+A live mesh whose buffers were lost still has queryable metadata. Its vertex-input
+lookup returns INVALID and the renderer skips it until the game reconstructs it.
+Stale mesh handles remain errors in
+draw/vertex-input paths. Resource invalidation destroys pack-owned meshes before
+rebuilding; procedural objects are recreated by the game.
 
 ### Mesh draws
 
@@ -1404,10 +1421,13 @@ means the selection has no pipeline, a lost context included.
 
 | Label | Fields | Written |
 |---|---|---|
-| `mesh` | `material`, `mesh`; `drop`: `program not ready`, `context lost` | before each run of `draw_list`, `draw_list_skinned` and each direct mesh draw; a deformation-only split notes the same pair again |
+| `mesh` | `material`, `mesh`; `drop`: `program not ready`, `context lost`, `mesh not ready` | before each run of `draw_list`, `draw_list_skinned` and each direct mesh draw; a deformation-only split notes the same pair again |
 | `sprite` | `material`, `page` (a texture HANDLE, 0 when not ready); `drop`: `program not ready`, `page not ready` | before each immediate emit of a live region and each `draw_list` run; a merged emit keeps its note before a `CACHE` draw |
 | `text` | `material`, `font`; `drop`: `program not ready`, `font not loaded`, `font texture not ready` | once per non-empty `draw_n` call |
 | `shape` | none; `drop`: `program not ready` | before each shape draw of a flush, or once for a non-empty flush whose programs are not ready |
+
+With a ready program and a live context, mesh buffers awaiting reconstruction
+produce `drop: mesh not ready`.
 
 On a loss taken at `nt_gfx_begin_frame`, mesh draws return before noting, and
 sprite, text and shape note `drop: program not ready`: the wipe leaves no ready

@@ -109,7 +109,7 @@ typedef struct {
  * iterates sampler_count, not capacity, so capacity is free for the hot path. */
 #define NT_GFX_MAX_SAMPLERS 128
 
-/* ---- Mesh info (side table for VBO+IBO pairs from mesh activator) ---- */
+/* ---- Mesh info (side table for a mesh's VBO+IBO pair) ---- */
 
 typedef struct {
     nt_buffer_t vbo;
@@ -118,7 +118,7 @@ typedef struct {
     uint32_t index_count;
     uint8_t stream_count;
     uint8_t index_type;                        /* 0=none, 1=uint16, 2=uint32 */
-    NtStreamDesc streams[NT_MESH_MAX_STREAMS]; /* copied from pack data at activation */
+    NtStreamDesc streams[NT_MESH_MAX_STREAMS]; /* copied at construction */
     uint16_t stride;                           /* total vertex size in bytes */
 } nt_gfx_mesh_info_t;
 
@@ -1298,6 +1298,26 @@ bool nt_gfx_is_gpu_timing_supported(void);
  * every draw reads the frame's last write; a write after it belongs to the next frame. */
 void nt_gfx_update_texture(nt_texture_t tex, uint16_t x, uint16_t y, uint16_t w, uint16_t h, const void *data);
 
+/* ---- Meshes ---- */
+
+typedef struct {
+    const void *vertices; /* tightly interleaved in stream order */
+    const void *indices;  /* NULL for non-indexed triangles */
+    const NtStreamDesc *streams;
+    uint32_t vertex_count;
+    uint32_t index_count;
+    uint8_t stream_count;
+    uint8_t index_type; /* NT_INDEX_NONE / UINT16 / UINT32 */
+} nt_mesh_desc_t;
+
+/* Uploads caller bytes and copies stream descriptors; retains no input pointers.
+ * The mesh owns both buffers and its vertex inputs. Invalid layout/counts and
+ * capacity assert; a context loss returns INVALID. Recreate after restore. */
+nt_mesh_t nt_gfx_make_mesh(const nt_mesh_desc_t *desc);
+/* Zero is a no-op; stale handles assert. Frees owned buffers and vertex inputs.
+ * Like buffer destruction, outside a pass before recording this frame's draws. */
+void nt_gfx_destroy_mesh(nt_mesh_t mesh);
+
 /* ---- Asset activators (called by nt_resource via callback registration) ---- */
 
 uint32_t nt_gfx_activate_texture(const uint8_t *data, uint32_t size);
@@ -1313,8 +1333,8 @@ const nt_gfx_mesh_info_t *nt_gfx_get_mesh_info(nt_mesh_t mesh);
 /* The vertex input that draws `mesh` with instances from instance_buffer: one per frame vertex
  * stream, so each stream's draws keep their own instance offsets, and one shared by every other
  * buffer. gfx owns it: made on first use with every stream at its NtStreamDesc.location, freed
- * with the mesh or by a context loss. INVALID when it must be made while the context is lost; a
- * live mesh and buffer are asserted. */
+ * with the mesh or by a context loss. INVALID while the mesh buffers have no live GPU storage,
+ * including after restore until the mesh is reconstructed; live mesh and buffer handles are asserted. */
 nt_vertex_input_t nt_gfx_mesh_vertex_input(nt_mesh_t mesh, nt_buffer_t instance_buffer);
 
 // #region test_access

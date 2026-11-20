@@ -50,7 +50,7 @@ void setUp(void) {
     s_fx.ctx->pending_rich = NULL;
     s_fx.ctx->rich_session_open = false;
     /* Deterministic metrics: advance = size/2/char; ascent 800/1000. */
-    nt_font_test_set_metrics(s_fx.stub_font, 1000, 800, -200, 1000);
+    ui_walker_fixture_fill_stub_font(&s_fx);
 }
 
 void tearDown(void) { ui_walker_fixture_shutdown(&s_fx); }

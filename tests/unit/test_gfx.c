@@ -2459,7 +2459,7 @@ void test_activate_mesh_asserts_when_the_mesh_pool_is_full(void) {
     fill_valid_mesh_blob(blob);
     TEST_ASSERT_NOT_EQUAL_UINT32(0, nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
     EXPECT_ASSERT(nt_gfx_activate_mesh(blob, (uint32_t)sizeof(blob)));
-    TEST_ASSERT_NOT_NULL(strstr(s_assert_expr, "activate_mesh: mesh pool full"));
+    TEST_ASSERT_NOT_NULL(strstr(s_assert_expr, "mesh pool full"));
     nt_gfx_end_frame();
     nt_gfx_shutdown();
     nt_gfx_init(&NT_GFX_TEST_DESC(.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8, .max_vertex_inputs = 8, .max_render_targets = 16));

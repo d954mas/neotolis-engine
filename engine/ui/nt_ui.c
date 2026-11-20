@@ -397,6 +397,9 @@ void nt_ui_set_font(nt_ui_context_t *ctx, uint16_t font_id, nt_font_t font) {
     NT_ASSERT(ctx != NULL && "nt_ui_set_font: ctx must be non-NULL");
     NT_ASSERT(!ctx->in_frame && "nt_ui_set_font: must be called outside begin/end");
     NT_ASSERT(font_id < NT_UI_MAX_FONTS && "nt_ui_set_font: font_id >= NT_UI_MAX_FONTS");
+    if (ctx->fonts[font_id].id != font.id) {
+        ctx->font_epoch = UINT32_MAX; /* the next begin resets measurements */
+    }
     ctx->fonts[font_id] = font;
 }
 // #endregion
@@ -439,6 +442,11 @@ void nt_ui_begin(nt_ui_context_t *ctx, const nt_ui_frame_desc_t *frame) {
 
     /* MUST be first so subsequent Clay calls operate on ctx->clay. */
     Clay_SetCurrentContext(ctx->clay);
+
+    if (ctx->font_epoch != nt_font_content_epoch()) {
+        ctx->font_epoch = nt_font_content_epoch();
+        Clay_ResetMeasureTextCache();
+    }
 
     ctx->in_frame = true;
     g_nt_ui_inframe_ctx = ctx;

@@ -146,13 +146,13 @@ static void test_fit_width_whitespace_only_terminates(void) {
     TEST_ASSERT_EQUAL_UINT16(44U, s); /* nothing to measure -- fits at max */
 }
 
-/* === Measuring font tests (T1): nt_font_test_set_metrics makes stub_font
+/* === Measuring font tests (T1): a glyph-free FONT payload makes stub_font
  * return tofu widths = size/2 per char. With units_per_em=1000, size=20:
  * each char is 10px wide. "abcde" (5 chars) = 50px. === */
 
 /* With measuring font: text wider than container must shrink. */
 static void test_fit_width_measuring_font_shrinks(void) {
-    nt_font_test_set_metrics(s_fx.stub_font, 1000, 800, -200, 1000);
+    ui_walker_fixture_fill_stub_font(&s_fx);
     /* size=40: advance = 20px/char. "abcdefghij" = 10 chars = 200px. container=100. */
     uint16_t s = nt_ui_fit_width(s_fx.ctx, 0, "abcdefghij", 100.0F, 10U, 40U, 0.0F);
     TEST_ASSERT_LESS_THAN_UINT16(40U, s);
@@ -161,7 +161,7 @@ static void test_fit_width_measuring_font_shrinks(void) {
 
 /* Long single word (no whitespace): fit_width must shrink even without wrap. */
 static void test_fit_width_long_word_no_wrap_shrinks(void) {
-    nt_font_test_set_metrics(s_fx.stub_font, 1000, 800, -200, 1000);
+    ui_walker_fixture_fill_stub_font(&s_fx);
     /* 20 chars, size=40: width = 20*20 = 400px. container=100. Must shrink. */
     uint16_t s = nt_ui_fit_width(s_fx.ctx, 0, "abcdefghijklmnopqrst", 100.0F, 10U, 40U, 0.0F);
     TEST_ASSERT_LESS_THAN_UINT16(40U, s);
@@ -169,7 +169,7 @@ static void test_fit_width_long_word_no_wrap_shrinks(void) {
 
 /* fit_box with measuring font: lots of text in tight box must shrink. */
 static void test_fit_box_measuring_font_shrinks(void) {
-    nt_font_test_set_metrics(s_fx.stub_font, 1000, 800, -200, 1000);
+    ui_walker_fixture_fill_stub_font(&s_fx);
     /* At size=40: line_height = 1000*40/1000 = 40px. Container 100x80 = 2 lines max.
      * 20 chars at 20px/char = 400px → wraps many times → shrinks. */
     uint16_t s = nt_ui_fit_box(s_fx.ctx, 0, "abcdefghij klmnopqrst uvwxy", 100.0F, 80.0F, 10U, 40U, 0.0F, 0U);

@@ -49,7 +49,7 @@ game code: nt_resource_mount(pack_id, priority)
 Next nt_resource_step():
   → nt_http_update() delivers the completed response into a C buffer
   → polls the HTTP request and takes its completed buffer
-  → first load: parses the manifest and registers assets (BLOB owners are READY)
+  → first load: parses the manifest and registers assets for activation
   → reload after eviction: restores bytes for retained records without reparsing
   → pack state = READY
 
@@ -79,7 +79,7 @@ The private `NtPackMeta` layout lives in
 It stores per-pack I/O progress (`bytes_received`, `bytes_total`), request linkage,
 retry state, blob residency, and the activation cursor described below.
 
-`meta_data` is copied out of the pack blob at parse time so metadata queries survive blob eviction. `retry_*`, `io_type`, and `load_path` drive both normal retry/backoff and immediate aux-miss reloads. `blob_last_access_ms` + `blob_ttl_ms` implement `NT_BLOB_AUTO` eviction. Activated assets and copied auxiliary snapshots own their data and survive source-byte eviction; see [Resource System — owned asset data](resource.md#owned-asset-data). Caller-owned blobs passed to `nt_resource_parse_pack` remain resident until unmount or shutdown regardless of policy.
+`meta_data` is copied out of the pack blob at parse time so metadata queries survive blob eviction. `retry_*`, `io_type`, and `load_path` drive both normal retry/backoff and immediate aux-miss reloads. `evict_bytes` remembers an explicit eviction request across rereads. Activated assets and copied auxiliary snapshots own their data and survive source-byte eviction; see [Resource System — owned asset data](resource.md#owned-asset-data). Caller-owned blobs passed to `nt_resource_parse_pack` remain resident until unmount or shutdown regardless of eviction requests.
 
 ## HTTP requests — nt_http contract
 
@@ -190,10 +190,10 @@ shutdown/init.
 **Eager with a time budget:** `nt_resource_step()` visits packs by registry index,
 then their canonical owners by asset index. Only READY packs with resident bytes
 and REGISTERED owners are eligible. Parsing requires an activator for every
-non-BLOB file type, configured before the first mount. At least one eligible
+non-FONT file type, configured before the first mount. At least one eligible
 activation is attempted per step; a zero budget is unlimited. Aliases consume no
 activation attempts and read owner state directly, regardless of which names
-the game requested. BLOB owners become READY during parse. Success and failure
+the game requested. FONT entries are raw inputs and are skipped; BLOB uses ordinary activation. Success and failure
 both dirty resolve. Failed activation requires explicit type invalidation or
 unmount/remount to retry; restoring evicted bytes alone does not reset its state.
 
@@ -207,14 +207,15 @@ The activation phase of a stable idle registry needs only the bounded pack walk.
 Cursor movement alone does not dirty resolve or change the publication epoch.
 Callbacks follow the [resource callback contract](resource.md#resource-callback-contract).
 
-An expired AUTO blob remains resident while its activation cursor is
+Bytes requested for eviction remain resident while their activation cursor is
 below the asset high-water mark. A budget stop leaves the cursor before the
 pending owner, so eviction cannot remove bytes needed on a later step. Types
 cannot gain activators after mounting, so a completed cursor cannot conceal
 owners waiting for late registration. READY and FAILED owners do not themselves
 hold the blob. The cursor check may conservatively retain a completed pack while
 other registry growth remains unscanned. Explicit unmount still removes a pack
-with pending activation. There is no additional owner scan or pending counter.
+with pending activation. Eviction runs only after all AUX resolve/post-resolve
+passes, including after a reread. There is no additional owner scan or pending counter.
 
 Any change that can affect publication (`mount`, `unmount`, `set_priority`, asset activation, virtual register/unregister, invalidation, placeholder change, or aux-miss reload scheduling) marks the registry dirty. Dirty frames run a resolve scan over assets to compute each slot's target winner and published winner. Clean frames stay on the O(1) fast path.
 

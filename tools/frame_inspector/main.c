@@ -197,7 +197,6 @@ _Alignas(max_align_t) static uint8_t s_scratch_mem[(size_t)4U * 1024U * 1024U]; 
 static nt_ui_context_t *s_ctx;
 static void *s_ui_arena;
 static nt_resource_t s_atlas;
-static nt_resource_t s_font_res;
 static nt_font_t s_font;
 static bool s_bound_atlas, s_bound_font;
 static nt_material_t s_sprite_material, s_text_material;
@@ -2710,8 +2709,10 @@ static void try_bind(void) {
         nt_ui_set_atlas_white_region(s_ctx, s_atlas, white);
         s_bound_atlas = true;
     }
-    if (!s_bound_font && nt_resource_is_ready(s_font_res)) {
-        nt_font_add(s_font, s_font_res);
+    if (!s_bound_font && nt_resource_pack_state(nt_hash32_str("frame_inspector")) == NT_PACK_STATE_READY) {
+        uint32_t size = 0;
+        const uint8_t *bytes = nt_resource_entry_bytes(nt_hash32_str("frame_inspector"), ASSET_FONT_FRAME_INSPECTOR_MONO, &size);
+        nt_font_fill(s_font, bytes, size);
         nt_ui_set_font(s_ctx, 0U, s_font);
         s_bound_font = true;
     }
@@ -3041,7 +3042,7 @@ int main(int argc, char *argv[]) {
                                         .fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_FRAG, NT_ASSET_SHADER_CODE),
                                         .label = "frame_inspector/text"};
     s_atlas = nt_resource_request(ASSET_ATLAS_FRAME_INSPECTOR_ATLAS, NT_ASSET_ATLAS);
-    s_font_res = nt_resource_request(ASSET_FONT_FRAME_INSPECTOR_MONO, NT_ASSET_FONT);
+
     s_sprite_material = make_material("frame_inspector_sprite");
     s_text_material = make_material("frame_inspector_text");
     nt_ui_set_sprite_material(s_ctx, s_sprite_material);

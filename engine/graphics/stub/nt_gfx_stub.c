@@ -308,6 +308,13 @@ uint32_t nt_gfx_activate_mesh(const uint8_t *data, uint32_t size) {
     return 0;
 }
 
+nt_mesh_t nt_gfx_make_mesh(const nt_mesh_desc_t *desc) {
+    (void)desc;
+    return NT_MESH_INVALID;
+}
+
+void nt_gfx_destroy_mesh(nt_mesh_t mesh) { (void)mesh; }
+
 uint32_t nt_gfx_activate_shader(const uint8_t *data, uint32_t size) {
     (void)data;
     (void)size;

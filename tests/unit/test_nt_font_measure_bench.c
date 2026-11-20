@@ -28,19 +28,10 @@
 #include "hash/nt_hash.h"
 #include "nt_font_format.h"
 #include "nt_pack_format.h"
-#include "resource/nt_resource.h"
 #include "time/nt_time.h"
 #include "unity.h"
 #include "test_helpers/nt_test_font_blob.h"
 /* clang-format on */
-
-/* ---- Helper: register font blob as test resource ---- */
-
-static nt_resource_t register_font_resource(const char *name, const uint8_t *blob, uint32_t blob_size) {
-    /* fonts resolve bytes from a resident pack blob — use a real parsed pack. */
-    (void)name;
-    return nt_font_test_resource(nt_font_test_register_data(blob, blob_size));
-}
 
 static nt_font_create_desc_t bench_font_desc(void) {
     return (nt_font_create_desc_t){
@@ -49,16 +40,15 @@ static nt_font_create_desc_t bench_font_desc(void) {
 }
 
 /* Build a fully-resolved test font (cache + metrics ready). Caller frees blob. */
-static nt_font_t make_bench_font(const char *name, uint8_t **out_blob) {
+static nt_font_t make_bench_font(uint8_t **out_blob) {
     nt_font_create_desc_t desc = bench_font_desc();
     nt_font_t font = nt_font_create(&desc);
 
     uint32_t blob_size = 0;
     uint8_t *blob = nt_test_font_blob('A', 'C', &blob_size);
-    nt_resource_t res = register_font_resource(name, blob, blob_size);
 
-    nt_font_add(font, res);
-    nt_resource_step();
+    nt_font_fill(font, blob, blob_size);
+
     nt_font_step();
 
     *out_blob = blob;
@@ -77,13 +67,13 @@ void setUp(void) {
     nt_gfx_init(&NT_GFX_TEST_DESC(.max_shaders = 8, .max_programs = 4, .max_pipelines = 4, .max_buffers = 8, .max_textures = 32, .max_meshes = 8, .max_vertex_inputs = 16, .max_render_targets = 16));
     nt_gfx_begin_frame();
     nt_hash_init(&(nt_hash_desc_t){0});
-    nt_resource_init(&(nt_resource_desc_t){0});
+
     nt_font_init(&(nt_font_desc_t){.max_fonts = 4});
 }
 
 void tearDown(void) {
     nt_font_shutdown();
-    nt_resource_shutdown();
+
     nt_hash_shutdown();
     nt_gfx_shutdown();
 }
@@ -92,10 +82,8 @@ void tearDown(void) {
 
 static void bench_cache_hit_steady_state(void) {
     uint8_t *blob = NULL;
-    nt_font_t font = make_bench_font("bench_hit", &blob);
+    nt_font_t font = make_bench_font(&blob);
     TEST_ASSERT_NOT_EQUAL_UINT32(0U, font.id);
-
-    nt_font_measure_invalidate(font);
 
     /* Warm-up: one call to populate the slot. */
     (void)nt_font_measure_n(font, "Hello, world", 12U, 14.0F, 0.0F);
@@ -122,10 +110,8 @@ static void bench_cache_hit_steady_state(void) {
 
 static void bench_cache_miss_unique(void) {
     uint8_t *blob = NULL;
-    nt_font_t font = make_bench_font("bench_miss", &blob);
+    nt_font_t font = make_bench_font(&blob);
     TEST_ASSERT_NOT_EQUAL_UINT32(0U, font.id);
-
-    nt_font_measure_invalidate(font);
 
     /* 1000 unique strings — each one collides with whatever is in its slot,
      * so it is effectively a miss every time. The 256-entry direct-mapped
@@ -158,10 +144,8 @@ static void bench_cache_miss_unique(void) {
 
 static void bench_long_string_hit(void) {
     uint8_t *blob = NULL;
-    nt_font_t font = make_bench_font("bench_lhit", &blob);
+    nt_font_t font = make_bench_font(&blob);
     TEST_ASSERT_NOT_EQUAL_UINT32(0U, font.id);
-
-    nt_font_measure_invalidate(font);
 
     /* ~2 KB ASCII paragraph (lorem-ipsum-style filler). Same content every
      * call → cache hit. Measures: (xxHash64 over 2 KB) + entry compare cost. */
@@ -196,10 +180,8 @@ static void bench_long_string_hit(void) {
 
 static void bench_long_string_miss(void) {
     uint8_t *blob = NULL;
-    nt_font_t font = make_bench_font("bench_lmiss", &blob);
+    nt_font_t font = make_bench_font(&blob);
     TEST_ASSERT_NOT_EQUAL_UINT32(0U, font.id);
-
-    nt_font_measure_invalidate(font);
 
     /* 1000 unique ~2 KB strings (the leading 8 chars vary, rest is filler).
      * Each call: full xxHash64 over 2 KB + full UTF-8 measure pass. The cache
@@ -234,10 +216,8 @@ static void bench_long_string_miss(void) {
 
 static void bench_mixed_ui(void) {
     uint8_t *blob = NULL;
-    nt_font_t font = make_bench_font("bench_mix", &blob);
+    nt_font_t font = make_bench_font(&blob);
     TEST_ASSERT_NOT_EQUAL_UINT32(0U, font.id);
-
-    nt_font_measure_invalidate(font);
 
     /* 80 short hot labels (typical button text), reused every "frame" */
     const int hot_count = 80;

@@ -147,7 +147,6 @@ static bool s_debug_overlay;
 /* Resources. */
 static nt_hash32_t s_pack_id;
 static nt_resource_t s_atlas_handle;
-static nt_resource_t s_font_resource;
 static nt_material_t s_sprite_material;
 static nt_material_t s_text_material;
 static nt_material_t s_overlay_sprite_material; /* depth-off overlay materials: the F2 inspector and the HUD */
@@ -504,8 +503,10 @@ static void try_bind_resources(void) {
         s_atlas_bound = true;
         nt_log_info("ui_3d_demo: atlas white region bound");
     }
-    if (!s_font_bound && nt_resource_is_ready(s_font_resource)) {
-        nt_font_add(s_font, s_font_resource);
+    if (!s_font_bound && nt_resource_pack_state(s_pack_id) == NT_PACK_STATE_READY) {
+        uint32_t size = 0;
+        const uint8_t *bytes = nt_resource_entry_bytes(s_pack_id, ASSET_FONT_UI_3D_DEMO_FONT, &size);
+        nt_font_fill(s_font, bytes, size);
         nt_ui_set_font(s_ctx, 0U, s_font);
         s_font_bound = true;
         nt_log_info("ui_3d_demo: font bound");
@@ -797,9 +798,9 @@ static void frame(void) {
         nt_program_ref_drop(&s_text_program);
         nt_resource_invalidate(NT_ASSET_SHADER_CODE);
         s_atlas_bound = false;
-        /* The font keeps its sources across a restore -- only its GPU textures
+        /* The font keeps its CPU data across a restore -- only its GPU textures
          * died, and nt_font_step rebuilds those itself. Clearing this would make
-         * the gate call nt_font_add twice, which asserts on the duplicate. */
+         * the gate call nt_font_fill twice, which asserts on the duplicate. */
     }
     nt_input_poll();
     nt_arena_reset(&g_nt_mem_scratch);
@@ -1055,7 +1056,6 @@ int main(int argc, char *argv[]) {
     s_text_program.label = "ui_3d_demo/text";
     s_text_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_FRAG, NT_ASSET_SHADER_CODE);
     s_atlas_handle = nt_resource_request(ASSET_ATLAS_UI_3D_DEMO_ATLAS, NT_ASSET_ATLAS);
-    s_font_resource = nt_resource_request(ASSET_FONT_UI_3D_DEMO_FONT, NT_ASSET_FONT);
 
     /* Handle is valid immediately; fill late-bound button-bg refs upfront. */
     init_button_styles();

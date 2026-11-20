@@ -239,6 +239,20 @@ static void frame(void) {
 
     /* Step resource system */
     nt_resource_step();
+    static int s_font_stage; /* 0: empty, 1: base filled, 2: CJK filled */
+    if (s_font_stage == 0 && nt_resource_pack_state(s_base_pack_id) == NT_PACK_STATE_READY) {
+        uint32_t size = 0;
+        const uint8_t *bytes = nt_resource_entry_bytes(s_base_pack_id, ASSET_FONT_TEXT_FONT_BASE, &size);
+        nt_font_fill(s_font, bytes, size);
+        s_font_stage = 1;
+    }
+    if (s_font_stage == 1 && nt_resource_pack_state(s_cjk_pack_id) == NT_PACK_STATE_READY) {
+        uint32_t size = 0;
+        const uint8_t *bytes = nt_resource_entry_bytes(s_cjk_pack_id, ASSET_FONT_TEXT_FONT_CJK, &size);
+        nt_font_fill(s_font, bytes, size);
+        nt_resource_evict(s_cjk_pack_id);
+        s_font_stage = 2;
+    }
     if (nt_program_ref_update(&s_text_program)) {
         nt_material_set_program(s_text_material, s_text_program.program);
     }
@@ -481,14 +495,6 @@ int main(int argc, char *argv[]) {
         .max_glyphs = 256,
         .measure_cache_size = 256,
     });
-
-    /* Request font resources (resolved when packs arrive) */
-    nt_resource_t font_base_res = nt_resource_request(ASSET_FONT_TEXT_FONT_BASE, NT_ASSET_FONT);
-    nt_font_add(s_font, font_base_res);
-
-    /* CJK font resource -- resolved when CJK pack loads (progressive) */
-    nt_resource_t font_cjk_res = nt_resource_request(ASSET_FONT_TEXT_FONT_CJK, NT_ASSET_FONT);
-    nt_font_add(s_font, font_cjk_res);
 
     /* 15. Unlimited activation budget during loading (0 = no time limit) */
     nt_resource_set_activate_time_budget(0);

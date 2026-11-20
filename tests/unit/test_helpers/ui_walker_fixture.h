@@ -62,6 +62,8 @@ void ui_walker_fixture_inject_cmds(ui_walker_fixture_t *fx, Clay_RenderCommand *
 
 /* A new font that really draws: nt_test_font_blob over ASCII 32..126. */
 nt_font_t ui_walker_fixture_make_real_font(ui_walker_fixture_t *fx);
+/* Fills the stub with metrics and no glyphs: every character measures as tofu. */
+void ui_walker_fixture_fill_stub_font(ui_walker_fixture_t *fx);
 
 /* Fake-backend draw trace probes (arm it with nt_gfx_fake_draw_trace_reset). */
 uint32_t ui_walker_fx_draw_count(nt_program_t program);

@@ -534,9 +534,7 @@ static nt_ui_context_t *s_ctx;
 
 static nt_hash32_t s_pack_id;
 static nt_resource_t s_atlas_handle;
-static nt_resource_t s_font_resource;
 /* Rich-text family resources: DejaVu R/B/I/BI faces baked into the pack (variant slots). */
-static nt_resource_t s_rich_font_resource[4];
 /* Radial: shared extended-layout VS + flat SDF FS + textured reveal FS. */
 /* Dedicated single-sprite atlas for the radial-image reveal: its lone region's UV spans [0,1]
  * over the quad, so the wedge stays centered. */
@@ -1161,7 +1159,7 @@ static void init_styles(void) {
 
 // #region binding
 static void try_bind_resources(void) {
-    if (s_atlas_bound && s_font_bound) {
+    if (s_atlas_bound && s_font_bound && s_rich_font_bound) {
         return;
     }
     if (!s_atlas_bound && nt_resource_is_ready(s_atlas_handle)) {
@@ -1171,16 +1169,20 @@ static void try_bind_resources(void) {
         s_atlas_bound = true;
         nt_log_info("ui_showcase: atlas white region bound");
     }
-    if (!s_font_bound && nt_resource_is_ready(s_font_resource)) {
-        nt_font_add(s_font, s_font_resource);
+    if (!s_font_bound && nt_resource_pack_state(s_pack_id) == NT_PACK_STATE_READY) {
+        uint32_t size = 0;
+        const uint8_t *bytes = nt_resource_entry_bytes(s_pack_id, ASSET_FONT_UI_SHOWCASE_FONT, &size);
+        nt_font_fill(s_font, bytes, size);
         nt_ui_set_font(s_ctx, 0U, s_font);
         s_font_bound = true;
         nt_log_info("ui_showcase: font bound at slot 0");
     }
-    if (!s_rich_font_bound && nt_resource_is_ready(s_rich_font_resource[0]) && nt_resource_is_ready(s_rich_font_resource[1]) && nt_resource_is_ready(s_rich_font_resource[2]) &&
-        nt_resource_is_ready(s_rich_font_resource[3])) {
+    if (!s_rich_font_bound && nt_resource_pack_state(s_pack_id) == NT_PACK_STATE_READY) {
+        const nt_hash64_t entries[4] = {ASSET_FONT_UI_SHOWCASE_FONT_RICH_R, ASSET_FONT_UI_SHOWCASE_FONT_RICH_B, ASSET_FONT_UI_SHOWCASE_FONT_RICH_I, ASSET_FONT_UI_SHOWCASE_FONT_RICH_BI};
         for (uint32_t i = 0; i < 4U; i++) {
-            nt_font_add(s_rich_font[i], s_rich_font_resource[i]);
+            uint32_t size = 0;
+            const uint8_t *bytes = nt_resource_entry_bytes(s_pack_id, entries[i], &size);
+            nt_font_fill(s_rich_font[i], bytes, size);
         }
         s_rich_font_bound = true;
         nt_log_info("ui_showcase: rich-text family R/B/I/BI bound");
@@ -3659,9 +3661,9 @@ static void frame(void) {
         nt_resource_invalidate(NT_ASSET_SHADER_CODE);
         /* Force a style re-init so memoized atlas region indices refresh after GL restore. */
         s_atlas_bound = false;
-        /* The font keeps its sources across a restore -- only its GPU textures
+        /* The font keeps its CPU data across a restore -- only its GPU textures
          * died, and nt_font_step rebuilds those itself. Clearing this would make
-         * the gate call nt_font_add twice, which asserts on the duplicate. */
+         * the gate call nt_font_fill twice, which asserts on the duplicate. */
     }
     if (!nt_example_frames_on()) {
         nt_input_poll();
@@ -3965,11 +3967,7 @@ int main(int argc, char *argv[]) {
     s_text_program.label = "ui_showcase/text";
     s_text_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_FRAG, NT_ASSET_SHADER_CODE);
     s_atlas_handle = nt_resource_request(ASSET_ATLAS_UI_SHOWCASE_ATLAS, NT_ASSET_ATLAS);
-    s_font_resource = nt_resource_request(ASSET_FONT_UI_SHOWCASE_FONT, NT_ASSET_FONT);
-    s_rich_font_resource[0] = nt_resource_request(ASSET_FONT_UI_SHOWCASE_FONT_RICH_R, NT_ASSET_FONT);
-    s_rich_font_resource[1] = nt_resource_request(ASSET_FONT_UI_SHOWCASE_FONT_RICH_B, NT_ASSET_FONT);
-    s_rich_font_resource[2] = nt_resource_request(ASSET_FONT_UI_SHOWCASE_FONT_RICH_I, NT_ASSET_FONT);
-    s_rich_font_resource[3] = nt_resource_request(ASSET_FONT_UI_SHOWCASE_FONT_RICH_BI, NT_ASSET_FONT);
+
     /* Radial shaders + the dedicated radial-art atlas + its full-bleed texture. */
     s_radial_program.vs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_RADIAL_VERT, NT_ASSET_SHADER_CODE);
     s_radial_program.label = "ui_showcase/radial";

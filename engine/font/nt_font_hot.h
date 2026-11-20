@@ -1,7 +1,7 @@
 #ifndef NT_FONT_HOT_H
 #define NT_FONT_HOT_H
 
-/* Slot pointer is stable until destroy/shutdown but contents mutate on every
+/* Slot pointer is stable until destroy/shutdown but contents mutate on nt_font_fill and
  * nt_font_step — resolve once per draw scope, do not cache across frames. */
 
 #include "font/nt_font.h"
