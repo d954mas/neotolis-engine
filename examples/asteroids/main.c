@@ -195,7 +195,13 @@ static bool s_paused, s_lod_colors, s_hide_hud, s_ready, s_generated;
 #ifndef NT_PLATFORM_WEB
 static bool s_fullscreen;
 #endif
-static double s_elapsed, s_last_tick, s_frame_ms, s_cpu_ms, s_update_ms, s_render_ms, s_generate_ms, s_gpu_ms = -1.0;
+static double s_elapsed, s_last_tick, s_frame_ms, s_cpu_ms, s_update_ms, s_render_ms, s_generate_ms;
+#if NT_GFX_GPU_TIMING_ENABLED
+static double s_gpu_ms = -1.0; /* -1: pending or unsupported */
+#define GPU_MS s_gpu_ms
+#else
+#define GPU_MS (-1.0) /* GPU timing compiled out */
+#endif
 static uint64_t s_mem_used, s_triangles;
 static bool s_memory_sampled;
 static uint32_t s_lod_counts[AST_SUBDIVISIONS];
@@ -1077,7 +1083,9 @@ static void load_pack(nt_hash32_t pack, const char *filename) {
 
 static void restore_gpu(void) {
     s_ready = false;
+#if NT_GFX_GPU_TIMING_ENABLED
     s_gpu_ms = -1;
+#endif
     drop_generated();
     nt_text_renderer_shutdown();
     nt_sprite_renderer_shutdown();
@@ -2197,6 +2205,7 @@ static void frame(void) {
     s_render_ms += ((nt_time_now() - render_begin) * 1000.0 - s_render_ms) * 0.05;
     s_cpu_ms += ((nt_time_now() - begin) * 1000.0 - s_cpu_ms) * 0.05;
     nt_example_frames_end(ready);
+#if NT_GFX_GPU_TIMING_ENABLED
     uint64_t gpu_ns = 0;
     if (nt_gfx_poll_segment_time_ns("asteroids", &gpu_ns)) {
         s_gpu_ms = (double)gpu_ns / 1000000.0;
@@ -2204,6 +2213,7 @@ static void frame(void) {
     if (!nt_gfx_is_gpu_timing_supported()) {
         s_gpu_ms = -1;
     }
+#endif
     static double report_time;
     if (!nt_example_frames_on() && begin - report_time > 1.0) {
         report_time = begin;
@@ -2212,7 +2222,7 @@ static void frame(void) {
         if (ready) {
             nt_log_info("Asteroids complexity=%u count=%u lod=%u/%u/%u/%u triangles=%" PRIu64 " draws=%u update_ms=%.3f render_submit_ms=%.3f cpu_frame_ms=%.3f gpu_ms=%.3f memory=%" PRIu64, s_level,
                         s_complexities[s_level].instances, s_lod_counts[0], s_lod_counts[1], s_lod_counts[2], s_lod_counts[3], s_triangles, nt_gfx_draw_calls(&g_nt_gfx.counters), s_update_ms,
-                        s_render_ms, s_cpu_ms, s_gpu_ms, s_mem_used);
+                        s_render_ms, s_cpu_ms, GPU_MS, s_mem_used);
         }
     }
     nt_window_swap_buffers();
