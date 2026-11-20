@@ -10,11 +10,8 @@ NT_TOOLCHAIN_DIR="${USERPROFILE:-$HOME}/.neotolis/toolchain"
 command -v cygpath > /dev/null 2>&1 && NT_TOOLCHAIN_DIR="$(cygpath -u "$NT_TOOLCHAIN_DIR")"
 NT_LLVM_BIN="$NT_TOOLCHAIN_DIR/llvm-$LLVM_VERSION/bin"
 NT_BUILDTOOLS_DIR="$NT_TOOLCHAIN_DIR/buildtools-cmake-$CMAKE_VERSION-ninja-$NINJA_VERSION"
-if [ -d "$NT_BUILDTOOLS_DIR/Scripts" ]; then
-    NT_BUILDTOOLS_BIN="$NT_BUILDTOOLS_DIR/Scripts"
-else
-    NT_BUILDTOOLS_BIN="$NT_BUILDTOOLS_DIR/bin"
-fi
+# The native cmake (cmake/data/bin) ahead of the wheel launchers in bin/, which also holds ninja.
+NT_BUILDTOOLS_BIN="$NT_BUILDTOOLS_DIR/cmake/data/bin:$NT_BUILDTOOLS_DIR/bin"
 export PATH="$NT_LLVM_BIN:$NT_BUILDTOOLS_BIN:$PATH"
 
 toolchain_fail() {

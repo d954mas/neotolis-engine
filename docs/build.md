@@ -47,8 +47,8 @@ check.sh also rejects a native build tree configured with another compiler.
   system or image compiler is never used. After a version change, reconfigure
   each native build tree with `cmake --preset <name> --fresh`.
 - **CMake and Ninja:** `python scripts/setup_buildtools.py` (run by `setup.sh`)
-  installs the PyPI wheels of the pinned versions into a venv under
-  `~/.neotolis/toolchain/`; CI runs the same script. check.sh also rejects a
+  unpacks the PyPI wheels of the pinned versions under `~/.neotolis/toolchain/`
+  (no venv, so no second python on PATH); CI runs the same script. check.sh also rejects a
   build tree configured by another CMake or Ninja.
 - **Emscripten:** `bash scripts/setup_emsdk.sh` (run by `setup.sh`) clones the
   emsdk tag of the `.emsdk-version` release into

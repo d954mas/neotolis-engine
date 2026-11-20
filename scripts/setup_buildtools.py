@@ -1,11 +1,14 @@
-"""Install the CMake and Ninja pinned in .toolchain-versions into a venv under ~/.neotolis/toolchain/.
+"""Install the CMake and Ninja pinned in .toolchain-versions under ~/.neotolis/toolchain/.
 
 The official PyPI wheels give the same CMake and Ninja on Windows and Linux, locally and in
-CI. One per-user venv serves every checkout and worktree; its versioned name lets branches with
-different pins coexist. scripts/lib/toolchain.sh puts its bin directory first on PATH.
+CI. One per-user directory serves every checkout and worktree; its versioned name lets branches
+with different pins coexist. The wheels are unpacked with --target, not into a venv, so no python
+goes on PATH: scripts/lib/toolchain.sh and CI put the native cmake (cmake/data/bin) and then bin/
+(ninja, and cmake launchers it shadows) first on PATH.
 """
 
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -33,10 +36,11 @@ def main():
     if marker.exists():
         print(f"CMake {cmake} and Ninja {ninja} already installed in {dest}")
         return
-    subprocess.run([sys.executable, "-m", "venv", "--clear", str(dest)], check=True)
-    python = dest / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-    subprocess.run([str(python), "-m", "pip", "install", "--quiet", "--disable-pip-version-check",
-                    "--only-binary=:all:", f"cmake=={cmake}", f"ninja=={ninja}"], check=True)
+    if dest.exists():
+        shutil.rmtree(dest)
+    subprocess.run([sys.executable, "-m", "pip", "install", "--quiet", "--disable-pip-version-check",
+                    "--only-binary=:all:", "--no-deps", "--target", str(dest), f"cmake=={cmake}", f"ninja=={ninja}"],
+                   check=True)
     marker.write_text(f"{cmake}\n{ninja}\n", encoding="utf-8")
     print(f"CMake {cmake} and Ninja {ninja} installed in {dest}")
 

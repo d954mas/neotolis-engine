@@ -39,10 +39,12 @@ runs:
       run: |
         python scripts/setup_buildtools.py
         dir="${USERPROFILE:-$HOME}/.neotolis/toolchain/buildtools-cmake-${{ steps.versions.outputs.CMAKE_VERSION }}-ninja-${{ steps.versions.outputs.NINJA_VERSION }}"
-        if command -v cygpath > /dev/null; then dir="$(cygpath -m "$dir")/Scripts"; else dir="$dir/bin"; fi
-        echo "$dir" >> "$GITHUB_PATH"
-        "$dir/cmake" --version | head -1
-        "$dir/ninja" --version
+        if command -v cygpath > /dev/null; then dir="$(cygpath -m "$dir")"; fi
+        # GITHUB_PATH prepends, so the native cmake added last wins over the bin/ launchers.
+        echo "$dir/bin" >> "$GITHUB_PATH"
+        echo "$dir/cmake/data/bin" >> "$GITHUB_PATH"
+        "$dir/cmake/data/bin/cmake" --version | head -1
+        "$dir/bin/ninja" --version
 
     - name: Create LFS file list
       if: inputs.lfs == 'true'
