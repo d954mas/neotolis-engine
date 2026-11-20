@@ -439,7 +439,7 @@ jobs:
   # Compile and link only: no other job builds the Windows recorder backend (Media Foundation).
   windows-recorder:
     name: Windows Recorder Build
-    runs-on: windows-2025
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
       - name: Install ninja
