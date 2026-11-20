@@ -5,6 +5,7 @@ import argparse
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import subprocess
+import re
 import shutil
 import sys
 
@@ -85,7 +86,8 @@ def main():
         for name, build, targets, tests, capture, configure, summary in rows:
             output = run(["ctest", "--test-dir", str(build), "--output-on-failure",
                           "-R", "^(" + "|".join(tests) + ")$"], args.output / f"{name}-test.log")
-            if f"100% tests passed, 0 tests failed out of {len(tests)}" not in output:
+            # CMake 4 drops ", 0 tests failed" from the summary.
+            if not re.search(rf"100% tests passed(, 0 tests failed)? out of {len(tests)}\b", output):
                 raise RuntimeError(f"{name}: expected all {len(tests)} registered tests\n{output}")
             nm = shutil.which("llvm-nm") or shutil.which("nm")
             if nm:
