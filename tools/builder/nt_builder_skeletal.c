@@ -5,9 +5,9 @@
 
 /*
  * Encoders from the runtime views to the NSKL / NSKN / NANM payloads. The wire
- * layout is the runtime layout, so headers go out as packed structs and the
- * arrays after them are memcpy'd whole. The encoders assert structure only;
- * values are the importer's contract.
+ * headers go out as packed structs. NANM sampled rows use the caller's explicit
+ * layout; base poses remain FP32. Encoders check structure and FP16 admission;
+ * other pose values are the producer's contract.
  */
 
 /* Every field of these payloads is little-endian and every array is copied as
@@ -126,8 +126,9 @@ void nt_builder_add_skin_binding(NtBuilderContext *ctx, const nt_skin_binding_t 
 
 // #region NANM clip
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- NT_BUILD_ASSERT expansions dominate the count
-void nt_builder_encode_clip(const nt_skeletal_clip_t *clip, uint8_t **out, uint32_t *out_size) {
+void nt_builder_encode_clip(const nt_skeletal_clip_t *clip, nt_builder_clip_layout_t layout, uint8_t **out, uint32_t *out_size) {
     NT_BUILD_ASSERT(clip && out && out_size && "invalid encode_clip args");
+    NT_BUILD_ASSERT(nt_skeletal_format_size(layout.t_format) != 0U && nt_skeletal_format_size(layout.q_format) != 0U && nt_skeletal_format_size(layout.s_format) != 0U && "unsupported clip format");
     // #region structure asserts
     NT_BUILD_ASSERT(clip->base && "clip has no base pose");
     NT_BUILD_ASSERT(clip->joint_count >= 1 && "clip has no joints");
@@ -159,10 +160,13 @@ void nt_builder_encode_clip(const nt_skeletal_clip_t *clip, uint8_t **out, uint3
         .n_t = clip->n_t,
         .n_q = clip->n_q,
         .n_s = clip->n_s,
-        ._pad = 0,
+        .t_format = (uint8_t)layout.t_format,
+        .q_format = (uint8_t)layout.q_format,
+        .s_format = (uint8_t)layout.s_format,
     };
     const uint64_t size64 = nt_anm_size(&header);
     NT_BUILD_ASSERT(size64 <= UINT32_MAX && "clip payload exceeds 4 GB");
+    NT_BUILD_ASSERT(nt_anm_decoded_size(&header) <= UINT32_MAX && "decoded clip exceeds 4 GB");
     const uint32_t size = (uint32_t)size64;
     uint8_t *payload = (uint8_t *)malloc(size);
     NT_BUILD_ASSERT(payload && "encode_clip: alloc failed (OOM)");
@@ -174,8 +178,41 @@ void nt_builder_encode_clip(const nt_skeletal_clip_t *clip, uint8_t **out, uint3
     memcpy(w, clip->base, (size_t)joint_count * sizeof(nt_skeletal_trs_t));
     w += (size_t)joint_count * sizeof(nt_skeletal_trs_t);
     if (stride != 0) {
-        memcpy(w, clip->blocks, (size_t)clip->sample_count * stride * sizeof(float));
-        w += (size_t)clip->sample_count * stride * sizeof(float);
+        const uint16_t counts[3] = {clip->n_t, clip->n_q, clip->n_s};
+        const uint16_t *const tables[3] = {clip->t_joint, clip->q_joint, clip->s_joint};
+        const nt_skeletal_format_t formats[3] = {layout.t_format, layout.q_format, layout.s_format};
+        const float *src = clip->blocks;
+        for (uint32_t i = 0; i < clip->sample_count; ++i) {
+            for (uint32_t kind = 0; kind < 3U; ++kind) {
+                const uint32_t comps = kind == 1U ? 4U : 3U;
+                if (formats[kind] == NT_SKELETAL_FORMAT_FP32) {
+                    const size_t lanes = (size_t)counts[kind] * comps;
+                    memcpy(w, src, lanes * sizeof(float));
+                    w += lanes * sizeof(float);
+                    src += lanes;
+                    continue;
+                }
+                for (uint32_t row = 0; row < counts[kind]; ++row) {
+                    for (uint32_t c = 0; c < comps; ++c) {
+                        const float value = src[c];
+                        if (!(value >= -65504.0F && value <= 65504.0F)) {
+                            NT_BUILD_FAIL("clip FP16 sample outside finite half range", "clip joint %u kind %u row %u sample %u component %u: %g is outside FP16 range", tables[kind][row], kind, row,
+                                          i, c, (double)value);
+                        }
+                        const uint16_t half = nt_f32_to_f16(value);
+                        memcpy(w, &half, sizeof(half));
+                        w += sizeof(half);
+                    }
+                    if (kind == 1U) {
+                        const double norm = ((double)src[0] * (double)src[0]) + ((double)src[1] * (double)src[1]) + ((double)src[2] * (double)src[2]) + ((double)src[3] * (double)src[3]);
+                        if (!(fabs(norm - 1.0) < 1e-3)) {
+                            NT_BUILD_FAIL("clip FP16 quaternion must be unit", "clip joint %u Q row %u sample %u: squared norm %g is not unit", tables[kind][row], row, i, norm);
+                        }
+                    }
+                    src += comps;
+                }
+            }
+        }
     }
     if (clip->n_t != 0) {
         memcpy(w, clip->t_joint, (size_t)clip->n_t * sizeof(uint16_t));
@@ -196,11 +233,11 @@ void nt_builder_encode_clip(const nt_skeletal_clip_t *clip, uint8_t **out, uint3
     *out_size = size;
 }
 
-void nt_builder_add_clip(NtBuilderContext *ctx, const nt_skeletal_clip_t *clip, const char *resource_id) {
+void nt_builder_add_clip(NtBuilderContext *ctx, const nt_skeletal_clip_t *clip, nt_builder_clip_layout_t layout, const char *resource_id) {
     NT_BUILD_ASSERT(ctx && resource_id && "invalid add_clip args");
     uint8_t *payload = NULL;
     uint32_t size = 0;
-    nt_builder_encode_clip(clip, &payload, &size);
+    nt_builder_encode_clip(clip, layout, &payload, &size);
     uint64_t hash = nt_hash64(payload, size).value;
     nt_builder_add_entry(ctx, resource_id, NT_BUILD_ASSET_CLIP, NULL, payload, size, hash);
 }

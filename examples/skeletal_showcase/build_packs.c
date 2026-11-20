@@ -26,6 +26,7 @@
 #define HEADER_DIR "examples/skeletal_showcase/generated"
 #define FONT_PATH "examples/ui_showcase/raw/font.ttf"
 #define SAMPLE_FPS 24.0F
+#define CLIP_FP32 ((nt_builder_clip_layout_t){NT_SKELETAL_FORMAT_FP32, NT_SKELETAL_FORMAT_FP32, NT_SKELETAL_FORMAT_FP32})
 
 static char s_path[512];
 
@@ -137,7 +138,7 @@ static void add_character(NtBuilderContext *rig_ctx, NtBuilderContext *clip_ctx,
 
     for (uint32_t c = 0; c < desc->clip_count; c++) {
         nt_builder_clip_report_t report;
-        nt_builder_add_scene_clip(clip_ctx, &scene, desc->clips[c].animation, &rig, desc->sample_fps, desc->clips[c].resource_id, &report);
+        nt_builder_add_scene_clip(clip_ctx, &scene, desc->clips[c].animation, &rig, desc->sample_fps, CLIP_FP32, desc->clips[c].resource_id, &report);
         print_clip_report(desc->clips[c].resource_id, &report);
     }
 

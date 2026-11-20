@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "core/nt_builtins.h"
+#include "nt_half.h"
 #include "nt_skeletal_format.h"
 
 void nt_skeletal_mat34_from_mat4(const float m[16], nt_skeletal_mat34_t *out) {
@@ -349,29 +350,71 @@ void nt_skeletal_override(const nt_skeletal_trs_t *base, const nt_skeletal_trs_t
 }
 // #endregion
 
-// #region clip view
-void nt_skeletal_clip_view(const uint8_t *payload, nt_skeletal_clip_t *out) {
-    NT_ASSERT(payload != NULL && out != NULL);
-    NT_ASSERT((((uintptr_t)payload) & 3U) == 0U && "NANM payload must be 4-aligned: the view reads its arrays in place");
+// #region clip decode
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void nt_skeletal_clip_decode(const uint8_t *payload, void *storage, size_t storage_size, nt_skeletal_clip_t *out) {
+    NT_ASSERT(payload != NULL && storage != NULL && out != NULL);
+    NT_ASSERT((((uintptr_t)payload | (uintptr_t)storage) & 3U) == 0U && "NANM payload and decoded storage must be 4-aligned");
 
     NtAnmHeader header;
     memcpy(&header, payload, sizeof(header));
+    NT_ASSERT(nt_skeletal_format_size((nt_skeletal_format_t)header.t_format) != 0U && nt_skeletal_format_size((nt_skeletal_format_t)header.q_format) != 0U &&
+              nt_skeletal_format_size((nt_skeletal_format_t)header.s_format) != 0U && "unsupported clip format");
+    const uint64_t decoded_size = nt_anm_decoded_size(&header);
+    NT_ASSERT(decoded_size <= UINT32_MAX && "decoded clip exceeds 4 GB");
+    NT_ASSERT((uint64_t)storage_size >= decoded_size && "clip decode storage too small");
     const size_t stride = ((size_t)3U * header.n_t) + ((size_t)4U * header.n_q) + ((size_t)3U * header.n_s);
 
-    /* Walk the arrays in the one order the format defines; the encoder writes
-     * them in exactly this sequence. Every product fits size_t on wasm32: the
-     * activator proved size == nt_anm_size(header) in 64 bits, and the encoder
-     * wrote exactly that many bytes. */
-    const uint8_t *at = payload + sizeof(NtAnmHeader);
+    uint8_t *at = (uint8_t *)storage;
+    const uint8_t *src = payload + sizeof(NtAnmHeader);
     const nt_skeletal_trs_t *base = (const nt_skeletal_trs_t *)at;
-    at += (size_t)header.joint_count * sizeof(nt_skeletal_trs_t);
-    const float *blocks = (const float *)at;
-    at += (size_t)header.sample_count * stride * 4U;
+    const size_t base_size = (size_t)header.joint_count * sizeof(nt_skeletal_trs_t);
+    memcpy(at, src, base_size);
+    at += base_size;
+    src += base_size;
+    float *blocks = (float *)at;
+    const uint16_t counts[3] = {header.n_t, header.n_q, header.n_s};
+    const uint8_t formats[3] = {header.t_format, header.q_format, header.s_format};
+    if (stride != 0U) {
+        float *dst = blocks;
+        for (uint32_t i = 0; i < header.sample_count; ++i) {
+            for (uint32_t kind = 0; kind < 3U; ++kind) {
+                const uint32_t comps = kind == 1U ? 4U : 3U;
+                if (formats[kind] == NT_SKELETAL_FORMAT_FP32) {
+                    const size_t lanes = (size_t)counts[kind] * comps;
+                    memcpy(dst, src, lanes * sizeof(float));
+                    src += lanes * sizeof(float);
+                    dst += lanes;
+                    continue;
+                }
+                for (uint32_t row = 0; row < counts[kind]; ++row) {
+                    for (uint32_t c = 0; c < comps; ++c) {
+                        uint16_t half;
+                        memcpy(&half, src, sizeof(half));
+                        src += sizeof(half);
+                        dst[c] = nt_f16_to_f32(half);
+                    }
+                    if (kind == 1U) {
+                        const float inv = 1.0F / sqrtf((dst[0] * dst[0]) + (dst[1] * dst[1]) + (dst[2] * dst[2]) + (dst[3] * dst[3]));
+                        for (uint32_t c = 0; c < 4U; ++c) {
+                            dst[c] *= inv;
+                        }
+                    }
+                    dst += comps;
+                }
+            }
+        }
+        at = (uint8_t *)dst;
+    }
+    const size_t tables_size = ((size_t)header.n_t + header.n_q + header.n_s) * sizeof(uint16_t);
+    memcpy(at, src, tables_size);
     const uint16_t *t_joint = (const uint16_t *)at;
     at += (size_t)header.n_t * 2U;
     const uint16_t *q_joint = (const uint16_t *)at;
     at += (size_t)header.n_q * 2U;
     const uint16_t *s_joint = (const uint16_t *)at;
+    at += (size_t)header.n_s * 2U;
+    NT_ASSERT(at == (uint8_t *)storage + (size_t)decoded_size);
 
     *out = (nt_skeletal_clip_t){
         .rig_compat_id = (nt_hash64_t){.value = header.rig_compat_id},

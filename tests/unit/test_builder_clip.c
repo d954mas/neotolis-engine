@@ -47,6 +47,8 @@
 #define FPS_COARSE 10.0F
 #define GRID_COARSE 11U /* the 0.25 / 0.75 keys fall between grid samples (they are still quarter points) */
 #define SUBSAMPLES 3U
+#define CLIP_FP32 ((nt_builder_clip_layout_t){NT_SKELETAL_FORMAT_FP32, NT_SKELETAL_FORMAT_FP32, NT_SKELETAL_FORMAT_FP32})
+
 #define QUARTER_PI 0.78539816339744830962 /* pi / 4: the half-angle of one 90 degree key step */
 
 // #region log sink
@@ -153,11 +155,12 @@ typedef struct {
     nt_builder_rig_t rig;
     nt_builder_clip_report_t report;
     uint8_t *payload;
+    void *decoded;
     uint32_t payload_size;
     nt_skeletal_clip_t view;
 } fixture_export_t;
 
-static void fixture_export_at(fixture_export_t *fx, const rigged_glb_opts_t *rig_opts, const rigged_glb_opts_t *clip_opts, float fps) {
+static void fixture_export_layout(fixture_export_t *fx, const rigged_glb_opts_t *rig_opts, const rigged_glb_opts_t *clip_opts, float fps, nt_builder_clip_layout_t layout) {
     memset(fx, 0, sizeof(*fx));
     rigged_glb_write(RIG_GLB, rig_opts);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_parse_glb_scene(&fx->scene, RIG_GLB));
@@ -172,17 +175,27 @@ static void fixture_export_at(fixture_export_t *fx, const rigged_glb_opts_t *rig
     (void)remove(PACK_PATH);
     NtBuilderContext *ctx = nt_builder_start_pack(PACK_PATH);
     TEST_ASSERT_NOT_NULL(ctx);
-    nt_builder_add_scene_clip(ctx, clip_scene, "Clip", &fx->rig, fps, CLIP_ID, &fx->report);
+    nt_builder_add_scene_clip(ctx, clip_scene, "Clip", &fx->rig, fps, layout, CLIP_ID, &fx->report);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
     nt_builder_free_pack(ctx);
 
     fx->payload = read_pack_clip(PACK_PATH, CLIP_ID, &fx->payload_size);
-    nt_skeletal_clip_view(fx->payload, &fx->view);
+    NtAnmHeader header;
+    memcpy(&header, fx->payload, sizeof(header));
+    const size_t decoded_size = (size_t)nt_anm_decoded_size(&header);
+    fx->decoded = malloc(decoded_size);
+    TEST_ASSERT_NOT_NULL(fx->decoded);
+    nt_skeletal_clip_decode(fx->payload, fx->decoded, decoded_size, &fx->view);
+}
+
+static void fixture_export_at(fixture_export_t *fx, const rigged_glb_opts_t *rig_opts, const rigged_glb_opts_t *clip_opts, float fps) {
+    fixture_export_layout(fx, rig_opts, clip_opts, fps, CLIP_FP32);
 }
 
 static void fixture_export(fixture_export_t *fx, const rigged_glb_opts_t *rig_opts, const rigged_glb_opts_t *clip_opts) { fixture_export_at(fx, rig_opts, clip_opts, FPS); }
 
 static void fixture_free(fixture_export_t *fx) {
+    free(fx->decoded);
     free(fx->payload);
     nt_builder_free_rig(&fx->rig);
     nt_builder_free_glb_scene(&fx->clip_scene);
@@ -659,10 +672,10 @@ static double ref_r_joints_at_keys(const fixture_export_t *fx) {
     return r;
 }
 
-static void check_report(float fps, uint32_t grid) {
+static void check_report(float fps, uint32_t grid, nt_builder_clip_layout_t layout) {
     const rigged_glb_opts_t opts = {.animation = true};
     fixture_export_t fx;
-    fixture_export_at(&fx, &opts, &opts, fps);
+    fixture_export_layout(&fx, &opts, &opts, fps, layout);
     ref_measure_t m;
     ref_measure(&fx, false, grid, &m);
 
@@ -683,8 +696,8 @@ static void check_report(float fps, uint32_t grid) {
 /* At 10 fps the 0.25 / 0.75 keys fall between grid samples, but still on
  * quarter points; the Khronos Run worst times pin the authored-key insertion. */
 void test_report_matches_an_independent_measurement(void) {
-    check_report(FPS, GRID);
-    check_report(FPS_COARSE, GRID_COARSE);
+    check_report(FPS, GRID, CLIP_FP32);
+    check_report(FPS_COARSE, GRID_COARSE, CLIP_FP32);
 }
 
 /* A STEP source is evaluated onto the grid like every other one, so the hold
@@ -746,7 +759,64 @@ void test_bounds_match_the_measurement(void) {
 }
 // #endregion
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_half_report_bounds_and_published_samples(void) {
+    const nt_builder_clip_layout_t half = {NT_SKELETAL_FORMAT_FP16, NT_SKELETAL_FORMAT_FP16, NT_SKELETAL_FORMAT_FP16};
+    const nt_builder_clip_layout_t mixed = {NT_SKELETAL_FORMAT_FP32, NT_SKELETAL_FORMAT_FP16, NT_SKELETAL_FORMAT_FP16};
+    check_report(FPS, GRID, half);
+    check_report(FPS_COARSE, GRID_COARSE, mixed);
+    const rigged_glb_opts_t opts = {.animation = true, .root_translation = true};
+    fixture_export_t fx;
+    fixture_export_layout(&fx, &opts, &opts, FPS, half);
+    ref_measure_t m;
+    ref_measure(&fx, false, GRID, &m);
+    assert_rounded_up(m.r_joints, fx.view.r_joints);
+    assert_rounded_up(m.r_root, fx.view.r_root);
+    assert_rounded_up(m.s_max, fx.view.s_max);
+    /* FP32 preserves the authored sample signs and rounding; the geometric
+     * reference above only promises equivalent rotations. */
+    fixture_export_t fp32;
+    fixture_export_layout(&fp32, &opts, &opts, FPS, CLIP_FP32);
+    TEST_ASSERT_EQUAL_UINT16(fp32.view.n_t, fx.view.n_t);
+    TEST_ASSERT_EQUAL_UINT16(fp32.view.n_q, fx.view.n_q);
+    TEST_ASSERT_EQUAL_UINT16(fp32.view.n_s, fx.view.n_s);
+    TEST_ASSERT_EQUAL_MEMORY(fp32.view.t_joint, fx.view.t_joint, (size_t)fx.view.n_t * sizeof(uint16_t));
+    TEST_ASSERT_EQUAL_MEMORY(fp32.view.q_joint, fx.view.q_joint, (size_t)fx.view.n_q * sizeof(uint16_t));
+    TEST_ASSERT_EQUAL_MEMORY(fp32.view.s_joint, fx.view.s_joint, (size_t)fx.view.n_s * sizeof(uint16_t));
+    NtAnmHeader header;
+    memcpy(&header, fx.payload, sizeof(header));
+    const uint8_t *at = fx.payload + 48U + ((size_t)fx.view.joint_count * 40U);
+    const size_t lane_count = (size_t)GRID * stride_of(&fp32.view);
+    for (size_t lane = 0; lane < lane_count; ++lane) {
+        uint16_t actual;
+        memcpy(&actual, at, sizeof(actual));
+        TEST_ASSERT_EQUAL_HEX16(nt_f32_to_f16(fp32.view.blocks[lane]), actual);
+        at += sizeof(actual);
+    }
+    TEST_ASSERT_EQUAL_UINT8(NT_SKELETAL_FORMAT_FP16, header.q_format);
+    fixture_free(&fp32);
+    fixture_free(&fx);
+}
+
 // #region content errors
+void test_half_range_applies_only_to_sampled_rows(void) {
+    const nt_builder_clip_layout_t half = {NT_SKELETAL_FORMAT_FP16, NT_SKELETAL_FORMAT_FP16, NT_SKELETAL_FORMAT_FP16};
+    const rigged_glb_opts_t constant = {.animation = true, .animation_large_constant = true};
+    fixture_export_t fx;
+    fixture_export_layout(&fx, &constant, &constant, FPS, half);
+    const uint16_t joint = joint_named(&fx.rig.skeleton, "Joint4");
+    ASSERT_F32(70000.0F, fx.view.base[joint].t[1]);
+    TEST_ASSERT_EQUAL_UINT32(UINT32_MAX, sampled_row(fx.view.t_joint, fx.view.n_t, joint));
+    fixture_free(&fx);
+
+    const rigged_glb_opts_t moving = {.animation = true, .animation_half_overflow = true};
+    EXPECT_BUILD_ASSERT_MATCH(fixture_export_layout(&fx, &moving, &moving, FPS, half), "clip FP16 sample outside finite half range");
+    TEST_ASSERT_NOT_NULL(strstr(s_log_last, "Clip"));
+    TEST_ASSERT_NOT_NULL(strstr(s_log_last, "Joint4.translation"));
+    TEST_ASSERT_NOT_NULL(strstr(s_log_last, "sample"));
+    TEST_ASSERT_NOT_NULL(strstr(s_log_last, "component 1"));
+}
+
 /* Each knob fires the rule it names, after a diagnostic that names the node. */
 #define EXPECT_CLIP_REJECTED(knob_opts, expected, node)                                                                                                                                                \
     do {                                                                                                                                                                                               \
@@ -836,11 +906,11 @@ void test_bad_arguments_are_rejected(void) {
     (void)remove(PACK_PATH);
     NtBuilderContext *ctx = nt_builder_start_pack(PACK_PATH);
     nt_builder_clip_report_t report;
-    EXPECT_BUILD_ASSERT_MATCH(nt_builder_add_scene_clip(ctx, &scene, "Clip", &rig, 0.0F, CLIP_ID, &report), "sample_fps must be finite and positive");
-    EXPECT_BUILD_ASSERT_MATCH(nt_builder_add_scene_clip(ctx, &scene, "Clip", &rig, NAN, CLIP_ID, &report), "sample_fps must be finite and positive");
-    EXPECT_BUILD_ASSERT_MATCH(nt_builder_add_scene_clip(ctx, &scene, "Clip", &rig, 1e30F, CLIP_ID, &report), "overflows the sample grid");
-    EXPECT_BUILD_ASSERT_MATCH(nt_builder_add_scene_clip(ctx, &scene, "Clip", &rig, 1e-40F, CLIP_ID, &report), "sample_fps gives no finite grid");
-    EXPECT_BUILD_ASSERT_MATCH(nt_builder_add_scene_clip(ctx, &scene, "Clip", &rig, FPS, CLIP_ID, NULL), "invalid add_scene_clip args");
+    EXPECT_BUILD_ASSERT_MATCH(nt_builder_add_scene_clip(ctx, &scene, "Clip", &rig, 0.0F, CLIP_FP32, CLIP_ID, &report), "sample_fps must be finite and positive");
+    EXPECT_BUILD_ASSERT_MATCH(nt_builder_add_scene_clip(ctx, &scene, "Clip", &rig, NAN, CLIP_FP32, CLIP_ID, &report), "sample_fps must be finite and positive");
+    EXPECT_BUILD_ASSERT_MATCH(nt_builder_add_scene_clip(ctx, &scene, "Clip", &rig, 1e30F, CLIP_FP32, CLIP_ID, &report), "overflows the sample grid");
+    EXPECT_BUILD_ASSERT_MATCH(nt_builder_add_scene_clip(ctx, &scene, "Clip", &rig, 1e-40F, CLIP_FP32, CLIP_ID, &report), "sample_fps gives no finite grid");
+    EXPECT_BUILD_ASSERT_MATCH(nt_builder_add_scene_clip(ctx, &scene, "Clip", &rig, FPS, CLIP_FP32, CLIP_ID, NULL), "invalid add_scene_clip args");
     nt_builder_free_pack(ctx);
     nt_builder_free_rig(&rig);
     nt_builder_free_glb_scene(&scene);
@@ -859,7 +929,7 @@ void test_an_unmatched_name_is_rejected(void) {
     (void)remove(PACK_PATH);
     NtBuilderContext *ctx = nt_builder_start_pack(PACK_PATH);
     nt_builder_clip_report_t report;
-    EXPECT_BUILD_ASSERT_MATCH(nt_builder_add_scene_clip(ctx, &scene, "Nope", &rig, FPS, CLIP_ID, &report), "exactly one animation must carry the requested name");
+    EXPECT_BUILD_ASSERT_MATCH(nt_builder_add_scene_clip(ctx, &scene, "Nope", &rig, FPS, CLIP_FP32, CLIP_ID, &report), "exactly one animation must carry the requested name");
     TEST_ASSERT_EQUAL_UINT32(2, s_log_warnings); /* the one animation, then the verdict */
     TEST_ASSERT_NOT_NULL(strstr(s_log_last, "0 of the scene's 1 animations are named Nope"));
     nt_builder_free_rig(&rig);
@@ -868,7 +938,7 @@ void test_an_unmatched_name_is_rejected(void) {
     s_log_warnings = 0;
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_parse_glb_scene(&scene, "examples/skeletal_showcase/raw/Fox.glb"));
     nt_builder_import_rig(&scene, 0, &rig);
-    EXPECT_BUILD_ASSERT_MATCH(nt_builder_add_scene_clip(ctx, &scene, NULL, &rig, FPS, CLIP_ID, &report), "exactly one animation must carry the requested name");
+    EXPECT_BUILD_ASSERT_MATCH(nt_builder_add_scene_clip(ctx, &scene, NULL, &rig, FPS, CLIP_FP32, CLIP_ID, &report), "exactly one animation must carry the requested name");
     TEST_ASSERT_EQUAL_UINT32(4, s_log_warnings); /* Survey, Walk, Run, then the verdict */
     TEST_ASSERT_NOT_NULL(strstr(s_log_last, "0 of the scene's 3 animations are named (unnamed)"));
     nt_builder_free_pack(ctx);
@@ -940,7 +1010,7 @@ void test_showcase_clips_export_at_authored_fps(void) {
         (void)remove(PACK_PATH);
         NtBuilderContext *ctx = nt_builder_start_pack(PACK_PATH);
         nt_builder_clip_report_t report;
-        nt_builder_add_scene_clip(ctx, &scene, asset->name, &rig, asset->sample_fps, CLIP_ID, &report);
+        nt_builder_add_scene_clip(ctx, &scene, asset->name, &rig, asset->sample_fps, CLIP_FP32, CLIP_ID, &report);
         TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
         nt_builder_free_pack(ctx);
         TEST_ASSERT_EQUAL_UINT32(asset->snapped ? 1U : 0U, s_log_warnings);
@@ -952,7 +1022,12 @@ void test_showcase_clips_export_at_authored_fps(void) {
         uint32_t size = 0;
         uint8_t *payload = read_pack_clip(PACK_PATH, CLIP_ID, &size);
         nt_skeletal_clip_t view;
-        nt_skeletal_clip_view(payload, &view);
+        NtAnmHeader header;
+        memcpy(&header, payload, sizeof(header));
+        const size_t decoded_size = (size_t)nt_anm_decoded_size(&header);
+        void *decoded = malloc(decoded_size);
+        TEST_ASSERT_NOT_NULL(decoded);
+        nt_skeletal_clip_decode(payload, decoded, decoded_size, &view);
         (void)printf("%s %s: samples %u, cpu_error_lin %.3g at t=%.4f joint %u, cpu_error_t %.3g at t=%.4f joint %u, r_joints %.4g r_root %.4g s_max %.4g\n", asset->path,
                      asset->name ? asset->name : "(unnamed)", report.sample_count, (double)report.cpu_error_lin, report.worst_time_lin, report.worst_joint_lin, (double)report.cpu_error_t,
                      report.worst_time_t, report.worst_joint_t, (double)view.r_joints, (double)view.r_root, (double)view.s_max);
@@ -991,6 +1066,7 @@ void test_showcase_clips_export_at_authored_fps(void) {
                 }
             }
         }
+        free(decoded);
         free(payload);
         nt_builder_free_rig(&rig);
         nt_builder_free_glb_scene(&scene);
@@ -1006,6 +1082,8 @@ int main(void) {
     RUN_TEST(test_a_step_source_samples_on_the_grid);
     RUN_TEST(test_report_matches_an_independent_measurement);
     RUN_TEST(test_bounds_match_the_measurement);
+    RUN_TEST(test_half_report_bounds_and_published_samples);
+    RUN_TEST(test_half_range_applies_only_to_sampled_rows);
     RUN_TEST(test_channel_outside_the_rig_is_rejected);
     RUN_TEST(test_morph_weights_channel_is_rejected);
     RUN_TEST(test_duplicate_channel_is_rejected);

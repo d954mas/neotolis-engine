@@ -1,15 +1,15 @@
 #ifndef NT_SKELETAL_FORMAT_H
 #define NT_SKELETAL_FORMAT_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 /*
  * Skeletal wire formats (NSKL skeleton, NSKN skin binding, NANM clip) --
  * shared between builder (native) and runtime (WASM).
  *
- * The wire layout IS the runtime layout: the builder writes the tables the
- * sampler reads, and an activator validates the structure, copies the whole
- * payload into one allocation and points its runtime view at it. Only the three
+ * NANM sampled rows have explicit wire formats and decode once into FP32 at
+ * activation. NSKL and NSKN arrays are copied without conversion. Only the three
  * headers below travel as structs; every array after a header is bytes the two
  * sides agree on. All fields are little-endian, which every target of this
  * engine is, so headers and arrays are memcpy'd rather than composed byte by
@@ -23,9 +23,25 @@
 #define NT_SKN_MAGIC NT_SKELETAL_FOURCC('N', 'S', 'K', 'N')
 #define NT_ANM_MAGIC NT_SKELETAL_FOURCC('N', 'A', 'N', 'M')
 
-/* One version for all three payloads, compared exactly: the layout is the
- * runtime layout, so any change to it is a rebuild. */
-#define NT_SKELETAL_FORMAT_VERSION 5
+/* One exact version for all three payloads; a change requires rebuilt packs. */
+#define NT_SKELETAL_FORMAT_VERSION 6
+
+typedef enum {
+    NT_SKELETAL_FORMAT_FP32 = 0,
+    NT_SKELETAL_FORMAT_FP16 = 1,
+} nt_skeletal_format_t;
+
+/* Zero denotes an unsupported tag, including before narrowing a builder enum. */
+static inline uint32_t nt_skeletal_format_size(nt_skeletal_format_t format) {
+    switch (format) {
+    case NT_SKELETAL_FORMAT_FP32:
+        return 4;
+    case NT_SKELETAL_FORMAT_FP16:
+        return 2;
+    default:
+        return 0;
+    }
+}
 
 // #region NSKL skeleton
 /*
@@ -80,11 +96,11 @@ typedef struct {
 
 // #region NANM clip
 /*
- * NtAnmHeader (44 bytes), then, each array a multiple of 4 bytes so the next
- * one stays aligned and the uint16 tables need only the 2 they end on:
+ * NtAnmHeader (48 bytes), then arrays without internal padding. Mixed sampled
+ * groups can put FP32 wire lanes at 2-mod-4 offsets: read them with memcpy.
  *
  *   float    base[joint_count][10]                 local pose AoS t[3] q[4] s[3]
- *   float    blocks[sample_count][stride]           stride = 3n_t + 4n_q + 3n_s
+ *   bytes    blocks[sample_count][wire_stride]      T rows, then Q, then S
  *   uint16_t t_joint[n_t], q_joint[n_q], s_joint[n_s]
  *
  * Payload size is exactly nt_anm_size(header). base is the rig's rest pose
@@ -111,19 +127,30 @@ typedef struct {
     uint16_t n_t;           /* 36:  sampled joint rows per component kind */
     uint16_t n_q;           /* 38 */
     uint16_t n_s;           /* 40 */
-    uint16_t _pad;          /* 42:  zero */
+    uint8_t t_format;       /* 42: nt_skeletal_format_t */
+    uint8_t q_format;       /* 43 */
+    uint8_t s_format;       /* 44 */
+    uint8_t _pad[3];        /* 45: zero */
 } NtAnmHeader;
 #pragma pack(pop)
 
 /* Exact payload size of a clip with these counts, in 64 bits: a corrupt header
  * must not wrap the size a consumer compares against. */
 static inline uint64_t nt_anm_size(const NtAnmHeader *header) {
-    const uint64_t stride = (3ULL * header->n_t) + (4ULL * header->n_q) + (3ULL * header->n_s);
+    const uint64_t stride = (3ULL * header->n_t * nt_skeletal_format_size((nt_skeletal_format_t)header->t_format)) +
+                            (4ULL * header->n_q * nt_skeletal_format_size((nt_skeletal_format_t)header->q_format)) +
+                            (3ULL * header->n_s * nt_skeletal_format_size((nt_skeletal_format_t)header->s_format));
     uint64_t size = sizeof(NtAnmHeader);
     size += 40ULL * header->joint_count;
-    size += (uint64_t)header->sample_count * stride * 4ULL;
+    size += (uint64_t)header->sample_count * stride;
     size += 2ULL * ((uint64_t)header->n_t + header->n_q + header->n_s);
     return size;
+}
+
+/* Headerless caller storage: FP32 base and samples, then the u16 joint tables. */
+static inline uint64_t nt_anm_decoded_size(const NtAnmHeader *header) {
+    const uint64_t stride = (3ULL * header->n_t) + (4ULL * header->n_q) + (3ULL * header->n_s);
+    return (40ULL * header->joint_count) + (4ULL * header->sample_count * stride) + (2ULL * ((uint64_t)header->n_t + header->n_q + header->n_s));
 }
 // #endregion
 
@@ -132,7 +159,8 @@ static inline uint64_t nt_anm_size(const NtAnmHeader *header) {
 #ifndef __cplusplus
 _Static_assert(sizeof(NtSklHeader) == 16, "NtSklHeader must be 16 bytes");
 _Static_assert(sizeof(NtSknHeader) == 24, "NtSknHeader must be 24 bytes");
-_Static_assert(sizeof(NtAnmHeader) == 44, "NtAnmHeader must be 44 bytes");
+_Static_assert(sizeof(NtAnmHeader) == 48, "NtAnmHeader must be 48 bytes");
+_Static_assert(offsetof(NtAnmHeader, n_s) == 40 && offsetof(NtAnmHeader, t_format) == 42 && offsetof(NtAnmHeader, q_format) == 43 && offsetof(NtAnmHeader, s_format) == 44, "NANM layout offsets");
 #endif
 
 #endif /* NT_SKELETAL_FORMAT_H */

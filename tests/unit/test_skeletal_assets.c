@@ -33,6 +33,8 @@
 #include "test_helpers/nt_assert_trap.h"
 /* clang-format on */
 
+#define CLIP_FP32 ((nt_builder_clip_layout_t){NT_SKELETAL_FORMAT_FP32, NT_SKELETAL_FORMAT_FP32, NT_SKELETAL_FORMAT_FP32})
+
 #define TMP_DIR "build/tests/tmp"
 
 /* Unity is built with UNITY_EXCLUDE_FLOAT: exact expectations compare bits,
@@ -212,7 +214,7 @@ static uint8_t *encode_fixture_clip(uint32_t *out_size) {
     nt_skeletal_clip_t clip;
     fixture_clip(&clip);
     uint8_t *payload = NULL;
-    nt_builder_encode_clip(&clip, &payload, out_size);
+    nt_builder_encode_clip(&clip, CLIP_FP32, &payload, out_size);
     TEST_ASSERT_NOT_NULL(payload);
     return payload;
 }
@@ -220,7 +222,7 @@ static uint8_t *encode_fixture_clip(uint32_t *out_size) {
 /* Offsets of the fixture clip's payload, in the order §16 lists them; the
  * rejection tests patch bytes through these. */
 enum {
-    ANM_OFF_BASE = 44,
+    ANM_OFF_BASE = 48,
     ANM_OFF_BLOCKS = ANM_OFF_BASE + (CLIP_JOINTS * 40),
     ANM_OFF_T_JOINT = ANM_OFF_BLOCKS + (CLIP_SAMPLES * CLIP_STRIDE * 4),
     ANM_OFF_Q_JOINT = ANM_OFF_T_JOINT + 4,
@@ -374,40 +376,6 @@ void test_clip_round_trip_tables(void) {
     free(payload);
 }
 
-/* The activator and the builder read one payload through nt_skeletal_clip_view:
- * the view over the caller's bytes and the activated view agree field by field,
- * pointers as offsets into their own copy. */
-#define ASSERT_SAME_OFFSET(name) TEST_ASSERT_EQUAL_MESSAGE((const uint8_t *)direct.name - payload, (const uint8_t *)clip->name - base, #name)
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void test_clip_view_matches_activator(void) {
-    uint32_t size = 0;
-    uint8_t *payload = encode_fixture_clip(&size);
-    nt_skeletal_clip_t direct;
-    nt_skeletal_clip_view(payload, &direct);
-
-    const uint32_t handle = nt_skeletal_assets_activate_clip(payload, size);
-    TEST_ASSERT_NOT_EQUAL_UINT32(0, handle);
-    const nt_skeletal_clip_t *clip = nt_skeletal_assets_clip(publish_handle("clips/view.nanm", NT_ASSET_CLIP, handle));
-    /* The activated copy starts where its base starts, one header back. */
-    const uint8_t *base = (const uint8_t *)clip->base - ((const uint8_t *)direct.base - payload);
-    TEST_ASSERT_EQUAL_MEMORY(payload, base, size);
-
-    ASSERT_SAME_OFFSET(base);
-    ASSERT_SAME_OFFSET(blocks);
-    ASSERT_SAME_OFFSET(t_joint);
-    ASSERT_SAME_OFFSET(q_joint);
-    ASSERT_SAME_OFFSET(s_joint);
-
-    TEST_ASSERT_EQUAL_HEX64(direct.rig_compat_id.value, clip->rig_compat_id.value);
-    TEST_ASSERT_TRUE(direct.duration == clip->duration);
-    TEST_ASSERT_TRUE(direct.r_joints == clip->r_joints && direct.r_root == clip->r_root && direct.s_max == clip->s_max);
-    TEST_ASSERT_EQUAL_UINT32(direct.sample_count, clip->sample_count);
-    TEST_ASSERT_EQUAL_UINT16(direct.joint_count, clip->joint_count);
-    TEST_ASSERT_TRUE(direct.n_t == clip->n_t && direct.n_q == clip->n_q && direct.n_s == clip->n_s);
-
-    nt_skeletal_assets_deactivate_clip(handle);
-    free(payload);
-}
 // #endregion
 
 // #region sampling
@@ -757,7 +725,7 @@ static void build_pack_a(const char *path) {
     nt_skeletal_clip_t clip;
     fixture_clip(&clip);
     nt_builder_add_skeleton(ctx, &skel, "rigs/hero.nskl");
-    nt_builder_add_clip(ctx, &clip, "clips/run.nanm");
+    nt_builder_add_clip(ctx, &clip, CLIP_FP32, "clips/run.nanm");
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
     nt_builder_free_pack(ctx);
 }
@@ -768,7 +736,7 @@ static void build_pack_b(const char *path) {
     nt_skeletal_clip_t clip;
     fixture_clip(&clip);
     clip.duration = 2.0; /* tells the two clip views apart */
-    nt_builder_add_clip(ctx, &clip, "clips/walk.nanm");
+    nt_builder_add_clip(ctx, &clip, CLIP_FP32, "clips/walk.nanm");
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
     nt_builder_free_pack(ctx);
 }
@@ -876,7 +844,6 @@ int main(void) {
     RUN_TEST(test_skeleton_round_trip);
     RUN_TEST(test_skin_binding_round_trip);
     RUN_TEST(test_clip_round_trip_tables);
-    RUN_TEST(test_clip_view_matches_activator);
     RUN_TEST(test_clip_samples_grid_times_exactly);
     RUN_TEST(test_clip_interpolates_between_samples);
     RUN_TEST(test_skeleton_structure_asserts);
