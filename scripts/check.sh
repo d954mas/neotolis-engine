@@ -95,6 +95,7 @@ step "toolchain versions (.toolchain-versions)"
 require_llvm clang clang++ clang-format clang-tidy
 require_python
 require_node
+require_buildtools
 ok
 
 if [ "$FORMAT_FIRST" -eq 1 ]; then

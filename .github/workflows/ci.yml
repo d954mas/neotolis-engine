@@ -443,8 +443,6 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
-      - name: Install ninja
-        run: choco install ninja -y --no-progress
       - name: Build devapi_host with the recorder group, and the frame inspector (Win32 file dialog)
         shell: bash
         run: |

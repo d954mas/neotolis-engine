@@ -21,8 +21,7 @@ with 1,000–50,000 objects, procedural shapes and textures in four LODs, and gr
 
 ## Prerequisites
 
-- **CMake** 3.25+
-- **Ninja** build system
+- **CMake** and **Ninja** -- the versions pinned in `.toolchain-versions`, installed by `scripts/setup.sh`
 - **LLVM** -- the exact release pinned in `.toolchain-versions`, installed by `scripts/setup.sh`
   into `~/.neotolis/toolchain`; native builds never use the system compiler
 - **Emscripten SDK** -- for WASM builds (setup automated via `scripts/setup.sh`)

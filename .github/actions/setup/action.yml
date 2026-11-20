@@ -6,7 +6,7 @@ inputs:
     description: Pull git-LFS assets (cached by object list).
     default: "false"
   native:
-    description: Install the pinned LLVM; on Linux also ninja, the GLFW/GL/X headers and xvfb.
+    description: Install the pinned LLVM; on Linux also the GLFW/GL/X headers and xvfb.
     default: "true"
   extra-packages:
     description: Additional apt packages.
@@ -32,6 +32,17 @@ runs:
     - uses: actions/setup-python@v7
       with:
         python-version: ${{ steps.versions.outputs.PYTHON_VERSION }}
+
+    # Every job configures or builds with CMake and Ninja: the same pinned wheels as locally.
+    - name: Install pinned CMake and Ninja
+      shell: bash
+      run: |
+        python scripts/setup_buildtools.py
+        dir="${USERPROFILE:-$HOME}/.neotolis/toolchain/buildtools-cmake-${{ steps.versions.outputs.CMAKE_VERSION }}-ninja-${{ steps.versions.outputs.NINJA_VERSION }}"
+        if command -v cygpath > /dev/null; then dir="$(cygpath -m "$dir")/Scripts"; else dir="$dir/bin"; fi
+        echo "$dir" >> "$GITHUB_PATH"
+        "$dir/cmake" --version | head -1
+        "$dir/ninja" --version
 
     - name: Create LFS file list
       if: inputs.lfs == 'true'
@@ -74,7 +85,7 @@ runs:
       run: |
         packages="${{ inputs.extra-packages }}"
         if [ "${{ inputs.native }}" = "true" ]; then
-          packages="ninja-build libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
+          packages="libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
             libwayland-dev wayland-protocols libxkbcommon-dev libgl-dev libgl1-mesa-dri libssl-dev xvfb $packages"
         fi
         sudo apt-get update && sudo apt-get install -y $packages

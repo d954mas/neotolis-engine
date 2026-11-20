@@ -32,8 +32,8 @@ assets or benchmark inputs.
 
 Local checks and every CI job use one set of tool versions.
 `.toolchain-versions` pins the LLVM release (clang, clang++, clang-format,
-clang-tidy, clangd), the Python minor version and the Node major version;
-`.emsdk-version` pins Emscripten. `scripts/check.sh`, `fmt.sh` and `tidy.sh`
+clang-tidy, clangd), CMake, Ninja, the Python minor version and the Node major
+version; `.emsdk-version` pins Emscripten. `scripts/check.sh`, `fmt.sh` and `tidy.sh`
 fail with the expected and the found version when a local tool differs, and
 check.sh also rejects a native build tree configured with another compiler.
 
@@ -46,6 +46,10 @@ check.sh also rejects a native build tree configured with another compiler.
   presets select it for C and C++ through `cmake/nt_llvm_toolchain.cmake`; the
   system or image compiler is never used. After a version change, reconfigure
   each native build tree with `cmake --preset <name> --fresh`.
+- **CMake and Ninja:** `python scripts/setup_buildtools.py` (run by `setup.sh`)
+  installs the PyPI wheels of the pinned versions into a venv under
+  `~/.neotolis/toolchain/`; CI runs the same script. check.sh also rejects a
+  build tree configured by another CMake or Ninja.
 - **Emscripten:** `bash scripts/setup_emsdk.sh` (run by `setup.sh`) clones the
   emsdk tag of the `.emsdk-version` release into
   `~/.neotolis/toolchain/emsdk-<version>/`, installs and activates it; CI runs
@@ -55,12 +59,15 @@ check.sh also rejects a native build tree configured with another compiler.
   `setup_llvm.py` needs it for `compression.zstd`.
 - **Node:** install the pinned major version (Windows: the nodejs.org
   installer; Linux: NodeSource or nvm). Wasm tests run under it.
+- **Shell:** `source scripts/lib/toolchain.sh` puts the pinned LLVM, CMake and
+  Ninja first on PATH for hand-run `cmake --preset` commands; the check
+  scripts do it themselves.
 - **Editors:** point clangd at `~/.neotolis/toolchain/llvm-<version>/bin/clangd`
   so editor diagnostics match the pinned clang-tidy.
 
 CI runs on explicit runner images (`ubuntu-26.04`, `windows-2025-vs2026`), never
 `*-latest`: the image still provides glibc and libstdc++, the MSVC STL and
-Windows SDK, Mesa, CMake and Ninja. Move to a new image in its own change.
+Windows SDK and Mesa. Move to a new image in its own change.
 
 Bumping a version is one change to `.toolchain-versions` (new SHA-256 values
 from the release archives), a whole-tree reformat commit when clang-format
