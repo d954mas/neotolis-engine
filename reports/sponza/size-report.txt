@@ -1,5 +1,5 @@
 # Size Report: sponza (wasm-analysis-paired)
-# Commit: dc1d149
+# Commit: 2e838b7
 
 ## WASM Section Sizes
 
@@ -13,11 +13,11 @@ Memory                 7 B
 Global                 8 B
 Export                35 B
 Elem                  82 B
-Code              203159 B
+Code              203143 B
 Data              211324 B
 Custom             10502 B
 ---------------- ----------
-TOTAL             426139 B
+TOTAL             426123 B
 
 ## Top 30 Functions by Size
 
@@ -28,7 +28,7 @@ TOTAL             426139 B
 27330 B   basist::basisu_lowlevel_uastc_ldr_4x4_transcoder::transcode_slice(void*, unsigned int, unsigned int, unsigned char const*, unsigned int, basist::block_format, unsigned int, bool, bool, unsigned int, unsigned int, unsigned int, basist::basisu_transcoder_state*, unsigned int, int, int, unsigned int)
 17094 B   nt_gfx_activate_texture
  5757 B   basist::unpack_uastc(basist::uastc_block const&, basist::unpacked_uastc_block&, bool, bool)
- 5287 B   main
+ 5271 B   main
  4533 B   basist::transcode_uastc_to_etc1(basist::unpacked_uastc_block&, basist::color32 (*) [4], void*)
  4300 B   nt_gfx_activate_mesh
  3914 B   basist::pack_eac(basist::eac_block&, unsigned char const*, unsigned int)
@@ -55,7 +55,7 @@ TOTAL             426139 B
   690 B   pop_arg_long_double
 
 Total functions: 161
-Total code size: 202892 B
+Total code size: 202876 B
 
 ## Built Engine Archives
 
@@ -116,7 +116,7 @@ libnt_sprite_renderer.a    16114 B
 libnt_text_renderer.a       7540 B
 libnt_time.a                 900 B
 libnt_transform_comp.a      5336 B
-libnt_ui.a                356184 B
+libnt_ui.a                356188 B
 libnt_ui_rich.a            39704 B
 libnt_ui_rich_fx.a          3050 B
 libnt_ui_stub.a             1270 B
@@ -125,7 +125,7 @@ libnt_version.a              638 B
 libnt_window.a             14562 B
 libnt_window_stub.a         1960 B
 ------------------------ ----------
-TOTAL (archives)         2632572 B
+TOTAL (archives)         2632576 B
 
 ## Data Segments Summary
 

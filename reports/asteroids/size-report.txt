@@ -1,5 +1,5 @@
 # Size Report: asteroids (wasm-analysis-paired)
-# Commit: dc1d149
+# Commit: 2e838b7
 
 ## WASM Section Sizes
 
@@ -13,17 +13,17 @@ Memory                 7 B
 Global                 9 B
 Export                47 B
 Elem                  60 B
-Code              403308 B
+Code              403265 B
 Data              219843 B
 Custom             13044 B
 ---------------- ----------
-TOTAL             637663 B
+TOTAL             637620 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-91106 B   frame
+91063 B   frame
 31657 B   basist::basisu_lowlevel_etc1s_transcoder::transcode_slice(void*, unsigned int, unsigned int, unsigned char const*, unsigned int, basist::block_format, unsigned int, bool, bool, bool, unsigned int, unsigned int, unsigned int, unsigned int, basist::basisu_transcoder_state*, bool, void*, unsigned int, unsigned int)
 27442 B   basist::basisu_lowlevel_uastc_ldr_4x4_transcoder::transcode_slice(void*, unsigned int, unsigned int, unsigned char const*, unsigned int, basist::block_format, unsigned int, bool, bool, unsigned int, unsigned int, unsigned int, basist::basisu_transcoder_state*, unsigned int, int, int, unsigned int)
 20423 B   ui_panel
@@ -55,7 +55,7 @@ TOTAL             637663 B
  2408 B   nt_ui_toggle
 
 Total functions: 250
-Total code size: 402870 B
+Total code size: 402827 B
 
 ## Built Engine Archives
 
@@ -116,7 +116,7 @@ libnt_sprite_renderer.a    16114 B
 libnt_text_renderer.a       7540 B
 libnt_time.a                 900 B
 libnt_transform_comp.a      5336 B
-libnt_ui.a                356184 B
+libnt_ui.a                356188 B
 libnt_ui_rich.a            39704 B
 libnt_ui_rich_fx.a          3050 B
 libnt_ui_stub.a             1270 B
@@ -125,7 +125,7 @@ libnt_version.a              638 B
 libnt_window.a             14562 B
 libnt_window_stub.a         1960 B
 ------------------------ ----------
-TOTAL (archives)         2632572 B
+TOTAL (archives)         2632576 B
 
 ## Data Segments Summary
 

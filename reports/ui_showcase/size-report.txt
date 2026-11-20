@@ -1,5 +1,5 @@
 # Size Report: ui_showcase (wasm-analysis-paired)
-# Commit: dc1d149
+# Commit: 2e838b7
 
 ## WASM Section Sizes
 
@@ -13,11 +13,11 @@ Memory                 7 B
 Global                 9 B
 Export                47 B
 Elem                 126 B
-Code              385969 B
+Code              385973 B
 Data               41847 B
 Custom             10955 B
 ---------------- ----------
-TOTAL             440456 B
+TOTAL             440460 B
 
 ## Top 30 Functions by Size
 
@@ -55,7 +55,7 @@ TOTAL             440456 B
  2429 B   printf_core
 
 Total functions: 333
-Total code size: 385379 B
+Total code size: 385383 B
 
 ## Built Engine Archives
 
@@ -116,7 +116,7 @@ libnt_sprite_renderer.a    16114 B
 libnt_text_renderer.a       7540 B
 libnt_time.a                 900 B
 libnt_transform_comp.a      5336 B
-libnt_ui.a                356184 B
+libnt_ui.a                356188 B
 libnt_ui_rich.a            39704 B
 libnt_ui_rich_fx.a          3050 B
 libnt_ui_stub.a             1270 B
@@ -125,7 +125,7 @@ libnt_version.a              638 B
 libnt_window.a             14562 B
 libnt_window_stub.a         1960 B
 ------------------------ ----------
-TOTAL (archives)         2632572 B
+TOTAL (archives)         2632576 B
 
 ## Data Segments Summary
 
