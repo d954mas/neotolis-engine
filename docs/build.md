@@ -15,18 +15,59 @@ launch WSL, which is not the supported shell for this Windows build.
 
 ```bash
 git lfs pull
-bash scripts/setup.sh
-source emsdk/emsdk_env.sh
+python scripts/setup_toolchain.py
+source scripts/lib/toolchain.sh
 cmake --preset native-debug
 cmake --preset native-release
-emcmake cmake --preset wasm-debug
-emcmake cmake --preset wasm-release
+cmake --preset wasm-debug
+cmake --preset wasm-release
 bash scripts/check.sh
 ```
 
-`setup.sh` installs and activates the version pinned by `.emsdk-version`.
-Activate that SDK again in later shell sessions. LFS checkout is required:
+`source scripts/lib/toolchain.sh` again in every new shell that runs `cmake`
+by hand; the check scripts source it themselves. LFS checkout is required:
 asset pointer files are not usable example assets or benchmark inputs.
+
+### Pinned toolchain
+
+Local checks and every CI job use one set of tool versions, all in
+`.toolchain-versions`: LLVM (clang, clang++, lld, clang-format, clang-tidy,
+clangd), CMake and Ninja by exact version with the SHA-256 of each release
+archive, the Emscripten SDK by its emsdk release tag, Python by minor and Node
+by major version (their patch level follows the installer or the runner's
+toolcache).
+
+- **Install:** `python scripts/setup_toolchain.py [llvm] [build] [emsdk]`
+  installs LLVM, CMake plus Ninja, and emsdk (default: all) into
+  `~/.neotolis/toolchain/<tool>-<version>/` (`%USERPROFILE%` on Windows). Every
+  checkout and worktree shares those directories, and branches with different
+  pins coexist in them. CI runs the same script. Native presets select clang,
+  clang++ and the linker through `cmake/nt_llvm_toolchain.cmake`; the system or
+  image compiler is never used.
+- **Enforcement:** `cmake/nt_toolchain_check.cmake` fails the configure unless
+  CMake, Ninja and the compiler (Emscripten for wasm trees) are the pinned
+  versions. `.toolchain-versions` is a configure dependency, so after a version
+  bump the next build of any tree stops there: reconfigure it with
+  `cmake --preset <name> --fresh`. The trees the checks own (`tidy-ci`,
+  `submodule-test`, the diagnostics matrix) start from scratch by themselves
+  when they are older than `.toolchain-versions`.
+- **Python and Node:** install them yourself (Windows: the python.org and
+  nodejs.org installers; Linux: the distro packages, deadsnakes or
+  `uv python install`, NodeSource or nvm); check.sh rejects other versions.
+  `setup_toolchain.py` needs Python 3.14 for `compression.zstd`. PATH Node runs
+  every wasm test, Playwright and the push checks; configure wasm trees with
+  plain `cmake --preset`, not `emcmake`, which would substitute emsdk's Node.
+- **Editors:** point clangd at `~/.neotolis/toolchain/llvm-<version>/bin/clangd`
+  so editor diagnostics match the pinned clang-tidy.
+
+CI runs on explicit runner images (`ubuntu-26.04`, `windows-2025-vs2026`), never
+`*-latest`: the image still provides glibc, libstdc++ and the GCC crt objects
+on Linux, the MSVC STL and Windows SDK, Mesa, and the apt tools wabt, ffmpeg
+and ccache. Move to a new image in its own change.
+
+Bumping a version is one change to `.toolchain-versions` (new SHA-256 values
+from the release archives), a whole-tree reformat commit when clang-format
+changes, and a green full CI graph.
 
 ### Example packs
 
@@ -107,7 +148,7 @@ Contracts and less common options:
 - [Log/assert policy, measurement producers and DevAPI group options](spec/debug/logging-errors-debugging.md).
 - [Resource measurements and resident bytes](spec/assets/resource.md#optional-measurements-and-resident-bytes).
 - [Font synthesis and rich markup](spec/ui/rich-text.md), [Clay debug view](spec/ui/nt-ui.md).
-- [WASM build variants](../README.md#wasm-requires-emsdk-activated).
+- [WASM build variants](../README.md#wasm-builds).
 
 ### Linux OpenSSL CA cache
 
@@ -316,8 +357,8 @@ format/tidy; review changes to them separately.
 
 Tidy uses the DevAPI-enabled compile database in `build/_cmake/tidy-ci`, matching
 CI. Before pushing new test/tool C files, run
-`clang-tidy -p build/_cmake/tidy-ci <file>` directly; new files can otherwise be
-missed. Rebuild native-debug after adding a C source to refresh its compile DB;
+`clang-tidy -p build/_cmake/tidy-ci <file>` directly in a shell that sourced
+`scripts/lib/toolchain.sh`; new files can otherwise be missed. Rebuild native-debug after adding a C source to refresh its compile DB;
 new-file and platform-`#if` clangd diagnostics need confirmation by a real build.
 
 The push gate additionally builds native-release, wasm-debug and wasm-release,
@@ -353,8 +394,8 @@ baseline build, so smoke, ctest and symbol checks run there. Narrow configures
 whose tests never use HTTP (Basis, font and Clay rows, goldens, the runtime
 diagnostics matrix) pass `-DNT_HTTP_CURL=OFF`: vendored curl doubles configure time.
 Shared job setup (LFS, toolchain, emsdk, ccache) lives in
-`.github/actions/setup`; emsdk installs into a cached `~/emsdk`, a fixed path
-that keeps wasm ccache keys stable across runs.
+`.github/actions/setup`, which runs `scripts/setup_toolchain.py` and caches its
+directories per version.
 
 ### Optional-feature checks
 
@@ -460,7 +501,7 @@ CI `web-smoke` builds a wasm-debug host with every group (this reconfigures the 
 and runs those eight scenarios plus `web_demo` and `record_demo` on it:
 
 ```bash
-emcmake cmake --preset wasm-debug -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_CORE=ON -DNT_DEVAPI_GROUP_TIME=ON -DNT_DEVAPI_GROUP_CAPTURE=ON -DNT_DEVAPI_GROUP_GFX=ON -DNT_DEVAPI_GROUP_OBS=ON -DNT_DEVAPI_GROUP_RECORDER=ON -DNT_DEVAPI_GROUP_UI=ON -DNT_DEVAPI_GROUP_ENTITY_WRITE=ON -DNT_DEVAPI_GROUP_INPUT=ON
+cmake --preset wasm-debug -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_CORE=ON -DNT_DEVAPI_GROUP_TIME=ON -DNT_DEVAPI_GROUP_CAPTURE=ON -DNT_DEVAPI_GROUP_GFX=ON -DNT_DEVAPI_GROUP_OBS=ON -DNT_DEVAPI_GROUP_RECORDER=ON -DNT_DEVAPI_GROUP_UI=ON -DNT_DEVAPI_GROUP_ENTITY_WRITE=ON -DNT_DEVAPI_GROUP_INPUT=ON
 cmake --build --preset wasm-debug --target devapi_host
 python -m tools.devapi.scenarios.record_demo --target web --out build/devapi-out
 ```
@@ -471,7 +512,7 @@ bridge and the `NtRecorder` calls, and runs the scenarios that reach that JS: `d
 introspect write, so this host builds only those scenarios' groups:
 
 ```bash
-emcmake cmake --preset wasm-release -B build/_cmake/wasm-release-devapi -DNT_LOG_RING_ENABLED=ON -DNT_METRICS_ENABLED=ON -DNT_INTROSPECT_ENABLED=ON -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_CORE=ON -DNT_DEVAPI_GROUP_TIME=ON -DNT_DEVAPI_GROUP_CAPTURE=ON -DNT_DEVAPI_GROUP_OBS=ON -DNT_DEVAPI_GROUP_RECORDER=ON
+cmake --preset wasm-release -B build/_cmake/wasm-release-devapi -DNT_LOG_RING_ENABLED=ON -DNT_METRICS_ENABLED=ON -DNT_INTROSPECT_ENABLED=ON -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_CORE=ON -DNT_DEVAPI_GROUP_TIME=ON -DNT_DEVAPI_GROUP_CAPTURE=ON -DNT_DEVAPI_GROUP_OBS=ON -DNT_DEVAPI_GROUP_RECORDER=ON
 cmake --build build/_cmake/wasm-release-devapi --target devapi_host
 python -m tools.devapi.scenarios.record_demo --target web --web-dir build/examples/devapi_host/wasm-release-devapi --out build/devapi-out
 ```
@@ -521,12 +562,9 @@ these simple patterns check recording correctness, not dense-scene compression q
 
 - **GNU ld:** archives resolve left-to-right. Providers/stubs must follow
   consumers (`nt_resource ... nt_http_stub nt_fs_stub nt_log_stub`); FS is
-  native-only. A standalone math test may need conditional linking to `m` on
+  native-only. Linux links with the pinned lld and `--warn-backrefs
+  --fatal-warnings`, which rejects every order GNU ld cannot resolve. A standalone math test may need conditional linking to `m` on
   non-Windows platforms. See `tests/submodule/CMakeLists.txt`.
-- **Format version skew:** use single-space trailing comments; CI clang-format
-  can reject multi-space alignment accepted by another local version.
-- **SDK pin skew:** compare `emcc --version` with `.emsdk-version` before trusting
-  a local Closure build.
 - **Platform branches:** Windows tidy does not check Linux-only `#if` blocks.
   Review them as Linux code; use a justified local `NOLINT` where needed.
 - **Headless smoke:** skip `glfwInit` when neither `DISPLAY` nor `WAYLAND_DISPLAY`

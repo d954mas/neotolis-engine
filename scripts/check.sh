@@ -7,7 +7,7 @@
 #   scripts/check.sh --format [--full|--push]  format changed files under the same run lock first
 # The cheap gates (module composition, EM_JS_DEPS, doc links, CRT pins) run in EVERY mode —
 # they cost seconds and previously CI-only failures came exactly from skipping them.
-# Remaining known CI-only class: GNU ld link order (Linux-specific, see AGENTS.md).
+# Remaining known CI-only class: GNU ld link order, checked by Linux lld --warn-backrefs (see AGENTS.md).
 # All tidy runs use the tidy-ci DB (native-debug + devapi groups ON) so the lint
 # matches the CI lint job exactly — devapi TUs are absent from the plain
 # native-debug compile DB and would otherwise be silently skipped.
@@ -88,9 +88,29 @@ trap print_summary EXIT
 
 # shellcheck source=lib/check_output.sh
 source "$SCRIPT_DIR/lib/check_output.sh"
+# shellcheck source=lib/toolchain.sh
+source "$SCRIPT_DIR/lib/toolchain.sh"
+
+step "toolchain (.toolchain-versions)"
+require_installed llvm cmake ninja
+require_python
+if [ "$MODE" = "push" ]; then
+    # PATH node runs the wasm tests and the push checks.
+    require_installed emsdk
+    require_node
+fi
+ok
+
+# check.sh owns tidy-ci and submodule-test: a missing tree, or one older than the pins, is
+# configured from scratch instead of failing the toolchain check.
+needs_fresh() {
+    [ ! -f "$1/CMakeCache.txt" ] || [ .toolchain-versions -nt "$1/CMakeCache.txt" ]
+}
 
 if [ "$FORMAT_FIRST" -eq 1 ]; then
+    step "clang-format (apply to changed files)"
     bash "$SCRIPT_DIR/fmt.sh"
+    ok
 fi
 
 # #region changed files
@@ -124,9 +144,9 @@ TIDY_CI_FLAGS=(
 )
 ensure_tidy_ci() {
     local db="$TIDY_CI_DIR/compile_commands.json"
-    if [ ! -f "$db" ]; then
-        echo "Configuring $TIDY_CI_DIR (one-time; devapi groups ON to match CI lint)..."
-        cmake --preset native-debug -B "$TIDY_CI_DIR" "${TIDY_CI_FLAGS[@]}"
+    if needs_fresh "$TIDY_CI_DIR" || [ ! -f "$db" ]; then
+        echo "Configuring $TIDY_CI_DIR from scratch (devapi groups ON to match CI lint)..."
+        cmake --preset native-debug -B "$TIDY_CI_DIR" "${TIDY_CI_FLAGS[@]}" --fresh > /dev/null
         return
     fi
     # Stale DB silently SKIPS new TUs in tidy (fail-open) — reconfigure when any
@@ -288,16 +308,9 @@ if [ "$MODE" = "push" ]; then
     ok
 
     step "build (wasm-debug)"
-    if ! command -v emcc > /dev/null 2>&1; then
-        echo "ERROR: emcc not found in PATH — the wasm-debug build is required before push."
-        echo "Activate emsdk version $(cat .emsdk-version 2> /dev/null || echo '(see .emsdk-version)'):"
-        echo "  source <emsdk>/emsdk_env.sh   (or emsdk_env.bat / emsdk_env.ps1)"
-        echo "Then configure once: emcmake cmake --preset wasm-debug"
-        exit 1
-    fi
     if [ ! -d "build/_cmake/wasm-debug" ]; then
         echo "ERROR: build/_cmake/wasm-debug missing — configure the preset first:"
-        echo "  emcmake cmake --preset wasm-debug"
+        echo "  cmake --preset wasm-debug"
         exit 1
     fi
     cmake --preset wasm-debug > /dev/null
@@ -309,7 +322,7 @@ if [ "$MODE" = "push" ]; then
     step "build (wasm-release)"
     if [ ! -d "build/_cmake/wasm-release" ]; then
         echo "ERROR: build/_cmake/wasm-release missing — configure the preset first:"
-        echo "  emcmake cmake --preset wasm-release"
+        echo "  cmake --preset wasm-release"
         exit 1
     fi
     cmake --preset wasm-release > /dev/null
@@ -320,8 +333,8 @@ if [ "$MODE" = "push" ]; then
     # consumable via add_subdirectory with the documented link order.
     step "submodule consumption test"
     SUBMODULE_DIR="build/submodule-test"
-    if [ ! -f "$SUBMODULE_DIR/CMakeCache.txt" ]; then
-        cmake -S tests/submodule -B "$SUBMODULE_DIR" -DENGINE_ROOT=../.. -DCMAKE_C_COMPILER=clang -G Ninja
+    if needs_fresh "$SUBMODULE_DIR"; then
+        cmake -S tests/submodule -B "$SUBMODULE_DIR" -DENGINE_ROOT=../.. -DCMAKE_TOOLCHAIN_FILE="$ROOT_DIR/cmake/nt_llvm_toolchain.cmake" -G Ninja --fresh
     fi
     cmake --build "$SUBMODULE_DIR"
     "./$SUBMODULE_DIR/submodule_test"

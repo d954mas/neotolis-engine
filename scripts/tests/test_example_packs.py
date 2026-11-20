@@ -72,7 +72,7 @@ nt_example_packs(
         return result.stdout
 
     def configure(self, *args):
-        self.run_cmake("-S", self.source, "-B", self.build, "-G", "Ninja", "-DCMAKE_C_COMPILER=clang", *args)
+        self.run_cmake("-S", self.source, "-B", self.build, "-G", "Ninja", f"-DCMAKE_TOOLCHAIN_FILE={(ROOT / 'cmake/nt_llvm_toolchain.cmake').as_posix()}", *args)
 
     def mtimes(self):
         return [p.stat().st_mtime_ns for p in (self.packs / "fixture.ntpack", self.build / "assets/fixture.ntpack")]

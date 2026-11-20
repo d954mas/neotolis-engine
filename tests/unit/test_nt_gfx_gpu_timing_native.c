@@ -292,6 +292,10 @@ static void test_unavailable_timer_is_inert(void) {
     TEST_ASSERT_EQUAL_UINT(0, s_begin_count);
     TEST_ASSERT_EQUAL_UINT(0, s_end_count);
     TEST_ASSERT_EQUAL_UINT(0, s_available_count);
+    TEST_ASSERT_EQUAL_UINT(0, s_result_count);
+    TEST_ASSERT_EQUAL_UINT(0, s_delete_count);
+    TEST_ASSERT_EQUAL_UINT(0, s_push_count);
+    TEST_ASSERT_EQUAL_UINT(0, s_pop_count);
 #if !NT_GFX_GPU_TIMING_ENABLED
     TEST_ASSERT_EQUAL_UINT64(0, out);
 #endif

@@ -717,7 +717,7 @@ static void test_clipboard_cut(void) {
 
 /* ---- Test 17b: Ctrl+X is a full no-op when the clipboard is unavailable (no data loss). ---- */
 static void test_clipboard_cut_unavailable_noop(void) {
-    char buf[32];
+    char buf[32] = {0}; /* the whole buffer is compared, so the tail must be defined */
     strcpy(buf, "hello");
     char snapshot[32];
     memcpy(snapshot, buf, sizeof buf);
@@ -919,7 +919,7 @@ static void test_drag_select_range(void) {
 
 /* ---- Test 27: a password field never mutates the game buffer when its masked display renders. ---- */
 static void test_password_buffer_unchanged_after_render(void) {
-    char buf[32];
+    char buf[32] = {0};               /* the whole buffer is compared, so the tail must be defined */
     strcpy(buf, "\xD0\x90\xD0\xB1!"); /* "Аб!" -- mixed multi-byte + ASCII */
     char snapshot[32];
     memcpy(snapshot, buf, sizeof buf);
@@ -931,9 +931,6 @@ static void test_password_buffer_unchanged_after_render(void) {
     (void)field_frame(&IDLE_PTR, id, buf, sizeof buf, true, NULL);
     TEST_ASSERT_EQUAL_MEMORY(snapshot, buf, sizeof buf);
 }
-
-/* The auto-repeat core is exposed under NT_TEST_ACCESS with explicit storage (no internal cell type). */
-extern bool nt_ui_input_key_repeat_step(uint16_t *repeat_key, float *repeat_t, nt_key_t k, bool pressed, bool down, float dt);
 
 /* ---- Test 29: key-repeat fires once on press, then after the initial delay repeats at the fast rate;
  * a release stops it. Driven directly with fake pressed/down edges so timing is deterministic. ---- */

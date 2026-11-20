@@ -72,7 +72,6 @@ static float s_pitch;
 static float s_vel_yaw;
 static float s_vel_pitch;
 static float s_cam_dist = 12.0F;
-static bool s_grabbed;
 
 static nt_font_t s_font;
 static nt_material_t s_text_material;
@@ -106,7 +105,6 @@ static bool s_prof_cjk_reset;    /* true after CJK load triggered a reset */
 static void trackball_update(float dt) {
     /* Mouse drag rotation */
     if (nt_input_mouse_is_down(NT_BUTTON_LEFT)) {
-        s_grabbed = true;
         float dx = g_nt_input.pointers[0].dx;
         float dy = g_nt_input.pointers[0].dy;
         float new_yaw = dx * MOUSE_SENS;

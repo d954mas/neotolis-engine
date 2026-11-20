@@ -470,7 +470,7 @@ static void bt_dfs_subtree(nt_ui_context_t *ctx, Clay_Context *cc, int32_t root_
                     const float cx = item->boundingBox.x + (item->boundingBox.width * 0.5F);
                     const float cy = item->boundingBox.y + (item->boundingBox.height * 0.5F);
                     /* In-place compose — cglm supports aliasing accum == out. */
-                    compose_transform_level(&ad->transform, cx, cy, (float(*)[4])m_cur, (float(*)[4])m_cur);
+                    compose_transform_level(&ad->transform, cx, cy, (float (*)[4])m_cur, (float (*)[4])m_cur);
                 }
                 if ((ad->flags & NT_UI_ELEM_FLAG_HAS_OPACITY) != 0U) {
                     op *= ad->opacity;

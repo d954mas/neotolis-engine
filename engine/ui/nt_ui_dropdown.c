@@ -468,7 +468,7 @@ static bool combo_emit_selectable(nt_ui_context_t *ctx, uint32_t key, const nt_a
     combo_dup_key_check(ctx, row_id);
     const bool clicked = dropdown_declare_row(ctx, ctx->pending_combo.fill_layer, ctx->pending_combo.label_layer, row_id, label_id, label, icon, selected, style);
     if (clicked) {
-        *(ctx->pending_combo.open) = false; /* the game writes *selected; the combo clears *open */
+        *ctx->pending_combo.open = false; /* the game writes *selected; the combo clears *open */
     }
     return clicked;
 }
@@ -521,7 +521,7 @@ bool nt_ui_combo_selectable_end(nt_ui_context_t *ctx) {
      * area. On click the combo clears *open (game writes *selected). */
     const nt_ui_interaction_t step = nt_ui_step(ctx, row_id, NULL);
     if (step.clicked) {
-        *(ctx->pending_combo.open) = false; /* the game writes *selected; the combo clears *open */
+        *ctx->pending_combo.open = false; /* the game writes *selected; the combo clears *open */
     }
     ctx->pending_combo.row_open = 0U;
     return step.clicked;

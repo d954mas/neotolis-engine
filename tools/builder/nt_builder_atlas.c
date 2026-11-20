@@ -482,7 +482,7 @@ _Static_assert(PER_SPRITE_SIZE == KEY_OV_OFF + 17 + sizeof(float), "PER_SPRITE_S
  * ATLAS_CACHE_KEY_VERSION. */
 enum {
     ATLAS_OPTS_KEY_SIZE = sizeof(uint32_t) + sizeof(((const nt_atlas_opts_t *)0)->max_size) + sizeof(((const nt_atlas_opts_t *)0)->padding) + sizeof(((const nt_atlas_opts_t *)0)->margin) +
-                          sizeof(((const nt_atlas_opts_t *)0)->extrude) + sizeof(((const nt_atlas_opts_t *)0)->max_added_area_percent) + sizeof(((const nt_atlas_opts_t *)0)->max_vertices) + 6
+    sizeof(((const nt_atlas_opts_t *)0)->extrude) + sizeof(((const nt_atlas_opts_t *)0)->max_added_area_percent) + sizeof(((const nt_atlas_opts_t *)0)->max_vertices) + 6
 };
 
 static void atlas_key_write_sprite(uint8_t *out, const NtAtlasSpriteInput *s) {
@@ -3331,10 +3331,8 @@ static void pipeline_debug_png(AtlasPipeline *p) {
 /* --- pipeline_cache_write: store packing result for next build --- */
 
 static void pipeline_cache_write(AtlasPipeline *p) {
-    if (p->ctx->cache_dir) {
-        if (atlas_cache_write(p->ctx->cache_dir, p->state->cache_key, p->placements, p->placement_count, p->page_w, p->page_h, p->page_count, p->page_pixels)) {
-            NT_LOG_INFO("Atlas cache stored: %s (key %016llx)", p->state->name, (unsigned long long)p->state->cache_key);
-        }
+    if (p->ctx->cache_dir && atlas_cache_write(p->ctx->cache_dir, p->state->cache_key, p->placements, p->placement_count, p->page_w, p->page_h, p->page_count, p->page_pixels)) {
+        NT_LOG_INFO("Atlas cache stored: %s (key %016llx)", p->state->name, (unsigned long long)p->state->cache_key);
     }
 }
 
@@ -3708,7 +3706,7 @@ static void pipeline_serialize(AtlasPipeline *p) {
     }
 
     NtAtlasRegion *regions = (NtAtlasRegion *)(blob + regions_offset);
-    float(*positions)[2] = (float(*)[2])(blob + vertex_offset);
+    float (*positions)[2] = (float (*)[2])(blob + vertex_offset);
     NtAtlasUv *uvs = (NtAtlasUv *)(blob + uv_offset);
     uint16_t *indices = (uint16_t *)(blob + index_offset);
 

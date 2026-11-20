@@ -145,7 +145,8 @@ static uint8_t *build_font_blob_codepoints(uint16_t units_per_em, int16_t ascent
 
 static nt_font_create_desc_t test_font_desc(void) {
     return (nt_font_create_desc_t){
-        .max_glyphs = 16, .measure_cache_size = 256, /* match v1.7 default; FONT-02 cases assert against this */
+        .max_glyphs = 16,
+        .measure_cache_size = 256, /* match v1.7 default; FONT-02 cases assert against this */
     };
 }
 
@@ -1451,7 +1452,7 @@ void test_font_bands_sorted_by_fp16_max(void) {
     };
     memcpy(blob, &hdr, sizeof hdr);
     memcpy(blob + sizeof hdr, &glyph, sizeof glyph);
-    const uint32_t blob_size = glyph.data_offset + build_contour_blob_1(blob + glyph.data_offset, (const int16_t(*)[2])pts, POINTS);
+    const uint32_t blob_size = glyph.data_offset + build_contour_blob_1(blob + glyph.data_offset, (const int16_t (*)[2])pts, POINTS);
     nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 4});
     nt_font_fill(font, blob, blob_size);
 
@@ -1536,7 +1537,7 @@ void test_font_glyph_over_slot_texels_drops_bands(void) {
     };
     memcpy(blob, &hdr, sizeof hdr);
     memcpy(blob + sizeof hdr, &glyph, sizeof glyph);
-    const uint32_t blob_size = glyph.data_offset + build_contour_blob_1(blob + glyph.data_offset, (const int16_t(*)[2])pts, POINTS);
+    const uint32_t blob_size = glyph.data_offset + build_contour_blob_1(blob + glyph.data_offset, (const int16_t (*)[2])pts, POINTS);
     nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 4});
     nt_font_fill(font, blob, blob_size);
 
@@ -2168,7 +2169,7 @@ void test_font_weight_over_curve_cap_draws_regular(void) {
     };
     memcpy(blob, &hdr, sizeof hdr);
     memcpy(blob + sizeof hdr, &glyph, sizeof glyph);
-    const uint32_t blob_size = glyph.data_offset + build_contour_blob_1(blob + glyph.data_offset, (const int16_t(*)[2])pts, POINTS);
+    const uint32_t blob_size = glyph.data_offset + build_contour_blob_1(blob + glyph.data_offset, (const int16_t (*)[2])pts, POINTS);
     nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 4});
     nt_font_fill(font, blob, blob_size);
 

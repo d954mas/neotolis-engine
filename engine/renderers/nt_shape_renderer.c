@@ -564,7 +564,7 @@ static void build_wire_templates(uint32_t *segments, uint32_t *index_count) {
         for (size_t r = 0; r < sizeof(k_wire_rings) / sizeof(k_wire_rings[0]); r++) {
             if (k_wire_rings[r].type == type) {
                 wire_ring_points(points, k_wire_rings[r].plane, k_wire_rings[r].y, k_wire_rings[r].tag);
-                wire_template_path(segments, index_count, (const float(*)[4])points, NT_SHAPE_SEGMENTS, true);
+                wire_template_path(segments, index_count, (const float (*)[4])points, NT_SHAPE_SEGMENTS, true);
             }
         }
         if (type == NT_SHAPE_RECT) {
@@ -588,7 +588,7 @@ static void build_wire_templates(uint32_t *segments, uint32_t *index_count) {
         } else if (type == NT_SHAPE_CAPSULE) {
             for (int plane = 0; plane < 2; plane++) {
                 wire_capsule_profile(points, plane);
-                wire_template_path(segments, index_count, (const float(*)[4])points, NT_WIRE_CAP_POINTS, true);
+                wire_template_path(segments, index_count, (const float (*)[4])points, NT_WIRE_CAP_POINTS, true);
             }
         }
         s_shape.wire_ranges[type] = (nt_shape_range_t){.first_index = first_index, .num_indices = *index_count - first_index, .num_vertices = (*segments - first) * 7};
@@ -597,7 +597,7 @@ static void build_wire_templates(uint32_t *segments, uint32_t *index_count) {
 
 /* Appends one filled template (components 3 or 4 per vertex; w = 0 when 3) with its indices rebased. */
 static void append_fill(int type, const float *verts, uint32_t nv, uint32_t components, const uint16_t *idx, uint32_t ni, uint32_t *vertex_count, uint32_t *index_count) {
-    float(*dst)[4] = s_shape.line_staging.build.fill_vertices;
+    float (*dst)[4] = s_shape.line_staging.build.fill_vertices;
     uint16_t *dst_idx = s_shape.line_staging.build.fill_indices;
     NT_ASSERT(*vertex_count + nv <= NT_FILL_TEMPLATE_VERTICES && *index_count + ni <= NT_FILL_TEMPLATE_INDICES);
     for (uint32_t i = 0; i < nv; i++) {

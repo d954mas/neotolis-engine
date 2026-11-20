@@ -1,6 +1,18 @@
 # .clang-tidy -- Maximum strictness for C code.
 # C++-only categories excluded. Noisy checks suppressed with rationale.
 #
+# Off since LLVM 23 (the version pin keeps the rest of * on):
+#   bugprone-signed-bitwise: the former hicpp-signed-bitwise; flags positive literals (v >> 1)
+#     and small unsigned types after integer promotion.
+#   readability-implicit-bool-conversion: in C, && and || yield int, so every bool built from
+#     them is reported; AllowLogicalOperatorConversion does not cover it.
+#   readability-math-missing-parentheses: parentheses around every product in a sum.
+#   readability-trailing-comma: a trailing comma makes clang-format put one element per line.
+#   readability-use-concise-preprocessor-directives: #if defined(X) spelling only.
+#   clang-analyzer-security.ArrayBound: left alpha in LLVM 23; its reports here follow infeasible
+#     paths around invariants asserted or guaranteed by callers (the heap string walks were
+#     already NOLINTed under core.UndefinedBinaryOperatorResult).
+#
 # Run: bash scripts/tidy.sh build/_cmake/native-debug
 ---
 Checks: >
@@ -31,7 +43,13 @@ Checks: >
   -readability-avoid-const-params-in-decls,
   -readability-enum-initial-value,
   -cert-int09-c,
-  -bugprone-macro-parentheses
+  -bugprone-macro-parentheses,
+  -bugprone-signed-bitwise,
+  -readability-implicit-bool-conversion,
+  -readability-math-missing-parentheses,
+  -readability-trailing-comma,
+  -readability-use-concise-preprocessor-directives,
+  -clang-analyzer-security.ArrayBound
 WarningsAsErrors: '*'
 HeaderFilterRegex: '[/\\\\](engine|shared|tools|examples|tests)[/\\\\]'
 FormatStyle: file

@@ -261,7 +261,6 @@ static inline bool shortcut_held(void) { return nt_input_key_is_down(NT_KEY_LCTR
 /* PC-style auto-repeat core. Last-pressed wins (a newer repeatable key re-arms to it).
  * Edges arrive as params so the unit test can drive timing with fake input. */
 #ifdef NT_TEST_ACCESS
-bool nt_ui_input_key_repeat_step(uint16_t *repeat_key, float *repeat_t, nt_key_t k, bool pressed, bool down, float dt);
 bool nt_ui_input_key_repeat_step(uint16_t *repeat_key, float *repeat_t, nt_key_t k, bool pressed, bool down, float dt)
 #else
 static bool key_repeat_step(uint16_t *repeat_key, float *repeat_t, nt_key_t k, bool pressed, bool down, float dt)
@@ -1142,7 +1141,7 @@ static void emit_field(input_frame_t *f) {
         /* Password fields render one mask glyph per codepoint instead of the real bytes; the mask
          * is render-only (the game buffer is untouched). build_display_text is shared with the test
          * probe so the password branch is asserted without a GL capture. */
-        const char *disp = (props->password) ? nt_ui_input_build_display_text(buffer, cur_len) : buffer;
+        const char *disp = props->password ? nt_ui_input_build_display_text(buffer, cur_len) : buffer;
         /* Float the text at -scroll_x inside the content clip so it tracks the caret/selection when
          * the line scrolls; an inline label would stay at x=0 and desync. */
         emit_text(ctx, text_layer, -st->scroll_x, 0.0F, disp, &ts);

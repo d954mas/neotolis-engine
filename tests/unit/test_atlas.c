@@ -74,7 +74,7 @@ static uint32_t build_mock_atlas_blob(uint8_t *out, uint32_t cap, const mock_atl
     if (region_bytes > 0) {
         memcpy(out + sizeof(NtAtlasHeader) + page_bytes, spec->regions, region_bytes);
     }
-    float(*positions)[2] = (float(*)[2])(out + vertex_offset);
+    float (*positions)[2] = (float (*)[2])(out + vertex_offset);
     NtAtlasUv *uvs = (NtAtlasUv *)(out + uv_offset);
     for (uint32_t i = 0; i < spec->total_vertex_count; i++) {
         positions[i][0] = (float)spec->vertices[i].local_x * hdr->inverse_pixels_per_unit;
@@ -438,7 +438,7 @@ void test_atlas_on_resolve_null_data_early_returns(void) {
     void *before = s_user_data;
     const struct nt_atlas_data *ad_before = (const struct nt_atlas_data *)before;
     const uint32_t region_count_before = nt_atlas_test_region_count(ad_before);
-    const float(*positions_before)[2] = nt_atlas_test_positions(ad_before);
+    const float (*positions_before)[2] = nt_atlas_test_positions(ad_before);
 
     /* Drive with NULL data — should early-return without touching state. */
     nt_atlas_test_drive_resolve(NULL, 0, &s_user_data);
@@ -1110,9 +1110,9 @@ void test_atlas_hash_table_growth_under_1000_regions(void) {
         for (uint32_t vi = 0; vi < verts_per_region; vi++) {
             uint32_t idx = (i * verts_per_region) + vi;
             verts1[idx].local_x = (int16_t)(i & 0x7FFF);
-            verts1[idx].local_y = (int16_t)(vi);
+            verts1[idx].local_y = (int16_t)vi;
             verts1[idx].atlas_u = (uint16_t)(i & 0xFFFF);
-            verts1[idx].atlas_v = (uint16_t)(vi);
+            verts1[idx].atlas_v = (uint16_t)vi;
         }
         for (uint32_t ii = 0; ii < indices_per_region; ii++) {
             inds1[(i * indices_per_region) + ii] = (uint16_t)ii;
@@ -1656,7 +1656,7 @@ void test_atlas_uv_passthrough_d4_transform(void) {
         nt_atlas_test_drive_resolve(buf, size, &s_user_data);
         const struct nt_atlas_data *ad = (const struct nt_atlas_data *)s_user_data;
 
-        const float(*pos)[2] = nt_atlas_test_positions(ad);
+        const float (*pos)[2] = nt_atlas_test_positions(ad);
         const nt_atlas_uv_t *vraw = nt_atlas_test_uvs(ad);
         TEST_ASSERT_NOT_NULL(vraw);
         TEST_ASSERT_NOT_NULL(pos);
@@ -1723,7 +1723,7 @@ void test_atlas_positions_keep_origin_separate(void) {
     nt_atlas_test_drive_resolve(buf, size, &s_user_data);
     const struct nt_atlas_data *ad = (const struct nt_atlas_data *)s_user_data;
 
-    const float(*pos)[2] = nt_atlas_test_positions(ad);
+    const float (*pos)[2] = nt_atlas_test_positions(ad);
     TEST_ASSERT_NOT_NULL(pos);
 
     /* origin (0.5, 0.5) is NOT baked into positions — sprite renderer
@@ -1787,7 +1787,7 @@ void test_atlas_copies_positions_with_trim(void) {
     nt_atlas_test_drive_resolve(buf, size, &s_user_data);
     const struct nt_atlas_data *ad = (const struct nt_atlas_data *)s_user_data;
 
-    const float(*pos)[2] = nt_atlas_test_positions(ad);
+    const float (*pos)[2] = nt_atlas_test_positions(ad);
     TEST_ASSERT_NOT_NULL(pos);
 
     /* Vertex source = local + trim_offset (origin NOT baked — that's
@@ -1868,7 +1868,7 @@ void test_atlas_intrinsic_scale_ignores_metadata(void) {
     TEST_ASSERT_EQUAL_UINT32(0, nt_atlas_test_page_resource_handle(ad, 0));
     /* Destroying the borrowed blob must not change the owned snapshot. */
     memset(atlas_blob, 0, atlas_size);
-    const float(*positions)[2] = nt_atlas_test_positions(ad);
+    const float (*positions)[2] = nt_atlas_test_positions(ad);
     const nt_atlas_uv_t *uvs = nt_atlas_test_uvs(ad);
     for (uint32_t i = 0; i < 4; i++) {
         assert_float_close(expected[i][0], positions[i][0], 1e-6F, "copied position x");
@@ -1952,7 +1952,7 @@ void test_atlas_merge_origin_keeps_positions(void) {
 
     nt_atlas_test_drive_resolve(buf1, size1, &s_user_data);
     const struct nt_atlas_data *ad = (const struct nt_atlas_data *)s_user_data;
-    const float(*pos_pre)[2] = nt_atlas_test_positions(ad);
+    const float (*pos_pre)[2] = nt_atlas_test_positions(ad);
     /* Origin is NOT baked into positions — sprite_renderer applies it via
      * translation. positions = (local + trim_offset) * ipu = local here.
      * Different origins between merges don't change positions values. */
@@ -1962,7 +1962,7 @@ void test_atlas_merge_origin_keeps_positions(void) {
     /* Merge: same hash, new origin. positions must remain stable since the
      * vertex layout didn't change and origin is no longer baked. */
     nt_atlas_test_drive_resolve(buf2, size2, &s_user_data);
-    const float(*pos_post)[2] = nt_atlas_test_positions(ad);
+    const float (*pos_post)[2] = nt_atlas_test_positions(ad);
     assert_float_close(0.0F, pos_post[0][0], 1e-5F, "post-merge v0.x unchanged");
     assert_float_close(0.0F, pos_post[0][1], 1e-5F, "post-merge v0.y unchanged");
     assert_float_close(10.0F, pos_post[1][0], 1e-5F, "post-merge v1.x = local");
@@ -1995,14 +1995,14 @@ void test_atlas_tombstone_has_empty_position_span(void) {
     TEST_ASSERT_EQUAL_UINT8(0, r0->vertex_count);
     TEST_ASSERT_EQUAL_UINT32(0, r0->vertex_start);
 
-    const float(*pos)[2] = nt_atlas_test_positions(ad);
+    const float (*pos)[2] = nt_atlas_test_positions(ad);
     TEST_ASSERT_NOT_NULL(pos); /* buffer still allocated, slice length is 0 */
 }
 
 void test_atlas_geometry_replacement_changes_section_sizes(void) {
     const uint8_t counts[][2] = {{0, 0}, {8, 18}, {4, 42}, {6, 9}, {0, 0}, {12, 30}, {3, 3}};
     uint8_t *packs[7] = {0};
-    const float(*previous_positions)[2] = NULL;
+    const float (*previous_positions)[2] = NULL;
     nt_resource_init(NULL);
     nt_atlas_init();
     for (uint32_t pass = 0; pass < 7; pass++) {
@@ -2134,7 +2134,7 @@ void test_atlas_sd_hd_merge_stable_region_indices(void) {
             TEST_ASSERT_EQUAL_INT16(trims[variant][id][1], r->trim_offset_y);
             assert_float_close(origins[variant][id][0], r->origin_x, 1e-6F, "winner origin x");
             assert_float_close(origins[variant][id][1], r->origin_y, 1e-6F, "winner origin y");
-            const float(*positions)[2] = nt_atlas_get_region_positions(atlas, id);
+            const float (*positions)[2] = nt_atlas_get_region_positions(atlas, id);
             const nt_atlas_uv_t *uvs = nt_atlas_get_region_uvs(atlas, id);
             for (uint32_t v = 0; v < 4; v++) {
                 assert_float_close(source_positions[variant][id][v][0] / ppu[variant], positions[v][0], 1e-5F, "winner position x");

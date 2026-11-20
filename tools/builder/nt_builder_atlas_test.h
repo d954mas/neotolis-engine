@@ -35,6 +35,10 @@ uint32_t nt_atlas_test_collect_transform_values(uint8_t mask, uint8_t out_values
  * then disarm; 0xFF disables. Negative control for the per-alias coverage proof. */
 void nt_atlas_test_force_alias_rel(uint8_t rel);
 
+/* Thin wrappers over static helpers of nt_builder_atlas_vpack.c and nt_builder_atlas.c. */
+bool nt_atlas_test_vpack_point_in_nfp(const int32_t *verts_xy, uint32_t vert_count, const uint16_t *ring_offsets, uint32_t ring_count, int32_t px, int32_t py);
+void nt_atlas_test_extrude_edges(uint8_t *page, uint32_t page_w, uint32_t page_h, uint32_t px, uint32_t py, uint32_t sw, uint32_t sh, uint32_t extrude_count);
+
 /* Directed Hausdorff distance from the full reference boundary to the
  * candidate boundary. Both polygons are closed implicitly. */
 double polygon_max_boundary_distance(const Point2D *reference, uint32_t reference_count, const Point2D *candidate, uint32_t candidate_count);

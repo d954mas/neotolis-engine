@@ -5,14 +5,18 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
-mkdir -p "$TMP_DIR/bin" "$TMP_DIR/build"
+# tidy.sh runs clang-tidy from the per-user pinned toolchain: fake that home directory.
+LLVM_VERSION="$(sed -n 's/^LLVM_VERSION=//p' "$ROOT_DIR/.toolchain-versions")"
+FAKE_BIN="$TMP_DIR/.neotolis/toolchain/llvm-$LLVM_VERSION/bin"
+mkdir -p "$FAKE_BIN" "$TMP_DIR/build"
+touch "$FAKE_BIN/../.installed"
 ROOT_WIN="$ROOT_DIR"
 command -v cygpath > /dev/null 2>&1 && ROOT_WIN="$(cygpath -m "$ROOT_DIR")"
 printf '[{"file":"%s/engine/core/nt_core.c","command":"clang"},{"file":"%s/engine/hash/nt_hash.c","command":"clang"}]\n' "$ROOT_WIN" "$ROOT_WIN" \
     > "$TMP_DIR/build/compile_commands.json"
 
 write_fake() {
-    cat > "$TMP_DIR/bin/clang-tidy" <<'EOF'
+    cat > "$FAKE_BIN/clang-tidy" <<'EOF'
 #!/usr/bin/env bash
 case "${FAKE_TIDY_MODE:?}" in
     success)
@@ -36,11 +40,13 @@ case "${FAKE_TIDY_MODE:?}" in
         ;;
 esac
 EOF
-    chmod +x "$TMP_DIR/bin/clang-tidy"
+    chmod +x "$FAKE_BIN/clang-tidy"
 }
 
 write_fake
-export PATH="$TMP_DIR/bin:$PATH"
+export HOME="$TMP_DIR"
+export USERPROFILE="$TMP_DIR"
+command -v cygpath > /dev/null 2>&1 && USERPROFILE="$(cygpath -w "$TMP_DIR")"
 export ROOT_FOR_FAKE="$ROOT_DIR"
 
 export FAKE_TIDY_MODE=success

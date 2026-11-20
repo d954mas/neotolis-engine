@@ -21,22 +21,21 @@ with 1,000–50,000 objects, procedural shapes and textures in four LODs, and gr
 
 ## Prerequisites
 
-- **CMake** 3.25+
-- **Ninja** build system
-- **Clang** (LLVM) -- recommended for both native and cross-compilation consistency
-- **Emscripten SDK** -- for WASM builds (setup automated via `scripts/setup.sh`)
+- **LLVM, CMake, Ninja and the Emscripten SDK** -- the versions pinned in `.toolchain-versions`,
+  installed into `~/.neotolis/toolchain` by `python scripts/setup_toolchain.py`; builds never use
+  the system compiler
 - **OpenSSL dev headers** (Linux/macOS only: `libssl-dev` / brew `openssl@3`) -- TLS for the
   libcurl-backed native HTTP module; skip entirely with `-DNT_HTTP_CURL=OFF` (Windows uses
   Schannel). Submodule builds default to OFF -- set `-DNT_HTTP_CURL=ON` to get real native HTTP
-- **Python 3** -- optional; without it the native HTTP acceptance test is skipped
+- **Python** and **Node** -- the versions pinned in `.toolchain-versions`; checks reject others
 
 ## Quick Start
 
-Bootstrap the Emscripten SDK (first time only):
+Install the pinned toolchain (first time only), then put it on PATH in each shell:
 
 ```bash
-./scripts/setup.sh
-source emsdk/emsdk_env.sh
+python scripts/setup_toolchain.py
+source scripts/lib/toolchain.sh
 ```
 
 ## Build
@@ -48,7 +47,7 @@ Primary CMake presets: `wasm-debug`, `wasm-debug-paired`, `wasm-debug-simd`, `wa
 
 `*-debug` presets pin the dev tooling ON (`NT_UI_DEBUG_TOOLS` and its dependents), `*-release` presets pin it OFF; a `-D` on the command line overrides the preset (e.g. `-DNT_METRICS_ENABLED=ON` to profile a release build).
 
-### WASM (requires emsdk activated)
+### WASM builds
 
 There are three explicit WASM modes for each build tier:
 
@@ -59,25 +58,25 @@ There are three explicit WASM modes for each build tier:
 Baseline-only build:
 
 ```bash
-emcmake cmake --preset wasm-debug
+cmake --preset wasm-debug
 cmake --build --preset wasm-debug
 ```
 
 Standalone SIMD build:
 
 ```bash
-emcmake cmake --preset wasm-debug-simd
+cmake --preset wasm-debug-simd
 cmake --build --preset wasm-debug-simd
 ```
 
 Explicit paired baseline+SIMD build in one command:
 
 ```bash
-source emsdk/emsdk_env.sh
+source scripts/lib/toolchain.sh
 ./scripts/build_wasm_paired.sh wasm-debug-paired
 ```
 
-The paired build script uses `emcmake cmake --preset ...` for both configure steps,
+The paired build script uses plain `cmake --preset ...` for both configure steps,
 then builds both presets and copies each SIMD wasm beside the paired example
 output as `index_simd.wasm`. Baseline-only presets do not inject a SIMD path
 into the shell. Paired presets do inject that path, so the shell performs the
@@ -93,11 +92,11 @@ If you build presets separately, you can package examples manually:
 Recommended validation flow when you want confidence in both variants:
 
 ```bash
-emcmake cmake --preset wasm-debug
+cmake --preset wasm-debug
 cmake --build --preset wasm-debug
 ctest --preset wasm-debug
 
-emcmake cmake --preset wasm-debug-simd
+cmake --preset wasm-debug-simd
 cmake --build --preset wasm-debug-simd
 ctest --preset wasm-debug-simd
 

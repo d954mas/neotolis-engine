@@ -326,7 +326,7 @@ static int s_active_scene = -1;
 static bool s_skip_scene_interaction_this_frame;
 
 static nt_ui_context_t *s_ui;
-NT_UI_DECLARE_ARENA(s_ui_arena, UI_ARENA_SIZE);
+static NT_UI_DECLARE_ARENA(s_ui_arena, UI_ARENA_SIZE);
 static nt_frame_uniforms_t s_frame_uniforms; /* filled each frame; stage parts set its camera */
 static nt_resource_t s_atlas;
 static nt_font_t s_font;

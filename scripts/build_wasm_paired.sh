@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# shellcheck source=lib/toolchain.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/toolchain.sh"
 
 if [ "$#" -ne 1 ]; then
     echo "Usage: $0 <paired-preset>"
@@ -18,8 +20,8 @@ case "${PAIRED_PRESET}" in
         ;;
 esac
 
-emcmake cmake --preset "${PAIRED_PRESET}"
-emcmake cmake --preset "${SIMD_PRESET}"
+cmake --preset "${PAIRED_PRESET}"
+cmake --preset "${SIMD_PRESET}"
 cmake --build --preset "${PAIRED_PRESET}"
 cmake --build --preset "${SIMD_PRESET}"
 
