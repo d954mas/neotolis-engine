@@ -10299,7 +10299,7 @@ void test_atlas_sprite_opts_origin_nan_asserts(void) {
      * compound-literal + macro expansion interactions. */
     nt_atlas_sprite_opts_t bad = nt_atlas_sprite_opts_defaults();
     bad.name = "bad.png";
-    bad.origin_x = (float)(0.0 / 0.0); /* NaN */ // NOLINT(misc-redundant-expression)
+    bad.origin_x = NAN;
     EXPECT_BUILD_ASSERT(ctx, nt_atlas_add_raw(atlas_build_5712, s, 16, 16, &bad));
 
     free(s);

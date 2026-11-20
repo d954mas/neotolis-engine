@@ -386,7 +386,8 @@ bool nt_ui_slider_int(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
     const bool out_of_range = (*value < min) || (*value > max); /* clamp-and-writeback on first frame */
     const float in_frac = slider_value_to_frac((float)nt_ui_clampi(*value, min, max), fmin, fmax);
     const float fstep = (step > 0) ? (float)step : 1.0F; /* int slider always quantizes to >= 1 */
-    const float step_frac = fstep / (fmax - fmin);       // NOLINT(clang-analyzer-core.UndefinedBinaryOperatorResult): min < max is asserted
+    NT_ASSERT(fmax > fmin && "nt_ui_slider_int: range collapses in float");
+    const float step_frac = fstep / (fmax - fmin);
     bool changed = false;
     const float out_frac = slider_core(ctx, data, label_layer, id, label, in_frac, fmin, fmax, step_frac, style, decl, enabled, &changed);
     /* Write back on a drag OR an out-of-range incoming *value (clamp to range on first frame). */

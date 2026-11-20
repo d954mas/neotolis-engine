@@ -48,13 +48,11 @@ runs:
         path: ~/.neotolis/toolchain/llvm-${{ steps.versions.outputs.LLVM_VERSION }}
         key: toolchain-llvm-${{ steps.versions.outputs.LLVM_VERSION }}-${{ runner.os }}-${{ hashFiles('scripts/setup_toolchain.py') }}
 
-    # The per-job key also keeps the Emscripten system libraries that job built.
     - uses: actions/cache@v6
       if: inputs.emsdk == 'true'
       with:
         path: ~/.neotolis/toolchain/emsdk-${{ steps.versions.outputs.EMSDK_VERSION }}
-        key: toolchain-emsdk-${{ steps.versions.outputs.EMSDK_VERSION }}-${{ inputs.ccache-key }}
-        restore-keys: toolchain-emsdk-${{ steps.versions.outputs.EMSDK_VERSION }}-
+        key: toolchain-emsdk-${{ steps.versions.outputs.EMSDK_VERSION }}-${{ runner.os }}
 
     - name: Install the pinned toolchain
       shell: bash

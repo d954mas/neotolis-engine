@@ -32,8 +32,10 @@ asset pointer files are not usable example assets or benchmark inputs.
 
 Local checks and every CI job use one set of tool versions, all in
 `.toolchain-versions`: LLVM (clang, clang++, lld, clang-format, clang-tidy,
-clangd), CMake, Ninja and the Emscripten SDK by exact version with the SHA-256
-of each release archive, Python by minor and Node by major version.
+clangd), CMake and Ninja by exact version with the SHA-256 of each release
+archive, the Emscripten SDK by its emsdk release tag, Python by minor and Node
+by major version (their patch level follows the installer or the runner's
+toolcache).
 
 - **Install:** `python scripts/setup_toolchain.py [llvm] [build] [emsdk]`
   installs LLVM, CMake plus Ninja, and emsdk (default: all) into
@@ -46,14 +48,15 @@ of each release archive, Python by minor and Node by major version.
   CMake, Ninja and the compiler (Emscripten for wasm trees) are the pinned
   versions. `.toolchain-versions` is a configure dependency, so after a version
   bump the next build of any tree stops there: reconfigure it with
-  `cmake --preset <name> --fresh`. check.sh rebuilds its own `tidy-ci` tree.
+  `cmake --preset <name> --fresh`. The trees the checks own (`tidy-ci`,
+  `submodule-test`, the diagnostics matrix) start from scratch by themselves
+  when they are older than `.toolchain-versions`.
 - **Python and Node:** install them yourself (Windows: the python.org and
   nodejs.org installers; Linux: the distro packages, deadsnakes or
   `uv python install`, NodeSource or nvm); check.sh rejects other versions.
   `setup_toolchain.py` needs Python 3.14 for `compression.zstd`. PATH Node runs
-  Playwright, the push checks and the wasm tests registered through
-  `NT_NODE_EXECUTABLE`; the other wasm tests run under the Node bundled with
-  the pinned emsdk.
+  every wasm test, Playwright and the push checks; configure wasm trees with
+  plain `cmake --preset`, not `emcmake`, which would substitute emsdk's Node.
 - **Editors:** point clangd at `~/.neotolis/toolchain/llvm-<version>/bin/clangd`
   so editor diagnostics match the pinned clang-tidy.
 
@@ -145,7 +148,7 @@ Contracts and less common options:
 - [Log/assert policy, measurement producers and DevAPI group options](spec/debug/logging-errors-debugging.md).
 - [Resource measurements and resident bytes](spec/assets/resource.md#optional-measurements-and-resident-bytes).
 - [Font synthesis and rich markup](spec/ui/rich-text.md), [Clay debug view](spec/ui/nt-ui.md).
-- [WASM build variants](../README.md#wasm-requires-emsdk-activated).
+- [WASM build variants](../README.md#wasm-builds).
 
 ### Linux OpenSSL CA cache
 
@@ -391,8 +394,8 @@ baseline build, so smoke, ctest and symbol checks run there. Narrow configures
 whose tests never use HTTP (Basis, font and Clay rows, goldens, the runtime
 diagnostics matrix) pass `-DNT_HTTP_CURL=OFF`: vendored curl doubles configure time.
 Shared job setup (LFS, toolchain, emsdk, ccache) lives in
-`.github/actions/setup`; emsdk installs into a cached `~/emsdk`, a fixed path
-that keeps wasm ccache keys stable across runs.
+`.github/actions/setup`, which runs `scripts/setup_toolchain.py` and caches its
+directories per version.
 
 ### Optional-feature checks
 
@@ -498,7 +501,7 @@ CI `web-smoke` builds a wasm-debug host with every group (this reconfigures the 
 and runs those eight scenarios plus `web_demo` and `record_demo` on it:
 
 ```bash
-emcmake cmake --preset wasm-debug -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_CORE=ON -DNT_DEVAPI_GROUP_TIME=ON -DNT_DEVAPI_GROUP_CAPTURE=ON -DNT_DEVAPI_GROUP_GFX=ON -DNT_DEVAPI_GROUP_OBS=ON -DNT_DEVAPI_GROUP_RECORDER=ON -DNT_DEVAPI_GROUP_UI=ON -DNT_DEVAPI_GROUP_ENTITY_WRITE=ON -DNT_DEVAPI_GROUP_INPUT=ON
+cmake --preset wasm-debug -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_CORE=ON -DNT_DEVAPI_GROUP_TIME=ON -DNT_DEVAPI_GROUP_CAPTURE=ON -DNT_DEVAPI_GROUP_GFX=ON -DNT_DEVAPI_GROUP_OBS=ON -DNT_DEVAPI_GROUP_RECORDER=ON -DNT_DEVAPI_GROUP_UI=ON -DNT_DEVAPI_GROUP_ENTITY_WRITE=ON -DNT_DEVAPI_GROUP_INPUT=ON
 cmake --build --preset wasm-debug --target devapi_host
 python -m tools.devapi.scenarios.record_demo --target web --out build/devapi-out
 ```
@@ -509,7 +512,7 @@ bridge and the `NtRecorder` calls, and runs the scenarios that reach that JS: `d
 introspect write, so this host builds only those scenarios' groups:
 
 ```bash
-emcmake cmake --preset wasm-release -B build/_cmake/wasm-release-devapi -DNT_LOG_RING_ENABLED=ON -DNT_METRICS_ENABLED=ON -DNT_INTROSPECT_ENABLED=ON -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_CORE=ON -DNT_DEVAPI_GROUP_TIME=ON -DNT_DEVAPI_GROUP_CAPTURE=ON -DNT_DEVAPI_GROUP_OBS=ON -DNT_DEVAPI_GROUP_RECORDER=ON
+cmake --preset wasm-release -B build/_cmake/wasm-release-devapi -DNT_LOG_RING_ENABLED=ON -DNT_METRICS_ENABLED=ON -DNT_INTROSPECT_ENABLED=ON -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_CORE=ON -DNT_DEVAPI_GROUP_TIME=ON -DNT_DEVAPI_GROUP_CAPTURE=ON -DNT_DEVAPI_GROUP_OBS=ON -DNT_DEVAPI_GROUP_RECORDER=ON
 cmake --build build/_cmake/wasm-release-devapi --target devapi_host
 python -m tools.devapi.scenarios.record_demo --target web --web-dir build/examples/devapi_host/wasm-release-devapi --out build/devapi-out
 ```
@@ -559,7 +562,8 @@ these simple patterns check recording correctness, not dense-scene compression q
 
 - **GNU ld:** archives resolve left-to-right. Providers/stubs must follow
   consumers (`nt_resource ... nt_http_stub nt_fs_stub nt_log_stub`); FS is
-  native-only. A standalone math test may need conditional linking to `m` on
+  native-only. Linux links with the pinned lld and `--warn-backrefs
+  --fatal-warnings`, which rejects every order GNU ld cannot resolve. A standalone math test may need conditional linking to `m` on
   non-Windows platforms. See `tests/submodule/CMakeLists.txt`.
 - **Platform branches:** Windows tidy does not check Linux-only `#if` blocks.
   Review them as Linux code; use a justified local `NOLINT` where needed.

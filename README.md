@@ -47,7 +47,7 @@ Primary CMake presets: `wasm-debug`, `wasm-debug-paired`, `wasm-debug-simd`, `wa
 
 `*-debug` presets pin the dev tooling ON (`NT_UI_DEBUG_TOOLS` and its dependents), `*-release` presets pin it OFF; a `-D` on the command line overrides the preset (e.g. `-DNT_METRICS_ENABLED=ON` to profile a release build).
 
-### WASM (requires emsdk activated)
+### WASM builds
 
 There are three explicit WASM modes for each build tier:
 
@@ -58,14 +58,14 @@ There are three explicit WASM modes for each build tier:
 Baseline-only build:
 
 ```bash
-emcmake cmake --preset wasm-debug
+cmake --preset wasm-debug
 cmake --build --preset wasm-debug
 ```
 
 Standalone SIMD build:
 
 ```bash
-emcmake cmake --preset wasm-debug-simd
+cmake --preset wasm-debug-simd
 cmake --build --preset wasm-debug-simd
 ```
 
@@ -76,7 +76,7 @@ source scripts/lib/toolchain.sh
 ./scripts/build_wasm_paired.sh wasm-debug-paired
 ```
 
-The paired build script uses `emcmake cmake --preset ...` for both configure steps,
+The paired build script uses plain `cmake --preset ...` for both configure steps,
 then builds both presets and copies each SIMD wasm beside the paired example
 output as `index_simd.wasm`. Baseline-only presets do not inject a SIMD path
 into the shell. Paired presets do inject that path, so the shell performs the
@@ -92,11 +92,11 @@ If you build presets separately, you can package examples manually:
 Recommended validation flow when you want confidence in both variants:
 
 ```bash
-emcmake cmake --preset wasm-debug
+cmake --preset wasm-debug
 cmake --build --preset wasm-debug
 ctest --preset wasm-debug
 
-emcmake cmake --preset wasm-debug-simd
+cmake --preset wasm-debug-simd
 cmake --build --preset wasm-debug-simd
 ctest --preset wasm-debug-simd
 

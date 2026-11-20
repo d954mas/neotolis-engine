@@ -245,7 +245,7 @@ class Checks:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--cc", default=os.environ.get("CC", "clang"))
+    parser.add_argument("--cc", default="clang")  # the pinned clang: toolchain.sh and CI put it first on PATH
     parser.add_argument("--nm", default="llvm-nm")
     parser.add_argument("--cmake", default="cmake")
     parser.add_argument("--generator", default="Ninja")

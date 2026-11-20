@@ -26,15 +26,10 @@ toolchain_fail() {
 # require_installed llvm cmake ninja emsdk: setup_toolchain.py writes each marker last, and the
 # directories above come first on PATH, so a marker means the pinned binary is the one that runs.
 require_installed() {
-    local tool version
+    local tool var
     for tool in "$@"; do
-        case "$tool" in
-            llvm) version="$LLVM_VERSION" ;;
-            cmake) version="$CMAKE_VERSION" ;;
-            ninja) version="$NINJA_VERSION" ;;
-            emsdk) version="$EMSDK_VERSION" ;;
-        esac
-        [ -f "$NT_TOOLCHAIN_DIR/$tool-$version/.installed" ] || toolchain_fail "$tool $version is not installed in $NT_TOOLCHAIN_DIR"
+        var="${tool^^}_VERSION"
+        [ -f "$NT_TOOLCHAIN_DIR/$tool-${!var}/.installed" ] || toolchain_fail "$tool ${!var} is not installed in $NT_TOOLCHAIN_DIR"
     done
 }
 

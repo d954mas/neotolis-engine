@@ -43,7 +43,7 @@ OUTPUT_DIR="$ROOT_DIR/build/examples/$TARGET/$PRESET"
 if [ ! -d "$OUTPUT_DIR" ]; then
     echo "ERROR: Build output not found: $OUTPUT_DIR"
     echo "Build the target first:"
-    echo "  emcmake cmake --preset $PRESET && cmake --build --preset $PRESET"
+    echo "  cmake --preset $PRESET && cmake --build --preset $PRESET"
     exit 1
 fi
 

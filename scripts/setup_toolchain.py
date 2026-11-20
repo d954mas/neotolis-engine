@@ -11,8 +11,8 @@ tools to GITHUB_PATH and GITHUB_ENV, as scripts/lib/toolchain.sh does for a loca
 
 import sys
 
-if sys.version_info[:2] != (3, 14):
-    sys.exit(f"setup_toolchain.py: Python 3.14 required (.toolchain-versions), found {sys.version.split()[0]}")
+if sys.version_info < (3, 14):
+    sys.exit(f"setup_toolchain.py: Python 3.14+ required (compression.zstd), found {sys.version.split()[0]}")
 
 import hashlib
 import os
@@ -29,6 +29,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 TOOLCHAIN_DIR = Path.home() / ".neotolis" / "toolchain"
 WINDOWS = platform.system() == "Windows"
+if platform.system() not in ("Windows", "Linux") or platform.machine().lower() not in ("x86_64", "amd64"):
+    sys.exit(f"setup_toolchain.py: only Windows and Linux x86-64 are pinned, not {platform.system()} {platform.machine()}")
 EXE = ".exe" if WINDOWS else ""
 OS = "WINDOWS_X64" if WINDOWS else "LINUX_X64"
 
@@ -53,7 +55,7 @@ def read_versions():
 
 
 def fetch(url, sha256):
-    """Download into a .part file and verify it, so an interrupted run leaves no archive behind."""
+    """Download into a .part file and verify it; a partial .part is overwritten by the next run."""
     path = TOOLCHAIN_DIR / (url.rsplit("/", 1)[1] + ".part")
     print(f"Downloading {url}")
     digest = hashlib.sha256()
@@ -116,6 +118,10 @@ def install_llvm(v):
                         v[f"LLVM_SHA256_{OS}"])
         # The release archives use zstd long mode (128 MiB window), above the default decoder limit.
         extract_tar(archive, dest, top, keep, {zstd.DecompressionParameter.window_log_max: 31})
+        # A tool missing from the archive would silently fall back to PATH, mixing versions.
+        missing = [tool for tool in LLVM_TOOLS if not (dest / "bin" / (tool + EXE)).exists()]
+        if missing:
+            sys.exit(f"setup_toolchain.py: the LLVM {version} archive lacks {', '.join(missing)}")
 
     install(dest, "\n".join((version, *LLVM_TOOLS)) + "\n", unpack)
     return [dest / "bin"]

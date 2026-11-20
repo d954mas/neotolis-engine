@@ -5,7 +5,6 @@ import argparse
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import subprocess
-import re
 import shutil
 import sys
 
@@ -59,8 +58,10 @@ def main():
         if floor == 3:
             targets += CRASH_TARGETS
             tests += CRASH_TESTS
-        # The matrix owns these trees: --fresh keeps one configured by an older toolchain from failing.
-        configure = ["cmake", "--preset", "native-release-test", "--fresh", "-B", str(args.output / name),
+        # The matrix owns these trees: a missing one, or one older than the pins, starts from scratch.
+        cache = args.output / name / "CMakeCache.txt"
+        fresh = not cache.exists() or cache.stat().st_mtime < (ROOT / ".toolchain-versions").stat().st_mtime
+        configure = ["cmake", "--preset", "native-release-test", *(["--fresh"] if fresh else []), "-B", str(args.output / name),
                      f"-DNT_PRESET_NAME={name}", f"-DNT_LOG_MIN_LEVEL={floor}",
                      f"-DNT_RESOURCE_TIMING_ENABLED={resource}", f"-DNT_UI_TIMING_ENABLED={ui}", f"-DNT_GFX_GPU_TIMING_ENABLED={gpu}",
                      f"-DNT_GFX_CAPTURE_ENABLED={capture}",
@@ -87,8 +88,7 @@ def main():
         for name, build, targets, tests, capture, configure, summary in rows:
             output = run(["ctest", "--test-dir", str(build), "--output-on-failure",
                           "-R", "^(" + "|".join(tests) + ")$"], args.output / f"{name}-test.log")
-            # CMake 4 drops ", 0 tests failed" from the summary.
-            if not re.search(rf"100% tests passed(, 0 tests failed)? out of {len(tests)}\b", output):
+            if f"100% tests passed out of {len(tests)}" not in output:
                 raise RuntimeError(f"{name}: expected all {len(tests)} registered tests\n{output}")
             nm = shutil.which("llvm-nm") or shutil.which("nm")
             if nm:
