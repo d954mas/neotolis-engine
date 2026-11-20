@@ -829,13 +829,12 @@ void nt_resource_unmount(nt_hash32_t pack_id) {
 
     /* Deactivate owned objects before releasing pack data. */
     for (uint32_t i = 0; i < s_resource.asset_hwm; i++) {
-        if (s_resource.assets[i].pack_index == (uint16_t)pack_idx && s_resource.assets[i].resource_id != 0) {
-            /* Aliases borrow the canonical owner's object. */
-            if (s_resource.assets[i].state == NT_ASSET_STATE_READY && s_resource.assets[i].runtime_handle != 0 && pack->pack_type == NT_PACK_FILE && s_resource.assets[i].owner_asset == i) {
-                uint8_t atype = s_resource.assets[i].asset_type;
-                if (atype < NT_RESOURCE_MAX_ASSET_TYPES && s_resource.types[atype].desc.deactivate) {
-                    s_resource.types[atype].desc.deactivate(s_resource.assets[i].runtime_handle);
-                }
+        /* Aliases borrow the canonical owner's object. */
+        if (s_resource.assets[i].pack_index == (uint16_t)pack_idx && s_resource.assets[i].resource_id != 0 && s_resource.assets[i].state == NT_ASSET_STATE_READY &&
+            s_resource.assets[i].runtime_handle != 0 && pack->pack_type == NT_PACK_FILE && s_resource.assets[i].owner_asset == i) {
+            uint8_t atype = s_resource.assets[i].asset_type;
+            if (atype < NT_RESOURCE_MAX_ASSET_TYPES && s_resource.types[atype].desc.deactivate) {
+                s_resource.types[atype].desc.deactivate(s_resource.assets[i].runtime_handle);
             }
         }
     }

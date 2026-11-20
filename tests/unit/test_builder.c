@@ -7436,13 +7436,6 @@ static bool atlas_trim_rgba(const uint8_t *rgba, uint32_t w, uint32_t h, uint8_t
     return result;
 }
 
-/* vpack internals stay static; tests reach in via this thin wrapper defined in nt_builder_atlas_vpack.c. */
-bool nt_atlas_test_vpack_point_in_nfp(const int32_t *verts_xy, uint32_t vert_count, const uint16_t *ring_offsets, uint32_t ring_count, int32_t px, int32_t py);
-
-/* edge-extrude helper stays static; test access via this wrapper defined in
- * nt_builder_atlas.c. */
-void nt_atlas_test_extrude_edges(uint8_t *page, uint32_t page_w, uint32_t page_h, uint32_t px, uint32_t py, uint32_t sw, uint32_t sh, uint32_t extrude_count);
-
 /* alpha_trim: fully transparent 4x4 image returns false */
 void test_alpha_trim_fully_transparent(void) {
     uint8_t rgba[4 * 4 * 4];
@@ -8925,7 +8918,7 @@ static atlas_position_view_t atlas_blob_vertices(const uint8_t *pack_buf);
 static Point2D atlas_local_vertex(atlas_position_view_t view, const NtAtlasRegion *region, uint32_t index) {
     TEST_ASSERT_TRUE(isfinite(view.ipu) && view.ipu > 0.0F);
     const float *position = view.positions[region->vertex_start + index];
-    const float x = roundf(position[0] / view.ipu);
+    const float x = roundf(position[0] / view.ipu); // NOLINT(clang-analyzer-core.NullDereference): every view has positions
     const float y = roundf(position[1] / view.ipu);
     TEST_ASSERT_TRUE(isfinite(x) && isfinite(y) && x >= 0.0F && x <= UINT16_MAX && y >= 0.0F && y <= UINT16_MAX);
     TEST_ASSERT_TRUE(x * view.ipu == position[0] && y * view.ipu == position[1]);
@@ -9093,7 +9086,7 @@ void test_convex_budget_preserves_all_retained_pixels(void) {
     const uint8_t *ablob = buf + atlas_entry->offset;
     const NtAtlasHeader *header = (const NtAtlasHeader *)ablob;
     const NtAtlasRegion *region = (const NtAtlasRegion *)(ablob + sizeof(NtAtlasHeader) + ((size_t)header->page_count * sizeof(uint64_t)));
-    const atlas_position_view_t vertices = {.positions = (const float(*)[2])(ablob + header->vertex_offset), .ipu = header->inverse_pixels_per_unit};
+    const atlas_position_view_t vertices = {.positions = (const float (*)[2])(ablob + header->vertex_offset), .ipu = header->inverse_pixels_per_unit};
     TEST_ASSERT_LESS_OR_EQUAL_UINT8(BUDGET, region->vertex_count);
 
     Point2D emitted[16];
@@ -9391,7 +9384,7 @@ void test_builder_atlas_pixels_per_unit_header(void) {
     TEST_ASSERT_TRUE(fabsf(header->inverse_pixels_per_unit - 0.4F) <= 1e-7F);
     TEST_ASSERT_EQUAL_UINT32(header->vertex_offset + (header->total_vertex_count * 12U), header->index_offset);
     TEST_ASSERT_EQUAL_UINT32(4, header->total_vertex_count);
-    const float(*positions)[2] = (const float(*)[2])(blob + header->vertex_offset);
+    const float (*positions)[2] = (const float (*)[2])(blob + header->vertex_offset);
     uint32_t corners = 0;
     for (uint32_t i = 0; i < header->total_vertex_count; i++) {
         TEST_ASSERT_TRUE(positions[i][0] == 0.0F || fabsf(positions[i][0] - 6.4F) <= 1e-6F);
@@ -9443,7 +9436,7 @@ static atlas_position_view_t atlas_blob_vertices(const uint8_t *pack_buf) {
         if (entries[i].asset_type == NT_ASSET_ATLAS) {
             const uint8_t *ablob = pack_buf + entries[i].offset;
             const NtAtlasHeader *header = (const NtAtlasHeader *)ablob;
-            return (atlas_position_view_t){.positions = (const float(*)[2])(ablob + header->vertex_offset), .ipu = header->inverse_pixels_per_unit};
+            return (atlas_position_view_t){.positions = (const float (*)[2])(ablob + header->vertex_offset), .ipu = header->inverse_pixels_per_unit};
         }
     }
     return (atlas_position_view_t){0};
@@ -10306,7 +10299,7 @@ void test_atlas_sprite_opts_origin_nan_asserts(void) {
      * compound-literal + macro expansion interactions. */
     nt_atlas_sprite_opts_t bad = nt_atlas_sprite_opts_defaults();
     bad.name = "bad.png";
-    bad.origin_x = (float)(0.0 / 0.0); /* NaN */
+    bad.origin_x = (float)(0.0 / 0.0); /* NaN */ // NOLINT(misc-redundant-expression)
     EXPECT_BUILD_ASSERT(ctx, nt_atlas_add_raw(atlas_build_5712, s, 16, 16, &bad));
 
     free(s);

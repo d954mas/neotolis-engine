@@ -86,8 +86,9 @@ static uint8_t s_ui_arena[1U << 20];
 
 static nt_hash32_t s_pack_id;
 static nt_hash32_t s_basis_pack_id;
-static nt_resource_t s_atlas_handle, s_atlas_tex_handle;
-/* basis_fixture.ntpack textures, ETC1S when admitted and UASTC otherwise; both activate through the
+static nt_resource_t s_atlas_handle;
+#if defined(__EMSCRIPTEN__)
+/* Read only by the web probes. basis_fixture.ntpack textures, ETC1S when admitted and UASTC otherwise; both activate through the
  * Basis transcode path. RGBA carries alpha, RGB is opaque (ETC2 picks RGB8 for it). */
 static nt_resource_t s_basis_tex_handle;
 static nt_resource_t s_basis_rgb_handle;
@@ -97,6 +98,7 @@ static nt_resource_t s_basis_srgb_rgb_handle;
 static nt_resource_t s_srgb_texel_handle;
 /* Uncompressed RGB9E5 with values above 1, sampled scaled by 1/16. */
 static nt_resource_t s_hdr_handle;
+#endif
 
 static nt_material_t s_sprite_material, s_text_material;
 static nt_program_ref_t s_sprite_program, s_text_program;
@@ -1498,7 +1500,7 @@ int main(int argc, char *argv[]) {
     s_text_program.label = "browser/text";
     s_text_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_FRAG, NT_ASSET_SHADER_CODE);
     s_atlas_handle = nt_resource_request(ASSET_ATLAS_UI_SHOWCASE_ATLAS, NT_ASSET_ATLAS);
-    s_atlas_tex_handle = nt_resource_request(ASSET_TEXTURE_UI_SHOWCASE_ATLAS_TEX0, NT_ASSET_TEXTURE);
+#if defined(__EMSCRIPTEN__)
     /* Resource ids are the hashed asset names. */
 #if NT_BASISU_HAS_ETC1S
     s_basis_tex_handle = nt_resource_request(nt_hash64_str("basis_etc1s_rgba"), NT_ASSET_TEXTURE);
@@ -1513,6 +1515,7 @@ int main(int argc, char *argv[]) {
 #endif
     s_srgb_texel_handle = nt_resource_request(nt_hash64_str("srgb_texel"), NT_ASSET_TEXTURE);
     s_hdr_handle = nt_resource_request(nt_hash64_str("hdr_rgb9e5"), NT_ASSET_TEXTURE);
+#endif
 
     s_sprite_material = nt_material_create(&(nt_material_create_desc_t){
         .blend = nt_blend_alpha_premultiplied(),

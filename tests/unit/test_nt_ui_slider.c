@@ -561,10 +561,8 @@ static bool active_floating_clip_at(int32_t thumb_index, Clay_BoundingBox *out_c
                 is_floating_marker[depth] = both_false;
                 ++depth;
             }
-        } else if (c->commandType == CLAY_RENDER_COMMAND_TYPE_SCISSOR_END) {
-            if (depth > 0) {
-                --depth;
-            }
+        } else if (c->commandType == CLAY_RENDER_COMMAND_TYPE_SCISSOR_END && depth > 0) {
+            --depth;
         }
     }
     /* Innermost floating-clip marker still open at the thumb. */

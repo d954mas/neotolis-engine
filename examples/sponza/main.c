@@ -116,7 +116,6 @@ static nt_hash32_t s_tex_pack_id;
 static nt_hash32_t s_full_pack_id;
 
 static nt_resource_t s_manifest_handle;
-static nt_resource_t s_fallback_handle;
 
 static nt_resource_t s_mesh_handles[MAX_SCENE_NODES];
 static nt_resource_t s_tex_handles[MAX_SCENE_NODES * 3]; /* diffuse, normal, specular per node */
@@ -686,9 +685,8 @@ int main(int argc, char **argv) {
     s_programs[SPONZA_SHADER_ALPHA].fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPONZA_ALPHA_FRAG, NT_ASSET_SHADER_CODE);
     s_programs[SPONZA_SHADER_ALPHA].label = "sponza/alpha";
 
-    /* 12. Request manifest and fallback texture resource handles */
+    /* 12. Request the manifest resource handle */
     s_manifest_handle = nt_resource_request(ASSET_BLOB_SPONZA_MANIFEST, NT_ASSET_BLOB);
-    s_fallback_handle = nt_resource_request(ASSET_TEXTURE_SPONZA_FALLBACK_CHECKER, NT_ASSET_TEXTURE);
 
     s_neutral_white_handle = nt_resource_request(ASSET_TEXTURE_SPONZA_NEUTRAL_WHITE, NT_ASSET_TEXTURE);
     s_neutral_normal_handle = nt_resource_request(ASSET_TEXTURE_SPONZA_NEUTRAL_NORMAL, NT_ASSET_TEXTURE);

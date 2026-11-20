@@ -896,10 +896,8 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
         increment_kind_counter(ctx, pe->kind);
 
         /* Cache store: save encoded bytes for future builds (raw bytes only) */
-        if (ctx->cache_dir && !results[i].from_cache) {
-            if (!nt_builder_cache_store(ctx->cache_dir, pe->decoded_hash, opts_hashes[i], results[i].data, results[i].size)) {
-                NT_LOG_WARN("cache store failed for %s", pe->path);
-            }
+        if (ctx->cache_dir && !results[i].from_cache && !nt_builder_cache_store(ctx->cache_dir, pe->decoded_hash, opts_hashes[i], results[i].data, results[i].size)) {
+            NT_LOG_WARN("cache store failed for %s", pe->path);
         }
 
         free(results[i].data);
@@ -1394,7 +1392,7 @@ void nt_builder_add_mesh(NtBuilderContext *ctx, const char *path, const nt_mesh_
     const char *decode_path = resolved_path ? resolved_path : file_path;
 
     const char *mesh_name = opts->mesh_name;
-    uint32_t mesh_index = (opts->use_mesh_index) ? opts->mesh_index : UINT32_MAX;
+    uint32_t mesh_index = opts->use_mesh_index ? opts->mesh_index : UINT32_MAX;
 
     uint8_t *mesh_data = NULL;
     uint32_t mesh_size = 0;

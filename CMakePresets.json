@@ -33,10 +33,10 @@
             "hidden": true,
             "inherits": "base",
             "generator": "Ninja",
+            "toolchainFile": "${sourceDir}/cmake/nt_llvm_toolchain.cmake",
             "cacheVariables": {
                 "CMAKE_C_STANDARD": "17",
                 "CMAKE_C_STANDARD_REQUIRED": "ON",
-                "CMAKE_C_COMPILER": "clang",
                 "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
                 "NT_HTTP_CURL": "ON"
             }

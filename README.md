@@ -23,12 +23,13 @@ with 1,000–50,000 objects, procedural shapes and textures in four LODs, and gr
 
 - **CMake** 3.25+
 - **Ninja** build system
-- **Clang** (LLVM) -- recommended for both native and cross-compilation consistency
+- **LLVM** -- the exact release pinned in `.toolchain-versions`, installed by `scripts/setup.sh`
+  into `~/.neotolis/toolchain`; native builds never use the system compiler
 - **Emscripten SDK** -- for WASM builds (setup automated via `scripts/setup.sh`)
 - **OpenSSL dev headers** (Linux/macOS only: `libssl-dev` / brew `openssl@3`) -- TLS for the
   libcurl-backed native HTTP module; skip entirely with `-DNT_HTTP_CURL=OFF` (Windows uses
   Schannel). Submodule builds default to OFF -- set `-DNT_HTTP_CURL=ON` to get real native HTTP
-- **Python 3** -- optional; without it the native HTTP acceptance test is skipped
+- **Python** and **Node** -- the versions pinned in `.toolchain-versions`; checks reject others
 
 ## Quick Start
 
@@ -36,7 +37,7 @@ Bootstrap the Emscripten SDK (first time only):
 
 ```bash
 ./scripts/setup.sh
-source emsdk/emsdk_env.sh
+source ~/.neotolis/toolchain/emsdk-$(cat .emsdk-version)/emsdk_env.sh
 ```
 
 ## Build
@@ -73,7 +74,7 @@ cmake --build --preset wasm-debug-simd
 Explicit paired baseline+SIMD build in one command:
 
 ```bash
-source emsdk/emsdk_env.sh
+source ~/.neotolis/toolchain/emsdk-$(cat .emsdk-version)/emsdk_env.sh
 ./scripts/build_wasm_paired.sh wasm-debug-paired
 ```
 

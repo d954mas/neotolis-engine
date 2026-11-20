@@ -711,6 +711,7 @@ typedef uint32_t nt_gfx_capture_string_t;
  * live only in backend data and are valid within their context segment, which a
  * CONTEXT operation ends. Unknown inherited values are explicit. */
 typedef union {
+    // NOLINTNEXTLINE(bugprone-tagged-union-member-count): kind and operation together select the arm, not kind alone
     struct {
         nt_gfx_event_kind_t kind;
         uint8_t operation;   /* nt_gfx_operation_t */

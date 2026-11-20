@@ -42,7 +42,7 @@ static void path_to_identifier(const char *path, const char *type_prefix, char *
 
     /* Convert full path including extension -- extension is part of identity
      * (e.g., sponza_alpha.vert vs sponza_alpha.frag must produce different identifiers) */
-    const char *end = path + strlen(path);
+    const char *end = path + strlen(path); // NOLINT(clang-analyzer-unix.cstring.NullArg): callers pass only filled entries
     const char *p = path;
     for (; p < end && (size_t)written < out_size - 1; p++) {
         char c = *p;

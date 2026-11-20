@@ -525,6 +525,8 @@ bool nt_ui_internal_widget_enabled(const nt_ui_context_t *ctx, uint32_t id);
 void nt_ui_internal_build_tree(nt_ui_context_t *ctx);
 
 #ifdef NT_TEST_ACCESS
+/* The text-field auto-repeat core with explicit storage, so tests drive its timing. */
+bool nt_ui_input_key_repeat_step(uint16_t *repeat_key, float *repeat_t, nt_key_t k, bool pressed, bool down, float dt);
 const nt_ui_baked_xform_t *nt_ui_internal_test_get_tree_baked(const nt_ui_context_t *ctx, int32_t elem_idx);
 int32_t nt_ui_internal_test_get_tree_baked_count(const nt_ui_context_t *ctx);
 int32_t nt_ui_internal_test_get_tree_root_for_elem(const nt_ui_context_t *ctx, int32_t elem_idx);

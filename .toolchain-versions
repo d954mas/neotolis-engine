@@ -1,0 +1,7 @@
+# Pinned tool versions: local checks and every CI job use exactly these (emsdk: .emsdk-version).
+# scripts/setup_llvm.py installs LLVM; scripts/lib/toolchain.sh rejects any other version.
+LLVM_VERSION=23.1.6
+LLVM_SHA256_LINUX_X64=59e14234f145927f982b50627e8bafaf2fca50151b7d973d6a0b40796ddcfe9a
+LLVM_SHA256_WINDOWS_X64=7623f582089983c1cb51030cf1996514b19464e5669099571b399e8543770155
+PYTHON_VERSION=3.14
+NODE_VERSION=26

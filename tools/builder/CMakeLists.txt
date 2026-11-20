@@ -58,6 +58,8 @@ target_link_libraries(nt_basisu_encoder PRIVATE nt_basisu_transcoder_full nt_bas
 target_compile_definitions(nt_basisu_encoder PRIVATE _CRT_SECURE_NO_WARNINGS)
 # Suppress warnings in vendored C++ code
 target_compile_options(nt_basisu_encoder PRIVATE -w)
+# Encoded bytes must not depend on the target ISA: no FMA contraction (x86-64-v3, ARM64).
+target_compile_options(nt_basisu_encoder PRIVATE -ffp-contract=off)
 # SSE4.1 for SIMD-accelerated encoding (x86 only, not WASM or ARM)
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64|i[3-6]86")
     target_compile_definitions(nt_basisu_encoder PRIVATE BASISU_SUPPORT_SSE=1)
