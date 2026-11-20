@@ -92,7 +92,7 @@ static uint8_t *build_test_font_blob_with_metrics(uint16_t units_per_em, int16_t
 }
 
 /* Build a font blob over a SORTED codepoint set (bsearch precondition). Every glyph shares `advance`,
- * so a resolved glyph's advance identifies WHICH resource won a shared codepoint (first-wins). */
+ * so a resolved glyph's advance identifies which payload supplied it. */
 static uint8_t *build_font_blob_codepoints(uint16_t units_per_em, int16_t ascent, int16_t descent, int16_t line_gap, const uint32_t *codepoints, uint16_t glyph_count, int16_t advance,
                                            uint32_t *out_size) {
     const uint8_t contour[] = {1, 0, 3, 0, 7, 0, 0, 0, 0, 0, 0, NT_FONT_DELTA_SENTINEL, 0x20, 3, NT_FONT_DELTA_SENTINEL, 0x90, 1, 0};
@@ -552,7 +552,7 @@ void test_font_cached_glyph_waits_for_rebuilt_textures(void) {
     free(blob);
 }
 
-/* ---- Test 3: Add resource (FONT-04) ---- */
+/* ---- Test 3: Fill sets metrics ---- */
 
 void test_font_fill_sets_metrics(void) {
     nt_font_create_desc_t desc = test_font_desc();
@@ -562,8 +562,6 @@ void test_font_fill_sets_metrics(void) {
     uint8_t *blob = build_test_font_blob(&blob_size);
 
     nt_font_fill(font, blob, blob_size);
-
-    nt_font_step(); /* recover GPU cache if needed */
 
     nt_font_metrics_t m = nt_font_get_metrics(font);
     TEST_ASSERT_EQUAL_INT16(800, m.ascent);
@@ -790,7 +788,7 @@ void test_font_lru_eviction(void) {
 static void assert_text_size_equal(nt_text_size_t expected, nt_text_size_t actual) { TEST_ASSERT_EQUAL_MEMORY(&expected, &actual, sizeof(expected)); }
 
 /* Build a fully-resolved test font (cache + metrics ready). Caller frees blob. */
-static nt_font_t make_resolved_test_font(const char *name, uint8_t **out_blob) {
+static nt_font_t make_resolved_test_font(uint8_t **out_blob) {
     nt_font_create_desc_t desc = test_font_desc();
     nt_font_t font = nt_font_create(&desc);
 
@@ -809,7 +807,7 @@ static nt_font_t make_resolved_test_font(const char *name, uint8_t **out_blob) {
 
 void test_measure_n_matches_measure(void) {
     uint8_t *blob = NULL;
-    nt_font_t font = make_resolved_test_font("font_eq", &blob);
+    nt_font_t font = make_resolved_test_font(&blob);
 
     nt_text_size_t a = nt_font_measure(font, "ABC", 14.0F, 0.0F);
     nt_text_size_t b = nt_font_measure_n(font, "ABC", 3U, 14.0F, 0.0F);
@@ -832,7 +830,7 @@ void test_measure_n_matches_measure(void) {
 
 void test_measure_n_does_not_over_read(void) {
     uint8_t *blob = NULL;
-    nt_font_t font = make_resolved_test_font("font_bound", &blob);
+    nt_font_t font = make_resolved_test_font(&blob);
 
     /* "ABC" + poison 'B' + filler; bounded measure must ignore the poison.
        Intentionally NOT NUL-terminated — tests that _n stops at len, not at NUL. */
@@ -851,7 +849,7 @@ void test_measure_n_does_not_over_read(void) {
 
 void test_measure_n_drops_partial_utf8(void) {
     uint8_t *blob = NULL;
-    nt_font_t font = make_resolved_test_font("font_utf8", &blob);
+    nt_font_t font = make_resolved_test_font(&blob);
 
     /* "A" + 0xC3 (first byte of a 2-byte UTF-8 sequence) — len = 2 stops
      * mid-multibyte. The UTF-8 state machine recovers via NT_UTF8_REJECT
@@ -874,7 +872,7 @@ void test_measure_n_drops_partial_utf8(void) {
  * to _n with sizeof(literal) MUST be aware of this. */
 void test_measure_n_embedded_nul_is_codepoint(void) {
     uint8_t *blob = NULL;
-    nt_font_t font = make_resolved_test_font("font_nul", &blob);
+    nt_font_t font = make_resolved_test_font(&blob);
 
     /* "A\0B" — 3 bytes. _n should measure A + tofu(0) + B; _measure (wrapper)
      * stops at the embedded NUL and measures only A. The two MUST differ. */
@@ -903,7 +901,7 @@ void test_measure_n_embedded_nul_is_codepoint(void) {
  * (UNITY_EXCLUDE_FLOAT is set repo-wide). */
 void test_measure_n_letter_spacing_grows_width(void) {
     uint8_t *blob = NULL;
-    nt_font_t font = make_resolved_test_font("font_ls", &blob);
+    nt_font_t font = make_resolved_test_font(&blob);
 
     /* 3 glyphs ABC: 2 gaps between them -> +10px width with spacing=5. */
     nt_text_size_t baseline = nt_font_measure_n(font, "ABC", 3U, 14.0F, 0.0F);
@@ -927,7 +925,7 @@ void test_measure_n_letter_spacing_grows_width(void) {
  * Clay tokenization can leave \r in slices; measure must not add tofu width. */
 void test_measure_n_skips_carriage_return(void) {
     uint8_t *blob = NULL;
-    nt_font_t font = make_resolved_test_font("font_cr", &blob);
+    nt_font_t font = make_resolved_test_font(&blob);
 
     nt_text_size_t plain = nt_font_measure_n(font, "ABC", 3U, 14.0F, 0.0F);
     nt_text_size_t with_cr = nt_font_measure_n(font, "ABC\r", 4U, 14.0F, 0.0F);
@@ -940,9 +938,8 @@ void test_measure_n_skips_carriage_return(void) {
 
 void test_measure_n_cache_hits_on_repeat(void) {
     uint8_t *blob = NULL;
-    nt_font_t font = make_resolved_test_font("font_hits", &blob);
+    nt_font_t font = make_resolved_test_font(&blob);
 
-    nt_font_measure_invalidate(font);
     nt_font_test_reset_measure_counters();
 
     for (int i = 0; i < 200; i++) {
@@ -956,34 +953,11 @@ void test_measure_n_cache_hits_on_repeat(void) {
     free(blob);
 }
 
-/* ---- FONT-02b: invalidate_cache resets — next call is a miss ---- */
-
-void test_measure_n_invalidate_forces_miss(void) {
-    uint8_t *blob = NULL;
-    nt_font_t font = make_resolved_test_font("font_inv", &blob);
-
-    nt_font_measure_invalidate(font);
-    nt_font_test_reset_measure_counters();
-
-    (void)nt_font_measure_n(font, "AB", 2U, 14.0F, 0.0F); /* miss */
-    (void)nt_font_measure_n(font, "AB", 2U, 14.0F, 0.0F); /* hit */
-    TEST_ASSERT_EQUAL_UINT32(1U, nt_font_test_measure_cache_hits(font));
-    TEST_ASSERT_EQUAL_UINT32(1U, nt_font_test_measure_cache_misses(font));
-
-    nt_font_measure_invalidate_cache();
-    (void)nt_font_measure_n(font, "AB", 2U, 14.0F, 0.0F);                  /* miss again after invalidate */
-    TEST_ASSERT_EQUAL_UINT32(1U, nt_font_test_measure_cache_hits(font));   /* unchanged */
-    TEST_ASSERT_EQUAL_UINT32(2U, nt_font_test_measure_cache_misses(font)); /* +1 */
-
-    nt_font_destroy(font);
-    free(blob);
-}
-
 /* ---- FONT-02c: nt_font_destroy(font) clears cache (slot recycled = empty cache) ---- */
 
 void test_measure_n_destroy_clears_cache(void) {
     uint8_t *blob_a = NULL;
-    nt_font_t font_a = make_resolved_test_font("font_d_a", &blob_a);
+    nt_font_t font_a = make_resolved_test_font(&blob_a);
 
     nt_font_test_reset_measure_counters();
     (void)nt_font_measure_n(font_a, "ABC", 3U, 14.0F, 0.0F); /* warm slot */
@@ -995,7 +969,7 @@ void test_measure_n_destroy_clears_cache(void) {
     free(blob_a);
 
     uint8_t *blob_b = NULL;
-    nt_font_t font_b = make_resolved_test_font("font_d_b", &blob_b);
+    nt_font_t font_b = make_resolved_test_font(&blob_b);
 
     nt_font_test_reset_measure_counters();
     (void)nt_font_measure_n(font_b, "ABC", 3U, 14.0F, 0.0F);
@@ -1034,10 +1008,6 @@ void test_measure_n_cache_disabled(void) {
     }
     TEST_ASSERT_EQUAL_UINT32(0U, nt_font_test_measure_cache_hits(font));
     TEST_ASSERT_EQUAL_UINT32(0U, nt_font_test_measure_cache_misses(font));
-
-    /* Invalidate is a no-op when disabled — must not crash. */
-    nt_font_measure_invalidate(font);
-    nt_font_measure_invalidate_cache();
 
     nt_font_destroy(font);
     free(blob);
@@ -1257,8 +1227,6 @@ void test_font_first_fill_owns_decoration(void) {
     nt_font_fill(font, base, base_sz); /* base FIRST = primary */
     nt_font_fill(font, fb, fb_sz);
 
-    nt_font_step(); /* must NOT assert on the decoration mismatch */
-
     /* Primary (base) owns decoration; the fallback's differing values are ignored. */
     nt_font_metrics_t m = nt_font_get_metrics(font);
     TEST_ASSERT_EQUAL_INT16_MESSAGE(50, m.underline_position, "fallback family: decoration is primary-owned (base wins)");
@@ -1311,56 +1279,6 @@ void test_font_cmap_bounded_no_parse(void) {
 
     nt_font_destroy(font);
     free(blob);
-}
-
-/* ---- FONT-01: two resources at a COMMON (builder-normalized) UPM merge
- * into one font without tripping the shared-metrics assert ----
- *
- * Two source fonts of different NATURAL UPM (latin ~1000, CJK 2048) that the
- * builder normalized to a COMMON units_per_em with the primary
- * driving vmetrics. At runtime both headers carry identical metrics, so adding
- * BOTH into one nt_font_t simultaneously must NOT fire the multi-resource
- * shared-metrics mismatch assert, and nt_font_get_metrics reports the common
- * UPM. Both resources also resolve their own glyphs within the one font. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void test_font_merged_different_upm_no_metrics_assert(void) {
-    nt_font_create_desc_t desc = test_font_desc();
-    nt_font_t font = nt_font_create(&desc);
-
-    const uint16_t common_upm = 2048U; /* = max(1000, 2048), scaled toward max */
-    const int16_t asc = 1600;
-    const int16_t descent = -400;
-    const int16_t lg = 0;
-    const uint32_t latin_cps[2] = {'A', 'M'};       /* base: half-em advance */
-    const uint32_t cjk_cps[2] = {0x4E2DU, 0x4E8CU}; /* CJK: full-width advance */
-    uint32_t latin_sz = 0;
-    uint32_t cjk_sz = 0;
-    uint8_t *latin = build_font_blob_codepoints(common_upm, asc, descent, lg, latin_cps, 2, 1024, &latin_sz);
-    uint8_t *cjk = build_font_blob_codepoints(common_upm, asc, descent, lg, cjk_cps, 2, 2048, &cjk_sz);
-
-    /* Primary (latin) FIRST drives line height; CJK second. Simultaneous merge. */
-    nt_font_fill(font, latin, latin_sz);
-    nt_font_fill(font, cjk, cjk_sz);
-
-    nt_font_step(); /* must NOT abort on the shared-metrics assert */
-
-    nt_font_metrics_t m = nt_font_get_metrics(font);
-    TEST_ASSERT_EQUAL_UINT16(common_upm, m.units_per_em);
-    TEST_ASSERT_EQUAL_INT16(asc, m.ascent);
-    TEST_ASSERT_EQUAL_INT16(descent, m.descent);
-    TEST_ASSERT_EQUAL_INT16((int16_t)(asc - descent + lg), m.line_height);
-
-    /* Both resources resolve within the one font (base + CJK). */
-    nt_glyph_metrics_t latin_g = nt_font_lookup_metrics(font, 'A');
-    TEST_ASSERT_TRUE(latin_g.found);
-    TEST_ASSERT_EQUAL_INT16(1024, latin_g.advance);
-    nt_glyph_metrics_t cjk_g = nt_font_lookup_metrics(font, 0x4E2DU);
-    TEST_ASSERT_TRUE(cjk_g.found);
-    TEST_ASSERT_EQUAL_INT16(2048, cjk_g.advance);
-
-    nt_font_destroy(font);
-    free(latin);
-    free(cjk);
 }
 
 /* ---- Test 9: GPU texture handles (FONT-03) ---- */
@@ -2142,7 +2060,7 @@ void test_contour_self_intersects_primitive(void) {
 #if NT_FONT_EMBOLDEN_ENABLED
 void test_cache_variant_distinct_slots(void) {
     uint8_t *blob = NULL;
-    nt_font_t font = make_resolved_test_font("font_variant", &blob);
+    nt_font_t font = make_resolved_test_font(&blob);
     nt_font_slot_t *slot = nt_font_get_slot(font);
 
     const nt_glyph_cache_entry_t *reg = nt_font_lookup_glyph_offset(slot, 'A', 0);
@@ -2169,7 +2087,7 @@ void test_cache_variant_distinct_slots(void) {
 /* The public wrapper delegates to key_offset 0 and returns the same slot as a direct offset-0 lookup. */
 void test_cache_key_offset_zero_parity(void) {
     uint8_t *blob = NULL;
-    nt_font_t font = make_resolved_test_font("font_parity", &blob);
+    nt_font_t font = make_resolved_test_font(&blob);
     nt_font_slot_t *slot = nt_font_get_slot(font);
 
     const nt_glyph_cache_entry_t *via_wrapper = nt_font_lookup_glyph_in_slot(slot, 'B');
@@ -2189,7 +2107,7 @@ void test_cache_key_offset_zero_parity(void) {
 #if NT_FONT_EMBOLDEN_ENABLED
 void test_embolden_entry_bbox_grows(void) {
     uint8_t *blob = NULL;
-    nt_font_t font = make_resolved_test_font("font_bbox_grow", &blob);
+    nt_font_t font = make_resolved_test_font(&blob);
     nt_font_slot_t *slot = nt_font_get_slot(font);
 
     const nt_glyph_cache_entry_t *reg = nt_font_lookup_glyph_offset(slot, 'A', 0);
@@ -2715,7 +2633,6 @@ int main(void) {
     RUN_TEST(test_font_disjoint_payloads);
     RUN_TEST(test_font_first_fill_owns_decoration);
     RUN_TEST(test_font_cmap_bounded_no_parse);
-    RUN_TEST(test_font_merged_different_upm_no_metrics_assert);
     RUN_TEST(test_font_get_stats);
     RUN_TEST(test_font_lru_eviction);
     RUN_TEST(test_font_gpu_textures);
@@ -2727,7 +2644,6 @@ int main(void) {
     RUN_TEST(test_measure_n_letter_spacing_grows_width);
     RUN_TEST(test_measure_n_skips_carriage_return);
     RUN_TEST(test_measure_n_cache_hits_on_repeat);
-    RUN_TEST(test_measure_n_invalidate_forces_miss);
     RUN_TEST(test_measure_n_destroy_clears_cache);
     RUN_TEST(test_measure_n_cache_disabled);
     RUN_TEST(test_measure_n_cache_custom_size);

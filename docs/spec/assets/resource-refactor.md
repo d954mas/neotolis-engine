@@ -184,13 +184,13 @@ if (!s_cjk_filled) {
 
 - `fill` merges the payload into the font's copy and publishes before returning, so old glyphs stay valid and no partial
   addition is visible. It clears the font's measure cache and advances the global font content epoch. It is
-  legal at any point of the frame, before layout.
+  legal before `nt_ui_begin` of a frame that lays out its text.
 - An incoming codepoint that already exists asserts. The builder selects ranges and emits disjoint
   subsets; there is no runtime range selector, source order or fallback stack.
 - Overlapping replacement is deferred until a caller needs it.
 - Font-wide metrics compatibility keeps its existing assert. The first fill owns decoration metrics.
 - A font keeps one payload, independent of the registry. A later fill merges the sorted glyph
-  tables in one linear pass, rewrites data offsets and kern glyph indices, and frees the old copy.
+  tables linearly, rewrites data offsets and kern glyph indices, and frees the old copy.
   Glyph access allocates nothing and does one search. The total is limited to 65535 glyphs, the
   range of the 16-bit glyph and kern indices. A fill briefly holds the caller bytes, the old copy
   and the merged copy.
@@ -261,7 +261,7 @@ step is gone before consumers run, which is legal because the step precedes the 
 
 ### 5.4 Font and UI caches
 
-One global font content epoch advances on every successful fill, including a font used without a
+One global font content epoch advances on every fill that adds glyphs or is a font's first, including a font used without a
 registry. GPU-only glyph cache rebuild or eviction does not change it. Disjoint fills preserve existing
 glyph rows; the existing protection of rows used in the current frame remains.
 

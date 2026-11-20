@@ -40,7 +40,7 @@ static nt_font_create_desc_t bench_font_desc(void) {
 }
 
 /* Build a fully-resolved test font (cache + metrics ready). Caller frees blob. */
-static nt_font_t make_bench_font(const char *name, uint8_t **out_blob) {
+static nt_font_t make_bench_font(uint8_t **out_blob) {
     nt_font_create_desc_t desc = bench_font_desc();
     nt_font_t font = nt_font_create(&desc);
 
@@ -82,10 +82,8 @@ void tearDown(void) {
 
 static void bench_cache_hit_steady_state(void) {
     uint8_t *blob = NULL;
-    nt_font_t font = make_bench_font("bench_hit", &blob);
+    nt_font_t font = make_bench_font(&blob);
     TEST_ASSERT_NOT_EQUAL_UINT32(0U, font.id);
-
-    nt_font_measure_invalidate(font);
 
     /* Warm-up: one call to populate the slot. */
     (void)nt_font_measure_n(font, "Hello, world", 12U, 14.0F, 0.0F);
@@ -112,10 +110,8 @@ static void bench_cache_hit_steady_state(void) {
 
 static void bench_cache_miss_unique(void) {
     uint8_t *blob = NULL;
-    nt_font_t font = make_bench_font("bench_miss", &blob);
+    nt_font_t font = make_bench_font(&blob);
     TEST_ASSERT_NOT_EQUAL_UINT32(0U, font.id);
-
-    nt_font_measure_invalidate(font);
 
     /* 1000 unique strings — each one collides with whatever is in its slot,
      * so it is effectively a miss every time. The 256-entry direct-mapped
@@ -148,10 +144,8 @@ static void bench_cache_miss_unique(void) {
 
 static void bench_long_string_hit(void) {
     uint8_t *blob = NULL;
-    nt_font_t font = make_bench_font("bench_lhit", &blob);
+    nt_font_t font = make_bench_font(&blob);
     TEST_ASSERT_NOT_EQUAL_UINT32(0U, font.id);
-
-    nt_font_measure_invalidate(font);
 
     /* ~2 KB ASCII paragraph (lorem-ipsum-style filler). Same content every
      * call → cache hit. Measures: (xxHash64 over 2 KB) + entry compare cost. */
@@ -186,10 +180,8 @@ static void bench_long_string_hit(void) {
 
 static void bench_long_string_miss(void) {
     uint8_t *blob = NULL;
-    nt_font_t font = make_bench_font("bench_lmiss", &blob);
+    nt_font_t font = make_bench_font(&blob);
     TEST_ASSERT_NOT_EQUAL_UINT32(0U, font.id);
-
-    nt_font_measure_invalidate(font);
 
     /* 1000 unique ~2 KB strings (the leading 8 chars vary, rest is filler).
      * Each call: full xxHash64 over 2 KB + full UTF-8 measure pass. The cache
@@ -224,10 +216,8 @@ static void bench_long_string_miss(void) {
 
 static void bench_mixed_ui(void) {
     uint8_t *blob = NULL;
-    nt_font_t font = make_bench_font("bench_mix", &blob);
+    nt_font_t font = make_bench_font(&blob);
     TEST_ASSERT_NOT_EQUAL_UINT32(0U, font.id);
-
-    nt_font_measure_invalidate(font);
 
     /* 80 short hot labels (typical button text), reused every "frame" */
     const int hot_count = 80;

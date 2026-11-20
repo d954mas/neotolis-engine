@@ -1618,9 +1618,7 @@ static void shutdown_mesh_scene(void) {
         nt_gfx_destroy_mesh(s_procedural_mesh[i]);
     }
     for (uint32_t i = 0; i < CPU_SOURCE_COUNT; ++i) {
-        if (s_cpu_mesh[i].reference.id != 0) {
-            nt_gfx_deactivate_mesh(s_cpu_mesh[i].reference.id);
-        }
+        nt_gfx_destroy_mesh(s_cpu_mesh[i].reference);
         free(s_cpu_mesh[i].data);
         free(s_cpu_mesh[i].output);
     }

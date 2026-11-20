@@ -97,10 +97,6 @@ typedef struct {
 nt_text_size_t nt_font_measure_n(nt_font_t font, const char *utf8, size_t len, float size, float letter_tracking);
 nt_text_size_t nt_font_measure(nt_font_t font, const char *utf8, float size, float letter_tracking);
 
-/* Both no-op on invalid/destroyed handles — safe to call from teardown. */
-void nt_font_measure_invalidate_cache(void);
-void nt_font_measure_invalidate(nt_font_t font);
-
 /* Independent of the resource registry. NULL desc, zero capacity, double init and OOM assert. */
 void nt_font_init(const nt_font_desc_t *desc);
 void nt_font_shutdown(void);
@@ -114,10 +110,10 @@ void nt_font_destroy(nt_font_t font);
 bool nt_font_valid(nt_font_t font);
 
 /* Merges a trusted FONT payload into the font's one owned copy before returning; caller
- * bytes may then be freed. Fill before layout. Overlap, incompatible metrics, glyph data or
- * kern indices outside the payload, more than 65535 glyphs and OOM assert. Existing glyphs stay valid. */
+ * bytes may then be freed. Fill before nt_ui_begin of a frame that lays out its text. Overlap, incompatible
+ * metrics, kern data or kern indices outside the payload, more than 65535 glyphs and OOM assert. Existing glyphs stay valid. */
 void nt_font_fill(nt_font_t font, const uint8_t *data, uint32_t size);
-/* Advances on every fill of any font, never on glyph-cache eviction or GPU recovery.
+/* Advances on every fill of any font that adds glyphs or is its first fill, never on glyph-cache eviction or GPU recovery.
  * Valid without nt_font_init; UI compares it to reset text measurements. */
 uint32_t nt_font_content_epoch(void);
 

@@ -100,7 +100,8 @@ forces the next reset when a different handle is bound under the same font ID.
 GPU glyph eviction and texture recovery do not change the epoch. A destroyed
 font may stay bound while no text uses its font ID; using it is invalid, and the
 measurement callback or text rendering asserts.
-Fill fonts before layout; a fill after layout requires rebuilding that layout.
+Fill fonts before `nt_ui_begin`: a fill after it leaves this frame's Clay
+measurements stale until the next begin.
 
 ## Widget IDs
 

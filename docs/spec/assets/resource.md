@@ -484,10 +484,10 @@ compact payload: the merge of all its fills, at most 65535 glyphs.
 failure.
 
 `nt_font_fill(font, bytes, size)` merges one trusted FONT payload synchronously:
-one linear pass over both sorted glyph tables, then the old copy is freed.
-The caller may free its input after return. Fill happens before layout, at any
-point of the frame. Existing glyphs and GPU cache rows stay valid. Overlapping
-codepoints, incompatible units-per-em/ascent/descent/line-gap, glyph data or kern
+a linear merge of both sorted glyph tables, then the old copy is freed.
+The caller may free its input after return. Fill before `nt_ui_begin` of a frame
+that lays out its text. Existing glyphs and GPU cache rows stay valid. Overlapping
+codepoints, incompatible units-per-em/ascent/descent/line-gap, kern data or kern
 indices outside the payload, more than 65535 glyphs, invalid headers and OOM
 assert before publication. The first fill owns decoration
 metrics. Ranges are selected in the builder; runtime replacement is not provided
@@ -500,8 +500,8 @@ or activation; absence/nonresidency returns NULL and size 0. The view is borrowe
 until byte eviction, unmount or shutdown. The game fills its font before evicting.
 Requesting or registering FONT as a resource asserts.
 
-Fill advances the global `nt_font_content_epoch` and clears only the font
-measurement cache. CPU data survives GPU context loss, so texture recovery needs
+A first fill or a fill that adds glyphs advances the global `nt_font_content_epoch`
+and clears only the font measurement cache; a later empty fill changes nothing. CPU data survives GPU context loss, so texture recovery needs
 no pack read. UI compares the epoch before layout; see [font measurements](../ui/nt-ui.md#font-measurements).
 
 Builder produces font assets from TTF/OTF sources. Binary layout:
@@ -587,7 +587,7 @@ metrics stay unchanged.
 
 **Decoration metrics.** The 24-byte header ends with four `int16` decoration-metric fields (`underline_position`, `underline_thickness`, `strikeout_position`, `strikeout_size`). The builder reads these raw from the source font's `post` (`underlinePosition`@8, `underlineThickness`@10) and `OS/2` (`yStrikeoutSize`@26, `yStrikeoutPosition`@28) tables (big-endian, UPM-rescaled with the other metrics); when a table is absent it bakes a metric-correct heuristic (underline just below baseline, strike near mid x-height) so the runtime never sees garbage. This keeps decoration metrics in the builder — the runtime stays a parser-free safety net.
 
-**Fill checks.** FONT fill asserts magic, version, minimum header size and that the glyph table fits the blob. Payload values are trusted builder output. It checks incoming codepoints against the existing table in one linear pass before merging; glyph decode asserts each glyph's point and curve counts on first use. Shared glyph payloads, trailing padding and zero-curve glyphs are valid. Coordinate and metric values are builder guarantees.
+**Fill checks.** Fill asserts the structure listed in the font section above. Contour bytes, coordinates and metric values are trusted builder output; glyph decode asserts each glyph's point and curve counts on first use. Shared glyph payloads, trailing padding and zero-curve glyphs are valid.
 
 ### NT_ASSET_ATLAS binary format
 

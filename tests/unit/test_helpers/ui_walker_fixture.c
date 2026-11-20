@@ -53,9 +53,7 @@ static const nt_pass_desc_t FIXTURE_PASS = {.clear_depth = 1.0F};
 
 void ui_walker_fixture_fill_stub_font(ui_walker_fixture_t *fx) {
     const NtFontAssetHeader payload = {.magic = NT_FONT_MAGIC, .version = NT_FONT_VERSION, .units_per_em = 1000, .ascent = 800, .descent = -200};
-    nt_gfx_end_pass();
     nt_font_fill(fx->stub_font, (const uint8_t *)&payload, sizeof payload);
-    nt_gfx_begin_pass(&FIXTURE_PASS);
 }
 
 void ui_walker_fixture_init(ui_walker_fixture_t *fx, void *arena, size_t arena_size, ui_walker_fx_bind_t bind) {

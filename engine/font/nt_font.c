@@ -151,8 +151,6 @@ static const NtFontGlyphEntry *lookup_glyph_entry_in_slot(const nt_font_slot_t *
         if (gi == NT_FONT_ASCII_IDX_NONE) {
             return NULL;
         }
-        /* gi is bounded when fill builds the ASCII index. */
-        NT_ASSERT(gi < ((const NtFontAssetHeader *)slot->data)->glyph_count);
         return (const NtFontGlyphEntry *)(slot->data + sizeof(NtFontAssetHeader)) + gi;
     }
     return slot->data != NULL ? find_glyph_in_pack(slot->data, codepoint) : NULL;
@@ -216,7 +214,7 @@ static uint16_t take_slot(nt_font_slot_t *slot) {
 /* One glyph's curve row for upload (no CPU mirror). RGBA16F: 4 uint16 per texel. */
 static uint16_t s_curve_upload[(size_t)NT_FONT_GLYPH_TEXELS * 4];
 
-/* Outside tests only nt_font_step calls this, before any text, so no recorded draw references the wiped slots. */
+/* Only nt_font_step calls this, before any text, so no recorded draw references the wiped slots. */
 static void clear_glyph_cache(nt_font_slot_t *slot) {
     memset(slot->cache, 0, (size_t)slot->max_glyphs * sizeof(nt_font_cache_slot_t));
     memset(slot->hash_table, 0, (size_t)slot->hash_table_size * sizeof(uint16_t));
@@ -1491,7 +1489,7 @@ void nt_font_fill(nt_font_t font, const uint8_t *data, uint32_t size) {
     bool has_kern = false;
     for (uint32_t gi = 0; gi < hdr->glyph_count; gi++) {
         const NtFontGlyphEntry *g = &glyphs[gi];
-        NT_ASSERT(g->data_offset >= table && g->data_offset + ((uint64_t)g->kern_count * sizeof(NtFontKernEntry)) <= size && "glyph data outside the payload");
+        NT_ASSERT(g->data_offset >= table && g->data_offset + ((uint64_t)g->kern_count * sizeof(NtFontKernEntry)) <= size && "kern data outside the payload");
         const NtFontKernEntry *kern = (const NtFontKernEntry *)(data + g->data_offset);
         for (uint32_t q = 0; q < g->kern_count; q++) {
             NT_ASSERT(kern[q].right_glyph_index < hdr->glyph_count && "kern index outside the payload");
@@ -1609,7 +1607,6 @@ const nt_glyph_cache_entry_t *nt_font_lookup_glyph_offset(nt_font_slot_t *slot, 
 
     // #region Decode contour data
     const uint8_t *blob = slot->data;
-    NT_ASSERT(blob);
 
     uint16_t cache_idx = take_slot(slot);
     if (cache_idx == UINT16_MAX) {
@@ -1913,42 +1910,10 @@ nt_text_size_t nt_font_measure_n(nt_font_t font, const char *utf8, size_t len, f
 nt_text_size_t nt_font_measure(nt_font_t font, const char *utf8, float size, float letter_tracking) { return nt_font_measure_n(font, utf8, utf8 ? strlen(utf8) : 0U, size, letter_tracking); }
 // #endregion
 
-// #region Measure cache invalidation
-/* Both variants no-op when the module is uninit or the handle is invalid —
- * callers may invoke between frames or after partial teardown. */
-
 /* One memset over the contiguous SoA block (base = key_hashes). */
 static void measure_cache_clear(nt_font_slot_t *slot) { memset(slot->measure_cache.key_hashes, 0, (size_t)slot->measure_cache_size * NT_FONT_MEASURE_CACHE_ENTRY_BYTES); }
 
-void nt_font_measure_invalidate_cache(void) {
-    if (!s_font.initialized) {
-        return;
-    }
-    for (uint32_t i = 1; i <= s_font.pool.capacity; i++) {
-        if (!nt_pool_slot_alive(&s_font.pool, i)) {
-            continue;
-        }
-        nt_font_slot_t *slot = &s_font.slots[i];
-        if (slot->measure_cache.key_hashes == NULL) {
-            continue; /* cache disabled for this font */
-        }
-        measure_cache_clear(slot);
-    }
-}
-
-void nt_font_measure_invalidate(nt_font_t font) {
-    if (!s_font.initialized || !nt_pool_valid(&s_font.pool, font.id)) {
-        return;
-    }
-    nt_font_slot_t *slot = get_slot(font);
-    if (slot->measure_cache.key_hashes == NULL) {
-        return;
-    }
-    measure_cache_clear(slot);
-}
-// #endregion
-
-/* ---- Test-only: register font data for headless testing ---- */
+/* ---- Test access ---- */
 
 #ifdef NT_TEST_ACCESS
 

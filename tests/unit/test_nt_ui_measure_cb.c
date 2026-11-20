@@ -32,8 +32,7 @@ alignas(NT_UI_ARENA_ALIGN) static uint8_t s_arena[NT_UI_TEST_ARENA_SIZE];
 alignas(NT_UI_ARENA_ALIGN) static uint8_t s_other_arena[NT_UI_TEST_ARENA_SIZE];
 static const nt_ui_create_desc_t s_ui_desc = {.max_elements = NT_UI_DEFAULT_MAX_ELEMENT_COUNT, .modal_zband_stride = NT_UI_MODAL_ZBAND_STRIDE};
 
-static nt_font_t make_resolved_test_font(const char *name, uint8_t **out_blob) {
-    (void)name;
+static nt_font_t make_resolved_test_font(uint8_t **out_blob) {
     nt_font_create_desc_t fd = {
         .max_glyphs = 16,
         .measure_cache_size = 256,
@@ -116,7 +115,7 @@ static void test_measure_callback_unbound_font_asserts(void) {
 /* Compare Clay bbox against a direct nt_font_measure_n on the same input. */
 static void test_measure_callback_forwards_to_font_measure_n(void) {
     uint8_t *blob = NULL;
-    nt_font_t font = make_resolved_test_font("measure_cb_forward", &blob);
+    nt_font_t font = make_resolved_test_font(&blob);
     TEST_ASSERT_TRUE(nt_font_valid(font));
 
     nt_ui_context_t *ctx = nt_ui_create_context(s_arena, sizeof s_arena, &s_ui_desc);
@@ -170,7 +169,7 @@ static Clay_BoundingBox declare_and_measure_text_ls(nt_ui_context_t *ctx, const 
 /* Bridge adds a trailing letterSpacing to compensate Clay's -1 at line 1677. */
 static void test_measure_callback_letter_spacing_matches_render_width(void) {
     uint8_t *blob = NULL;
-    nt_font_t font = make_resolved_test_font("measure_cb_ls", &blob);
+    nt_font_t font = make_resolved_test_font(&blob);
     TEST_ASSERT_TRUE(nt_font_valid(font));
 
     nt_ui_context_t *ctx = nt_ui_create_context(s_arena, sizeof s_arena, &s_ui_desc);
@@ -206,7 +205,7 @@ static uint32_t font_measure_calls(nt_font_t font) { return nt_font_test_measure
 
 static void test_layout_refreshes_after_fill_and_rebind(void) {
     uint8_t *blob = NULL;
-    nt_font_t font = make_resolved_test_font("fill", &blob);
+    nt_font_t font = make_resolved_test_font(&blob);
     free(blob);
     nt_ui_context_t *ctx = nt_ui_create_context(s_arena, sizeof s_arena, &s_ui_desc);
     nt_ui_context_t *inactive = nt_ui_create_context(s_other_arena, sizeof s_other_arena, &s_ui_desc);
@@ -227,7 +226,7 @@ static void test_layout_refreshes_after_fill_and_rebind(void) {
     free(blob);
     TEST_ASSERT_EQUAL_INT32(14, (int32_t)declare_and_measure_text(ctx, "D", 0, 20).width);
     TEST_ASSERT_EQUAL_INT32(14, (int32_t)declare_and_measure_text(inactive, "D", 0, 20).width);
-    nt_font_t other = make_resolved_test_font("other", &blob);
+    nt_font_t other = make_resolved_test_font(&blob);
     free(blob);
     blob = nt_test_font_blob('E', 'E', &size);
     nt_font_fill(other, blob, size);

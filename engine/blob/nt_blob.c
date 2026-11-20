@@ -61,9 +61,6 @@ void nt_blob_destroy(nt_blob_t blob) {
     nt_pool_free(&s_blob.pool, blob.id);
 }
 
-uint32_t nt_blob_activate(const uint8_t *data, uint32_t size) {
-    NT_ASSERT(data != NULL && size >= sizeof(NtBlobAssetHeader));
-    return nt_blob_create(data + sizeof(NtBlobAssetHeader), size - (uint32_t)sizeof(NtBlobAssetHeader)).id;
-}
+uint32_t nt_blob_activate(const uint8_t *data, uint32_t size) { return nt_blob_create(data + sizeof(NtBlobAssetHeader), size - (uint32_t)sizeof(NtBlobAssetHeader)).id; }
 
 void nt_blob_deactivate(uint32_t handle) { nt_blob_destroy((nt_blob_t){handle}); }
