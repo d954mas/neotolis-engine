@@ -636,7 +636,7 @@ data array and no `chosen_id` sink. Menu rows are declared with
 `preview_begin..preview_end` / `combo_end`. Activation is reported INLINE by
 the row call (`if (nt_ui_menu_item(...)) act();` / a combo selectable returns
 clicked) — there is no per-frame result struct to scan. The game owns the open
-state (`nt_ui_menu_state_t` / `bool *open`) and, for the combo, the `int`
+state (`nt_ui_menu_t` / `bool *open`) and, for the combo, the `int`
 selection; the widget only signals and clears `open` on a pick (Model D, same
 as popup-core). Both build on the kept popup-core (+ the scroll wrapper for a
 long combo list). There is no data-array form — immediate-only.
@@ -653,27 +653,41 @@ over all of its text, not only over the links. A menu row with `non_activatable`
 has no action of its own (for a row that only hosts a control): it never steps,
 only blocks the pointer, so it hovers but never captures or activates.
 
-Per-frame menu scratch is GAME-owned (`nt_ui_menu_ctx_t`, allocated by the
-game — static / app field / arena slice — and init via `nt_ui_menu_init`), so
-the core `nt_ui_context` pays zero bytes for a game that uses no menu and the
-menu TU dead-strips. The SAME instance MUST be reused every frame: it holds the
-per-level keyboard-nav record, so a fresh `{0}` each frame would silently break
-nav. The combo carries no such scratch (its state lives in the core ctx's pool,
-bounded by caps). Row identity is KEY-STABLE via a scope stack:
+The game owns one `nt_ui_menu_t` per menu and UI context and keeps it across
+frames (static / app field / arena slice): the open flag and anchor, the menu's
+navigation and its per-declaration scratch, so the core `nt_ui_context` pays
+zero bytes for a game that uses no menu and the menu TU dead-strips. All-zero
+is the valid closed state, and every closed frame resets the navigation. The
+combo carries no such object (its state lives in the core ctx's pool, bounded
+by caps). Row identity is KEY-STABLE via a scope stack:
 `mix(scope_id, key)` (fmix, never additive — additive sibling ids collide in
 Clay's anonymous child-id space). A submenu pushes its own row id as the child
 scope (ImGui `PushID` model), so keys need only be unique among SIBLINGS; a
-duplicate sibling key aliases the same row state. `NT_UI_CHECKS` enables the
-asserting duplicate-key scans: complete within the menu's bounded per-level cap;
-each combo row is compared with the first `NT_UI_COMBO_DUP_KEY_WINDOW` row IDs,
-so duplicates exclusively outside that window are not detected. OFF removes
-these scans and the combo's duplicate-check storage. Ordinary pointer, index and
-capacity assertions remain independent of this flag. Configuration is explicit
-and independent of the inspector and assert mode; see [build options](../../build.md#build-options).
-Keyboard nav runs in `menu_end` against THIS frame's per-level record (built as
-rows declare, complete by `menu_end`); a focus or open-chain change re-declares
-the tree and becomes navigable NEXT frame — a 1-frame latency in the EFFECT,
-not in the record lookup.
+duplicate sibling key gives two rows one Clay id, a fatal Clay error.
+`NT_UI_CHECKS` enables the combo's asserting duplicate-key scan: each combo row
+is compared with the first `NT_UI_COMBO_DUP_KEY_WINDOW` row IDs, so duplicates
+exclusively outside that window are not detected. OFF removes this scan and its
+storage. Ordinary pointer, index and capacity assertions remain independent of
+this flag. Configuration is explicit and independent of the inspector and assert
+mode; see [build options](../../build.md#build-options).
+
+The menu keeps the focused row and the open parent of each level as row IDs, so
+inserting, deleting or reordering other rows keeps them. Opening or closing a
+level's child replaces the whole branch below it. Keys act on the deepest open
+level:
+
+- Enter on the focused leaf activates it in the same frame, like a click.
+- Right or Enter on the focused parent opens it in the same frame and focuses
+  its first enabled row; an empty child stays open without focus.
+- Up and Down step over the enabled rows declared this frame and wrap; Left and
+  Esc close the level, and at the root they close the menu. They resolve in
+  `menu_end` and show next frame.
+
+A focused row that is absent or disabled is no focus: Enter does nothing, Down
+starts at the first enabled row and Up at the last. An open parent that the
+frame does not declare as an enabled parent closes its branch in `menu_end`;
+Up, Down, Left and Esc in that frame do nothing. Hover moves focus too, and an
+open parent stays highlighted while focus is in its child.
 
 ## Atlas region identity
 

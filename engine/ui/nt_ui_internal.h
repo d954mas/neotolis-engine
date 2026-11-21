@@ -283,9 +283,9 @@ struct nt_ui_context {
         bool active;      /* between vlist_begin/vlist_end */
     } pending_vlist;
 
-    /* The immediate-menu scratch lives in the game-owned nt_ui_menu_ctx_t (engine/ui/nt_ui_menu.h): it is
-     * heavy (~4.2 KB) and would otherwise drag that header into this one. tabbar/combo scratch are
-     * void*-decoupled and cheap, so they stay below. */
+    /* The immediate-menu scratch lives in the game-owned nt_ui_menu_t (engine/ui/nt_ui_menu.h), so a game
+     * without a menu pays nothing here. tabbar/combo scratch are void*-decoupled and cheap, so they stay
+     * below. */
 
     /* Immediate-combo begin/selectable/end. Combos do NOT nest (single level, asserted). combo_begin
      * stashes the per-call style ptr + the game-owned open ptr + the combo id + layers; each
