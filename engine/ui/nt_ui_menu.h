@@ -66,23 +66,19 @@ _Static_assert(sizeof(nt_ui_menu_style_t) == 112, "nt_ui_menu_style_t stable ABI
 /* Valid baseline style (dark). */
 nt_ui_menu_style_t nt_ui_menu_style_defaults(void);
 
-/* Immediate-item options: the full OS-menu row field set. `icon` is the leading-gutter sprite
- * (atlas.id==0 = aligned empty gutter). The two mostly-true bools are stored INVERTED so a {0} init is a
- * normal enabled + activatable row — the common case opts IN to nothing.
- * Negative-sense (disabled/non_activatable) — unlike the positional `bool enabled` on
- * button/checkbox/slider — because a struct field can't default to true, so `{0}` must be the normal
- * enabled+activatable row. */
+/* Options of a plain or parent row (item_ex / submenu_begin_ex). `icon` is the leading-gutter sprite
+ * (atlas.id==0 = aligned empty gutter). `disabled` is negative-sense — unlike the positional `bool enabled`
+ * on button/checkbox/slider — because a struct field can't default to true, so `{0}` is a normal row. */
 typedef struct {
     nt_atlas_region_ref_t icon; /* optional leading-gutter sprite (atlas.id==0 = aligned empty gutter) */
     const char *shortcut;       /* optional right-aligned shortcut text (e.g. "Ctrl+S"); NULL = none */
     bool disabled;              /* greyed + non-selectable when true (default false = enabled) */
-    bool selected;              /* checkmark (toggle/radio menu items) */
-    bool non_activatable;       /* true = the row has no action of its own: never activates (item_begin only) */
-    uint8_t _pad[1];
+    bool selected;              /* checkmark (toggle/radio menu items); a parent row asserts it is false */
+    uint8_t _pad[2];
 } nt_ui_menu_item_opts_t;
 /* 64-bit: 16 ref + 8 ptr + 4 bools/pad = 28 -> 32 (8-align). wasm 32-bit: 16 + 4 + 4 = 24. Both = a
  * multiple of the 8-byte ref alignment; express portably as 16 + the (ptr+4) cell rounded up to 8. */
-_Static_assert(sizeof(nt_ui_menu_item_opts_t) == 16 + (((sizeof(void *) + 4) + 7) / 8 * 8), "nt_ui_menu_item_opts_t stable ABI (16 ref + ptr + 3 bool + pad, 8-aligned)");
+_Static_assert(sizeof(nt_ui_menu_item_opts_t) == 16 + (((sizeof(void *) + 4) + 7) / 8 * 8), "nt_ui_menu_item_opts_t stable ABI (16 ref + ptr + 2 bool + pad, 8-aligned)");
 
 /* The mouse-aim corridor guarding one open child level: its apex is where the cursor left the parent
  * row, its timer the dwell off the corridor. depth 0 = not primed. */
@@ -103,13 +99,12 @@ typedef struct {
     uint32_t click_id;            /* parent clicked this frame (0 = none) */
     uint32_t item_id;             /* the open custom row (item_begin..item_end); 0 = none */
     uint8_t depth;                /* level being declared */
-    uint8_t nav_depth;            /* deepest open level at begin: the one keys navigate */
+    uint8_t nav_depth;            /* the focused row's level at begin: the one keys navigate */
     uint8_t declared_depth;       /* deepest level declared: open parents past it are gone */
     uint8_t hover_depth;
     uint8_t click_depth;
     uint8_t fill_layer;
     uint8_t label_layer;
-    bool arming;           /* the first open frame: its press does not dismiss */
     bool nav_passed;       /* the navigated level has declared the focused row */
     bool focus_first;      /* a keyboard-opened child gives focus to its first enabled row */
     bool hover_opens;      /* hover_id is a parent */
@@ -118,62 +113,56 @@ typedef struct {
     bool item_activatable; /* the open custom row has an action of its own */
 } nt_ui_menu_frame_t;
 
-/* One menu, owned by the game and kept across frames: one per logical menu and UI context. The game sets
- * open + anchor (or nt_ui_menu_open_trigger does); the menu clears open on dismiss. The other fields are
- * the menu's own. All-zero is the valid closed state, and every closed frame resets the navigation, so
- * setting open false then true reopens cleanly. Activation is reported INLINE by the row calls
- * (if (nt_ui_menu_item(...)) act();) for mouse and keyboard alike. */
+/* One menu, owned by the game and kept across frames: one per logical menu and UI context. The game opens
+ * it with nt_ui_menu_open and may close it by clearing `open`; the menu clears `open` on dismiss and on
+ * activation. The other fields are the menu's own; all-zero is the valid closed state. Activation is
+ * reported INLINE by the row calls (if (nt_ui_menu_item(...)) act();) for mouse and keyboard alike. */
 typedef struct {
     float anchor_x, anchor_y; /* open point (UI space) — root menu top-left attaches here */
     uint32_t focus;           /* focused row id (0 = none) */
     /* Open parent row id per level; the first 0 ends the chain, and its length is the open depth. */
     uint32_t open_path[NT_UI_MENU_MAX_DEPTH];
     nt_ui_menu_aim_t aim;
-    bool open;     /* game-owned open flag; menu clears on dismiss */
-    bool shown;    /* open at the last begin */
-    bool kbd_mode; /* a key moved focus: the pointer moves it again once it moves */
+    uint8_t focus_depth; /* the focused row's level */
+    bool open;           /* the menu is shown; cleared on dismiss */
+    bool arming;         /* opened since the last end: this frame's press does not dismiss */
+    bool kbd_mode;       /* a key moved focus: the pointer takes it back once it moves or presses */
     nt_ui_menu_frame_t frame;
 } nt_ui_menu_t;
 
 /* Immediate-mode menu (begin/end), declared every frame. A row id is mix(scope, key), where the scope is
  * the menu id at the root and the open parent's row id below it, so keys need only be unique among
- * siblings. Keys act on the deepest open level: Enter on the focused leaf activates it this frame, Right
- * or Enter on the focused parent opens it this frame; Up/Down/Left/Esc resolve in menu_end.
+ * siblings. Keyboard rules: docs/spec/ui/nt-ui.md, section "Immediate menu + combo".
  * Layers: every level's panel + row fills + icons + markers draw on data->layer (also the popup panel
  * layer); item text + label fallbacks on label_layer (split to batch fills-then-text). data may be NULL
  * (fills fall to layer 0). Mirrors tabbar/checkbox: layer comes from the call, NOT the style.
- * Call begin EVERY frame (a closed frame resets the navigation); it returns true while the menu is open,
- * and only then the game declares the rows and calls nt_ui_menu_end, like nt_ui_combo_begin:
+ * begin returns true while the menu is open, and only then the game declares the rows and calls
+ * nt_ui_menu_end, like nt_ui_combo_begin:
  *   if (nt_ui_menu_begin(&menu, ctx, data, label_layer, id, style)) { ...rows...; nt_ui_menu_end(&menu); }
  * begin binds `ctx` until end; every inner call reaches the core through the menu. */
 bool nt_ui_menu_begin(nt_ui_menu_t *menu, nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t menu_id, nt_ui_menu_style_t *style);
 bool nt_ui_menu_item(nt_ui_menu_t *menu, uint32_t key, const char *label);                                 /* plain item; returns clicked */
 bool nt_ui_menu_item_ex(nt_ui_menu_t *menu, uint32_t key, const char *label, nt_ui_menu_item_opts_t opts); /* rich row; returns clicked */
 /* Custom-content row: item_begin opens the row element, the game declares its body, item_end closes it
- * and returns whether the row was activated (mouse or Enter), like item/item_ex. A non_activatable row has
- * no action of its own and never activates. A forgotten item_end trips the next row or menu_end assert. */
-void nt_ui_menu_item_begin(nt_ui_menu_t *menu, uint32_t key, nt_ui_menu_item_opts_t opts);
+ * and returns whether the row was activated (mouse or Enter), like item/item_ex. A row that is not
+ * `activatable` only hosts a control: it hovers but never captures or activates. A forgotten item_end trips
+ * the next row, submenu_end or menu_end assert. */
+void nt_ui_menu_item_begin(nt_ui_menu_t *menu, uint32_t key, bool enabled, bool activatable);
 bool nt_ui_menu_item_end(nt_ui_menu_t *menu);
 bool nt_ui_menu_submenu_begin(nt_ui_menu_t *menu, uint32_t key, const char *label); /* true ONLY when open -> declare body */
 /* Rich submenu parent (icon/shortcut/disabled), mirroring item -> item_ex. opts.disabled renders greyed and
- * returns false (a disabled parent never flies out, never opens). opts.selected/opts.non_activatable do NOT
- * apply to a parent row (it is never a checkable leaf nor a custom-child host) and are ignored.
- * submenu_begin is the thin wrapper calling _ex with a zero-init opts (a normal enabled parent). */
+ * returns false (a disabled parent never flies out, never opens). submenu_begin is the thin wrapper calling
+ * _ex with a zero-init opts (a normal enabled parent). */
 bool nt_ui_menu_submenu_begin_ex(nt_ui_menu_t *menu, uint32_t key, const char *label, nt_ui_menu_item_opts_t opts);
 void nt_ui_menu_submenu_end(nt_ui_menu_t *menu);
 void nt_ui_menu_separator(nt_ui_menu_t *menu);                         /* non-interactive divider (no focus) */
 void nt_ui_menu_separator_text(nt_ui_menu_t *menu, const char *label); /* optional section header */
 void nt_ui_menu_end(nt_ui_menu_t *menu);
 
-/* Open trigger: arms the menu at the cursor on a right-click OR a caller-supplied long-press this frame.
- * Does ONLY idempotent reads — NO mutating interaction step (so it never double-steps the caller's
- * widget; nt_ui_step is the one mutating step per widget per frame). `target_id` optionally binds the
- * right-click to a widget: 0 = arm anywhere (any right-click); non-zero = arm over that widget's bbox via
- * a GEOMETRY hit-test (NOT arbitrated hover, so a right-click RE-opens the menu through its own occluder;
- * does not respect z-order). `long_pressed` is the touch trigger: the caller passes nt_ui_hold_crossed of
- * ITS target widget's own step (this helper owns no gesture timing). Returns true if it armed this frame
- * (so the caller can stop other handling). */
-bool nt_ui_menu_open_trigger(nt_ui_menu_t *menu, nt_ui_context_t *ctx, uint32_t target_id, bool long_pressed);
+/* Opens the menu with its root at (x, y) in UI space and starts its navigation fresh; the press of this
+ * frame (usually the one that opened it) does not dismiss it. When to open is the game's call: a
+ * right-click (nt_ui_pointer_pos gives the point), a long-press on its widget, a button. */
+void nt_ui_menu_open(nt_ui_menu_t *menu, float x, float y);
 
 #ifdef NT_TEST_ACCESS
 /* Pure barycentric point-in-triangle. No GL, no ctx — directly unit-tested. */

@@ -2956,6 +2956,13 @@ static bool pointer_target(const nt_ui_context_t *ctx, uint32_t i, uint32_t *out
     return true;
 }
 
+void nt_ui_pointer_pos(const nt_ui_context_t *ctx, float *x, float *y) {
+    NT_ASSERT(ctx != NULL && ctx->in_frame && "nt_ui_pointer_pos: call between nt_ui_begin/end");
+    const nt_pointer_t *p = &ctx->frame_pointers[ctx->frame_primary];
+    *x = p->x;
+    *y = p->y;
+}
+
 bool nt_ui_hovered_within(const nt_ui_context_t *ctx, uint32_t id) {
     NT_ASSERT(ctx != NULL && "nt_ui_hovered_within: ctx must be non-NULL");
     NT_ASSERT(id != 0U && "nt_ui_hovered_within: id must be non-zero (0 = no widget)");

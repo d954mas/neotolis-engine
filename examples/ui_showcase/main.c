@@ -508,7 +508,7 @@ static uint32_t s_id_tip_a, s_id_tip_b, s_id_tip_c;         /* tooltip targets *
 static uint32_t s_id_menu_global;                           /* global context menu (right-click anywhere) */
 static uint32_t s_id_menu_zone;                             /* zone context menu (bound to a panel) */
 static uint32_t s_id_menu_panel;                            /* the zone panel the zone menu binds to (opens only over it) */
-static uint32_t s_id_menu_opacity_btn;                      /* inner button on the zone menu's non_activatable custom row */
+static uint32_t s_id_menu_opacity_btn;                      /* inner button on the zone menu's not-activatable custom row */
 static uint32_t s_id_tabs_demo_base;                        /* begin/end-core demo strip: tabs salt from this + index */
 static bool s_ids_ready;
 // #endregion
@@ -3126,7 +3126,7 @@ static void render_menu_global(nt_ui_context_t *ctx, tab_state_t *st) {
 }
 
 /* ZONE menu (panel actions): distinct rows + a "Move to" submenu so the bound menu is unmistakable, plus a
- * custom non_activatable row whose inner control owns the click while the row only highlights. */
+ * custom not-activatable row whose inner control owns the click while the row only highlights. */
 static void render_menu_zone(nt_ui_context_t *ctx, tab_state_t *st) {
     nt_ui_menu_t *menu = &st->menu.zone_menu;
     if (nt_ui_menu_begin(menu, ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_menu_zone, g_current->menu)) {
@@ -3152,10 +3152,9 @@ static void render_menu_zone(nt_ui_context_t *ctx, tab_state_t *st) {
             (void)nt_ui_menu_item_ex(menu, MK_MOVE_GROUP, "Group", grp);
             nt_ui_menu_submenu_end(menu);
         }
-        /* Custom-content row (non_activatable): the inner button owns the click; the row only
+        /* Custom-content row (not activatable): the inner button owns the click; the row only
          * highlights on hover. The game reads the inner button's own interaction. */
-        nt_ui_menu_item_opts_t op = {.non_activatable = true};
-        nt_ui_menu_item_begin(menu, MK_CUSTOM_OPACITY, op);
+        nt_ui_menu_item_begin(menu, MK_CUSTOM_OPACITY, /*enabled=*/true, /*activatable=*/false);
         char opacity_buf[24];
         (void)snprintf(opacity_buf, sizeof opacity_buf, "Opacity %u%%", st->menu.opacity_pct);
         nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), opacity_buf, g_current->body);
@@ -3176,8 +3175,8 @@ static void render_menu_zone(nt_ui_context_t *ctx, tab_state_t *st) {
 
 /* Menu tab: a right-click / long-press context menu with a nested submenu, exercising the mouse-aim
  * hover-intent, per-level edge-flip, nested dismiss, and keyboard nav. The immediate API builds the tree in
- * CODE every frame (no static items[]); the game owns the open flag; activation is reported inline. The
- * nt_ui_menu_open_trigger arms the menu at the cursor on a right-click / long-press. */
+ * CODE every frame (no static items[]); the game decides when nt_ui_menu_open opens a menu at the cursor;
+ * activation is reported inline. */
 static void render_menu(nt_ui_context_t *ctx, tab_state_t *st) {
     char buf[64];
 
@@ -3186,10 +3185,8 @@ static void render_menu(nt_ui_context_t *ctx, tab_state_t *st) {
                 g_current->caption);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Opening one closes the other. Hover the submenu row to fly it out; arrows/Enter navigate.", g_current->caption);
 
-    /* ZONE menu: a visible panel the menu binds to, so a right-click / long-press arms it ONLY over this
-     * panel. The game owns the panel's single canonical events step (long-press gesture for touch); the
-     * trigger does only idempotent reads and binds the right-click to the panel via a bbox geometry hit-test
-     * (so a right-click over the panel RE-opens the menu at the cursor through its own occluder). */
+    /* ZONE menu: a visible panel the menu binds to, so a right-click / long-press opens it ONLY over this
+     * panel. The game owns the panel's step (long-press gesture for touch) and decides when each menu opens. */
     CLAY({.id = (Clay_ElementId){.id = s_id_menu_panel},
           .layout = {.sizing = {CLAY_SIZING_FIXED(520), CLAY_SIZING_FIXED(220)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
           .backgroundColor = g_current->panel_alt,
@@ -3199,20 +3196,20 @@ static void render_menu(nt_ui_context_t *ctx, tab_state_t *st) {
     }
     const nt_ui_interaction_t zone_ev = nt_ui_step(ctx, s_id_menu_panel, NULL);
 
-    /* Mutually exclusive arming: a right-click over the zone panel must arm ONLY the zone menu, anywhere
-     * else ONLY the global. Same cursor + bbox snapshot the trigger reads (prev-frame bbox vs this-frame
-     * pointer), so over_zone matches the zone trigger's own geometry hit-test. */
+    /* A right-click opens the zone menu over the panel and the global one anywhere else; opening one closes
+     * the other. The panel test is geometric (prev-frame bbox), so a right-click re-opens the zone menu
+     * through the open menu's occluder. */
+    float px = 0.0F;
+    float py = 0.0F;
+    nt_ui_pointer_pos(ctx, &px, &py);
     const nt_ui_bbox_t zone_bb = nt_ui_get_bbox(ctx, s_id_menu_panel);
-    const bool over_zone = zone_bb.found && zone_ev.pos[0] >= zone_bb.x && zone_ev.pos[0] <= zone_bb.x + zone_bb.width && zone_ev.pos[1] >= zone_bb.y && zone_ev.pos[1] <= zone_bb.y + zone_bb.height;
-
-    const bool zone_armed = nt_ui_menu_open_trigger(&st->menu.zone_menu, ctx, s_id_menu_panel, nt_ui_hold_crossed(&zone_ev, 0.5F));
-    /* Global only when NOT over the zone, so a right-click on the panel never also arms the global. */
-    const bool global_armed = !over_zone && nt_ui_menu_open_trigger(&st->menu.global_menu, ctx, /*target_id=*/0U, /*long_pressed=*/false);
-
-    /* Opening one forces the other closed (open_trigger returns true only on the arming frame). */
-    if (zone_armed) {
+    const bool over_zone = zone_bb.found && px >= zone_bb.x && px <= zone_bb.x + zone_bb.width && py >= zone_bb.y && py <= zone_bb.y + zone_bb.height;
+    const bool right = nt_input_mouse_is_pressed(NT_BUTTON_RIGHT);
+    if ((right && over_zone) || nt_ui_hold_crossed(&zone_ev, 0.5F)) {
+        nt_ui_menu_open(&st->menu.zone_menu, px, py);
         st->menu.global_menu.open = false;
-    } else if (global_armed) {
+    } else if (right) {
+        nt_ui_menu_open(&st->menu.global_menu, px, py);
         st->menu.zone_menu.open = false;
     }
 
