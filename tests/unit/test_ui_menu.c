@@ -104,23 +104,11 @@ static void test_menu_point_in_tri(void) {
     TEST_ASSERT_TRUE(nt_ui_menu_test_point_in_tri(5.0F, 5.0F, 0.0F, 0.0F, 10.0F, 0.0F, 0.0F, 10.0F));
 }
 
-/* ---- Aim corners: the near edge faces the apex — the LEFT edge of a submenu opened to the right, the
- *      RIGHT edge of one edge-flipped to the left. ---- */
-static void test_menu_aim_corners_mirror(void) {
-    float bx = 0.0F;
-    float by = 0.0F;
-    float cx = 0.0F;
-    float cy = 0.0F;
-    /* submenu rect at (200,100) 150x200, apex on its left -> corners at x==200 (its left edge) */
-    nt_ui_menu_test_aim_corners(200.0F, 100.0F, 150.0F, 200.0F, 190.0F, &bx, &by, &cx, &cy);
-    TEST_ASSERT_TRUE(float_near(bx, 200.0F, 0.01F));
-    TEST_ASSERT_TRUE(float_near(cx, 200.0F, 0.01F));
-    TEST_ASSERT_TRUE(float_near(by, 100.0F, 0.01F));
-    TEST_ASSERT_TRUE(float_near(cy, 300.0F, 0.01F));
-    /* apex on its right (edge-flipped LEFT) -> mirror to the RIGHT edge x==350 */
-    nt_ui_menu_test_aim_corners(200.0F, 100.0F, 150.0F, 200.0F, 360.0F, &bx, &by, &cx, &cy);
-    TEST_ASSERT_TRUE(float_near(bx, 350.0F, 0.01F));
-    TEST_ASSERT_TRUE(float_near(cx, 350.0F, 0.01F));
+/* ---- The corridor aims at the submenu edge facing the apex: the LEFT edge of a submenu opened to the
+ *      right, the RIGHT edge of one edge-flipped to the left. ---- */
+static void test_menu_aim_near_edge_faces_apex(void) {
+    TEST_ASSERT_TRUE(float_near(nt_ui_menu_test_aim_near_x(200.0F, 150.0F, 190.0F), 200.0F, 0.01F));
+    TEST_ASSERT_TRUE(float_near(nt_ui_menu_test_aim_near_x(200.0F, 150.0F, 360.0F), 350.0F, 0.01F));
 }
 
 /* ---- Aim KEEP: a diagonal cursor path from a parent toward an open submenu (crossing a sibling row)
@@ -1563,7 +1551,7 @@ int main(void) {
     RUN_TEST(test_menu_abi_sizes);
     RUN_TEST(test_menu_defaults_valid);
     RUN_TEST(test_menu_point_in_tri);
-    RUN_TEST(test_menu_aim_corners_mirror);
+    RUN_TEST(test_menu_aim_near_edge_faces_apex);
     RUN_TEST(test_menu_aim_keeps_submenu_open_on_diagonal);
     RUN_TEST(test_menu_aim_switch_after_fallback);
     RUN_TEST(test_menu_max_depth_constant);

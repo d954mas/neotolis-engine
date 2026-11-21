@@ -152,9 +152,8 @@ void nt_ui_menu_open(nt_ui_menu_t *menu, float x, float y);
 /* Pure barycentric point-in-triangle. No GL, no ctx — directly unit-tested. */
 bool nt_ui_menu_test_point_in_tri(float px, float py, float ax, float ay, float bx, float by, float cx, float cy);
 
-/* The aim-triangle corners of a submenu rect: the edge facing the apex. Writes {bx,by,cx,cy} = the two
- * near corners. */
-void nt_ui_menu_test_aim_corners(float sub_x, float sub_y, float sub_w, float sub_h, float apex_x, float *bx, float *by, float *cx, float *cy);
+/* The x of the submenu edge the corridor aims at: the edge facing the apex. */
+float nt_ui_menu_test_aim_near_x(float sub_x, float sub_w, float apex_x);
 
 /* The hover-intent decision for the corridor `aim` toward the open submenu rect: true KEEPS the submenu
  * (the cursor aims at it or sits over it), false allows a sibling switch once the off-corridor dwell

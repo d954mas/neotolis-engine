@@ -76,19 +76,14 @@ static bool menu_point_in_tri(float px, float py, float ax, float ay, float bx, 
     return !(neg && pos);
 }
 
-/* Aim-triangle near corners for an open submenu rect (the two base corners only; the apex is the stable
- * primed apex): the submenu edge that faces the apex, so a submenu edge-flipped to the LEFT of its parent
- * aims at its RIGHT edge. */
-static void menu_aim_corners(float sub_x, float sub_y, float sub_w, float sub_h, float apex_x, float *bx, float *by, float *cx, float *cy) {
-    const float near_x = (apex_x > sub_x + (sub_w * 0.5F)) ? (sub_x + sub_w) : sub_x;
-    *bx = near_x;
-    *by = sub_y;
-    *cx = near_x;
-    *cy = sub_y + sub_h;
-}
+/* The submenu edge the corridor aims at: the one facing the apex, so a submenu edge-flipped to the LEFT of
+ * its parent aims at its RIGHT edge. */
+static float menu_aim_near_x(float sub_x, float sub_w, float apex_x) { return (apex_x > sub_x + (sub_w * 0.5F)) ? (sub_x + sub_w) : sub_x; }
 
 /* true KEEPS the open child `child`. The apex stays fixed while the corridor lives: a per-frame apex ~1px
- * from the cursor makes a degenerate wedge that never releases. */
+ * from the cursor makes a degenerate wedge that never releases. Over the child: keep and reset the timer;
+ * in the corridor: keep for at most 2x AIM_FALLBACK, so a parked cursor still releases; elsewhere: switch
+ * after AIM_FALLBACK. */
 static bool menu_hover_intent(nt_ui_menu_aim_t *c, uint8_t child, float mouse_x, float mouse_y, float sub_x, float sub_y, float sub_w, float sub_h, float dt) {
     if (c->depth != child) {
         c->apex_x = mouse_x;
@@ -97,26 +92,14 @@ static bool menu_hover_intent(nt_ui_menu_aim_t *c, uint8_t child, float mouse_x,
         c->depth = child;
         return true;
     }
-    float bx = 0.0F;
-    float by = 0.0F;
-    float cx = 0.0F;
-    float cy = 0.0F;
-    menu_aim_corners(sub_x, sub_y, sub_w, sub_h, c->apex_x, &bx, &by, &cx, &cy);
-    /* Over the child: keep and reset the timer. In the corridor: keep for at most 2x AIM_FALLBACK, so a parked
-     * cursor still releases. Elsewhere: switch after AIM_FALLBACK. */
-    const bool over_sub = (mouse_x >= sub_x) && (mouse_x <= sub_x + sub_w) && (mouse_y >= sub_y) && (mouse_y <= sub_y + sub_h);
-    const bool in_corridor = menu_point_in_tri(mouse_x, mouse_y, c->apex_x, c->apex_y, bx, by, cx, cy);
-    bool keep = true;
-    if (over_sub) {
+    if (mouse_x >= sub_x && mouse_x <= sub_x + sub_w && mouse_y >= sub_y && mouse_y <= sub_y + sub_h) {
         c->timer = 0.0F;
-    } else if (in_corridor && (c->timer < NT_UI_MENU_AIM_FALLBACK_SECS * 2.0F)) {
-        c->timer += dt;
-        keep = true;
-    } else {
-        c->timer += dt;
-        keep = (c->timer < NT_UI_MENU_AIM_FALLBACK_SECS);
+        return true;
     }
-    return keep;
+    const float near_x = menu_aim_near_x(sub_x, sub_w, c->apex_x);
+    const bool aiming = menu_point_in_tri(mouse_x, mouse_y, c->apex_x, c->apex_y, near_x, sub_y, near_x, sub_y + sub_h) && (c->timer < NT_UI_MENU_AIM_FALLBACK_SECS * 2.0F);
+    c->timer += dt;
+    return aiming || (c->timer < NT_UI_MENU_AIM_FALLBACK_SECS);
 }
 // #endregion
 
@@ -138,11 +121,10 @@ nt_ui_menu_style_t nt_ui_menu_style_defaults(void) {
         .item_height = 26U,
         .min_width = 160U,
         .pad = 6U,
-        .font_id = 0U,
-        .icon_size = 0U,        /* no icon gutter by default (text-only) */
-        .arrow_size = 14U,      /* used only when the arrow ref is set */
-        .check_size = 14U,      /* used only when the checkmark ref is set (mirror arrow_size) */
-        .separator_height = 2U, /* NULL-label divider thickness */
+        .icon_size = 0U,   /* no icon gutter by default (text-only) */
+        .arrow_size = 14U, /* used only when the arrow ref is set */
+        .check_size = 14U, /* used only when the checkmark ref is set (mirror arrow_size) */
+        .separator_height = 2U,
     };
 }
 
@@ -181,7 +163,7 @@ void nt_ui_menu_open(nt_ui_menu_t *menu, float x, float y) {
 
 // #region menu UI declaration (shared row/marker/panel helpers fed by the immediate path)
 /* A separator: a thin non-interactive divider (no row id), indented by the panel pad. */
-static void menu_declare_separator(nt_ui_context_t *ctx, uint8_t fill_layer, const nt_ui_menu_style_t *style) {
+static void menu_declare_separator(uint8_t fill_layer, const nt_ui_menu_style_t *style) {
     const float h = (style->separator_height > 0U) ? (float)style->separator_height : 1.0F;
     CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .padding = {.left = style->pad, .right = style->pad}}}) {
         CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(h)}},
@@ -192,8 +174,8 @@ static void menu_declare_separator(nt_ui_context_t *ctx, uint8_t fill_layer, con
 
 /* Draw the resolved per-item icon image filling the gutter cell (no-op if the ref is unset/unresolved).
  * Split out so the gutter cell stays a flat declaration (cognitive-complexity). */
-static void menu_draw_icon_image(nt_ui_context_t *ctx, uint8_t fill_layer, const nt_atlas_region_ref_t *icon) {
-    if (icon == NULL || icon->atlas.id == 0U) {
+static void menu_draw_icon_image(uint8_t fill_layer, const nt_atlas_region_ref_t *icon) {
+    if (icon->atlas.id == 0U) {
         return;
     }
     nt_atlas_region_ref_t ic = *icon; /* per-item ref (not style-owned): resolve by-value, never memoize */
@@ -209,55 +191,31 @@ static void menu_draw_icon_image(nt_ui_context_t *ctx, uint8_t fill_layer, const
 /* The leading icon gutter (unified icon model): reserve icon_size px so labels stay aligned across iconed
  * and non-iconed rows; draw the per-item icon if set, else leave the gutter empty. icon_size==0 -> no
  * gutter. */
-static void menu_declare_icon(nt_ui_context_t *ctx, uint8_t fill_layer, uint32_t icon_id, const nt_atlas_region_ref_t *icon, const nt_ui_menu_style_t *style) {
+static void menu_declare_icon(uint8_t fill_layer, uint32_t icon_id, const nt_atlas_region_ref_t *icon, const nt_ui_menu_style_t *style) {
     if (style->icon_size == 0U) {
         return;
     }
     const float gut = (float)style->icon_size;
     CLAY({.id = (Clay_ElementId){.id = icon_id}, .layout = {.sizing = {CLAY_SIZING_FIXED(gut), CLAY_SIZING_FIXED(gut)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
-        menu_draw_icon_image(ctx, fill_layer, icon);
+        menu_draw_icon_image(fill_layer, icon);
     }
 }
 
-/* The submenu marker on a parent row: the arrow sprite (tinted, right-aligned) when a ref is set, else
- * the ">" text fallback. The arrow cell carries an explicit fmix id so consecutive parent rows' markers
- * never collide (Clay anonymous-child ids are additive). */
-static void menu_declare_marker(nt_ui_context_t *ctx, uint8_t fill_layer, uint8_t label_layer, uint32_t arrow_id, const nt_ui_label_style_t *lbl, nt_ui_menu_style_t *style) {
-    nt_atlas_resolve_ref(&style->arrow);
-    const bool has_art = (style->arrow.atlas.id != 0U && style->arrow.region != NT_ATLAS_INVALID_REGION);
-    if (has_art) {
+/* A trailing mark (submenu arrow, checkmark): `ref`'s sprite when it resolves, else `text`. The cell id keeps
+ * consecutive rows' marks apart (Clay anonymous child ids are additive). */
+static void menu_declare_mark(const nt_ui_menu_frame_t *f, uint32_t cell_id, nt_atlas_region_ref_t *ref, uint32_t tint, uint16_t size, const char *text, const nt_ui_label_style_t *lbl) {
+    nt_atlas_resolve_ref(ref);
+    if (ref->atlas.id != 0U && ref->region != NT_ATLAS_INVALID_REGION) {
         nt_ui_image_payload_t *p = NT_ARENA_ALLOC(&g_nt_mem_scratch, nt_ui_image_payload_t);
-        *p = (nt_ui_image_payload_t){.atlas = style->arrow.atlas, .region_index = style->arrow.region, .origin_x = 0.5F, .origin_y = 0.5F, .slice9_scale = 1.0F};
-        const float sz = (style->arrow_size > 0U) ? (float)style->arrow_size : (float)style->item_height * 0.5F;
-        CLAY({.id = (Clay_ElementId){.id = arrow_id},
+        *p = (nt_ui_image_payload_t){.atlas = ref->atlas, .region_index = ref->region, .origin_x = 0.5F, .origin_y = 0.5F, .slice9_scale = 1.0F};
+        const float sz = (size > 0U) ? (float)size : (float)f->style->item_height * 0.5F;
+        CLAY({.id = (Clay_ElementId){.id = cell_id},
               .layout = {.sizing = {CLAY_SIZING_FIXED(sz), CLAY_SIZING_FIXED(sz)}},
               .image = (Clay_ImageElementConfig){.imageData = p},
-              .backgroundColor = nt_ui_unpack_tint(style->arrow_tint),
-              .userData = (void *)nt_ui_make_element_data(fill_layer, NULL)}) {}
+              .backgroundColor = nt_ui_unpack_tint(tint),
+              .userData = (void *)nt_ui_make_element_data(f->fill_layer, NULL)}) {}
     } else {
-        nt_ui_label(ctx, nt_ui_make_element_data(label_layer, NULL), ">", lbl);
-    }
-}
-
-/* The selected checkmark on a row: the checkmark sprite (tinted) when a ref is set, else the "✓" text
- * fallback. Mirrors menu_declare_marker; the cell carries an explicit fmix id so sibling rows' checkmarks
- * never collide (Clay anonymous-child ids are additive). */
-static void menu_declare_check(nt_ui_context_t *ctx, uint8_t fill_layer, uint8_t label_layer, uint32_t check_id, const nt_ui_label_style_t *lbl, nt_ui_menu_style_t *style) {
-    nt_atlas_resolve_ref(&style->checkmark);
-    const bool has_art = (style->checkmark.atlas.id != 0U && style->checkmark.region != NT_ATLAS_INVALID_REGION);
-    if (has_art) {
-        nt_ui_image_payload_t *p = NT_ARENA_ALLOC(&g_nt_mem_scratch, nt_ui_image_payload_t);
-        *p = (nt_ui_image_payload_t){.atlas = style->checkmark.atlas, .region_index = style->checkmark.region, .origin_x = 0.5F, .origin_y = 0.5F, .slice9_scale = 1.0F};
-        const float sz = (style->check_size > 0U) ? (float)style->check_size : (float)style->item_height * 0.5F;
-        CLAY({.id = (Clay_ElementId){.id = check_id},
-              .layout = {.sizing = {CLAY_SIZING_FIXED(sz), CLAY_SIZING_FIXED(sz)}},
-              .image = (Clay_ImageElementConfig){.imageData = p},
-              .backgroundColor = nt_ui_unpack_tint(style->check_tint),
-              .userData = (void *)nt_ui_make_element_data(fill_layer, NULL)}) {}
-    } else {
-        CLAY({.id = (Clay_ElementId){.id = check_id}, .layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}}}) {
-            nt_ui_label(ctx, nt_ui_make_element_data(label_layer, NULL), "\xE2\x9C\x93", lbl);
-        }
+        CLAY({.id = (Clay_ElementId){.id = cell_id}, .layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}}}) { nt_ui_label(f->ui, nt_ui_make_element_data(f->label_layer, NULL), text, lbl); }
     }
 }
 
@@ -394,7 +352,7 @@ static nt_ui_interaction_t menu_im_row(nt_ui_menu_t *menu, uint32_t key, const c
     nt_ui_clay_priv_open_element();
     nt_ui_clay_priv_configure_open_element(row);
     if (!open_element) {
-        menu_declare_icon(ctx, f->fill_layer, menu_cell_id(row_id, NT_UI_MENU_KIND_ICON), &opts->icon, style);
+        menu_declare_icon(f->fill_layer, menu_cell_id(row_id, NT_UI_MENU_KIND_ICON), &opts->icon, style);
         nt_ui_label(ctx, nt_ui_make_element_data(f->label_layer, NULL), label != NULL ? label : "", &lbl);
         /* One GROW spacer right-aligns the trailing cells (shortcut / checkmark / submenu marker). */
         if (opts->shortcut != NULL || opts->selected || has_sub) {
@@ -404,10 +362,10 @@ static nt_ui_interaction_t menu_im_row(nt_ui_menu_t *menu, uint32_t key, const c
             menu_declare_shortcut(ctx, f->label_layer, menu_cell_id(row_id, NT_UI_MENU_KIND_SHORTCUT), opts->shortcut, style);
         }
         if (opts->selected) {
-            menu_declare_check(ctx, f->fill_layer, f->label_layer, menu_cell_id(row_id, NT_UI_MENU_KIND_CHECK), &lbl, style);
+            menu_declare_mark(f, menu_cell_id(row_id, NT_UI_MENU_KIND_CHECK), &style->checkmark, style->check_tint, style->check_size, "\xE2\x9C\x93", &lbl);
         }
         if (has_sub) {
-            menu_declare_marker(ctx, f->fill_layer, f->label_layer, menu_cell_id(row_id, NT_UI_MENU_KIND_ARROW), &lbl, style);
+            menu_declare_mark(f, menu_cell_id(row_id, NT_UI_MENU_KIND_ARROW), &style->arrow, style->arrow_tint, style->arrow_size, ">", &lbl);
         }
         nt_ui_clay_priv_close_element();
     }
@@ -416,7 +374,7 @@ static nt_ui_interaction_t menu_im_row(nt_ui_menu_t *menu, uint32_t key, const c
 
 /* Open a level's PANEL element (art-or-flat slice9) and LEAVE it open for the level's item children. The
  * caller (menu_begin / submenu_begin) balances it with nt_ui_clay_priv_close_element. */
-static void menu_open_panel(nt_ui_context_t *ctx, uint8_t fill_layer, uint32_t menu_id, uint8_t depth, nt_ui_menu_style_t *style) {
+static void menu_open_panel(uint8_t fill_layer, uint32_t menu_id, uint8_t depth, nt_ui_menu_style_t *style) {
     nt_atlas_resolve_ref(&style->panel_bg);
     const bool panel_art = (style->panel_bg.atlas.id != 0U && style->panel_bg.region != NT_ATLAS_INVALID_REGION);
     Clay_ElementDeclaration panel = {.id = (Clay_ElementId){.id = menu_panel_id(menu_id, depth)},
@@ -447,7 +405,7 @@ static void menu_open_level(const nt_ui_menu_t *menu, uint8_t depth, const nt_ui
     pst.layer = f->fill_layer;
     pst.flags &= (uint8_t)~NT_UI_POPUP_LIGHT_DISMISS;
     (void)nt_ui_popup_begin(f->ui, menu_level_id(f->menu_id, depth), &pst, anchor, true);
-    menu_open_panel(f->ui, f->fill_layer, f->menu_id, depth, f->style); /* LEFT open for the level's rows */
+    menu_open_panel(f->fill_layer, f->menu_id, depth, f->style); /* LEFT open for the level's rows */
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity): the leading validation assert chain inflates the count; control flow is flat (one open/closed branch)
@@ -471,7 +429,7 @@ bool nt_ui_menu_begin(nt_ui_menu_t *menu, nt_ui_context_t *ctx, const nt_ui_elem
         .style = style,
         .menu_id = menu_id,
         .nav_depth = menu->focus_depth,
-        .fill_layer = (data != NULL) ? data->layer : 0U, /* fills on data->layer, text on label_layer (game-controlled render order) */
+        .fill_layer = (data != NULL) ? data->layer : 0U,
         .label_layer = label_layer,
     };
 
@@ -495,6 +453,16 @@ bool nt_ui_menu_begin(nt_ui_menu_t *menu, nt_ui_context_t *ctx, const nt_ui_elem
     return true;
 }
 
+/* A row activates on its click or on Enter while focused; a frame activates one row, the first declared (a
+ * tap and Enter can land on two). */
+static bool menu_activate(nt_ui_menu_t *menu, uint32_t row_id, bool clicked) {
+    if (menu->frame.activated || !(clicked || (menu_key_target(menu, row_id) && nt_input_key_is_pressed(NT_KEY_ENTER)))) {
+        return false;
+    }
+    menu->frame.activated = true;
+    return true;
+}
+
 bool nt_ui_menu_item_ex(nt_ui_menu_t *menu, uint32_t key, const char *label, nt_ui_menu_item_opts_t opts) {
     NT_ASSERT(menu->frame.ui != NULL && "nt_ui_menu_item_ex: call between nt_ui_menu_begin/end");
     uint32_t row_id = 0U;
@@ -503,12 +471,7 @@ bool nt_ui_menu_item_ex(nt_ui_menu_t *menu, uint32_t key, const char *label, nt_
         return false;
     }
     (void)nt_ui_step(menu->frame.ui, row_id, NULL);
-    /* A frame activates one row, the first declared (a tap and Enter can land on two). */
-    const bool activated = !menu->frame.activated && (in.clicked || (menu_key_target(menu, row_id) && nt_input_key_is_pressed(NT_KEY_ENTER)));
-    if (activated) {
-        menu->frame.activated = true;
-    }
-    return activated;
+    return menu_activate(menu, row_id, in.clicked);
 }
 
 bool nt_ui_menu_item(nt_ui_menu_t *menu, uint32_t key, const char *label) { return nt_ui_menu_item_ex(menu, key, label, (nt_ui_menu_item_opts_t){0}); }
@@ -538,12 +501,7 @@ bool nt_ui_menu_item_end(nt_ui_menu_t *menu) {
         nt_ui_block_pointer(f->ui, row_id, NULL);
         return false;
     }
-    const nt_ui_interaction_t in = nt_ui_step(f->ui, row_id, NULL); /* the ONE mutating step per id */
-    const bool activated = !f->activated && (in.clicked || (menu_key_target(menu, row_id) && nt_input_key_is_pressed(NT_KEY_ENTER)));
-    if (activated) {
-        f->activated = true;
-    }
-    return activated;
+    return menu_activate(menu, row_id, nt_ui_step(f->ui, row_id, NULL).clicked); /* the ONE mutating step per id */
 }
 
 /* Right or Enter opens the focused parent if needed and moves focus to its first enabled row. A sibling's
@@ -605,7 +563,7 @@ void nt_ui_menu_submenu_end(nt_ui_menu_t *menu) {
 
 void nt_ui_menu_separator(nt_ui_menu_t *menu) {
     NT_ASSERT(menu->frame.ui != NULL && "nt_ui_menu_separator: call between nt_ui_menu_begin/end");
-    menu_declare_separator(menu->frame.ui, menu->frame.fill_layer, menu->frame.style); /* no id: nav skips it */
+    menu_declare_separator(menu->frame.fill_layer, menu->frame.style); /* no id: nav skips it */
 }
 
 void nt_ui_menu_separator_text(nt_ui_menu_t *menu, const char *label) {
@@ -730,9 +688,7 @@ void nt_ui_menu_end(nt_ui_menu_t *menu) {
 #ifdef NT_TEST_ACCESS
 bool nt_ui_menu_test_point_in_tri(float px, float py, float ax, float ay, float bx, float by, float cx, float cy) { return menu_point_in_tri(px, py, ax, ay, bx, by, cx, cy); }
 
-void nt_ui_menu_test_aim_corners(float sub_x, float sub_y, float sub_w, float sub_h, float apex_x, float *bx, float *by, float *cx, float *cy) {
-    menu_aim_corners(sub_x, sub_y, sub_w, sub_h, apex_x, bx, by, cx, cy);
-}
+float nt_ui_menu_test_aim_near_x(float sub_x, float sub_w, float apex_x) { return menu_aim_near_x(sub_x, sub_w, apex_x); }
 
 bool nt_ui_menu_test_hover_intent(nt_ui_menu_aim_t *aim, float mouse_x, float mouse_y, float sub_x, float sub_y, float sub_w, float sub_h, float dt) {
     return menu_hover_intent(aim, 1U, mouse_x, mouse_y, sub_x, sub_y, sub_w, sub_h, dt);
