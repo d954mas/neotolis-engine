@@ -32,11 +32,7 @@ if(NOT EMSCRIPTEN AND (CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU"))
 endif()
 
 nt_set_static_crt_cxx(nt_fpng)
-
-# Link C++ stdlib — needed on Linux where C linker doesn't pull it automatically
-if(NOT WIN32 AND NOT EMSCRIPTEN)
-    target_link_libraries(nt_fpng PUBLIC stdc++)
-endif()
+nt_link_cxx_runtime(nt_fpng)
 
 set_target_properties(nt_fpng PROPERTIES
     ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/engine/${NT_PRESET_NAME}"

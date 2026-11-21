@@ -54,8 +54,7 @@
 #endif
 
 /* KHR_debug constant — needed for glPushDebugGroup. Only used on native
- * (s_debug_groups_enabled is always false on WebGL2 since KHR_debug isn't
- * in the WebGL spec), but the symbol must compile. */
+ * (KHR_debug isn't in the WebGL spec), but the symbol must compile. */
 #ifndef GL_DEBUG_SOURCE_APPLICATION
 #define GL_DEBUG_SOURCE_APPLICATION 0x824A
 #endif
@@ -194,7 +193,9 @@ typedef struct {
 
 static bool s_timer_enabled;             /* extension/core entry points present */
 static bool s_timer_user_enabled = true; /* runtime toggle from nt_gfx_set_gpu_timing_enabled */
-static bool s_debug_groups_enabled;      /* KHR_debug present — push/pop debug groups around segments */
+#ifndef NT_PLATFORM_WEB
+static bool s_debug_groups_enabled; /* KHR_debug present — push/pop debug groups around segments */
+#endif
 static nt_gfx_segment_state_t s_segments[NT_GFX_TIMER_MAX_SEGMENTS];
 static uint8_t s_segment_count;
 static int8_t s_active_segment = -1; /* index in s_segments while a query is open, -1 otherwise */
@@ -656,7 +657,9 @@ static void nt_gfx_gl_init_context_features(void) {
     nt_gfx_gl_drain_errors();
 #if NT_GFX_GPU_TIMING_ENABLED
     s_timer_enabled = nt_gfx_gl_ctx_enable_timer_query();
+#ifndef NT_PLATFORM_WEB
     s_debug_groups_enabled = nt_gfx_gl_ctx_enable_debug_groups();
+#endif
     nt_gfx_backend_drop_timer_segments();
 #endif
     nt_gfx_gl_ctx_enable_debug_callback();

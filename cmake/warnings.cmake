@@ -69,3 +69,14 @@ function(nt_set_static_crt_cxx target)
         set_target_properties(${target} PROPERTIES MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:>")
     endif()
 endfunction()
+
+# A C++ library linked into C executables carries its C++ runtime on the link interface. Consumers
+# link with the C driver: CXX is enabled only in the library's directory, so CMake never picks the
+# C++ one. The GNU linker and emcc then add no C++ runtime; MSVC-style links pull it themselves.
+function(nt_link_cxx_runtime target)
+    if(EMSCRIPTEN)
+        target_link_options(${target} INTERFACE -sDEFAULT_TO_CXX)
+    elseif(NOT WIN32)
+        target_link_libraries(${target} PUBLIC stdc++)
+    endif()
+endfunction()

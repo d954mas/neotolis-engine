@@ -24,6 +24,12 @@ if(EMSCRIPTEN)
         gl/nt_gfx_gl_ctx.h
     )
     target_link_libraries(nt_gfx PUBLIC nt_core nt_pool nt_window_interface nt_log_interface nt_hash nt_gfx_interface nt_basisu_transcoder_interface nt_meshwire_interface)
+    # The GL backend creates a WebGL2 context and nothing falls back to WebGL1.
+    target_link_options(nt_gfx INTERFACE -sUSE_WEBGL2=1 -sMAX_WEBGL_VERSION=2 -sMIN_WEBGL_VERSION=2)
+    # Opt-in web GL debug (NT_GFX_WEB_GL_DEBUG): link-time GL glue validation + per-call logging.
+    if(NT_GFX_WEB_GL_DEBUG)
+        target_link_options(nt_gfx INTERFACE -sGL_ASSERTIONS=1 -sGL_DEBUG=1)
+    endif()
 else()
     nt_add_module(nt_gfx LOG_DOMAIN "gfx"
         nt_gfx.c
