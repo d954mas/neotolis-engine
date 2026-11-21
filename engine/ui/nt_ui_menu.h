@@ -24,9 +24,9 @@ extern const nt_ui_widget_def_t NT_UI_MENU_DEF;
 /* AIM_FALLBACK is how long the cursor may sit OFF the aim triangle before the hovered sibling wins. */
 #define NT_UI_MENU_AIM_FALLBACK_SECS 0.12F
 
-/* Submenu nesting cap: a runaway tree (cyclic submenu pointer, pathological depth) would exhaust the
- * popup z-band / stack; NT_ASSERT fires BEFORE the push (fail-early, no fallback). Build-overridable for
- * parity with every other cap in the subsystem. */
+/* Submenu nesting cap: a parent row declared on the deepest level asserts (fail-early, no fallback), so a
+ * runaway tree never exhausts the popup z-band / stack. Build-overridable for parity with every other cap
+ * in the subsystem. */
 #ifndef NT_UI_MENU_MAX_DEPTH
 #define NT_UI_MENU_MAX_DEPTH 8
 #endif
@@ -52,7 +52,6 @@ typedef struct {
     float font_size;                 /* px; asserted > 0 */
     float slice9_scale;              /* multiplies the panel art's baked slice9 borders; > 0 */
     float state_speed;               /* eases the row hover/focus highlight (0 = instant) */
-    float open_ease_speed;           /* popup open/close tween speed (0 = snap; game opts into a tween) */
     uint16_t item_height;            /* px row height */
     uint16_t min_width;              /* px panel min width */
     uint16_t pad;                    /* px inner padding */
@@ -62,7 +61,7 @@ typedef struct {
     uint16_t check_size;             /* px checkmark sprite box (used only when the checkmark ref is set) */
     uint16_t separator_height;       /* px NULL-label separator divider thickness */
 } nt_ui_menu_style_t;
-_Static_assert(sizeof(nt_ui_menu_style_t) == 120, "nt_ui_menu_style_t stable ABI (3 ref + 9 u32 + 4 float + 8 u16 + 4 tail pad)");
+_Static_assert(sizeof(nt_ui_menu_style_t) == 112, "nt_ui_menu_style_t stable ABI (3 ref + 9 u32 + 3 float + 8 u16)");
 
 /* Valid baseline style (dark). */
 nt_ui_menu_style_t nt_ui_menu_style_defaults(void);
@@ -85,31 +84,37 @@ typedef struct {
  * multiple of the 8-byte ref alignment; express portably as 16 + the (ptr+4) cell rounded up to 8. */
 _Static_assert(sizeof(nt_ui_menu_item_opts_t) == 16 + (((sizeof(void *) + 4) + 7) / 8 * 8), "nt_ui_menu_item_opts_t stable ABI (16 ref + ptr + 3 bool + pad, 8-aligned)");
 
+/* The mouse-aim corridor guarding one open child level: its apex is where the cursor left the parent
+ * row, its timer the dwell off the corridor. depth 0 = not primed. */
+typedef struct {
+    float apex_x, apex_y;
+    float timer;
+    uint8_t depth; /* the guarded child level */
+} nt_ui_menu_aim_t;
+
 /* One declaration's scratch (menu_begin..menu_end), reset by nt_ui_menu_begin. */
 typedef struct {
     nt_ui_context_t *ui; /* the core ctx between begin and end; NULL outside */
     nt_ui_menu_style_t *style;
     uint32_t menu_id;
-    uint32_t focus;                           /* focus at begin: Enter and Right act on this row */
-    uint32_t nav_first, nav_last;             /* first/last enabled row on the navigated level */
-    uint32_t nav_prev, nav_next;              /* enabled rows before/after the focused one there */
-    uint32_t hover_id;                        /* row under the pointer (0 = none) */
-    uint32_t click_id;                        /* parent clicked this frame (0 = none) */
-    uint32_t item_id;                         /* the open custom row (item_begin..item_end) */
-    uint8_t level_side[NT_UI_MENU_MAX_DEPTH]; /* each level's resolved popup side (aim-corridor near edge) */
-    uint8_t depth;                            /* level being declared */
-    uint8_t nav_depth;                        /* deepest open level at begin: the one keys navigate */
-    uint8_t declared_depth;                   /* deepest level declared: open parents past it are gone */
+    uint32_t nav_first, nav_last; /* first/last enabled row on the navigated level */
+    uint32_t nav_prev, nav_next;  /* enabled rows before/after the focused one there */
+    uint32_t hover_id;            /* row under the pointer (0 = none) */
+    uint32_t click_id;            /* parent clicked this frame (0 = none) */
+    uint32_t item_id;             /* the open custom row (item_begin..item_end); 0 = none */
+    uint8_t depth;                /* level being declared */
+    uint8_t nav_depth;            /* deepest open level at begin: the one keys navigate */
+    uint8_t declared_depth;       /* deepest level declared: open parents past it are gone */
     uint8_t hover_depth;
     uint8_t click_depth;
     uint8_t fill_layer;
     uint8_t label_layer;
     bool open_frame;       /* open at begin; false = the row calls no-op */
+    bool arming;           /* the first open frame: its press does not dismiss */
     bool nav_passed;       /* the navigated level has declared the focused row */
     bool focus_first;      /* a keyboard-opened child gives focus to its first enabled row */
-    bool hover_opens;      /* hover_id is a parent that can open its child */
+    bool hover_opens;      /* hover_id is a parent */
     bool activated;        /* a row activated: the chain closes */
-    bool item_open;        /* between item_begin and item_end */
     bool item_enabled;     /* the open custom row is enabled */
     bool item_activatable; /* the open custom row has an action of its own */
 } nt_ui_menu_frame_t;
@@ -121,26 +126,27 @@ typedef struct {
  * (if (nt_ui_menu_item(...)) act();) for mouse and keyboard alike. */
 typedef struct {
     float anchor_x, anchor_y; /* open point (UI space) — root menu top-left attaches here */
-    bool open;                /* game-owned open flag; menu clears on dismiss */
     uint32_t focus;           /* focused row id (0 = none) */
+    uint32_t hovered;         /* row under the pointer last frame */
     /* Open parent row id per level; the first 0 ends the chain, and its length is the open depth. */
     uint32_t open_path[NT_UI_MENU_MAX_DEPTH];
-    uint32_t opened_frame; /* the arming frame: its press does not dismiss */
+    nt_ui_menu_aim_t aim;
+    bool open;     /* game-owned open flag; menu clears on dismiss */
+    bool shown;    /* open at the last begin */
+    bool kbd_mode; /* a key moved focus: the pointer moves it again only from another row */
     nt_ui_menu_frame_t frame;
 } nt_ui_menu_t;
 
-/* Immediate-mode menu (begin/end). The game declares the tree during the frame: open with menu_begin,
- * declare rows via item / item_ex / item_begin..item_end / submenu_begin..submenu_end / separator, close
- * with menu_end. Ids derive via the scope stack (mix(scope,key)); submenu_begin pushes its row id as the
- * child scope so keys need only be unique among siblings. Keys act on the deepest open level: Enter on the
- * focused leaf activates it this frame, Right or Enter on the focused parent opens it this frame;
- * Up/Down/Left/Esc resolve in menu_end and show next frame.
+/* Immediate-mode menu (begin/end), declared every frame. A row id is mix(scope, key), where the scope is
+ * the menu id at the root and the open parent's row id below it, so keys need only be unique among
+ * siblings. Keys act on the deepest open level: Enter on the focused leaf activates it this frame, Right
+ * or Enter on the focused parent opens it this frame; Up/Down/Left/Esc resolve in menu_end.
  * Layers: every level's panel + row fills + icons + markers draw on data->layer (also the popup panel
  * layer); item text + label fallbacks on label_layer (split to batch fills-then-text). data may be NULL
  * (fills fall to layer 0). Mirrors tabbar/checkbox: layer comes from the call, NOT the style.
  * begin binds `ctx` for the begin/end span; every inner call reaches the core through the menu.
- * Call item/submenu/separator/end EVERY frame, open or closed — the calls no-op when closed, and the
- * closed frame resets navigation; do NOT wrap them in `if (menu.open)`. */
+ * Call item/submenu/separator/end EVERY frame, open or closed — the calls no-op when closed; do NOT wrap
+ * them in `if (menu.open)`. */
 void nt_ui_menu_begin(nt_ui_menu_t *menu, nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t menu_id, nt_ui_menu_style_t *style);
 bool nt_ui_menu_item(nt_ui_menu_t *menu, uint32_t key, const char *label);                                 /* plain item; returns clicked */
 bool nt_ui_menu_item_ex(nt_ui_menu_t *menu, uint32_t key, const char *label, nt_ui_menu_item_opts_t opts); /* rich row; returns clicked */
@@ -174,24 +180,20 @@ void nt_ui_menu_end(nt_ui_menu_t *menu);
  * does not respect z-order). `long_pressed` is the touch trigger: the caller passes nt_ui_hold_crossed of
  * ITS target widget's own step (this helper owns no gesture timing). Returns true if it armed this frame
  * (so the caller can stop other handling). */
-bool nt_ui_menu_open_trigger(nt_ui_context_t *ctx, uint32_t target_id, bool long_pressed, nt_ui_menu_t *menu);
+bool nt_ui_menu_open_trigger(nt_ui_menu_t *menu, nt_ui_context_t *ctx, uint32_t target_id, bool long_pressed);
 
 #ifdef NT_TEST_ACCESS
 /* Pure barycentric point-in-triangle. No GL, no ctx — directly unit-tested. */
 bool nt_ui_menu_test_point_in_tri(float px, float py, float ax, float ay, float bx, float by, float cx, float cy);
 
-/* The aim-triangle corners for a submenu rect on a given side (RIGHT => near edge is the submenu LEFT;
- * LEFT => mirror to the submenu RIGHT). Writes {bx,by,cx,cy} = the two near corners. */
-void nt_ui_menu_test_aim_corners(float sub_x, float sub_y, float sub_w, float sub_h, uint8_t side, float *bx, float *by, float *cx, float *cy);
+/* The aim-triangle corners of a submenu rect: the edge facing the apex. Writes {bx,by,cx,cy} = the two
+ * near corners. */
+void nt_ui_menu_test_aim_corners(float sub_x, float sub_y, float sub_w, float sub_h, float apex_x, float *bx, float *by, float *cx, float *cy);
 
-/* Per-open-submenu hover-intent decision, driven through the state pool (salted by depth so level N
- * never aliases N+1). Feeds the current mouse + prev-frame mouse + the open submenu rect; returns true
- * to KEEP the submenu (cursor is aiming at it, switch_timer reset) or false to allow a sibling switch
- * once the off-triangle dwell passed AIM_FALLBACK. */
-bool nt_ui_menu_test_hover_intent(nt_ui_context_t *ctx, uint32_t menu_id, uint8_t depth, float mouse_x, float mouse_y, float sub_x, float sub_y, float sub_w, float sub_h, uint8_t side, float dt);
-
-/* Live switch-timer in the depth-salted hover-intent cell (0 if absent). */
-float nt_ui_menu_test_switch_timer(const nt_ui_context_t *ctx, uint32_t menu_id, uint8_t depth);
+/* The hover-intent decision for the corridor `aim` toward the open submenu rect: true KEEPS the submenu
+ * (the cursor aims at it or sits over it), false allows a sibling switch once the off-corridor dwell
+ * passed AIM_FALLBACK. An unprimed aim latches its apex at the cursor and keeps. */
+bool nt_ui_menu_test_hover_intent(nt_ui_menu_aim_t *aim, float mouse_x, float mouse_y, float sub_x, float sub_y, float sub_w, float sub_h, float dt);
 
 /* A level's panel id and the single root occluder id, for prev-frame bbox queries. */
 uint32_t nt_ui_menu_test_panel_id(uint32_t menu_id, uint8_t depth);

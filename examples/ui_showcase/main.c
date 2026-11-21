@@ -3206,9 +3206,9 @@ static void render_menu(nt_ui_context_t *ctx, tab_state_t *st) {
     const nt_ui_bbox_t zone_bb = nt_ui_get_bbox(ctx, s_id_menu_panel);
     const bool over_zone = zone_bb.found && zone_ev.pos[0] >= zone_bb.x && zone_ev.pos[0] <= zone_bb.x + zone_bb.width && zone_ev.pos[1] >= zone_bb.y && zone_ev.pos[1] <= zone_bb.y + zone_bb.height;
 
-    const bool zone_armed = nt_ui_menu_open_trigger(ctx, s_id_menu_panel, nt_ui_hold_crossed(&zone_ev, 0.5F), &st->menu.zone_menu);
+    const bool zone_armed = nt_ui_menu_open_trigger(&st->menu.zone_menu, ctx, s_id_menu_panel, nt_ui_hold_crossed(&zone_ev, 0.5F));
     /* Global only when NOT over the zone, so a right-click on the panel never also arms the global. */
-    const bool global_armed = !over_zone && nt_ui_menu_open_trigger(ctx, /*target_id=*/0U, /*long_pressed=*/false, &st->menu.global_menu);
+    const bool global_armed = !over_zone && nt_ui_menu_open_trigger(&st->menu.global_menu, ctx, /*target_id=*/0U, /*long_pressed=*/false);
 
     /* Opening one forces the other closed (open_trigger returns true only on the arming frame). */
     if (zone_armed) {
