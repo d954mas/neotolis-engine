@@ -105,7 +105,6 @@ static void init_style(void) {
     s_style.placeholder.font_id = 0;
     s_style.placeholder.font_size = FONT_SIZE;
     s_style.pad_x = PAD_X;
-    s_style.pad_y = 4.0F;
     s_style.caret_blink_rate = 0.0F;     /* always-on caret -> deterministic render */
     memset(&s_props, 0, sizeof s_props); /* zero-init = plain text field (no filter/mask, default keyboard) */
 }

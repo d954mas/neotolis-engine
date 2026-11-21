@@ -1573,7 +1573,6 @@ int main(int argc, char *argv[]) {
     s_input_style.placeholder.font_size = 22.0F;
     s_input_style.placeholder.color = NT_RGBA8(120, 126, 138, 255);
     s_input_style.pad_x = 10.0F;
-    s_input_style.pad_y = 8.0F;
     s_input_style.skin[NT_UI_INPUT_IDLE].bg_color = 0xFF303438U;
     s_input_style.skin[NT_UI_INPUT_IDLE].border_color = 0xFF505860U;
     s_input_style.skin[NT_UI_INPUT_FOCUSED].bg_color = 0xFF383E44U;

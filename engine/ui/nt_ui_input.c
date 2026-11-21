@@ -58,8 +58,7 @@ const nt_ui_widget_def_t NT_UI_INPUT_DEF = {
 #define NT_UI_INPUT_REPEAT_DELAY 0.275F
 #define NT_UI_INPUT_REPEAT_RATE 0.05F
 
-/* Per-field retained cell: caret byte-offset into the game buffer, horizontal scroll px so the
- * caret stays visible, and the accumulated blink phase. The STRING stays game-owned. */
+/* Salt for the per-field edit-state cell; the string stays game-owned. */
 #define NT_UI_INPUT_STATE_SALT 0x10D70001U
 /* Distinct salt for the bg/border colour-ease cell in the retained state pool so it never collides
  * with a game's own cell on the field id, nor with the input edit-state cell. */
@@ -78,9 +77,7 @@ typedef struct {
 static inline uint32_t input_state_id(uint32_t id) { return nt_ui_derived_id(id, NT_UI_INPUT_STATE_SALT); }
 
 // #region oklab colour-ease (bg/border cross-fade)
-/* Perceptual OKLab cross-fade: ease L,a,b in OKLab (no muddy sRGB midpoint), alpha linearly;
- * first-touch snaps (no flash). Arena per-id cell, no heap. The OKLab/sRGB math lives in
- * color/nt_color.h (Clay-free, shared); the Clay_Color boundary stays local here. */
+/* bg/border cross-fade cell; the OKLab math lives in color/nt_color.h. */
 #define NT_UI_INPUT_FADE_TAG NT_UI_STATE_TAG('i', 'f', 'a', 'd')
 
 typedef struct {
@@ -89,15 +86,13 @@ typedef struct {
     nt_oklab_t bd; /* current eased border colour */
 } input_fade_cell_t;
 
-/* Eased OKLab cell -> Clay_Color (0..255) via the packed gamut-clamp path. Skins are opaque; a
- * translucent fade would premultiply rgb by alpha around the lerp to avoid edge fringe. */
+/* Eased OKLab cell -> Clay_Color via the packed gamut-clamp path. */
 static inline Clay_Color oklab_to_clay(nt_oklab_t o) { return nt_ui_unpack_abgr(nt_color_oklab_to_packed(o)); }
 // #endregion
 
 // #region utf8 helpers
-
-/* Decode the codepoint length (1..4 bytes) at byte offset `off`. Returns 0 on a malformed
- * lead (caller treats as a single byte to make forward progress without splitting). */
+/* Byte length of the codepoint at `off` (off < len): 1..4, 1 for a malformed byte, the rest for a
+ * truncated tail. */
 static uint32_t utf8_seq_len(const char *buf, uint32_t off, uint32_t len) {
     uint32_t state = NT_UTF8_ACCEPT;
     uint32_t cp = 0U;
@@ -112,7 +107,7 @@ static uint32_t utf8_seq_len(const char *buf, uint32_t off, uint32_t len) {
             return 1U; /* malformed: step one byte */
         }
     }
-    return (i > off) ? (i - off) : 0U;
+    return i - off;
 }
 
 /* Byte offset of the codepoint boundary one step LEFT of `off` (continuation bytes are 10xxxxxx). */
@@ -127,8 +122,8 @@ static uint32_t utf8_prev_boundary(const char *buf, uint32_t off) {
     return i;
 }
 
-/* Encode `cp` to UTF-8 in `out` (>= 4 bytes). Returns the byte count, or 0 for an
- * unencodable / control / NUL codepoint (dropped, never spliced). */
+/* Encode `cp` to UTF-8 in `out` (>= 4 bytes). Returns the byte count, or 0 for NUL, a surrogate
+ * or an out-of-range codepoint (dropped, never spliced). */
 static uint32_t utf8_encode(uint32_t cp, char out[4]) {
     if (cp == 0U || cp > 0x10FFFFU || (cp >= 0xD800U && cp <= 0xDFFFU)) {
         return 0U; /* NUL, out-of-range, or surrogate: never splice */
@@ -154,11 +149,9 @@ static uint32_t utf8_encode(uint32_t cp, char out[4]) {
     out[3] = (char)(0x80U | (cp & 0x3FU));
     return 4U;
 }
-
 // #endregion
 
 // #region selection helpers
-
 /* Whitespace test for word-class scanning (double-click select-word). ASCII space class only;
  * a non-whitespace codepoint (incl. any multi-byte letter) is a "word" byte. */
 static bool byte_is_word(char c) {
@@ -199,11 +192,9 @@ static void selection_span(const nt_ui_input_state_t *st, uint32_t *lo, uint32_t
         *hi = st->anchor;
     }
 }
-
 // #endregion
 
 // #region stock predicates
-
 bool nt_ui_filter_numeric(uint32_t cp) { return (cp >= (uint32_t)'0' && cp <= (uint32_t)'9') || cp == (uint32_t)'.' || cp == (uint32_t)'+' || cp == (uint32_t)'-'; }
 
 static bool is_ascii_alnum(uint32_t cp) { return (cp >= (uint32_t)'0' && cp <= (uint32_t)'9') || (cp >= (uint32_t)'a' && cp <= (uint32_t)'z') || (cp >= (uint32_t)'A' && cp <= (uint32_t)'Z'); }
@@ -249,15 +240,13 @@ bool nt_ui_filter_url(uint32_t cp) {
 
 /* Default allow when props->allow == NULL: any printable (drop C0/C1 control + DEL). */
 static bool allow_printable(uint32_t cp) { return cp >= 0x20U && cp != 0x7FU && !(cp >= 0x80U && cp <= 0x9FU); }
-
 // #endregion
 
 static inline bool shift_held(void) { return nt_input_key_is_down(NT_KEY_LSHIFT) || nt_input_key_is_down(NT_KEY_RSHIFT); }
 /* Ctrl, or Cmd on macOS. */
 static inline bool shortcut_held(void) { return nt_input_key_is_down(NT_KEY_LCTRL) || nt_input_key_is_down(NT_KEY_RCTRL) || nt_input_key_is_down(NT_KEY_LMETA) || nt_input_key_is_down(NT_KEY_RMETA); }
 
-/* PC-style auto-repeat core. Last-pressed wins (a newer repeatable key re-arms to it).
- * Edges arrive as params so the unit test can drive timing with fake input. */
+/* PC-style auto-repeat core; last-pressed wins (a newer repeatable key re-arms to it). */
 #ifdef NT_TEST_ACCESS
 bool nt_ui_input_key_repeat_step(uint16_t *repeat_key, float *repeat_t, nt_key_t k, bool pressed, bool down, float dt)
 #else
@@ -301,9 +290,8 @@ bool nt_ui_input_any_focused(const nt_ui_context_t *ctx) {
 }
 
 // #region edit ops
-
-/* Splice the UTF-8 encoding of `cp` into buffer at `caret`, clamping to buffer_size-1 and the
- * style max_length. A multi-byte codepoint that does not fit is dropped WHOLE (never split).
+/* Splice the UTF-8 encoding of `cp` into buffer at `caret`, clamping to buffer_size-1 and
+ * max_len. A multi-byte codepoint that does not fit is dropped WHOLE (never split).
  * Returns the new caret byte-offset; sets *changed when the buffer mutated. */
 static uint32_t insert_codepoint(char *buffer, size_t buffer_size, size_t max_len, uint32_t caret, uint32_t cur_len, uint32_t cp, bool *changed) {
     char enc[4];
@@ -353,16 +341,13 @@ static void delete_right(char *buffer, uint32_t caret, uint32_t cur_len, bool *c
     if (caret >= cur_len) {
         return;
     }
-    const uint32_t n = utf8_seq_len(buffer, caret, cur_len);
-    const uint32_t step = (n > 0U) ? n : 1U;
+    const uint32_t step = utf8_seq_len(buffer, caret, cur_len);
     memmove(&buffer[caret], &buffer[caret + step], (size_t)(cur_len - (caret + step)) + 1U);
     *changed = true;
 }
-
 // #endregion
 
 // #region clipboard (Ctrl+C/X/V)
-
 /* Copy the selected byte range to the system clipboard. No-op on an empty selection. */
 static void clipboard_copy_selection(const char *buffer, const nt_ui_input_state_t *st) {
     if (st->anchor == st->caret) {
@@ -404,10 +389,8 @@ static uint32_t decode_one(const char *src, size_t off, size_t len, uint32_t *ou
     return (consumed > 0U) ? consumed : 1U;
 }
 
-/* Splice clipboard text at the caret (replacing any selection). Each codepoint is decoded from the
- * untrusted clipboard bytes, run through the allow-predicate, and inserted via insert_codepoint —
- * which clamps to buffer_size-1 / max_length-1 bytes and drops a non-fitting multi-byte codepoint WHOLE.
- * A malformed lead byte is skipped one byte at a time (never read OOB). Returns the new caret. */
+/* Splice untrusted clipboard text at the caret (replacing any selection): decode per codepoint,
+ * filter through allow, stop at the first that does not fit. Returns the new caret. */
 static uint32_t clipboard_paste(char *buffer, size_t buffer_size, const nt_ui_input_props_t *props, nt_ui_input_state_t *st, uint32_t cur_len, bool *changed) {
     /* Read in place: valid until the next clipboard call, and allow must not make one. */
     const char *clip = nt_clipboard_get_text();
@@ -448,7 +431,6 @@ static uint32_t clipboard_paste(char *buffer, size_t buffer_size, const nt_ui_in
     }
     return st->caret;
 }
-
 // #endregion
 
 /* Codepoint count in [0,caret) (one decode pass). password mode measures one mask glyph per
@@ -457,8 +439,7 @@ static uint32_t codepoint_count(const char *buffer, uint32_t caret) {
     uint32_t count = 0U;
     uint32_t i = 0U;
     while (i < caret) {
-        const uint32_t step = utf8_seq_len(buffer, i, caret);
-        i += (step > 0U) ? step : 1U;
+        i += utf8_seq_len(buffer, i, caret);
         ++count;
     }
     return count;
@@ -482,9 +463,8 @@ static float caret_x_at(const nt_ui_input_style_t *style, bool password, nt_font
     return mask_width(style, font, codepoint_count(buffer, caret));
 }
 
-/* Map a click x (px from text origin, scroll already added) to the nearest codepoint boundary.
- * One forward decode pass (hoisted seq_len). Non-password prefix widths come from the font's
- * cached measure_n so kerning + tracking stay exact; password measures fixed-width mask glyphs. */
+/* Map a click x (px from text origin, scroll added) to the nearest codepoint boundary; prefix widths
+ * keep kerning + tracking exact. */
 static uint32_t caret_from_x(const nt_ui_input_style_t *style, bool password, nt_font_t font, const char *buffer, uint32_t len, float local_x) {
     if (local_x <= 0.0F || len == 0U) {
         return 0U;
@@ -493,11 +473,8 @@ static uint32_t caret_from_x(const nt_ui_input_style_t *style, bool password, nt
     uint32_t cp_index = 0U; /* codepoints consumed so far -- avoids re-counting from 0 (password) */
     float prev_w = 0.0F;
     while (off < len) {
-        const uint32_t raw = utf8_seq_len(buffer, off, len);
-        const uint32_t step = (raw > 0U) ? raw : 1U;
-        const uint32_t next = off + step;
+        const uint32_t next = off + utf8_seq_len(buffer, off, len);
         ++cp_index;
-        /* Password closed-form by running index; non-password prefix via cached measure_n (kern-exact). */
         const float next_w = password ? mask_width(style, font, cp_index) : nt_font_measure_n(font, buffer, (size_t)next, style->text.font_size, (float)style->text.letter_tracking).width;
         if (local_x < (prev_w + ((next_w - prev_w) * 0.5F))) {
             return off; /* click landed in the left half of this glyph */
@@ -509,7 +486,6 @@ static uint32_t caret_from_x(const nt_ui_input_style_t *style, bool password, nt
 }
 
 // #region render
-
 /* A filled rect floated at (x,y) inside the field; used for both the caret and the selection
  * highlight (the highlight sits BEHIND the text by emitting before the label). Every floating part of
  * the field omits zIndex on purpose: delta 0 keeps it in the field's own band (NT patch 4). */
@@ -531,8 +507,7 @@ static void emit_rect(nt_ui_context_t *ctx, uint8_t layer, float x, float y, flo
 }
 
 /* Build the password mask string: one NT_UI_INPUT_MASK_CHAR per codepoint of [buffer,len), into
- * frame scratch (NUL-terminated). Render-only — the game buffer is never modified. Exposed for the
- * test probe (no GL capture) under NT_TEST_ACCESS. */
+ * frame scratch (NUL-terminated). Render-only — the game buffer is never modified. */
 const char *nt_ui_input_build_display_text(const char *buffer, uint32_t len) {
     const uint32_t count = codepoint_count(buffer, len);
     char *masked = NT_ARENA_ALLOC_ARRAY(&g_nt_mem_scratch, char, count + 1U);
@@ -543,7 +518,7 @@ const char *nt_ui_input_build_display_text(const char *buffer, uint32_t len) {
 
 /* Picks the hint string the field shows when nothing is entered: the per-field placeholder, but only
  * while empty AND unfocused (focusing clears it so the caret reads against a blank field). Render-
- * only -- the game buffer is never written. NULL/"" placeholder = render nothing. Test probe. */
+ * only -- the game buffer is never written. NULL/"" placeholder = render nothing. */
 const char *nt_ui_input_placeholder_for(const char *buffer, const char *placeholder, bool focused) {
     const bool empty = (buffer[0] == '\0');
     const bool has_hint = (placeholder != NULL && placeholder[0] != '\0');
@@ -569,29 +544,8 @@ bool nt_ui_input_test_state(nt_ui_context_t *ctx, uint32_t id, uint32_t *out_car
 }
 #endif
 
-static void emit_caret(nt_ui_context_t *ctx, uint8_t layer, float x, float y, float w, float h, uint32_t color) {
-    nt_ui_transform_t tt = nt_ui_transform_defaults();
-    tt.offset_x = x;
-    tt.offset_y = y;
-    nt_ui_element_data_t *cd = NT_ARENA_ALLOC(&g_nt_mem_scratch, nt_ui_element_data_t);
-    *cd = (nt_ui_element_data_t){.user_data = NULL, .layer = layer, .flags = (uint8_t)NT_UI_ELEM_FLAG_HAS_TRANSFORM, .transform = tt, .opacity = 1.0F};
-    const Clay_ElementDeclaration caret_decl = {
-        .layout = {.sizing = {CLAY_SIZING_FIXED(w), CLAY_SIZING_FIXED(h)}},
-        .backgroundColor = nt_ui_unpack_abgr(color),
-        .userData = (void *)cd, /* carries layer + transform offset; without it the walker ignores both */
-        .floating = {.attachTo = CLAY_ATTACH_TO_PARENT, .clipTo = CLAY_CLIP_TO_ATTACHED_PARENT, .attachPoints = {.element = CLAY_ATTACH_POINT_LEFT_CENTER, .parent = CLAY_ATTACH_POINT_LEFT_CENTER}},
-    };
-    nt_ui_clay_priv_open_element();
-    nt_ui_clay_priv_configure_open_element(caret_decl);
-    nt_ui_clay_priv_close_element();
-}
-
-/* Each field's content-clip + per-float scissor splits draws (~4 draw calls/focused field);
- * the clip is required since a field can straddle an outer scroll. */
-/* Open a non-floating child that fills the field's content box and clips both axes (pad_x-inset
- * horizontally, full field height vertically). The selection/text/caret floats attach to it and clip to
- * its box; the walker further intersects that with the box's full ancestor chain (so an outer tab scroll
- * clips them too). The line is vertically centered by the floats' LEFT_CENTER attach. Caller must close. */
+/* Content box (pad_x-inset) that clips the selection/text/caret floats on both axes; needed because a
+ * field can straddle an outer scroll. Caller must close. */
 static void emit_content_clip_open(nt_ui_context_t *ctx, uint8_t text_layer) {
     nt_ui_element_data_t *id = NT_ARENA_ALLOC(&g_nt_mem_scratch, nt_ui_element_data_t);
     *id = (nt_ui_element_data_t){.user_data = NULL, .layer = text_layer, .flags = 0U, .transform = nt_ui_transform_defaults(), .opacity = 1.0F};
@@ -604,10 +558,8 @@ static void emit_content_clip_open(nt_ui_context_t *ctx, uint8_t text_layer) {
     nt_ui_clay_priv_configure_open_element(content_decl);
 }
 
-/* Float the text over the content-clip, sharing the SAME -scroll_x origin as the caret/selection so the
- * overlay z-orders by declaration (selection behind, text, caret on top). clipTo=ATTACHED_PARENT clips it
- * to the content-clip; the walker intersects that with the clip's full ancestor chain, so an outer tab
- * scroll clips it too (a raw floating clipTo would leak the text past the scroll). */
+/* Float the text at the shared -scroll_x origin so it z-orders by declaration (selection, text, caret)
+ * and clips with the content box. */
 static void emit_text(nt_ui_context_t *ctx, uint8_t text_layer, float x, float y, const char *disp, const nt_ui_label_style_t *ts) {
     nt_ui_transform_t tt = nt_ui_transform_defaults();
     tt.offset_x = x;
@@ -625,10 +577,8 @@ static void emit_text(nt_ui_context_t *ctx, uint8_t text_layer, float x, float y
     nt_ui_clay_priv_close_element();
 }
 
-/* Build a frame-scratch bg-sprite payload from an art ref, or NULL when unset/unresolved. The style is
- * const + shared across fields, so we resolve a LOCAL copy (O(1) name find; a pre-resolved ref_idx is a
- * no-op) rather than memoizing into the shared style. slice9_override={0} = use the region's BAKED slice9
- * borders: a 9-slice frame stretches its borders, a plain sprite stretches whole (walker decides). */
+/* Frame-scratch bg-sprite payload, or NULL when unset/unresolved. Resolves a local copy: the style is
+ * shared and const, so the ref is never memoized into it. slice9 comes from the region's baked borders. */
 static nt_ui_image_payload_t *make_bg_payload(nt_atlas_region_ref_t art) {
     if (art.atlas.id == 0U) {
         return NULL;
@@ -659,7 +609,6 @@ static const nt_ui_input_skin_t *resolve_skin(const nt_ui_input_style_t *style, 
     }
     return s;
 }
-
 // #endregion
 
 // #region input_text step helpers
@@ -706,7 +655,7 @@ static void focus_step(input_frame_t *f) {
     const nt_ui_input_props_t *props = f->props;
     const nt_ui_input_style_t *style = f->style;
 
-    // #region focus-order bookkeeping (Tab wrap target)
+    // #region Tab bookkeeping (wrap + next-field target)
     if (f->enabled && ctx->focus_first_id == 0U) {
         ctx->focus_first_id = id;
     }
@@ -731,9 +680,8 @@ static void focus_step(input_frame_t *f) {
         st->anchor = cur_len; /* keep the selection anchor in-bounds too */
     }
 
-    /* ONE mutating interaction step. Word-select reads double_clicked
-     * off this single result; the dbl window + move radius come from the context. A focused field
-     * drags its selection along x, so inside a vertical list that drag is the field's. */
+    /* One mutating step; a focused field drags its selection along x, so inside a vertical list that
+     * drag is the field's. */
     const bool was_focused = (ctx->focused_input_id == id);
     const nt_ui_step_desc_t step = {.drag_axes = was_focused ? NT_UI_DRAG_X : 0U};
     nt_ui_interaction_t in;
@@ -899,8 +847,7 @@ static void edit_step(input_frame_t *f, bool *changed, bool *submitted) {
                 selection_span(st, &lo, &hi);
                 st->caret = hi;
             } else if (st->caret < cur_len) {
-                const uint32_t step = (utf8_seq_len(buffer, st->caret, cur_len) > 0U) ? utf8_seq_len(buffer, st->caret, cur_len) : 1U;
-                st->caret += step;
+                st->caret += utf8_seq_len(buffer, st->caret, cur_len);
             }
             if (!shift) {
                 st->anchor = st->caret;
@@ -953,7 +900,7 @@ static void edit_step(input_frame_t *f, bool *changed, bool *submitted) {
             *submitted = true;
         }
         if (nt_input_key_is_pressed(NT_KEY_ESCAPE)) {
-            ctx->focused_input_id = 0U; /* unfocus first; modal close (if any) handles the next Esc */
+            ctx->focused_input_id = 0U;
         } else if (nt_input_key_is_pressed(NT_KEY_TAB)) {
             ctx->focus_tab_seek = id;
             ctx->focus_tab_pending = ctx->focus_first_id;
@@ -963,9 +910,7 @@ static void edit_step(input_frame_t *f, bool *changed, bool *submitted) {
     f->cur_len = cur_len;
 }
 
-/* Keep the caret visible: compute the inner content width and slide st->scroll_x so the caret's right
- * edge stays inside it (FIXED width from decl, else the prev-frame bbox for a GROW/responsive field).
- * Also accumulates the blink phase while focused. */
+/* Slide scroll_x so the caret stays inside the content box; advance the blink phase. */
 static void scroll_step(input_frame_t *f) {
     nt_ui_context_t *ctx = f->ctx;
     const nt_ui_input_style_t *style = f->style;
@@ -1039,10 +984,8 @@ static void emit_field(input_frame_t *f) {
     /* Pick the per-state skin (disabled > focused > hover > idle); the bg/border below all read from it. */
     const nt_ui_input_skin_t *skin = resolve_skin(style, enabled, focused, f->in.hovered);
 
-    /* Optional sprite background: when bg_art resolves the field draws the sprite (9-slice if the region
-     * has baked borders) and bg_color becomes its TINT (zero = untinted) -- the same .image +
-     * backgroundColor convention as nt_ui_panel/button. Unset/unresolved = the flat bg_color rect. The
-     * sprite art SNAPS across states (button precedent); only the flat color cross-fades. */
+    /* A resolved bg_art draws the sprite with bg_color as its tint (zero = untinted); the sprite snaps
+     * across states, only the flat colour cross-fades. */
     nt_ui_image_payload_t *bg_art_p = make_bg_payload(skin->bg_art);
     if (bg_art_p != NULL) {
         root.image = (Clay_ImageElementConfig){.imageData = bg_art_p};
@@ -1051,10 +994,7 @@ static void emit_field(input_frame_t *f) {
     const bool has_bg = (skin->bg_color != 0U);
     const bool has_border = (style->border_width > 0.0F && skin->border_color != 0U);
     if (style->state_speed > 0.0F && bg_art_p == NULL && (has_bg || has_border)) {
-        /* Perceptual OKLab cross-fade (flat-color path only): the retained cell holds last frame's eased
-         * bg/border as OKLab + linear alpha; a skin-state change ramps them toward the new colour over
-         * state_speed. A channel that appears/disappears cross-fades its ALPHA (target colour at alpha 0
-         * for an absent channel), so toggles fade too -- no snap. */
+        /* An absent channel targets its colour at alpha 0, so toggles fade too. */
         const nt_oklab_t bg_t = nt_color_packed_to_oklab(skin->bg_color, has_bg);
         const nt_oklab_t bd_t = nt_color_packed_to_oklab(skin->border_color, has_border);
         input_fade_cell_t *cell = (input_fade_cell_t *)nt_ui_state(ctx, nt_ui_derived_id(id, NT_UI_INPUT_FADE_SALT), (uint32_t)sizeof *cell, NT_UI_INPUT_FADE_TAG);
@@ -1090,20 +1030,14 @@ static void emit_field(input_frame_t *f) {
                 .width = {.left = (uint16_t)style->border_width, .right = (uint16_t)style->border_width, .top = (uint16_t)style->border_width, .bottom = (uint16_t)style->border_width}};
         }
     }
-    /* Horizontal inset only: pad_x positions the text origin + bounds the clip. Vertical padding is 0 on
-     * purpose — the single line is vertically CENTERED and the text/caret float clip to this box on BOTH
-     * axes (Clay floating clipTo), so a pad_y inset would shrink the clip below the line height and shave
-     * descenders. The vertical margin is the natural (field_height - line_height)/2 from centering. */
+    /* No vertical padding: the line is centered and clips on both axes, so a vertical inset would shave
+     * descenders. */
     root.layout.padding = (Clay_Padding){.left = (uint16_t)style->pad_x, .right = (uint16_t)style->pad_x, .top = 0, .bottom = 0};
 
     nt_ui_clay_priv_open_element();
     nt_ui_clay_priv_configure_open_element(root);
     nt_ui_widget_register(ctx, id, &NT_UI_INPUT_DEF, NULL, enabled);
 
-    /* Content-clip child: pad_x-inset horizontally (scissors long text), full field height vertically.
-     * The selection/text/caret attach to it and are vertically centered, so descenders are never shaved
-     * by a pad_y inset. Without this child the floats would clip to the root's border box and scrolled
-     * text would leak past pad_x. */
     emit_content_clip_open(ctx, text_layer);
 
     /* Selection highlight behind the text: emit before the label so it renders underneath. */
@@ -1123,9 +1057,7 @@ static void emit_field(input_frame_t *f) {
     const bool empty = (cur_len == 0U);
     if (!empty) {
         nt_ui_label_style_t ts = style->text;
-        /* Password fields render one mask glyph per codepoint instead of the real bytes; the mask
-         * is render-only (the game buffer is untouched). build_display_text is shared with the test
-         * probe so the password branch is asserted without a GL capture. */
+        /* Password renders one mask glyph per codepoint; the game buffer is untouched. */
         const char *disp = props->password ? nt_ui_input_build_display_text(buffer, cur_len) : buffer;
         /* Float the text at -scroll_x inside the content clip so it tracks the caret/selection when
          * the line scrolls; an inline label would stay at x=0 and desync. */
@@ -1144,7 +1076,7 @@ static void emit_field(input_frame_t *f) {
         const float caret_px = caret_x_at(style, props->password, font, buffer, st->caret) - st->scroll_x;
         const bool blink_on = (style->caret_blink_rate <= 0.0F) || (fmodf(st->blink, style->caret_blink_rate) < (style->caret_blink_rate * 0.5F));
         if (blink_on) {
-            emit_caret(ctx, text_layer, caret_px, 0.0F, style->caret_width, line_h, style->caret_color);
+            emit_rect(ctx, text_layer, caret_px, 0.0F, style->caret_width, line_h, style->caret_color);
         }
     }
 
@@ -1190,10 +1122,8 @@ bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
     /* The string is game-owned; the engine assumes a valid NUL-terminated buffer. */
     NT_ASSERT(memchr(buffer, '\0', buffer_size) != NULL && "nt_ui_input_text: buffer must be NUL-terminated within buffer_size");
 
-    /* Thin orchestrator over the four static step helpers (focus → edit → scroll → emit); the per-frame
-     * working set is threaded through the input_frame_t. */
     input_frame_t f;
-    memset(&f, 0, sizeof f); /* memset, not = {0}: emscripten -Werror rejects {0} on aggregate-first */
+    memset(&f, 0, sizeof f);
     f.ctx = ctx;
     f.data = data;
     f.text_layer = text_layer;
@@ -1224,7 +1154,7 @@ bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
 
 nt_ui_input_style_t nt_ui_input_style_defaults(void) {
     nt_ui_input_style_t s;
-    memset(&s, 0, sizeof s); /* memset, not = {0}: emscripten -Werror rejects {0} on aggregate-first */
+    memset(&s, 0, sizeof s);
     s.text = (nt_ui_label_style_t){.font_id = 0, .font_size = 16, .color = NT_RGBA8(255, 255, 255, 255)};
     s.placeholder = (nt_ui_label_style_t){.font_id = 0, .font_size = 16, .color = NT_RGBA8(128, 128, 128, 255)};
     s.skin[NT_UI_INPUT_IDLE] = (nt_ui_input_skin_t){.bg_color = 0xFF202020U, .border_color = 0xFF505050U};
@@ -1237,6 +1167,5 @@ nt_ui_input_style_t nt_ui_input_style_defaults(void) {
     s.caret_width = 2.0F;
     s.border_width = 1.0F;
     s.pad_x = 6.0F;
-    s.pad_y = 4.0F;
     return s;
 }

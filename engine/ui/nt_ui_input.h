@@ -1,11 +1,8 @@
 #ifndef NT_UI_INPUT_H
 #define NT_UI_INPUT_H
 
-/* Single-line text-field widget. The string lives in the GAME (char* + cap, ImGui-style);
- * the engine state pool holds only the transient caret/scroll/blink + the focus arbiter id.
- * Caret motion + hit-test + edit are CODEPOINT-aware (nt_utf8) so multi-byte UTF-8 (e.g.
- * Cyrillic) never corrupts. Typed chars arrive via nt_input_pop_char; physical keys
- * (Backspace/Delete/arrows/Home/End/Enter/Tab/Esc) drive editing + focus. */
+/* Single-line text field over a game-owned UTF-8 buffer (char* + capacity). Editing is codepoint-aware;
+ * typed chars come from nt_input_pop_char, physical keys drive editing and focus. */
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -60,15 +57,10 @@ typedef struct {
     float caret_width;                                /* caret rect width px; asserted > 0 */
     float border_width;                               /* border thickness px (0 = no border); per-skin border_color sets the color */
     float pad_x;                                      /* horizontal inner padding px (text origin + clip bound) */
-    float pad_y;                                      /* vertical padding px: UNUSED -- the line is auto-centered, vertical margin = (field_h - line_h)/2 */
-    /* bg/border cross-fade speed across skin states; 0 = instant snap. Eased in OKLab (perceptual --
-     * no muddy/dark midpoint); alpha eased linearly. A bg/border that appears or disappears between
-     * states cross-fades its alpha too (no snap-on-toggle). Skins are opaque, so alpha is exact; a
-     * translucent cross-fade would premultiply rgb by alpha to avoid edge fringe. Flat-color path only
-     * (a sprite bg snaps). */
+    /* Cross-fade rate across skin states (per second; 0 = instant snap). Eased in OKLab, alpha linearly;
+     * a sprite bg snaps. */
     float state_speed;
 } nt_ui_input_style_t;
-_Static_assert(sizeof(nt_ui_input_style_t) >= sizeof(nt_ui_input_skin_t) * NT_UI_INPUT_STATE_COUNT, "nt_ui_input_style_t holds the full skin array");
 
 /* Per-field behaviour -- distinct from the shared visual style, so many fields can share one
  * style but differ in validation/length/keyboard/mask. Zero-init = plain text field. */
@@ -80,20 +72,17 @@ typedef struct {
     bool password;                   /* render a mask glyph per codepoint */
 } nt_ui_input_props_t;
 
-/* Valid baseline style: visible caret, sensible padding/blink, no art, allow-all. The caller
- * supplies font ids + colors. Avoids the zero-init trap (caret_width must be > 0). */
+/* Valid baseline style (visible caret, padding, blink, no art); avoids the zero-init trap
+ * (caret_width must be > 0). The caller supplies font ids and colors. */
 nt_ui_input_style_t nt_ui_input_style_defaults(void);
 
 /* Edits a game-owned NUL-terminated UTF-8 buffer in place. buffer_size is the FULL
  * capacity incl. the NUL terminator; inserts clamp to buffer_size-1 and never split a
  * multi-byte codepoint. Only a FOCUSED field consumes typed chars + editing keys.
  *
- * Returns true the frame the buffer mutated (on_change). Pass on_submit non-NULL to receive
- * an Enter event (fires after the frame's edits). enabled=false = inert occluder, no edit.
- *
- * props carries per-field behaviour (allow filter, max_length, keyboard, password) and the
- * placeholder CONTENT (props->placeholder; NULL or "" = no hint). The hint's dimmed appearance
- * comes from style->placeholder; it shows only when the buffer is EMPTY and the field is NOT focused.
+ * Returns true the frame the buffer mutated. A non-NULL out_submitted receives Enter (after the
+ * frame's edits). enabled=false = inert occluder, no edit. The placeholder shows only while the
+ * buffer is empty and the field is unfocused.
  *
  * Engine owns the decl id/userData; data->flags must NOT set HAS_TRANSFORM/HAS_OPACITY. */
 bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t text_layer, uint32_t id, char *buffer, size_t buffer_size, const nt_ui_input_props_t *props,
@@ -111,22 +100,5 @@ bool nt_ui_input_any_focused(const nt_ui_context_t *ctx);
 bool nt_ui_filter_numeric(uint32_t codepoint);
 bool nt_ui_filter_email(uint32_t codepoint);
 bool nt_ui_filter_url(uint32_t codepoint);
-
-#ifdef NT_TEST_ACCESS
-/* Test probe: builds the password mask render string (one mask glyph per codepoint of
- * [buffer,len)) into frame scratch. Lets the password branch be asserted without a GL capture. */
-const char *nt_ui_input_build_display_text(const char *buffer, uint32_t len);
-
-/* Test probe: the hint string the field would render for the given (buffer, placeholder, focused) --
- * the placeholder only when empty AND unfocused, else NULL. Asserts the empty/placeholder branch
- * (which display string the compose path picks) without a GL capture. */
-const char *nt_ui_input_placeholder_for(const char *buffer, const char *placeholder, bool focused);
-
-/* Test probe: read the live caret byte offset + drag flag + horizontal scroll for `id`'s field state
- * (post-frame, no alloc). Returns false if the field has no state slot yet. Asserts the
- * focus-loss-abandons-drag path, caret math, and responsive-width scroll without a GL capture. Any out
- * pointer may be NULL. */
-bool nt_ui_input_test_state(nt_ui_context_t *ctx, uint32_t id, uint32_t *out_caret, uint8_t *out_drag, float *out_scroll_x);
-#endif
 
 #endif /* NT_UI_INPUT_H */
