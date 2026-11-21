@@ -109,7 +109,6 @@ typedef struct {
     uint8_t click_depth;
     uint8_t fill_layer;
     uint8_t label_layer;
-    bool open_frame;       /* open at begin; false = the row calls no-op */
     bool arming;           /* the first open frame: its press does not dismiss */
     bool nav_passed;       /* the navigated level has declared the focused row */
     bool focus_first;      /* a keyboard-opened child gives focus to its first enabled row */
@@ -127,13 +126,12 @@ typedef struct {
 typedef struct {
     float anchor_x, anchor_y; /* open point (UI space) — root menu top-left attaches here */
     uint32_t focus;           /* focused row id (0 = none) */
-    uint32_t hovered;         /* row under the pointer last frame */
     /* Open parent row id per level; the first 0 ends the chain, and its length is the open depth. */
     uint32_t open_path[NT_UI_MENU_MAX_DEPTH];
     nt_ui_menu_aim_t aim;
     bool open;     /* game-owned open flag; menu clears on dismiss */
     bool shown;    /* open at the last begin */
-    bool kbd_mode; /* a key moved focus: the pointer moves it again only from another row */
+    bool kbd_mode; /* a key moved focus: the pointer moves it again once it moves */
     nt_ui_menu_frame_t frame;
 } nt_ui_menu_t;
 
@@ -144,24 +142,19 @@ typedef struct {
  * Layers: every level's panel + row fills + icons + markers draw on data->layer (also the popup panel
  * layer); item text + label fallbacks on label_layer (split to batch fills-then-text). data may be NULL
  * (fills fall to layer 0). Mirrors tabbar/checkbox: layer comes from the call, NOT the style.
- * begin binds `ctx` for the begin/end span; every inner call reaches the core through the menu.
- * Call item/submenu/separator/end EVERY frame, open or closed — the calls no-op when closed; do NOT wrap
- * them in `if (menu.open)`. */
-void nt_ui_menu_begin(nt_ui_menu_t *menu, nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t menu_id, nt_ui_menu_style_t *style);
+ * Call begin EVERY frame (a closed frame resets the navigation); it returns true while the menu is open,
+ * and only then the game declares the rows and calls nt_ui_menu_end, like nt_ui_combo_begin:
+ *   if (nt_ui_menu_begin(&menu, ctx, data, label_layer, id, style)) { ...rows...; nt_ui_menu_end(&menu); }
+ * begin binds `ctx` until end; every inner call reaches the core through the menu. */
+bool nt_ui_menu_begin(nt_ui_menu_t *menu, nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t menu_id, nt_ui_menu_style_t *style);
 bool nt_ui_menu_item(nt_ui_menu_t *menu, uint32_t key, const char *label);                                 /* plain item; returns clicked */
 bool nt_ui_menu_item_ex(nt_ui_menu_t *menu, uint32_t key, const char *label, nt_ui_menu_item_opts_t opts); /* rich row; returns clicked */
-/* item_begin returns DECLARE-BODY (true while the menu is OPEN), NOT clicked — guard the custom body with it
- * (a closed/present-only menu returns false so the body is skipped, no scene leak). The row's ACTIVATION is
- * reported by item_end (parallel to item/item_ex returning clicked), so the two bools never mean the same
- * thing: item_begin = "declare the body", item_end = "the row was activated". A non_activatable row has no
- * action of its own and never activates (item_end returns false).
- * item_end is a NO-OP when item_begin returned false (closed menu opened no row), so BOTH placements are safe:
- *   if (item_begin(...)) { ...body...; item_end(...); }   // item_end inside the guard
- *   if (item_begin(...)) { ...body...; }  item_end(...);  // item_end unconditional
- * A forgotten item_end after an OPEN item_begin is still caught (the next item_begin/menu_end asserts). */
-bool nt_ui_menu_item_begin(nt_ui_menu_t *menu, uint32_t key, nt_ui_menu_item_opts_t opts); /* TRUE = declare body (menu open); guard with if. NOT clicked. */
-bool nt_ui_menu_item_end(nt_ui_menu_t *menu);                                              /* TRUE = the activatable row was activated (mouse or Enter); always false for opts.non_activatable. */
-bool nt_ui_menu_submenu_begin(nt_ui_menu_t *menu, uint32_t key, const char *label);        /* true ONLY when open -> declare body */
+/* Custom-content row: item_begin opens the row element, the game declares its body, item_end closes it
+ * and returns whether the row was activated (mouse or Enter), like item/item_ex. A non_activatable row has
+ * no action of its own and never activates. A forgotten item_end trips the next row or menu_end assert. */
+void nt_ui_menu_item_begin(nt_ui_menu_t *menu, uint32_t key, nt_ui_menu_item_opts_t opts);
+bool nt_ui_menu_item_end(nt_ui_menu_t *menu);
+bool nt_ui_menu_submenu_begin(nt_ui_menu_t *menu, uint32_t key, const char *label); /* true ONLY when open -> declare body */
 /* Rich submenu parent (icon/shortcut/disabled), mirroring item -> item_ex. opts.disabled renders greyed and
  * returns false (a disabled parent never flies out, never opens). opts.selected/opts.non_activatable do NOT
  * apply to a parent row (it is never a checkable leaf nor a custom-child host) and are ignored.

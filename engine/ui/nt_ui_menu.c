@@ -178,7 +178,6 @@ static void menu_set_open(nt_ui_menu_t *menu, uint8_t depth, uint32_t id) {
 
 static void menu_reset_navigation(nt_ui_menu_t *menu) {
     menu->focus = 0U;
-    menu->hovered = 0U;
     memset(menu->open_path, 0, sizeof menu->open_path);
     menu->aim.depth = 0U;
     menu->kbd_mode = false;
@@ -510,7 +509,7 @@ static void menu_open_level(const nt_ui_menu_t *menu, uint8_t depth, const nt_ui
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity): the leading validation assert chain inflates the count; control flow is flat (one open/closed branch)
-void nt_ui_menu_begin(nt_ui_menu_t *menu, nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t menu_id, nt_ui_menu_style_t *style) {
+bool nt_ui_menu_begin(nt_ui_menu_t *menu, nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t menu_id, nt_ui_menu_style_t *style) {
     NT_ASSERT(menu != NULL && "nt_ui_menu_begin: menu must be non-NULL");
     NT_ASSERT(ctx != NULL && "nt_ui_menu_begin: ctx must be non-NULL");
     NT_ASSERT(ctx->in_frame && ctx == nt_ui_internal_get_inframe_ctx() && "nt_ui_menu_begin: call between nt_ui_begin/end");
@@ -518,6 +517,11 @@ void nt_ui_menu_begin(nt_ui_menu_t *menu, nt_ui_context_t *ctx, const nt_ui_elem
     NT_ASSERT(style->font_size > 0.0F && "nt_ui_menu_begin: style->font_size must be > 0");
     NT_ASSERT(menu->frame.ui == NULL && "nt_ui_menu_begin: the previous nt_ui_menu_begin has no nt_ui_menu_end");
 
+    if (!menu->open) {
+        menu->shown = false;
+        menu_reset_navigation(menu); /* clean chain for a later reopen */
+        return false;
+    }
     const uint8_t open_depth = menu_open_depth(menu);
     menu->frame = (nt_ui_menu_frame_t){
         .ui = ctx,
@@ -526,14 +530,9 @@ void nt_ui_menu_begin(nt_ui_menu_t *menu, nt_ui_context_t *ctx, const nt_ui_elem
         .nav_depth = open_depth,
         .fill_layer = (data != NULL) ? data->layer : 0U, /* fills on data->layer, text on label_layer (game-controlled render order) */
         .label_layer = label_layer,
-        .open_frame = menu->open,
-        .arming = menu->open && !menu->shown, /* the opening press (often the trigger itself) never dismisses */
+        .arming = !menu->shown, /* the opening press (often the trigger itself) never dismisses */
     };
-    menu->shown = menu->open;
-    if (!menu->open) {
-        menu_reset_navigation(menu); /* clean chain for a later reopen; the row calls no-op */
-        return;
-    }
+    menu->shown = true;
 
     menu_declare_occluder(ctx, menu->frame.fill_layer, menu_id); /* single root occluder under the whole stack */
 
@@ -555,13 +554,11 @@ void nt_ui_menu_begin(nt_ui_menu_t *menu, nt_ui_context_t *ctx, const nt_ui_elem
     }
     const nt_ui_popup_anchor_t root_anchor = {.x = root_x, .y = menu->anchor_y, .w = 0.0F, .h = 0.0F, .prefer_side = NT_UI_POPUP_BELOW};
     menu_open_level(menu, 0U, &root_anchor); /* the root panel stays open until menu_end */
+    return true;
 }
 
 bool nt_ui_menu_item_ex(nt_ui_menu_t *menu, uint32_t key, const char *label, nt_ui_menu_item_opts_t opts) {
     NT_ASSERT(menu->frame.ui != NULL && "nt_ui_menu_item_ex: call between nt_ui_menu_begin/end");
-    if (!menu->frame.open_frame) {
-        return false; /* present-only menu: no-op */
-    }
     uint32_t row_id = 0U;
     const nt_ui_interaction_t in = menu_im_row(menu, key, label, &opts, false, false, &row_id);
     if (opts.disabled) {
@@ -579,31 +576,17 @@ bool nt_ui_menu_item_ex(nt_ui_menu_t *menu, uint32_t key, const char *label, nt_
 
 bool nt_ui_menu_item(nt_ui_menu_t *menu, uint32_t key, const char *label) { return nt_ui_menu_item_ex(menu, key, label, (nt_ui_menu_item_opts_t){0}); }
 
-bool nt_ui_menu_item_begin(nt_ui_menu_t *menu, uint32_t key, nt_ui_menu_item_opts_t opts) {
+void nt_ui_menu_item_begin(nt_ui_menu_t *menu, uint32_t key, nt_ui_menu_item_opts_t opts) {
     NT_ASSERT(menu->frame.ui != NULL && "nt_ui_menu_item_begin: call between nt_ui_menu_begin/end");
-    /* Returns DECLARE-BODY (true only when the menu is open this frame), NOT clicked: a present-only
-     * (closed) menu opens no row element, so the game MUST guard the custom-content body with the return —
-     * otherwise the body's children leak into the scene's open element. An activatable row reports
-     * its ACTIVATION via item_end (parallel to item/item_ex returning clicked) — the two bools never alias. */
-    if (!menu->frame.open_frame) {
-        /* True no-op: open NO row. item_end is a no-op when no row is open, so BOTH the guarded
-         * `if (begin()){ body; end(); }` and the unconditional `if (begin()){ body; } end();` are safe. */
-        return false; /* closed: do NOT declare the body */
-    }
     (void)menu_im_row(menu, key, NULL, &opts, false, true, &menu->frame.item_id);
     menu->frame.item_enabled = !opts.disabled;            /* internal state stays positive-sense */
     menu->frame.item_activatable = !opts.non_activatable; /* derived from the inverted opts */
-    return true;                                          /* open: declare the body */
 }
 
 bool nt_ui_menu_item_end(nt_ui_menu_t *menu) {
-    /* No-op when no row was opened (closed menu, or item_begin returned false): the begin-without-end footgun is
-     * still caught — an OPEN item_begin sets item_id, so a forgotten item_end trips the next begin/menu_end assert. */
     nt_ui_menu_frame_t *f = &menu->frame;
     const uint32_t row_id = f->item_id;
-    if (row_id == 0U) {
-        return false;
-    }
+    NT_ASSERT(row_id != 0U && "nt_ui_menu_item_end without nt_ui_menu_item_begin");
     f->item_id = 0U;
     nt_ui_clay_priv_close_element();
     /* A disabled row never steps/activates — mirror item_ex's enabled gate (a disabled custom row must not
@@ -628,9 +611,6 @@ bool nt_ui_menu_item_end(nt_ui_menu_t *menu) {
 bool nt_ui_menu_submenu_begin_ex(nt_ui_menu_t *menu, uint32_t key, const char *label, nt_ui_menu_item_opts_t opts) {
     NT_ASSERT(menu->frame.ui != NULL && "nt_ui_menu_submenu_begin_ex: call between nt_ui_menu_begin/end");
     nt_ui_menu_frame_t *f = &menu->frame;
-    if (!f->open_frame) {
-        return false; /* present-only menu: declare nothing, game skips the body */
-    }
     const uint8_t depth = f->depth;
     NT_ASSERT((depth + 1U) < NT_UI_MENU_MAX_DEPTH && "nt_ui_menu: submenu nesting exceeds NT_UI_MENU_MAX_DEPTH");
     /* selected/non_activatable do not apply to a PARENT row (a parent flies out, it is never a checkable leaf
@@ -676,17 +656,12 @@ void nt_ui_menu_submenu_end(nt_ui_menu_t *menu) {
 
 void nt_ui_menu_separator(nt_ui_menu_t *menu) {
     NT_ASSERT(menu->frame.ui != NULL && "nt_ui_menu_separator: call between nt_ui_menu_begin/end");
-    if (menu->frame.open_frame) {
-        menu_declare_separator(menu->frame.ui, menu->frame.fill_layer, menu->frame.style); /* no id: nav skips it */
-    }
+    menu_declare_separator(menu->frame.ui, menu->frame.fill_layer, menu->frame.style); /* no id: nav skips it */
 }
 
 void nt_ui_menu_separator_text(nt_ui_menu_t *menu, const char *label) {
     NT_ASSERT(menu->frame.ui != NULL && "nt_ui_menu_separator_text: call between nt_ui_menu_begin/end");
     const nt_ui_menu_frame_t *f = &menu->frame;
-    if (!f->open_frame) {
-        return;
-    }
     const nt_ui_menu_style_t *style = f->style;
     const nt_ui_label_style_t lbl = {.font_id = style->font_id, .font_size = style->font_size, .color = style->separator_color};
     CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .padding = {.left = style->pad, .right = style->pad}}, .userData = (void *)nt_ui_make_element_data(f->fill_layer, NULL)}) {
@@ -750,14 +725,14 @@ static bool menu_resolve(nt_ui_menu_t *menu) {
             menu_set_open(menu, (uint8_t)(depth - 1U), 0U);
         }
     }
-    /* A key hands focus and the open chain to the keyboard; the pointer takes them back only from another
-     * row, so a pointer resting on a row neither steals focus nor reopens what the keyboard closed. */
+    /* A key hands focus and the open chain to the keyboard; the pointer takes them back when it moves, so a
+     * pointer resting on a row neither steals focus nor reopens what the keyboard closed. */
+    const nt_pointer_t *pp = &ctx->frame_pointers[ctx->frame_primary];
     if (kbd_acted) {
         menu->kbd_mode = true;
-    } else if (f->hover_id != 0U && f->hover_id != menu->hovered) {
+    } else if (pp->active && (pp->dx != 0.0F || pp->dy != 0.0F)) {
         menu->kbd_mode = false;
     }
-    menu->hovered = f->hover_id;
     float mx = 0.0F;
     float my = 0.0F;
     menu_mouse_pos(ctx, &mx, &my);
@@ -772,7 +747,6 @@ static bool menu_resolve(nt_ui_menu_t *menu) {
     }
     /* Menu-owned outside-press dismiss (a click or a tap); the arming frame skips it so the opening press
      * does not self-dismiss. */
-    const nt_pointer_t *pp = &ctx->frame_pointers[ctx->frame_primary];
     const bool outside_press = pp->active && (pp->buttons[NT_BUTTON_LEFT].is_pressed || pp->buttons[NT_BUTTON_RIGHT].is_pressed);
     if (outside_press && !f->arming && !menu_cursor_over_any_panel(ctx, f->menu_id, mx, my)) {
         close_chain = true;
@@ -783,10 +757,6 @@ static bool menu_resolve(nt_ui_menu_t *menu) {
 void nt_ui_menu_end(nt_ui_menu_t *menu) {
     nt_ui_context_t *ctx = menu->frame.ui;
     NT_ASSERT(ctx != NULL && ctx->in_frame && ctx == nt_ui_internal_get_inframe_ctx() && "nt_ui_menu_end: call between nt_ui_begin/end after nt_ui_menu_begin");
-    if (!menu->frame.open_frame) {
-        menu->frame.ui = NULL; /* present-only: begin declared nothing, nothing to balance */
-        return;
-    }
     NT_ASSERT(menu->frame.depth == 0U && "nt_ui_menu_end with an open submenu (missing nt_ui_menu_submenu_end)");
     NT_ASSERT(menu->frame.item_id == 0U && "nt_ui_menu_end with an open custom row (missing nt_ui_menu_item_end)");
     nt_ui_clay_priv_close_element(); /* the root panel */

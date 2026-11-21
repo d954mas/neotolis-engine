@@ -46,10 +46,25 @@ static ui_walker_fixture_t s_fx;
 #define KEY_TOOLS 30U
 #define KEY_OPT 31U
 
+/* The frame helpers fill the pointer's movement since their last frame, as nt_input does: a pointer that
+ * moves takes focus back from the keyboard. */
+static float s_ptr_x;
+static float s_ptr_y;
+static nt_pointer_t menu_moved(const nt_pointer_t *p) {
+    nt_pointer_t q = *p;
+    q.dx = q.x - s_ptr_x;
+    q.dy = q.y - s_ptr_y;
+    s_ptr_x = q.x;
+    s_ptr_y = q.y;
+    return q;
+}
+
 void setUp(void) {
     nt_test_assert_install();
     nt_input_init();
     ui_walker_fixture_init(&s_fx, s_arena, sizeof s_arena, UI_WALKER_FX_BIND_ALL);
+    s_ptr_x = 0.0F;
+    s_ptr_y = 0.0F;
 }
 
 void tearDown(void) { ui_walker_fixture_shutdown(&s_fx); }
@@ -210,22 +225,24 @@ static void menu_im_open(nt_ui_menu_t *st, float anchor_x, float anchor_y) {
  * via begin/item/submenu_begin..submenu_end/menu_end. The snapshot pointer is positioned but the keyboard
  * path is what most tests assert against (deterministic, no prev-frame bbox). */
 static void menu_im_frame_ptr(nt_ui_menu_t *st, nt_ui_menu_style_t *style, const nt_pointer_t *p) {
-    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = p, .pointer_count = 1});
-    nt_ui_menu_begin(st, s_fx.ctx, NULL, 0U, MENU_A, style);
-    const uint32_t file_scope = nt_ui_menu_test_item_id(MENU_A, KEY_FILE);
-    const uint32_t open_scope = nt_ui_menu_test_item_id(file_scope, KEY_OPEN);
-    if (nt_ui_menu_submenu_begin(st, KEY_FILE, "File")) {
-        (void)nt_ui_menu_item(st, KEY_NEW, "New");
-        if (nt_ui_menu_submenu_begin(st, KEY_OPEN, "Open")) {
-            (void)nt_ui_menu_item(st, KEY_PROJECT, "Project");
-            act_capture(nt_ui_menu_test_item_id(open_scope, KEY_FILE2), nt_ui_menu_item(st, KEY_FILE2, "File2"));
+    const nt_pointer_t moved = menu_moved(p);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = &moved, .pointer_count = 1});
+    if (nt_ui_menu_begin(st, s_fx.ctx, NULL, 0U, MENU_A, style)) {
+        const uint32_t file_scope = nt_ui_menu_test_item_id(MENU_A, KEY_FILE);
+        const uint32_t open_scope = nt_ui_menu_test_item_id(file_scope, KEY_OPEN);
+        if (nt_ui_menu_submenu_begin(st, KEY_FILE, "File")) {
+            (void)nt_ui_menu_item(st, KEY_NEW, "New");
+            if (nt_ui_menu_submenu_begin(st, KEY_OPEN, "Open")) {
+                (void)nt_ui_menu_item(st, KEY_PROJECT, "Project");
+                act_capture(nt_ui_menu_test_item_id(open_scope, KEY_FILE2), nt_ui_menu_item(st, KEY_FILE2, "File2"));
+                nt_ui_menu_submenu_end(st);
+            }
+            (void)nt_ui_menu_item(st, KEY_QUIT, "Quit");
             nt_ui_menu_submenu_end(st);
         }
-        (void)nt_ui_menu_item(st, KEY_QUIT, "Quit");
-        nt_ui_menu_submenu_end(st);
+        (void)nt_ui_menu_item(st, KEY_EDIT, "Edit");
+        nt_ui_menu_end(st);
     }
-    (void)nt_ui_menu_item(st, KEY_EDIT, "Edit");
-    nt_ui_menu_end(st);
     nt_ui_end(s_fx.ctx);
 }
 
@@ -379,13 +396,14 @@ static void test_menu_right_click_outside_dismisses_chain(void) {
     p.buttons[NT_BUTTON_RIGHT].is_down = true;
     p.buttons[NT_BUTTON_RIGHT].is_pressed = true;
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = &p, .pointer_count = 1});
-    nt_ui_menu_begin(&st, s_fx.ctx, NULL, 0U, MENU_A, &style);
-    if (nt_ui_menu_submenu_begin(&st, KEY_FILE, "File")) {
-        (void)nt_ui_menu_item(&st, KEY_NEW, "New");
-        nt_ui_menu_submenu_end(&st);
+    if (nt_ui_menu_begin(&st, s_fx.ctx, NULL, 0U, MENU_A, &style)) {
+        if (nt_ui_menu_submenu_begin(&st, KEY_FILE, "File")) {
+            (void)nt_ui_menu_item(&st, KEY_NEW, "New");
+            nt_ui_menu_submenu_end(&st);
+        }
+        (void)nt_ui_menu_item(&st, KEY_EDIT, "Edit");
+        nt_ui_menu_end(&st);
     }
-    (void)nt_ui_menu_item(&st, KEY_EDIT, "Edit");
-    nt_ui_menu_end(&st);
     nt_ui_end(s_fx.ctx);
 
     TEST_ASSERT_FALSE_MESSAGE(st.open, "right-click outside (post-open) dismisses the whole chain");
@@ -394,24 +412,26 @@ static void test_menu_right_click_outside_dismisses_chain(void) {
 /* Immediate frame for a two-branch root: File > (New, Open > (Project, File2), Quit) and Tools > (Opt).
  * Used by the branch-switch tests (the user must reach the OTHER root branch while one is open). */
 static void menu_im_frame2_ptr(nt_ui_menu_t *st, nt_ui_menu_style_t *style, const nt_pointer_t *p) {
-    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = p, .pointer_count = 1});
-    nt_ui_menu_begin(st, s_fx.ctx, NULL, 0U, MENU_A, style);
-    const uint32_t tools_scope = nt_ui_menu_test_item_id(MENU_A, KEY_TOOLS);
-    if (nt_ui_menu_submenu_begin(st, KEY_FILE, "File")) {
-        (void)nt_ui_menu_item(st, KEY_NEW, "New");
-        if (nt_ui_menu_submenu_begin(st, KEY_OPEN, "Open")) {
-            (void)nt_ui_menu_item(st, KEY_PROJECT, "Project");
-            (void)nt_ui_menu_item(st, KEY_FILE2, "File2");
+    const nt_pointer_t moved = menu_moved(p);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = &moved, .pointer_count = 1});
+    if (nt_ui_menu_begin(st, s_fx.ctx, NULL, 0U, MENU_A, style)) {
+        const uint32_t tools_scope = nt_ui_menu_test_item_id(MENU_A, KEY_TOOLS);
+        if (nt_ui_menu_submenu_begin(st, KEY_FILE, "File")) {
+            (void)nt_ui_menu_item(st, KEY_NEW, "New");
+            if (nt_ui_menu_submenu_begin(st, KEY_OPEN, "Open")) {
+                (void)nt_ui_menu_item(st, KEY_PROJECT, "Project");
+                (void)nt_ui_menu_item(st, KEY_FILE2, "File2");
+                nt_ui_menu_submenu_end(st);
+            }
+            (void)nt_ui_menu_item(st, KEY_QUIT, "Quit");
             nt_ui_menu_submenu_end(st);
         }
-        (void)nt_ui_menu_item(st, KEY_QUIT, "Quit");
-        nt_ui_menu_submenu_end(st);
+        if (nt_ui_menu_submenu_begin(st, KEY_TOOLS, "Tools")) {
+            act_capture(nt_ui_menu_test_item_id(tools_scope, KEY_OPT), nt_ui_menu_item(st, KEY_OPT, "Opt"));
+            nt_ui_menu_submenu_end(st);
+        }
+        nt_ui_menu_end(st);
     }
-    if (nt_ui_menu_submenu_begin(st, KEY_TOOLS, "Tools")) {
-        act_capture(nt_ui_menu_test_item_id(tools_scope, KEY_OPT), nt_ui_menu_item(st, KEY_OPT, "Opt"));
-        nt_ui_menu_submenu_end(st);
-    }
-    nt_ui_menu_end(st);
     nt_ui_end(s_fx.ctx);
 }
 
@@ -610,27 +630,28 @@ typedef struct {
 
 static void menu_dyn_frame(nt_ui_menu_t *st, nt_ui_menu_style_t *style, const menu_dyn_tree_t *t) {
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = &(nt_pointer_t){.active = true}, .pointer_count = 1});
-    nt_ui_menu_begin(st, s_fx.ctx, NULL, 0U, MENU_A, style);
-    if (t->separator_first) {
-        nt_ui_menu_separator(st);
-    }
-    for (int i = 0; i < t->count; ++i) {
-        const uint32_t key = t->keys[i];
-        const uint32_t id = nt_ui_menu_test_item_id(MENU_A, key);
-        const nt_ui_menu_item_opts_t opts = {.disabled = (key == t->disabled_key)};
-        if (key < KEY_PARENT || key == t->leaf_key) {
-            act_capture(id, nt_ui_menu_item_ex(st, key, "Leaf", opts));
-        } else if (nt_ui_menu_submenu_begin_ex(st, key, "Parent", opts)) {
-            if (t->disabled_first_child) {
-                (void)nt_ui_menu_item_ex(st, KEY_L0, "Off", (nt_ui_menu_item_opts_t){.disabled = true});
-            }
-            if (!t->empty_children) {
-                act_capture(nt_ui_menu_test_item_id(id, KEY_OPT), nt_ui_menu_item(st, KEY_OPT, "Opt"));
-            }
-            nt_ui_menu_submenu_end(st);
+    if (nt_ui_menu_begin(st, s_fx.ctx, NULL, 0U, MENU_A, style)) {
+        if (t->separator_first) {
+            nt_ui_menu_separator(st);
         }
+        for (int i = 0; i < t->count; ++i) {
+            const uint32_t key = t->keys[i];
+            const uint32_t id = nt_ui_menu_test_item_id(MENU_A, key);
+            const nt_ui_menu_item_opts_t opts = {.disabled = (key == t->disabled_key)};
+            if (key < KEY_PARENT || key == t->leaf_key) {
+                act_capture(id, nt_ui_menu_item_ex(st, key, "Leaf", opts));
+            } else if (nt_ui_menu_submenu_begin_ex(st, key, "Parent", opts)) {
+                if (t->disabled_first_child) {
+                    (void)nt_ui_menu_item_ex(st, KEY_L0, "Off", (nt_ui_menu_item_opts_t){.disabled = true});
+                }
+                if (!t->empty_children) {
+                    act_capture(nt_ui_menu_test_item_id(id, KEY_OPT), nt_ui_menu_item(st, KEY_OPT, "Opt"));
+                }
+                nt_ui_menu_submenu_end(st);
+            }
+        }
+        nt_ui_menu_end(st);
     }
-    nt_ui_menu_end(st);
     nt_ui_end(s_fx.ctx);
 }
 
@@ -802,15 +823,16 @@ static void test_menu_kbd_empty_submenu(void) {
  *      popup stack is exhausted. ---- */
 static void menu_im_self_ref(nt_ui_menu_t *st, nt_ui_menu_style_t *style) {
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = &(nt_pointer_t){.active = true}, .pointer_count = 1});
-    nt_ui_menu_begin(st, s_fx.ctx, NULL, 0U, MENU_A, style);
-    int guard = 0;
-    while (nt_ui_menu_submenu_begin(st, KEY_FILE, "loop") && guard < NT_UI_MENU_MAX_DEPTH + 4) {
-        ++guard;
+    if (nt_ui_menu_begin(st, s_fx.ctx, NULL, 0U, MENU_A, style)) {
+        int guard = 0;
+        while (nt_ui_menu_submenu_begin(st, KEY_FILE, "loop") && guard < NT_UI_MENU_MAX_DEPTH + 4) {
+            ++guard;
+        }
+        for (int i = 0; i < guard; ++i) {
+            nt_ui_menu_submenu_end(st);
+        }
+        nt_ui_menu_end(st);
     }
-    for (int i = 0; i < guard; ++i) {
-        nt_ui_menu_submenu_end(st);
-    }
-    nt_ui_menu_end(st);
     nt_ui_end(s_fx.ctx);
 }
 static void test_menu_depth_cap_asserts(void) {
@@ -850,15 +872,16 @@ static void menu_im_frame25(nt_ui_menu_t *st, nt_ui_menu_style_t *style, float p
     p.y = py;
     p.active = true;
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = &p, .pointer_count = 1});
-    nt_ui_menu_begin(st, s_fx.ctx, NULL, 0U, MENU_A, style);
-    (void)nt_ui_menu_item_ex(st, KEY_NEW, "Iconed", (nt_ui_menu_item_opts_t){.icon = s_icon_ref});
-    nt_ui_menu_separator(st);
-    act_capture(nt_ui_menu_test_item_id(MENU_A, KEY_QUIT), nt_ui_menu_item_ex(st, KEY_QUIT, "Plain", (nt_ui_menu_item_opts_t){0}));
-    if (nt_ui_menu_submenu_begin(st, KEY_OPEN, "Parent")) {
-        (void)nt_ui_menu_item(st, KEY_PROJECT, "ChildA");
-        nt_ui_menu_submenu_end(st);
+    if (nt_ui_menu_begin(st, s_fx.ctx, NULL, 0U, MENU_A, style)) {
+        (void)nt_ui_menu_item_ex(st, KEY_NEW, "Iconed", (nt_ui_menu_item_opts_t){.icon = s_icon_ref});
+        nt_ui_menu_separator(st);
+        act_capture(nt_ui_menu_test_item_id(MENU_A, KEY_QUIT), nt_ui_menu_item_ex(st, KEY_QUIT, "Plain", (nt_ui_menu_item_opts_t){0}));
+        if (nt_ui_menu_submenu_begin(st, KEY_OPEN, "Parent")) {
+            (void)nt_ui_menu_item(st, KEY_PROJECT, "ChildA");
+            nt_ui_menu_submenu_end(st);
+        }
+        nt_ui_menu_end(st);
     }
-    nt_ui_menu_end(st);
     nt_ui_end(s_fx.ctx);
 }
 
@@ -979,13 +1002,14 @@ static void trigger_frame(nt_ui_menu_t *st, nt_ui_menu_style_t *style, uint32_t 
     }
     nt_ui_block_pointer(s_fx.ctx, TARGET_ID, NULL);
     (void)nt_ui_menu_open_trigger(st, s_fx.ctx, target_id, long_pressed);
-    nt_ui_menu_begin(st, s_fx.ctx, NULL, 0U, MENU_A, style);
-    if (nt_ui_menu_submenu_begin(st, KEY_FILE, "File")) {
-        (void)nt_ui_menu_item(st, KEY_NEW, "New");
-        nt_ui_menu_submenu_end(st);
+    if (nt_ui_menu_begin(st, s_fx.ctx, NULL, 0U, MENU_A, style)) {
+        if (nt_ui_menu_submenu_begin(st, KEY_FILE, "File")) {
+            (void)nt_ui_menu_item(st, KEY_NEW, "New");
+            nt_ui_menu_submenu_end(st);
+        }
+        (void)nt_ui_menu_item(st, KEY_EDIT, "Edit");
+        nt_ui_menu_end(st);
     }
-    (void)nt_ui_menu_item(st, KEY_EDIT, "Edit");
-    nt_ui_menu_end(st);
     nt_ui_end(s_fx.ctx);
 }
 
@@ -1106,13 +1130,13 @@ static menu_row_child_result_t menu_row_child_frames(nt_ui_menu_t *st, bool non_
             p.buttons[NT_BUTTON_LEFT].is_released = true;
         }
         nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = &p, .pointer_count = 1});
-        nt_ui_menu_begin(st, s_fx.ctx, NULL, 0U, MENU_A, &style);
-        if (nt_ui_menu_item_begin(st, KEY_NEW, (nt_ui_menu_item_opts_t){.non_activatable = non_activatable})) {
+        if (nt_ui_menu_begin(st, s_fx.ctx, NULL, 0U, MENU_A, &style)) {
+            nt_ui_menu_item_begin(st, KEY_NEW, (nt_ui_menu_item_opts_t){.non_activatable = non_activatable});
             CLAY({.id = (Clay_ElementId){.id = MENU_ROW_CHILD_ID}, .layout = {.sizing = {CLAY_SIZING_FIXED(60), CLAY_SIZING_FIXED(20)}}}) {}
             r.btn_clicked |= nt_ui_step(s_fx.ctx, MENU_ROW_CHILD_ID, NULL).clicked;
+            r.end_activated |= nt_ui_menu_item_end(st);
+            nt_ui_menu_end(st);
         }
-        r.end_activated |= nt_ui_menu_item_end(st);
-        nt_ui_menu_end(st);
         nt_ui_end(s_fx.ctx);
         r.row_captured |= (nt_ui_test_capture_active_id(s_fx.ctx, 0U) == row_id);
     }
@@ -1172,85 +1196,19 @@ static void test_menu_item_begin_captured_drag_keeps_focus(void) {
         p.buttons[NT_BUTTON_LEFT].is_down = (frame >= 2);
         p.buttons[NT_BUTTON_LEFT].is_pressed = (frame == 2);
         nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = &p, .pointer_count = 1});
-        nt_ui_menu_begin(&st, s_fx.ctx, NULL, 0U, MENU_A, &style);
-        if (nt_ui_menu_item_begin(&st, KEY_NEW, (nt_ui_menu_item_opts_t){0})) {
+        if (nt_ui_menu_begin(&st, s_fx.ctx, NULL, 0U, MENU_A, &style)) {
+            nt_ui_menu_item_begin(&st, KEY_NEW, (nt_ui_menu_item_opts_t){0});
             CLAY({.id = (Clay_ElementId){.id = MENU_ROW_CHILD_ID}, .layout = {.sizing = {CLAY_SIZING_FIXED(60), CLAY_SIZING_FIXED(20)}}}) { (void)nt_ui_step(s_fx.ctx, MENU_ROW_CHILD_ID, NULL); }
-        }
-        (void)nt_ui_menu_item_end(&st);
-        if (nt_ui_menu_item_begin(&st, KEY_OPEN, (nt_ui_menu_item_opts_t){0})) {
+            (void)nt_ui_menu_item_end(&st);
+            nt_ui_menu_item_begin(&st, KEY_OPEN, (nt_ui_menu_item_opts_t){0});
             CLAY({.id = (Clay_ElementId){.id = MENU_ROW_B_CHILD_ID}, .layout = {.sizing = {CLAY_SIZING_FIXED(60), CLAY_SIZING_FIXED(20)}}}) { (void)nt_ui_step(s_fx.ctx, MENU_ROW_B_CHILD_ID, NULL); }
+            (void)nt_ui_menu_item_end(&st);
+            nt_ui_menu_end(&st);
         }
-        (void)nt_ui_menu_item_end(&st);
-        nt_ui_menu_end(&st);
         nt_ui_end(s_fx.ctx);
     }
     TEST_ASSERT_EQUAL_UINT32(MENU_ROW_CHILD_ID, nt_ui_test_capture_active_id(s_fx.ctx, 0U));
     TEST_ASSERT_EQUAL_UINT32(nt_ui_menu_test_item_id(MENU_A, KEY_NEW), st.focus);
-}
-
-/* ---- Custom row leak: a CLOSED (present-only) menu's item_begin returns false so the game skips
- *      the custom body — the inner child must NOT lay out (no bbox) when the menu is closed, so it can
- *      never leak onto the scene. ---- */
-static void test_menu_item_begin_closed_skips_body(void) {
-    nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
-    nt_ui_menu_t st = {0}; /* st.open stays false -> present-only */
-    const uint32_t inner_btn = 0x1B7703U;
-
-    bool declared = false;
-    for (int frame = 0; frame < 2; ++frame) {
-        nt_pointer_t p = {.x = 0.0F, .y = 0.0F, .active = true};
-        nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = &p, .pointer_count = 1});
-        nt_ui_menu_begin(&st, s_fx.ctx, NULL, 0U, MENU_A, &style);
-        if (nt_ui_menu_item_begin(&st, KEY_NEW, (nt_ui_menu_item_opts_t){.non_activatable = true})) {
-            declared = true; /* must stay false: the menu is closed */
-            CLAY({.id = (Clay_ElementId){.id = inner_btn}, .layout = {.sizing = {CLAY_SIZING_FIXED(60), CLAY_SIZING_FIXED(20)}}}) {}
-        }
-        nt_ui_menu_item_end(&st);
-        nt_ui_menu_end(&st);
-        nt_ui_end(s_fx.ctx);
-    }
-    TEST_ASSERT_FALSE_MESSAGE(declared, "a closed (present-only) menu must NOT declare the custom-content body");
-    const nt_ui_bbox_t child = nt_ui_get_bbox(s_fx.ctx, inner_btn);
-    TEST_ASSERT_FALSE_MESSAGE(child.found, "a closed menu's custom child must not lay out anywhere (no scene leak)");
-}
-
-/* ---- GUARDED pattern on a CLOSED menu must not poison the item scratch: item_end placed INSIDE the guard is
- *      skipped when item_begin returns false, so no custom row stays open (a true no-op). The
- *      next frame OPENS the menu and declares a real custom row through the SAME guarded pattern — it must
- *      complete with no assert/poison from the prior closed frame. ---- */
-static void test_menu_item_begin_closed_guarded_no_poison(void) {
-    nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
-    nt_ui_menu_t st = {0}; /* frame 0: present-only (closed) */
-
-    /* Frame 0: CLOSED menu, guarded pattern with item_end INSIDE the if -> begin false, body+item_end skipped. */
-    nt_pointer_t p0 = {.x = 0.0F, .y = 0.0F, .active = true};
-    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = &p0, .pointer_count = 1});
-    nt_ui_menu_begin(&st, s_fx.ctx, NULL, 0U, MENU_A, &style);
-    bool closed_declared = false;
-    if (nt_ui_menu_item_begin(&st, KEY_NEW, (nt_ui_menu_item_opts_t){0})) {
-        closed_declared = true; /* skipped: menu closed */
-        CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}}}) {}
-        nt_ui_menu_item_end(&st); /* item_end INSIDE the guard -> skipped on a closed menu */
-    }
-    nt_ui_menu_end(&st);
-    nt_ui_end(s_fx.ctx);
-    TEST_ASSERT_FALSE_MESSAGE(closed_declared, "guarded closed menu must not declare the body");
-
-    /* Frame 1: OPEN the menu and declare a real custom row through the same guarded pattern. If the closed frame
-     * had left a custom row open, item_begin's NT_ASSERT here would have fired. */
-    st.open = true;
-    nt_pointer_t p1 = {.x = 0.0F, .y = 0.0F, .active = true};
-    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = &p1, .pointer_count = 1});
-    nt_ui_menu_begin(&st, s_fx.ctx, NULL, 0U, MENU_A, &style);
-    bool open_declared = false;
-    if (nt_ui_menu_item_begin(&st, KEY_NEW, (nt_ui_menu_item_opts_t){0})) {
-        open_declared = true;
-        CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}}}) {}
-        nt_ui_menu_item_end(&st);
-    }
-    nt_ui_menu_end(&st); /* must not assert "open custom row" -> scratch was clean */
-    nt_ui_end(s_fx.ctx);
-    TEST_ASSERT_TRUE_MESSAGE(open_declared, "an OPEN menu's guarded item_begin must declare the body (scratch clean after a closed frame)");
 }
 
 /* ---- Disabled custom row never activates: item_begin(opts{.disabled=true}) + a click over the row must
@@ -1276,14 +1234,14 @@ static bool menu_item_begin_click_activates(nt_ui_menu_t *st, nt_ui_menu_style_t
             p.buttons[NT_BUTTON_LEFT].is_released = true;
         }
         nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = &p, .pointer_count = 1});
-        nt_ui_menu_begin(st, s_fx.ctx, NULL, 0U, MENU_A, style);
-        if (nt_ui_menu_item_begin(st, row_key, (nt_ui_menu_item_opts_t){.disabled = !enabled})) {
+        if (nt_ui_menu_begin(st, s_fx.ctx, NULL, 0U, MENU_A, style)) {
+            nt_ui_menu_item_begin(st, row_key, (nt_ui_menu_item_opts_t){.disabled = !enabled});
             CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}}}) {} /* game body */
+            if (nt_ui_menu_item_end(st)) {
+                end_activated = true;
+            }
+            nt_ui_menu_end(st);
         }
-        if (nt_ui_menu_item_end(st)) {
-            end_activated = true;
-        }
-        nt_ui_menu_end(st);
         nt_ui_end(s_fx.ctx);
     }
     return end_activated;
@@ -1298,12 +1256,12 @@ static void test_menu_item_begin_enter_activates(void) {
     for (int frame = 0; frame < 2; ++frame) {
         menu_key(keys[frame]);
         nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = &(nt_pointer_t){.active = true}, .pointer_count = 1});
-        nt_ui_menu_begin(&st, s_fx.ctx, NULL, 0U, MENU_A, &style);
-        if (nt_ui_menu_item_begin(&st, KEY_NEW, (nt_ui_menu_item_opts_t){0})) {
+        if (nt_ui_menu_begin(&st, s_fx.ctx, NULL, 0U, MENU_A, &style)) {
+            nt_ui_menu_item_begin(&st, KEY_NEW, (nt_ui_menu_item_opts_t){0});
             CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(60), CLAY_SIZING_FIXED(20)}}}) {}
+            activated |= nt_ui_menu_item_end(&st);
+            nt_ui_menu_end(&st);
         }
-        activated |= nt_ui_menu_item_end(&st);
-        nt_ui_menu_end(&st);
         nt_ui_end(s_fx.ctx);
     }
     TEST_ASSERT_TRUE_MESSAGE(activated, "Enter on the focused custom row must make item_end return true");
@@ -1347,11 +1305,12 @@ static bool menu_item_click_activates(nt_ui_menu_t *st, nt_ui_menu_style_t *styl
             p.buttons[NT_BUTTON_LEFT].is_released = true;
         }
         nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = &p, .pointer_count = 1});
-        nt_ui_menu_begin(st, s_fx.ctx, NULL, 0U, MENU_A, style);
-        if (nt_ui_menu_item(st, row_key, "Leaf")) {
-            activated = true;
+        if (nt_ui_menu_begin(st, s_fx.ctx, NULL, 0U, MENU_A, style)) {
+            if (nt_ui_menu_item(st, row_key, "Leaf")) {
+                activated = true;
+            }
+            nt_ui_menu_end(st);
         }
-        nt_ui_menu_end(st);
         nt_ui_end(s_fx.ctx);
     }
     return activated;
@@ -1379,10 +1338,11 @@ static void test_menu_duplicate_sibling_key_asserts(void) {
     nt_test_assert_armed = true;
     if (setjmp(nt_test_assert_jmp) == 0) {
         nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = &(nt_pointer_t){.active = true}, .pointer_count = 1});
-        nt_ui_menu_begin(&st, s_fx.ctx, NULL, 0U, MENU_A, &style);
-        (void)nt_ui_menu_item(&st, KEY_NEW, "First");
-        (void)nt_ui_menu_item(&st, KEY_NEW, "Dup"); /* same key in the same level -> aliased id */
-        nt_ui_menu_end(&st);
+        if (nt_ui_menu_begin(&st, s_fx.ctx, NULL, 0U, MENU_A, &style)) {
+            (void)nt_ui_menu_item(&st, KEY_NEW, "First");
+            (void)nt_ui_menu_item(&st, KEY_NEW, "Dup"); /* same key in the same level -> aliased id */
+            nt_ui_menu_end(&st);
+        }
         nt_ui_end(s_fx.ctx);
     } else {
         tripped = true;
@@ -1396,11 +1356,12 @@ static void test_menu_duplicate_sibling_key_asserts(void) {
 static void menu_im_frame_sep_text(nt_ui_menu_t *st, nt_ui_menu_style_t *style) {
     nt_pointer_t p = {.active = true};
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = &p, .pointer_count = 1});
-    nt_ui_menu_begin(st, s_fx.ctx, NULL, 0U, MENU_A, style);
-    (void)nt_ui_menu_item(st, KEY_NEW, "Top");
-    nt_ui_menu_separator_text(st, "Section");
-    act_capture(nt_ui_menu_test_item_id(MENU_A, KEY_QUIT), nt_ui_menu_item(st, KEY_QUIT, "Bottom"));
-    nt_ui_menu_end(st);
+    if (nt_ui_menu_begin(st, s_fx.ctx, NULL, 0U, MENU_A, style)) {
+        (void)nt_ui_menu_item(st, KEY_NEW, "Top");
+        nt_ui_menu_separator_text(st, "Section");
+        act_capture(nt_ui_menu_test_item_id(MENU_A, KEY_QUIT), nt_ui_menu_item(st, KEY_QUIT, "Bottom"));
+        nt_ui_menu_end(st);
+    }
     nt_ui_end(s_fx.ctx);
 }
 
@@ -1446,11 +1407,12 @@ static bool menu_item_ex_disabled_click(nt_ui_menu_t *st, nt_ui_menu_style_t *st
             p.buttons[NT_BUTTON_LEFT].is_released = true;
         }
         nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = &p, .pointer_count = 1});
-        nt_ui_menu_begin(st, s_fx.ctx, NULL, 0U, MENU_A, style);
-        if (nt_ui_menu_item_ex(st, row_key, "Disabled", (nt_ui_menu_item_opts_t){.disabled = true})) {
-            activated = true;
+        if (nt_ui_menu_begin(st, s_fx.ctx, NULL, 0U, MENU_A, style)) {
+            if (nt_ui_menu_item_ex(st, row_key, "Disabled", (nt_ui_menu_item_opts_t){.disabled = true})) {
+                activated = true;
+            }
+            nt_ui_menu_end(st);
         }
-        nt_ui_menu_end(st);
         nt_ui_end(s_fx.ctx);
     }
     return activated;
@@ -1473,15 +1435,16 @@ static void test_menu_item_ex_disabled_no_activate(void) {
 static void menu_im_frame_submenu_ex(nt_ui_menu_t *st, nt_ui_menu_style_t *style, bool enabled) {
     nt_pointer_t p = {.active = true};
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = &p, .pointer_count = 1});
-    nt_ui_menu_begin(st, s_fx.ctx, NULL, 0U, MENU_A, style);
-    nt_ui_menu_item_opts_t opts = {0};
-    opts.icon = s_icon_ref;
-    opts.disabled = !enabled;
-    if (nt_ui_menu_submenu_begin_ex(st, KEY_OPEN, "Parent", opts)) {
-        (void)nt_ui_menu_item(st, KEY_PROJECT, "Child");
-        nt_ui_menu_submenu_end(st);
+    if (nt_ui_menu_begin(st, s_fx.ctx, NULL, 0U, MENU_A, style)) {
+        nt_ui_menu_item_opts_t opts = {0};
+        opts.icon = s_icon_ref;
+        opts.disabled = !enabled;
+        if (nt_ui_menu_submenu_begin_ex(st, KEY_OPEN, "Parent", opts)) {
+            (void)nt_ui_menu_item(st, KEY_PROJECT, "Child");
+            nt_ui_menu_submenu_end(st);
+        }
+        nt_ui_menu_end(st);
     }
-    nt_ui_menu_end(st);
     nt_ui_end(s_fx.ctx);
 }
 
@@ -1519,11 +1482,12 @@ static void menu_im_frame_rich(nt_ui_menu_t *st, nt_ui_menu_style_t *style, floa
     p.y = py;
     p.active = true;
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = &p, .pointer_count = 1});
-    nt_ui_menu_begin(st, s_fx.ctx, NULL, 0U, MENU_A, style);
-    nt_ui_menu_item_opts_t save = {.shortcut = "Ctrl+S", .selected = true};
-    (void)nt_ui_menu_item_ex(st, KEY_NEW, "Save", save);
-    (void)nt_ui_menu_item_ex(st, KEY_QUIT, "Plain", (nt_ui_menu_item_opts_t){0});
-    nt_ui_menu_end(st);
+    if (nt_ui_menu_begin(st, s_fx.ctx, NULL, 0U, MENU_A, style)) {
+        nt_ui_menu_item_opts_t save = {.shortcut = "Ctrl+S", .selected = true};
+        (void)nt_ui_menu_item_ex(st, KEY_NEW, "Save", save);
+        (void)nt_ui_menu_item_ex(st, KEY_QUIT, "Plain", (nt_ui_menu_item_opts_t){0});
+        nt_ui_menu_end(st);
+    }
     nt_ui_end(s_fx.ctx);
 }
 
@@ -1562,16 +1526,17 @@ static void test_menu_check_cell_when_selected(void) {
 /* One menu frame: root = [File submenu (2 items), Edit leaf]. Cursor at (px,py). Used by the hover-open
  * corridor tests — File is the parent that flies out on hover; Edit is the sibling leaf that collapses it. */
 static void menu_im_hover_frame(nt_ui_menu_t *st, nt_ui_menu_style_t *style, float px, float py) {
-    nt_pointer_t p = {.x = px, .y = py, .active = true};
+    const nt_pointer_t p = menu_moved(&(nt_pointer_t){.x = px, .y = py, .active = true});
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = &p, .pointer_count = 1});
-    nt_ui_menu_begin(st, s_fx.ctx, NULL, 0U, MENU_A, style);
-    if (nt_ui_menu_submenu_begin(st, KEY_FILE, "File")) {
-        (void)nt_ui_menu_item(st, KEY_NEW, "New");
-        (void)nt_ui_menu_item(st, KEY_PROJECT, "Project");
-        nt_ui_menu_submenu_end(st);
+    if (nt_ui_menu_begin(st, s_fx.ctx, NULL, 0U, MENU_A, style)) {
+        if (nt_ui_menu_submenu_begin(st, KEY_FILE, "File")) {
+            (void)nt_ui_menu_item(st, KEY_NEW, "New");
+            (void)nt_ui_menu_item(st, KEY_PROJECT, "Project");
+            nt_ui_menu_submenu_end(st);
+        }
+        (void)nt_ui_menu_item(st, KEY_EDIT, "Edit");
+        nt_ui_menu_end(st);
     }
-    (void)nt_ui_menu_item(st, KEY_EDIT, "Edit");
-    nt_ui_menu_end(st);
     nt_ui_end(s_fx.ctx);
 }
 
@@ -1635,13 +1600,14 @@ static void test_menu_hover_sibling_leaf_collapses_submenu(void) {
 static void menu_im_submenu_frame(nt_ui_menu_t *st, nt_ui_menu_style_t *style, float px, float py) {
     nt_pointer_t p = {.x = px, .y = py, .active = true};
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = &p, .pointer_count = 1});
-    nt_ui_menu_begin(st, s_fx.ctx, NULL, 0U, MENU_A, style);
-    if (nt_ui_menu_submenu_begin(st, KEY_FILE, "File")) {
-        (void)nt_ui_menu_item(st, KEY_NEW, "ChildItemLong");
-        (void)nt_ui_menu_item(st, KEY_QUIT, "ChildItem2");
-        nt_ui_menu_submenu_end(st);
+    if (nt_ui_menu_begin(st, s_fx.ctx, NULL, 0U, MENU_A, style)) {
+        if (nt_ui_menu_submenu_begin(st, KEY_FILE, "File")) {
+            (void)nt_ui_menu_item(st, KEY_NEW, "ChildItemLong");
+            (void)nt_ui_menu_item(st, KEY_QUIT, "ChildItem2");
+            nt_ui_menu_submenu_end(st);
+        }
+        nt_ui_menu_end(st);
     }
-    nt_ui_menu_end(st);
     nt_ui_end(s_fx.ctx);
 }
 
@@ -1682,7 +1648,8 @@ static void test_menu_right_edge_root_clamp_and_submenu_flip(void) {
 }
 
 /* ---- A pointer resting on a row hands focus and the chain to the keyboard: with File hover-opened and
- *      the pointer still on File, Down focuses New and Left closes File; moving onto Edit takes focus back. ---- */
+ *      the pointer still on File, Down focuses New and Left closes File; moving the pointer, even within
+ *      File, takes focus back and reopens File. ---- */
 static void test_menu_resting_pointer_yields_to_keyboard(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
     nt_ui_menu_t st = {0};
@@ -1710,12 +1677,10 @@ static void test_menu_resting_pointer_yields_to_keyboard(void) {
     menu_im_hover_frame(&st, &style, fx, fy);
     TEST_ASSERT_FALSE_MESSAGE(menu_level_found(1U), "Left closes File although the pointer rests on it");
 
-    const uint32_t edit = nt_ui_menu_test_item_id(MENU_A, KEY_EDIT);
-    float ex = 0.0F;
-    float ey = 0.0F;
-    menu_row_center(edit, &ex, &ey);
-    menu_im_hover_frame(&st, &style, ex, ey);
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(edit, st.focus, "moving onto Edit takes focus back to the pointer");
+    menu_im_hover_frame(&st, &style, fx + 2.0F, fy);
+    menu_im_hover_frame(&st, &style, fx + 2.0F, fy);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(nt_ui_menu_test_item_id(MENU_A, KEY_FILE), st.focus, "moving within File takes focus back to the pointer");
+    TEST_ASSERT_TRUE_MESSAGE(menu_level_found(1U), "moving within File hands it the chain again: File reopens");
 }
 
 /* ---- A press inside a panel shown last frame is not an outside press, even when that level closed at the
@@ -1759,10 +1724,13 @@ static void test_menu_one_activation_per_frame(void) {
     p.buttons[NT_BUTTON_LEFT].is_released = true;
     menu_key(NT_KEY_ENTER);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = &p, .pointer_count = 1});
-    nt_ui_menu_begin(&st, s_fx.ctx, NULL, 0U, MENU_A, &style);
-    const bool l1 = nt_ui_menu_item(&st, KEY_L1, "L1");
-    const bool l2 = nt_ui_menu_item(&st, KEY_L2, "L2");
-    nt_ui_menu_end(&st);
+    bool l1 = false;
+    bool l2 = false;
+    if (nt_ui_menu_begin(&st, s_fx.ctx, NULL, 0U, MENU_A, &style)) {
+        l1 = nt_ui_menu_item(&st, KEY_L1, "L1");
+        l2 = nt_ui_menu_item(&st, KEY_L2, "L2");
+        nt_ui_menu_end(&st);
+    }
     nt_ui_end(s_fx.ctx);
     TEST_ASSERT_TRUE_MESSAGE(l1, "the tapped row activates");
     TEST_ASSERT_FALSE_MESSAGE(l2, "the focused row does not activate in the same frame");
@@ -1818,8 +1786,6 @@ int main(void) {
     RUN_TEST(test_menu_item_begin_child_owns_its_press);
     RUN_TEST(test_menu_item_begin_press_beside_child);
     RUN_TEST(test_menu_item_begin_captured_drag_keeps_focus);
-    RUN_TEST(test_menu_item_begin_closed_skips_body);
-    RUN_TEST(test_menu_item_begin_closed_guarded_no_poison);
     RUN_TEST(test_menu_item_begin_disabled_never_activates);
     RUN_TEST(test_menu_item_begin_enter_activates);
     RUN_TEST(test_menu_shortcut_cell_on_rich_row_only);

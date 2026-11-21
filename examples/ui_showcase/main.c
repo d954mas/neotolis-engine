@@ -3090,73 +3090,72 @@ enum {
  * separator, a checkmark toggle, a disabled-via-custom row, and Quit. Built in CODE every frame. */
 static void render_menu_global(nt_ui_context_t *ctx, tab_state_t *st) {
     nt_ui_menu_t *menu = &st->menu.global_menu;
-    nt_ui_menu_begin(menu, ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_menu_global, g_current->menu);
-    nt_ui_menu_item_opts_t newo = {0};
-    newo.icon = s_icon_bunny_ref;
-    newo.shortcut = "Ctrl+N";
-    if (nt_ui_menu_item_ex(menu, MK_NEW, "New", newo)) {
-        st->menu.last_chosen = "New";
-    }
-    if (nt_ui_menu_submenu_begin(menu, MK_RECENT, "Open recent")) {
-        if (nt_ui_menu_item(menu, MK_RECENT_A, "level_01.ntpack")) {
-            st->menu.last_chosen = "Open recent > level_01.ntpack";
+    if (nt_ui_menu_begin(menu, ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_menu_global, g_current->menu)) {
+        nt_ui_menu_item_opts_t newo = {0};
+        newo.icon = s_icon_bunny_ref;
+        newo.shortcut = "Ctrl+N";
+        if (nt_ui_menu_item_ex(menu, MK_NEW, "New", newo)) {
+            st->menu.last_chosen = "New";
         }
-        if (nt_ui_menu_item(menu, MK_RECENT_B, "ui_showcase.ntpack")) {
-            st->menu.last_chosen = "Open recent > ui_showcase.ntpack";
+        if (nt_ui_menu_submenu_begin(menu, MK_RECENT, "Open recent")) {
+            if (nt_ui_menu_item(menu, MK_RECENT_A, "level_01.ntpack")) {
+                st->menu.last_chosen = "Open recent > level_01.ntpack";
+            }
+            if (nt_ui_menu_item(menu, MK_RECENT_B, "ui_showcase.ntpack")) {
+                st->menu.last_chosen = "Open recent > ui_showcase.ntpack";
+            }
+            nt_ui_menu_item_opts_t clr = {.disabled = true}; /* greyed, not selectable */
+            (void)nt_ui_menu_item_ex(menu, MK_RECENT_CLEAR, "(clear list)", clr);
+            nt_ui_menu_submenu_end(menu);
         }
-        nt_ui_menu_item_opts_t clr = {.disabled = true}; /* greyed, not selectable */
-        (void)nt_ui_menu_item_ex(menu, MK_RECENT_CLEAR, "(clear list)", clr);
-        nt_ui_menu_submenu_end(menu);
+        nt_ui_menu_separator(menu);
+        /* Checkmark toggle row: `selected` draws the checkmark; clicking flips the game-owned bool. */
+        nt_ui_menu_item_opts_t grid = {.selected = st->menu.show_grid};
+        if (nt_ui_menu_item_ex(menu, MK_TOGGLE_GRID, "Show grid", grid)) {
+            st->menu.show_grid = !st->menu.show_grid;
+            st->menu.last_chosen = "Show grid";
+        }
+        if (nt_ui_menu_item(menu, MK_PREFS, "Preferences")) {
+            st->menu.last_chosen = "Preferences";
+        }
+        if (nt_ui_menu_item(menu, MK_QUIT, "Quit")) {
+            st->menu.last_chosen = "Quit";
+        }
+        nt_ui_menu_end(menu);
     }
-    nt_ui_menu_separator(menu);
-    /* Checkmark toggle row: `selected` draws the checkmark; clicking flips the game-owned bool. */
-    nt_ui_menu_item_opts_t grid = {.selected = st->menu.show_grid};
-    if (nt_ui_menu_item_ex(menu, MK_TOGGLE_GRID, "Show grid", grid)) {
-        st->menu.show_grid = !st->menu.show_grid;
-        st->menu.last_chosen = "Show grid";
-    }
-    if (nt_ui_menu_item(menu, MK_PREFS, "Preferences")) {
-        st->menu.last_chosen = "Preferences";
-    }
-    if (nt_ui_menu_item(menu, MK_QUIT, "Quit")) {
-        st->menu.last_chosen = "Quit";
-    }
-    nt_ui_menu_end(menu);
 }
 
 /* ZONE menu (panel actions): distinct rows + a "Move to" submenu so the bound menu is unmistakable, plus a
  * custom non_activatable row whose inner control owns the click while the row only highlights. */
 static void render_menu_zone(nt_ui_context_t *ctx, tab_state_t *st) {
     nt_ui_menu_t *menu = &st->menu.zone_menu;
-    nt_ui_menu_begin(menu, ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_menu_zone, g_current->menu);
-    nt_ui_menu_item_opts_t edit = {0};
-    edit.icon = s_icon_bunny_ref;
-    if (nt_ui_menu_item_ex(menu, MK_EDIT, "Edit panel", edit)) {
-        st->menu.last_chosen = "Edit panel";
-    }
-    if (nt_ui_menu_item(menu, MK_DUP, "Duplicate")) {
-        st->menu.last_chosen = "Duplicate";
-    }
-    nt_ui_menu_separator(menu);
-    nt_ui_menu_item_opts_t move = {0};
-    move.icon = s_icon_bunny_ref;
-    if (nt_ui_menu_submenu_begin_ex(menu, MK_MOVE, "Move to", move)) {
-        if (nt_ui_menu_item(menu, MK_MOVE_FRONT, "Front")) {
-            st->menu.last_chosen = "Move to > Front";
+    if (nt_ui_menu_begin(menu, ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_menu_zone, g_current->menu)) {
+        nt_ui_menu_item_opts_t edit = {0};
+        edit.icon = s_icon_bunny_ref;
+        if (nt_ui_menu_item_ex(menu, MK_EDIT, "Edit panel", edit)) {
+            st->menu.last_chosen = "Edit panel";
         }
-        if (nt_ui_menu_item(menu, MK_MOVE_BACK, "Back")) {
-            st->menu.last_chosen = "Move to > Back";
+        if (nt_ui_menu_item(menu, MK_DUP, "Duplicate")) {
+            st->menu.last_chosen = "Duplicate";
         }
-        nt_ui_menu_item_opts_t grp = {.disabled = true};
-        (void)nt_ui_menu_item_ex(menu, MK_MOVE_GROUP, "Group", grp);
-        nt_ui_menu_submenu_end(menu);
-    }
-    /* Custom-content row (non_activatable): the inner button owns the click; the row only
-     * highlights on hover. The game reads the inner button's own interaction. */
-    nt_ui_menu_item_opts_t op = {.non_activatable = true};
-    /* Guard the custom body with the return: a CLOSED (present-only) menu returns false and skips the body,
-     * so the inner control never leaks onto the scene. item_end is still called unconditionally to balance. */
-    if (nt_ui_menu_item_begin(menu, MK_CUSTOM_OPACITY, op)) {
+        nt_ui_menu_separator(menu);
+        nt_ui_menu_item_opts_t move = {0};
+        move.icon = s_icon_bunny_ref;
+        if (nt_ui_menu_submenu_begin_ex(menu, MK_MOVE, "Move to", move)) {
+            if (nt_ui_menu_item(menu, MK_MOVE_FRONT, "Front")) {
+                st->menu.last_chosen = "Move to > Front";
+            }
+            if (nt_ui_menu_item(menu, MK_MOVE_BACK, "Back")) {
+                st->menu.last_chosen = "Move to > Back";
+            }
+            nt_ui_menu_item_opts_t grp = {.disabled = true};
+            (void)nt_ui_menu_item_ex(menu, MK_MOVE_GROUP, "Group", grp);
+            nt_ui_menu_submenu_end(menu);
+        }
+        /* Custom-content row (non_activatable): the inner button owns the click; the row only
+         * highlights on hover. The game reads the inner button's own interaction. */
+        nt_ui_menu_item_opts_t op = {.non_activatable = true};
+        nt_ui_menu_item_begin(menu, MK_CUSTOM_OPACITY, op);
         char opacity_buf[24];
         (void)snprintf(opacity_buf, sizeof opacity_buf, "Opacity %u%%", st->menu.opacity_pct);
         nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), opacity_buf, g_current->body);
@@ -3167,12 +3166,12 @@ static void render_menu_zone(nt_ui_context_t *ctx, tab_state_t *st) {
             st->menu.opacity_pct = 100; /* the inner control owns the click; a real state change, not a magic log */
             st->menu.last_chosen = "Opacity reset";
         }
+        nt_ui_menu_item_end(menu);
+        if (nt_ui_menu_item(menu, MK_DELETE, "Delete")) {
+            st->menu.last_chosen = "Delete";
+        }
+        nt_ui_menu_end(menu);
     }
-    nt_ui_menu_item_end(menu);
-    if (nt_ui_menu_item(menu, MK_DELETE, "Delete")) {
-        st->menu.last_chosen = "Delete";
-    }
-    nt_ui_menu_end(menu);
 }
 
 /* Menu tab: a right-click / long-press context menu with a nested submenu, exercising the mouse-aim

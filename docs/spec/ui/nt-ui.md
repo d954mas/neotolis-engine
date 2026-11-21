@@ -639,7 +639,10 @@ clicked) — there is no per-frame result struct to scan. The game owns the open
 state (`nt_ui_menu_t` / `bool *open`) and, for the combo, the `int`
 selection; the widget only signals and clears `open` on a pick (Model D, same
 as popup-core). Both build on the kept popup-core (+ the scroll wrapper for a
-long combo list). There is no data-array form — immediate-only.
+long combo list). There is no data-array form — immediate-only. Both begins are
+called every frame and return whether the body is declared this frame; only
+then the game declares the rows and calls the matching end
+(`if (nt_ui_menu_begin(...)) { ...; nt_ui_menu_end(...); }`).
 
 A custom-content row (`item_begin..item_end`, `selectable_begin..selectable_end`,
 `preview_begin..preview_end`, and a tab's `nt_ui_tab_begin..nt_ui_tab_end`) steps
@@ -658,7 +661,8 @@ frames (static / app field / arena slice): the open flag and anchor, the menu's
 navigation, its mouse-aim corridor and its per-declaration scratch, so the core
 `nt_ui_context` pays zero bytes and no state-pool cells for a menu, and the menu
 TU dead-strips from a game without one. All-zero is the valid closed state, and
-every closed frame resets the navigation. Menu levels snap open (no tween). The
+the closed frame's `nt_ui_menu_begin` resets the navigation. Menu levels snap
+open (no tween). The
 combo carries no such object (its state lives in the core ctx's pool, bounded
 by caps). Row identity is KEY-STABLE: `mix(scope_id, key)` (fmix, never
 additive — additive sibling ids collide in Clay's anonymous child-id space),
@@ -689,9 +693,9 @@ absent is no focus: Enter does nothing, Down starts at the first enabled row and
 Up at the last. A disabled focused row keeps its place: Enter does nothing and
 Up/Down step from it. An open parent that the frame does not declare as an
 enabled parent closes its branch; Up, Down, Left and Esc in that frame do
-nothing. The pointer moves focus to the row it enters. A key hands focus and the
+nothing. The pointer moves focus to the row under it. A key hands focus and the
 open chain to the keyboard: a pointer resting on a row neither moves focus nor
-opens or closes a submenu until it enters another row. An open parent stays
+opens or closes a submenu until it moves. An open parent stays
 highlighted while focus is in its child.
 
 ## Atlas region identity
