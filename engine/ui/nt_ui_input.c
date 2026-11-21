@@ -18,8 +18,12 @@
 #include "utf8/nt_utf8.h"
 #include "window/nt_window.h"
 
-/* Password masking overrides the keyboard hint; map UI vocabulary to the platform input mode. */
-static inline nt_text_input_mode_t keyboard_mode(nt_ui_input_keyboard_t kb, bool password) {
+/* The keyboard hint is UX only (web soft keyboard); the allow filter restricts input. Password
+ * masking overrides the keyboard kind. The platform has one text-entry surface, starting in TEXT,
+ * so the focused field writes its mode only when it differs from the last one written. */
+static nt_text_input_mode_t s_text_input_mode = NT_TEXT_INPUT_TEXT;
+
+static inline void apply_keyboard_hint(nt_ui_input_keyboard_t kb, bool password) {
     nt_text_input_mode_t mode = NT_TEXT_INPUT_TEXT;
     if (password) {
         mode = NT_TEXT_INPUT_PASSWORD;
@@ -43,7 +47,10 @@ static inline nt_text_input_mode_t keyboard_mode(nt_ui_input_keyboard_t kb, bool
             break;
         }
     }
-    return mode;
+    if (mode != s_text_input_mode) {
+        s_text_input_mode = mode;
+        nt_window_set_text_input_mode(mode);
+    }
 }
 
 const nt_ui_widget_def_t NT_UI_INPUT_DEF = {
@@ -709,16 +716,10 @@ static void focus_step(input_frame_t *f) {
     // #region focus-order bookkeeping (Tab wrap target)
     if (f->enabled && ctx->focus_first_id == 0U) {
         ctx->focus_first_id = id;
-        ctx->focus_first_mode = keyboard_mode(props->keyboard, props->password);
     }
-    /* Only an enabled field consumes the seek; input and visuals switch next frame,
-     * matching wrap to an earlier field whose commands have already been emitted. */
-    bool claimed_now = false;
     if (f->enabled && ctx->focus_tab_seek != 0U && ctx->focus_tab_seek != id) {
-        ctx->focused_input_id = id;
+        ctx->focus_tab_pending = id; /* replaces the wrap fallback */
         ctx->focus_tab_seek = 0U;
-        claimed_now = true;
-        nt_window_set_text_input_mode(keyboard_mode(props->keyboard, props->password));
     }
     // #endregion
 
@@ -770,9 +771,6 @@ static void focus_step(input_frame_t *f) {
         }
         st->anchor = st->caret; /* a fresh press collapses the selection to the click point */
         st->drag = (uint8_t)in.pressed;
-        if (!was_focused) {
-            nt_window_set_text_input_mode(keyboard_mode(props->keyboard, props->password));
-        }
     }
 
     /* Double-click select-word rides the same single step. */
@@ -808,13 +806,16 @@ static void focus_step(input_frame_t *f) {
     }
     f->in = in;
     f->bb = bb;
-    f->focused = enabled && (ctx->focused_input_id == id) && !claimed_now;
+    f->focused = enabled && (ctx->focused_input_id == id);
+    if (f->focused) {
+        apply_keyboard_hint(props->keyboard, props->password);
+    }
     // #endregion
 }
 
 /* The focused edit pipeline: drain the typed chars, then run the physical editing keys
  * (delete/arrows/home/end), selection chords (Shift/Ctrl+A), clipboard (Ctrl+C/X/V), submit + Tab/Esc.
- * No-op when unfocused or newly reached by Tab. Sets changed/submitted; cur_len re-derived in f->cur_len. */
+ * No-op when unfocused. Sets changed/submitted; cur_len re-derived in f->cur_len. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void edit_step(input_frame_t *f, bool *changed, bool *submitted) {
     if (!f->focused) {
@@ -961,13 +962,9 @@ static void edit_step(input_frame_t *f, bool *changed, bool *submitted) {
         if (nt_input_key_is_pressed(NT_KEY_ESCAPE)) {
             ctx->focused_input_id = 0U; /* unfocus first; modal close (if any) handles the next Esc */
         } else if (nt_input_key_is_pressed(NT_KEY_TAB)) {
-            /* Advance focus to the next enabled field declared this frame; wrap to the first. */
+            /* Next enabled field declared after this one, else wrap to the first; applied next begin. */
             ctx->focus_tab_seek = id;
-            ctx->focused_input_id = ctx->focus_first_id; /* fallback: wrap (overridden if a later field claims) */
-            if (ctx->focus_first_id != id) {
-                /* A later field may replace this hint; keeping it here leaves text-free UI independent of input. */
-                nt_window_set_text_input_mode(ctx->focus_first_mode);
-            }
+            ctx->focus_tab_pending = ctx->focus_first_id;
         }
         // #endregion
     }

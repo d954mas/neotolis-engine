@@ -554,16 +554,13 @@ shown dimmed while empty+unfocused, and a minimal focus arbiter (Esc unfocus, Ta
 advance/wrap). A press focuses the field, except an unfocused field whose press waits
 for a scroll (`gesture_pending`): it focuses on the tap's release, so a list drag never
 opens the keyboard. A focused field drags its selection along x (`drag_axes`).
-A field reached by Tab starts processing keyboard input on the
-next frame; it never replays editing or submit events handled by the source field.
-Focus queries report the destination during the transition frame, while the source
-keeps its focused appearance until the next frame, equally for advance and wrap.
-Esc takes priority over Tab when both arrive in one frame. The destination's
-keyboard hint is applied during the transition; idle frames and Tab back to the
-sole enabled field do not reapply it. A Tab from a middle field applies the wrap
-fallback's hint before a later field replaces it, keeping the platform dependency
-inside the text widget rather than the base UI lifecycle.
-Caret, selection highlight, and the text all float as clipped
+Tab moves focus to the next enabled field declared after the focused one, wrapping
+to the first enabled field, at the next `nt_ui_begin`: for the rest of the Tab frame
+the source keeps focus, so the destination never sees that frame's keys. A press
+focuses at once, so a press and a Tab in one frame act as press, then Tab. Esc
+unfocuses and wins over a Tab in the same frame. The focused field sets the
+platform keyboard hint (`nt_window_set_text_input_mode`) only when its mode differs
+from the last one set. Caret, selection highlight, and the text all float as clipped
 children carrying a `HAS_TRANSFORM` offset of `pad_x - scroll_x` (set as the Clay
 element `userData`, which the walker reads for layer+transform), so the line
 scrolls to keep the caret visible while clipping to the field box. Cut is a no-op

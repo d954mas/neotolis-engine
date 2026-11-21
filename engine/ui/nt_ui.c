@@ -543,8 +543,11 @@ void nt_ui_begin(nt_ui_context_t *ctx, const nt_ui_frame_desc_t *frame) {
         ctx->focused_input_id = 0U;
     }
     ctx->focused_input_seen = 0U;
-    /* Tab focus-advance is single-frame: the seek is consumed by the next field this frame; the
-     * first-field tracker re-zeroes so a Tab off the last field wraps to this frame's first. */
+    /* Last frame's Tab takes effect here, so focus never changes mid-frame on Tab. */
+    if (ctx->focus_tab_pending != 0U) {
+        ctx->focused_input_id = ctx->focus_tab_pending;
+        ctx->focus_tab_pending = 0U;
+    }
     ctx->focus_tab_seek = 0U;
     ctx->focus_first_id = 0U;
 

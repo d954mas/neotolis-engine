@@ -17,7 +17,6 @@
 #include "ui/nt_ui_anim.h"
 #include "ui/nt_ui_inspector.h"
 #include "ui/nt_ui_state.h"
-#include "window/nt_window.h"
 
 /* Depth (not count) — independent of max_elements; deep nests are rare. */
 #ifndef NT_UI_TREE_DFS_DEPTH_CAP
@@ -224,15 +223,15 @@ struct nt_ui_context {
      * delivers the dismiss click. INT32_MIN until the first claim. */
     int32_t modal_top_z_cur;
     /* Keyboard-focus arbiter: the input field that eats typed chars + editing keys.
-     * 0 = none. A press inside a field sets it; Esc clears it; Tab moves it to the next
-     * field declared this frame. Survives across frames (not reset by begin). */
+     * 0 = none. A press inside a field sets it; Esc clears it; Tab sets it at the next begin.
+     * Survives across frames (not reset by begin). */
     uint32_t focused_input_id;
-    /* Tab focus-advance bookkeeping, scoped to one frame: _seek set the frame a focused field
-     * sees Tab; the NEXT field declared that frame claims focus and clears _seek. _first_id
-     * tracks the earliest enabled field and its keyboard mode for wrap. */
+    /* Tab bookkeeping for one frame: the focused field seeing Tab sets _seek and points _pending at
+     * _first_id (the earliest enabled field, for wrap); the next enabled field declared after it
+     * takes _pending and clears _seek. nt_ui_begin moves _pending into focused_input_id. */
     uint32_t focus_tab_seek;
+    uint32_t focus_tab_pending;
     uint32_t focus_first_id;
-    nt_text_input_mode_t focus_first_mode;
     /* Raw rich-text per-block caps (0 = compile-time NT_UI_RICH_MAX_* default); resolved in
      * nt_ui_rich_begin, which owns the rich #defines. Raw here so this widget-agnostic header stays
      * rich-text-agnostic. Slotted into the uint32 run so they add no struct padding. */
