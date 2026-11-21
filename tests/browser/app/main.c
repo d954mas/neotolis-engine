@@ -86,8 +86,9 @@ static uint8_t s_ui_arena[1U << 20];
 
 static nt_hash32_t s_pack_id;
 static nt_hash32_t s_basis_pack_id;
-static nt_resource_t s_atlas_handle, s_atlas_tex_handle;
-/* basis_fixture.ntpack textures, ETC1S when admitted and UASTC otherwise; both activate through the
+static nt_resource_t s_atlas_handle;
+#if defined(__EMSCRIPTEN__)
+/* Read only by the web probes. basis_fixture.ntpack textures, ETC1S when admitted and UASTC otherwise; both activate through the
  * Basis transcode path. RGBA carries alpha, RGB is opaque (ETC2 picks RGB8 for it). */
 static nt_resource_t s_basis_tex_handle;
 static nt_resource_t s_basis_rgb_handle;
@@ -97,8 +98,7 @@ static nt_resource_t s_basis_srgb_rgb_handle;
 static nt_resource_t s_srgb_texel_handle;
 /* Uncompressed RGB9E5 with values above 1, sampled scaled by 1/16. */
 static nt_resource_t s_hdr_handle;
-static nt_resource_t s_font_resource;
-static nt_resource_t s_rich_font_resource[4];
+#endif
 
 static nt_material_t s_sprite_material, s_text_material;
 static nt_program_ref_t s_sprite_program, s_text_program;
@@ -317,15 +317,19 @@ static void try_bind_resources(void) {
         nt_ui_set_atlas_white_region(s_ctx, s_atlas_handle, white);
         s_atlas_bound = true;
     }
-    if (!s_font_bound && nt_resource_is_ready(s_font_resource)) {
-        nt_font_add(s_font, s_font_resource);
+    if (!s_font_bound && nt_resource_pack_state(s_pack_id) == NT_PACK_STATE_READY) {
+        uint32_t size = 0;
+        const uint8_t *bytes = nt_resource_entry_bytes(s_pack_id, ASSET_FONT_UI_SHOWCASE_FONT, &size);
+        nt_font_fill(s_font, bytes, size);
         nt_ui_set_font(s_ctx, 0U, s_font);
         s_font_bound = true;
     }
-    if (!s_rich_font_bound && nt_resource_is_ready(s_rich_font_resource[0]) && nt_resource_is_ready(s_rich_font_resource[1]) && nt_resource_is_ready(s_rich_font_resource[2]) &&
-        nt_resource_is_ready(s_rich_font_resource[3])) {
+    if (!s_rich_font_bound && nt_resource_pack_state(s_pack_id) == NT_PACK_STATE_READY) {
+        const nt_hash64_t entries[4] = {ASSET_FONT_UI_SHOWCASE_FONT_RICH_R, ASSET_FONT_UI_SHOWCASE_FONT_RICH_B, ASSET_FONT_UI_SHOWCASE_FONT_RICH_I, ASSET_FONT_UI_SHOWCASE_FONT_RICH_BI};
         for (uint32_t i = 0; i < 4U; i++) {
-            nt_font_add(s_rich_font[i], s_rich_font_resource[i]);
+            uint32_t size = 0;
+            const uint8_t *bytes = nt_resource_entry_bytes(s_pack_id, entries[i], &size);
+            nt_font_fill(s_rich_font[i], bytes, size);
         }
         s_rich_font_bound = true;
     }
@@ -836,6 +840,36 @@ EMSCRIPTEN_KEEPALIVE double nt_test_gpu_command(int operation, int segment) {
 }
 EMSCRIPTEN_KEEPALIVE const char *nt_test_input_buffer(void) { return s_state.cyrillic; }
 EMSCRIPTEN_KEEPALIVE int nt_test_mouse(void) { return (g_nt_input.pointers[0].active ? 1 : 0) | (g_nt_input.pointers[0].buttons[NT_BUTTON_LEFT].is_down ? 2 : 0); }
+
+/* Pump and poll, then read before another browser task or the UI can consume this frame's edges and chars. */
+EMSCRIPTEN_KEEPALIVE const char *nt_test_input_poll(void) {
+    static char snapshot[8192];
+    /* Worst case per entry: key "[1,1,1]," 8, pointer object 160, codepoint 11; the snprintf sums never wrap. */
+    _Static_assert((NT_KEY_COUNT * 8) + (NT_INPUT_MAX_POINTERS * 160) + (NT_INPUT_CHAR_MAX * 11) + 64 <= sizeof(snapshot), "input_poll snapshot");
+    nt_window_poll();
+    nt_input_poll();
+    size_t len = (size_t)snprintf(snapshot, sizeof(snapshot), "{\"dpr\":%g,\"keys\":[", (double)g_nt_window.dpr);
+    for (int i = 0; i < NT_KEY_COUNT; i++) {
+        const nt_key_t key = (nt_key_t)i;
+        len += (size_t)snprintf(snapshot + len, sizeof(snapshot) - len, "%s[%d,%d,%d]", i ? "," : "", nt_input_key_is_down(key), nt_input_key_is_pressed(key), nt_input_key_is_released(key));
+    }
+    len += (size_t)snprintf(snapshot + len, sizeof(snapshot) - len, "],\"pointers\":[");
+    for (int i = 0; i < NT_INPUT_MAX_POINTERS; i++) {
+        const nt_pointer_t *p = &g_nt_input.pointers[i];
+        const nt_button_state_t *b = &p->buttons[NT_BUTTON_LEFT];
+        len += (size_t)snprintf(snapshot + len, sizeof(snapshot) - len, "%s{\"id\":%u,\"active\":%d,\"down\":%d,\"pressed\":%d,\"released\":%d,\"x\":%g,\"y\":%g,\"wheel\":%g}", i ? "," : "", p->id,
+                                p->active, b->is_down, b->is_pressed, b->is_released, (double)p->x, (double)p->y, (double)p->wheel_dy);
+    }
+    len += (size_t)snprintf(snapshot + len, sizeof(snapshot) - len, "],\"chars\":[");
+    uint32_t cp = 0;
+    bool first = true;
+    while (nt_input_pop_char(&cp)) {
+        len += (size_t)snprintf(snapshot + len, sizeof(snapshot) - len, "%s%u", first ? "" : ",", cp);
+        first = false;
+    }
+    (void)snprintf(snapshot + len, sizeof(snapshot) - len, "]}");
+    return snapshot;
+}
 EMSCRIPTEN_KEEPALIVE unsigned int nt_test_walk_text_cmd_count(void) { return nt_ui_get_last_walk_text_command_count(s_ctx); }
 EMSCRIPTEN_KEEPALIVE float nt_test_field_css_x(void) { return s_nt_field_css_x; }
 EMSCRIPTEN_KEEPALIVE float nt_test_field_css_y(void) { return s_nt_field_css_y; }
@@ -1005,6 +1039,7 @@ EM_JS(void, nt_test_install_hooks, (void), {
     window['__nt'] = {
         get 'ready'() { return _nt_test_ready() !== 0; },
         'input_buffer': function() { return UTF8ToString(_nt_test_input_buffer()); },
+        'input_poll': function() { return JSON.parse(UTF8ToString(_nt_test_input_poll())); },
         'mouse': function() { var m = _nt_test_mouse(); return { 'active': (m & 1) !== 0, 'down': (m & 2) !== 0 }; },
         'walk_text_cmd_count': function() { return _nt_test_walk_text_cmd_count() >>> 0; },
         'drawn_frames': function() { return _nt_test_drawn_frames() >>> 0; },
@@ -1273,8 +1308,12 @@ static void frame(void) {
                             nt_gfx_program_ready(text_info->program);
 
     if (can_render) {
-        nt_ui_begin(s_ctx, scale.logical_w, scale.logical_h, g_nt_app.dt, &g_nt_input.pointers[g_nt_input.primary], 1, 0);
-        nt_ui_set_viewport(s_ctx, nt_ui_viewport_from_scale(&scale));
+        nt_ui_begin(s_ctx, &(nt_ui_frame_desc_t){.layout_w = scale.logical_w,
+                                                 .layout_h = scale.logical_h,
+                                                 .dt = g_nt_app.dt,
+                                                 .pointers = &g_nt_input.pointers[g_nt_input.primary],
+                                                 .pointer_count = 1,
+                                                 .viewport = nt_ui_viewport_from_scale(&scale, g_nt_window.dpr)});
 
         const nt_ui_label_style_t *caption = &s_caption;
         const nt_ui_input_style_t *input_style = &s_input_style;
@@ -1335,7 +1374,7 @@ static void frame(void) {
 #if defined(__EMSCRIPTEN__)
         /* Map the Cyrillic field's logical bbox -> canvas CSS px so Playwright clicks the real widget.
          * UI logical -> framebuffer px (offset + ui*scale) -> CSS px (/dpr). Clay bbox + fb are both
-         * Y-down, matching nt_input_web's css->fb map (no Y-flip). */
+         * Y-down, matching nt_window_web's css->fb map (no Y-flip). */
         {
             const nt_ui_bbox_t fb = nt_ui_get_bbox(s_ctx, s_id_input_cyrillic);
             s_nt_field_visible = fb.found ? 1 : 0;
@@ -1480,7 +1519,7 @@ int main(int argc, char *argv[]) {
     s_text_program.label = "browser/text";
     s_text_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_FRAG, NT_ASSET_SHADER_CODE);
     s_atlas_handle = nt_resource_request(ASSET_ATLAS_UI_SHOWCASE_ATLAS, NT_ASSET_ATLAS);
-    s_atlas_tex_handle = nt_resource_request(ASSET_TEXTURE_UI_SHOWCASE_ATLAS_TEX0, NT_ASSET_TEXTURE);
+#if defined(__EMSCRIPTEN__)
     /* Resource ids are the hashed asset names. */
 #if NT_BASISU_HAS_ETC1S
     s_basis_tex_handle = nt_resource_request(nt_hash64_str("basis_etc1s_rgba"), NT_ASSET_TEXTURE);
@@ -1495,11 +1534,7 @@ int main(int argc, char *argv[]) {
 #endif
     s_srgb_texel_handle = nt_resource_request(nt_hash64_str("srgb_texel"), NT_ASSET_TEXTURE);
     s_hdr_handle = nt_resource_request(nt_hash64_str("hdr_rgb9e5"), NT_ASSET_TEXTURE);
-    s_font_resource = nt_resource_request(ASSET_FONT_UI_SHOWCASE_FONT, NT_ASSET_FONT);
-    s_rich_font_resource[0] = nt_resource_request(ASSET_FONT_UI_SHOWCASE_FONT_RICH_R, NT_ASSET_FONT);
-    s_rich_font_resource[1] = nt_resource_request(ASSET_FONT_UI_SHOWCASE_FONT_RICH_B, NT_ASSET_FONT);
-    s_rich_font_resource[2] = nt_resource_request(ASSET_FONT_UI_SHOWCASE_FONT_RICH_I, NT_ASSET_FONT);
-    s_rich_font_resource[3] = nt_resource_request(ASSET_FONT_UI_SHOWCASE_FONT_RICH_BI, NT_ASSET_FONT);
+#endif
 
     s_sprite_material = nt_material_create(&(nt_material_create_desc_t){
         .blend = nt_blend_alpha_premultiplied(),

@@ -197,7 +197,6 @@ _Alignas(max_align_t) static uint8_t s_scratch_mem[(size_t)4U * 1024U * 1024U]; 
 static nt_ui_context_t *s_ctx;
 static void *s_ui_arena;
 static nt_resource_t s_atlas;
-static nt_resource_t s_font_res;
 static nt_font_t s_font;
 static bool s_bound_atlas, s_bound_font;
 static nt_material_t s_sprite_material, s_text_material;
@@ -234,7 +233,11 @@ static struct {
     double total_ms, worst_ms, started;
     uint32_t press_frames; /* frames left to hold the button */
     uint32_t again;        /* frames until the second click of a double-click */
+    nt_pointer_t pointer;  /* the monkey's mouse: published input is replaced by the next poll */
 } s_monkey;
+
+/* The pointer this frame's UI follows. */
+static const nt_pointer_t *frame_pointer(void) { return s_monkey.on ? &s_monkey.pointer : &g_nt_input.pointers[g_nt_input.primary]; }
 
 static uint32_t monkey_rand(void) {
     s_monkey.seed ^= s_monkey.seed << 13U;
@@ -247,8 +250,7 @@ static uint32_t monkey_rand(void) {
 static void monkey_input(float w, float h) {
     static const nt_key_t k_keys[] = {NT_KEY_ARROW_UP, NT_KEY_ARROW_DOWN, NT_KEY_ARROW_LEFT, NT_KEY_ARROW_RIGHT, NT_KEY_PAGE_UP, NT_KEY_PAGE_DOWN, NT_KEY_HOME, NT_KEY_END,
                                       NT_KEY_D,        NT_KEY_P,          NT_KEY_ENTER,      NT_KEY_BACKSPACE,   NT_KEY_ESCAPE,  NT_KEY_C,         NT_KEY_B};
-    nt_pointer_t *p = &g_nt_input.pointers[0];
-    g_nt_input.primary = 0;
+    nt_pointer_t *p = &s_monkey.pointer;
     p->active = true;
     p->wheel_dy = 0.0F;
     p->dx = 0.0F;
@@ -661,7 +663,7 @@ static void textf(const nt_ui_label_style_t *style, const char *fmt, ...) {
 
 static bool button(const char *label, const nt_ui_label_style_t *style, bool active) {
     const uint32_t id = next_id();
-    const nt_ui_events_t ev = nt_ui_events(s_ctx, id, NULL);
+    const nt_ui_interaction_t ev = nt_ui_step(s_ctx, id, NULL);
     CLAY({.id = (Clay_ElementId){.id = id}, .layout = {.padding = {6, 6, 2, 2}}, .backgroundColor = active ? k_select : (ev.hovered ? k_hover : k_panel), .cornerRadius = CLAY_CORNER_RADIUS(3)}) {
         text(label, style);
     }
@@ -851,7 +853,7 @@ static void tracks_input(void) {
     if (!box.found || box.width <= 0.0F) {
         return;
     }
-    const nt_pointer_t *pointer = &g_nt_input.pointers[g_nt_input.primary];
+    const nt_pointer_t *pointer = frame_pointer();
     double at = ((double)pointer->x - (double)box.x) / ((double)box.width * SHARE_);
     at = at < 0.0 ? 0.0 : (at > 1.0 ? 1.0 : at); // NOLINT(readability-avoid-nested-conditional-operator)
     if (s.track_wheel != 0.0F) {
@@ -871,7 +873,7 @@ static void tracks_input(void) {
     s.hover_file = FI_NONE;
     for (uint32_t f = 0; f < s.file_count; f++) {
         for (int t = 0; t < TRACK_COUNT; t++) {
-            const nt_ui_events_t ev = nt_ui_events(s_ctx, track_id(f, (track_t)t), NULL);
+            const nt_ui_interaction_t ev = nt_ui_step(s_ctx, track_id(f, (track_t)t), NULL);
             if (ev.pressed_now) {
                 s.drag_first = s.axis_first;
             }
@@ -899,7 +901,7 @@ static void tracks_input(void) {
 static void strip_input(float *thumb_x, float *thumb_w) {
     const uint32_t id = nt_ui_id("axis_strip");
     const nt_ui_bbox_t box = nt_ui_get_bbox(s_ctx, id);
-    const nt_ui_events_t ev = nt_ui_events(s_ctx, id, NULL);
+    const nt_ui_interaction_t ev = nt_ui_step(s_ctx, id, NULL);
     const double most = (double)axis_frames();
     const double first = axis_hold(s.axis_first);
     const float width = box.found && box.width > 0.0F ? box.width : 1.0F;
@@ -1045,7 +1047,7 @@ static void declare_frame_table(void) {
         for (uint32_t k = 0; k < s.files[f].frame_count; k++) {
             const fi_frame_t *fr = &s.files[f].frames[k];
             const uint32_t id = next_id();
-            const nt_ui_events_t ev = nt_ui_events(s_ctx, id, NULL);
+            const nt_ui_interaction_t ev = nt_ui_step(s_ctx, id, NULL);
             if (ev.clicked) {
                 pick_frame(f, k);
             }
@@ -1241,7 +1243,7 @@ static void declare_timeline(const fi_frame_t *fr) {
             const bool selected = c == selected_column;
             const uint32_t target = targets[c];
             const uint32_t id = next_id();
-            const nt_ui_events_t ev = nt_ui_events(s_ctx, id, NULL);
+            const nt_ui_interaction_t ev = nt_ui_step(s_ctx, id, NULL);
             if (ev.clicked) {
                 select_record(target);
             }
@@ -1397,8 +1399,8 @@ static void declare_tree(void) {
                     const uint32_t r = s.vis_row[k];
                     const uint32_t row_id = nt_ui_vlist_item_id(s_ctx, k);
                     const uint32_t fold_id = nt_ui_child_id(row_id, "fold");
-                    const nt_ui_events_t ev = nt_ui_events(s_ctx, row_id, NULL);
-                    const nt_ui_events_t fold_ev = nt_ui_events(s_ctx, fold_id, NULL);
+                    const nt_ui_interaction_t ev = nt_ui_step(s_ctx, row_id, NULL);
+                    const nt_ui_interaction_t fold_ev = nt_ui_step(s_ctx, fold_id, NULL);
                     const bool parent = r != FI_NONE && r + 1U < fr->row_count && fr->depth[r + 1U] > fr->depth[r];
                     if (fold_ev.clicked && parent) {
                         s.collapsed[r] ^= 1U;
@@ -1466,7 +1468,7 @@ static void declare_banners(const fi_frame_t *fr) {
 
 static void card(fi_query_t q, const char *value, const char *label, const char *detail) {
     const uint32_t id = next_id();
-    const nt_ui_events_t ev = nt_ui_events(s_ctx, id, NULL);
+    const nt_ui_interaction_t ev = nt_ui_step(s_ctx, id, NULL);
     const bool any = fi_cell(frame_sel(), q).n > 0;
     if (any) {
         open_query(ev.clicked, q, label);
@@ -2038,7 +2040,7 @@ static void declare_compare_list(void) {
             for (uint32_t k = range.first; k <= range.last && k < s_cmp.row_count; ++k) {
                 const cmp_row_t *row = &s_cmp.rows[k];
                 const uint32_t row_id = nt_ui_vlist_item_id(s_ctx, k);
-                const nt_ui_events_t ev = nt_ui_events(s_ctx, row_id, NULL);
+                const nt_ui_interaction_t ev = nt_ui_step(s_ctx, row_id, NULL);
                 const bool fold = row->kind == CMP_GROUP || row->kind == CMP_SAME;
                 CLAY({.id = (Clay_ElementId){.id = row_id},
                       .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(ROW_H)}, .childGap = 4, .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}},
@@ -2091,7 +2093,7 @@ static void link_text(const fi_frame_t *fr, const char *what, uint32_t record, c
     (void)snprintf(buf, sizeof(buf), "%s@%u  %s", what, record, body);
     const bool commands = s.page == PAGE_COMMANDS;
     const uint32_t id = next_id();
-    const nt_ui_events_t ev = nt_ui_events(s_ctx, id, NULL);
+    const nt_ui_interaction_t ev = nt_ui_step(s_ctx, id, NULL);
     Clay_Color background = ev.hovered ? k_hover : k_panel;
     background = !commands && s.selected == record ? k_select : background;
     CLAY({.id = (Clay_ElementId){.id = id}, .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .padding = {4, 4, 1, 1}}, .backgroundColor = background}) { text(buf, &k_link_wrap); }
@@ -2253,7 +2255,7 @@ static void object_row(const fi_frame_t *fr, uint32_t k) {
     (void)snprintf(count, sizeof(count), "%u record%s", s_panel.named_records[k], s_panel.named_records[k] == 1 ? "" : "s");
     CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .childGap = 6, .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}}}) {
         const uint32_t ui = next_id();
-        const nt_ui_events_t ev = nt_ui_events(s_ctx, ui, NULL);
+        const nt_ui_interaction_t ev = nt_ui_step(s_ctx, ui, NULL);
         const bool linked = s_panel.named_def[k] != FI_NONE;
         CLAY(
             {.id = (Clay_ElementId){.id = ui}, .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .padding = {4, 4, 1, 1}}, .backgroundColor = ev.hovered && linked ? k_hover : k_panel}) {
@@ -2707,8 +2709,10 @@ static void try_bind(void) {
         nt_ui_set_atlas_white_region(s_ctx, s_atlas, white);
         s_bound_atlas = true;
     }
-    if (!s_bound_font && nt_resource_is_ready(s_font_res)) {
-        nt_font_add(s_font, s_font_res);
+    if (!s_bound_font && nt_resource_pack_state(nt_hash32_str("frame_inspector")) == NT_PACK_STATE_READY) {
+        uint32_t size = 0;
+        const uint8_t *bytes = nt_resource_entry_bytes(nt_hash32_str("frame_inspector"), ASSET_FONT_FRAME_INSPECTOR_MONO, &size);
+        nt_font_fill(s_font, bytes, size);
         nt_ui_set_font(s_ctx, 0U, s_font);
         s_bound_font = true;
     }
@@ -2781,7 +2785,7 @@ static void frame(void) {
     const nt_material_info_t *txt = nt_material_get_info(s_text_material);
     const bool can_render = s_bound_atlas && s_bound_font && sprite != NULL && nt_gfx_program_ready(sprite->program) && txt != NULL && nt_gfx_program_ready(txt->program);
     /* The wheel over the tracks (last frame's layout) belongs to the frame axis: the UI gets the pointer without it. */
-    nt_pointer_t pointer = g_nt_input.pointers[g_nt_input.primary];
+    nt_pointer_t pointer = *frame_pointer();
     const nt_ui_bbox_t tracks = nt_ui_get_bbox(s_ctx, CLAY_ID("tracks").id);
     const bool over = s.page == PAGE_FRAMES && tracks.found && pointer.x >= tracks.x && pointer.x < tracks.x + tracks.width && pointer.y >= tracks.y && pointer.y < tracks.y + tracks.height;
     s.track_wheel = over && !s_keys.shift ? pointer.wheel_dy : 0.0F;
@@ -2791,8 +2795,10 @@ static void frame(void) {
         pointer.wheel_dy = 0.0F;
     }
     if (can_render) {
-        nt_ui_begin(s_ctx, scale.logical_w, scale.logical_h, g_nt_app.dt, &pointer, 1, 0);
-        nt_ui_set_viewport(s_ctx, nt_ui_viewport_from_scale(&scale));
+        nt_ui_begin(
+            s_ctx,
+            &(nt_ui_frame_desc_t){
+                .layout_w = scale.logical_w, .layout_h = scale.logical_h, .dt = g_nt_app.dt, .pointers = &pointer, .pointer_count = 1, .viewport = nt_ui_viewport_from_scale(&scale, g_nt_window.dpr)});
         declare_ui();
         nt_ui_end(s_ctx);
     }
@@ -3036,7 +3042,7 @@ int main(int argc, char *argv[]) {
                                         .fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_FRAG, NT_ASSET_SHADER_CODE),
                                         .label = "frame_inspector/text"};
     s_atlas = nt_resource_request(ASSET_ATLAS_FRAME_INSPECTOR_ATLAS, NT_ASSET_ATLAS);
-    s_font_res = nt_resource_request(ASSET_FONT_FRAME_INSPECTOR_MONO, NT_ASSET_FONT);
+
     s_sprite_material = make_material("frame_inspector_sprite");
     s_text_material = make_material("frame_inspector_text");
     nt_ui_set_sprite_material(s_ctx, s_sprite_material);

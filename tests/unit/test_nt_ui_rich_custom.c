@@ -61,7 +61,7 @@ static void test_custom_effect_reaches_object_without_stock_module(void) {
     float magnitude = 8.0F;
     nt_ui_rich_style_t base = nt_ui_rich_style_defaults();
     base.font_id[0] = s_fx.stub_font;
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &mouse, .pointer_count = 1});
     CLAY({.id = CLAY_ID("root"), .layout = {.sizing = {CLAY_SIZING_FIXED(100), CLAY_SIZING_FIXED(60)}}}) {
         nt_ui_rich_begin(s_fx.ctx, &base);
         nt_ui_rich_object(s_fx.ctx, s_obj_size, draw, NULL);
@@ -96,7 +96,7 @@ static rich_frame_result_t run_rich_frame(bool scribble) {
     nt_ui_rich_result_t out = {0};
     s_draw_calls = 0U;
     nt_arena_reset(&g_nt_mem_scratch);
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &mouse, .pointer_count = 1});
     CLAY({.id = CLAY_ID("root"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(60)}}}) {
         nt_ui_rich_begin(s_fx.ctx, &base);
         nt_ui_rich_text_n(s_fx.ctx, "ab ", 3);

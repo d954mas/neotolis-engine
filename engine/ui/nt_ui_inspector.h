@@ -29,7 +29,7 @@ typedef struct nt_ui_inspector_metrics_t {
 void nt_ui_inspector_set_active(nt_ui_context_t *ctx, bool on);
 bool nt_ui_inspector_is_active(const nt_ui_context_t *ctx);
 
-/* True when active AND pointer is inside the sidebar. step_interaction honors this internally. */
+/* True when active AND pointer is inside the sidebar. nt_ui_step honors this internally. */
 bool nt_ui_inspector_pointer_consumed(const nt_ui_context_t *ctx);
 
 extern const nt_ui_inspector_metrics_t NT_UI_INSPECTOR_METRICS_DEFAULT;

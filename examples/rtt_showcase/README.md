@@ -13,7 +13,7 @@ cmake --build build/_cmake/native-debug --target rtt_showcase
 build/examples/rtt_showcase/native-debug/rtt_showcase.exe
 
 # wasm-debug
-emcmake cmake --preset wasm-debug
+cmake --preset wasm-debug
 cmake --build build/_cmake/wasm-debug --target rtt_showcase
 # serve build/examples/rtt_showcase/wasm-debug/ and open index.html
 ```

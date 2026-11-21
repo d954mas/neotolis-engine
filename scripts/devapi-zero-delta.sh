@@ -58,7 +58,7 @@ fi
 if [ -z "$WASM_FILE" ] || [ ! -f "$WASM_FILE" ]; then
     echo "ERROR: No .wasm binary found in: $OUTPUT_DIR"
     echo "Build the target first:"
-    echo "  emcmake cmake --preset $PRESET && cmake --build --preset $PRESET"
+    echo "  cmake --preset $PRESET && cmake --build --preset $PRESET"
     exit 1
 fi
 

@@ -243,9 +243,6 @@ static nt_ui_menu_runtime_t *menu_runtime(nt_ui_context_t *ctx, uint32_t menu_id
 /* Current pointer pos (UI space) from the active frame snapshot — the menu reads the cursor directly
  * for the open-point anchor and the hover-intent apex. */
 static void menu_mouse_pos(nt_ui_context_t *ctx, float *mx, float *my) {
-    /* The menu reads the cursor directly (not via step), so force the once-per-frame device->layout
-     * conversion before handing back a layout-space anchor. Idempotent. */
-    nt_ui_internal_ensure_pointers_layout(ctx);
     if (ctx->frame_pointer_count > 0U) {
         const nt_pointer_t *p = &ctx->frame_pointers[ctx->frame_primary];
         *mx = p->x;
@@ -262,10 +259,10 @@ bool nt_ui_menu_open_trigger(nt_ui_context_t *ctx, uint32_t menu_id, uint32_t ta
     NT_ASSERT(ctx->in_frame && ctx == nt_ui_internal_get_inframe_ctx() && "nt_ui_menu_open_trigger: call between nt_ui_begin/end");
     NT_ASSERT(menu_id != 0U && st != NULL && "nt_ui_menu_open_trigger: menu_id non-zero, st non-NULL");
 
-    /* Idempotent reads only — no mutating step here (nt_ui_events is the caller's one canonical step per
+    /* Idempotent reads only — no mutating step here (nt_ui_step is the caller's one step per
      * widget). Right-click is the desktop trigger: bound (target_id != 0) it arms over the target; target_id
      * == 0 arms anywhere. long_pressed is the touch trigger, supplied by the caller from its target widget's
-     * own events gesture step. */
+     * own step. */
     bool right_armed = nt_input_mouse_is_pressed(NT_BUTTON_RIGHT);
     if (right_armed && target_id != 0U) {
         /* Geometry hit-test (not arbitrated hover) so a right-click RE-opens the menu through its own root
@@ -456,7 +453,7 @@ static void menu_record_append(nt_ui_menu_ctx_t *menu, uint8_t depth, uint32_t i
 /* Declare one immediate row (icon gutter + label + optional submenu marker) carrying the scope-stack id,
  * register + record it, move keyboard focus on hover. Driven by opts (the immediate row codepath).
  * Leaves the row CLOSED (single-shot rows); item_begin opens its own custom-content element.
- * The row interaction is returned; the caller does the ONE step_interaction (so item_begin can defer it
+ * The row interaction is returned; the caller does the ONE nt_ui_step (so item_begin can defer it
  * to item_end). Returns the row id via *out_id. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) — icon + eased hover + marker branch, not deep nesting
 static nt_ui_interaction_t menu_im_row(nt_ui_menu_ctx_t *menu, uint32_t key, const char *label, const nt_ui_menu_item_opts_t *opts, bool has_sub, bool open_element, uint32_t *out_id) {
@@ -472,8 +469,11 @@ static nt_ui_interaction_t menu_im_row(nt_ui_menu_ctx_t *menu, uint32_t key, con
     const bool enabled = !opts->disabled;
 
     const nt_ui_interaction_t in = enabled ? nt_ui_query_interaction(ctx, row_id) : (nt_ui_interaction_t){0};
+    /* A custom row stays under the pointer over its own interactive child (hot, declared later), so
+     * focus, highlight and the leaf collapse follow the row the pointer is in. */
+    const bool pointed = enabled && nt_ui_hovered_within(ctx, row_id);
     const bool focused = (rt->focus[depth] == (int16_t)running_idx);
-    const bool highlit = enabled && (in.hovered || focused);
+    const bool highlit = pointed || (enabled && focused);
 
     const nt_ui_anim_target_t tgt = {.scale_x = 1.0F, .scale_y = 1.0F, .scale_z = 1.0F, .opacity = 1.0F, .value_t = highlit ? 1.0F : 0.0F};
     const nt_ui_anim_interaction_t *a = nt_ui_anim(ctx, row_id, &tgt, 0.0F, style->state_speed);
@@ -517,7 +517,7 @@ static nt_ui_interaction_t menu_im_row(nt_ui_menu_ctx_t *menu, uint32_t key, con
     /* open_element=true (item_begin): leave the element OPEN for the game's custom content; the gutter/
      * label are the game's responsibility there. */
 
-    if (enabled && in.hovered) {
+    if (pointed) {
         rt->focus[depth] = (int16_t)running_idx; /* hover moves keyboard focus too */
         /* Hover-open: record the hovered row so menu_end can drive the mouse-aim corridor. A
          * hovered PARENT is a candidate to fly out; a hovered LEAF requests collapsing the open child
@@ -645,7 +645,7 @@ bool nt_ui_menu_item_ex(nt_ui_menu_ctx_t *menu, uint32_t key, const char *label,
     uint32_t row_id = 0U;
     const nt_ui_interaction_t in = menu_im_row(menu, key, label, &opts, false, false, &row_id);
     if (!opts.disabled) {
-        (void)nt_ui_step_interaction(ctx, row_id);
+        (void)nt_ui_step(ctx, row_id, NULL);
     }
     /* The inline bool is the SINGLE activation idiom: mouse clicks same-frame; a keyboard Enter arrives via
      * rt->kbd_activated (set in the PREVIOUS frame's menu_end, 1-frame latency). Both latch pending_menu.chosen
@@ -694,14 +694,17 @@ bool nt_ui_menu_item_end(nt_ui_menu_ctx_t *menu) {
     nt_ui_clay_priv_close_element();
     /* A disabled row never steps/activates — mirror item_ex's enabled gate (a disabled custom row must not
      * capture the pointer nor fire on a stashed keyboard activation). */
-    if (!menu->pending_menu_item.enabled || !menu->pending_menu_item.activatable) {
-        /* activatable=false: the inner interactive child owns the click. The row must NOT step_interaction —
-         * a row step would capture the pointer and starve the child. Hover highlight still works via the
-         * read-only query_interaction in menu_im_row (prev-frame geometry, no capture). Never activates. */
+    if (!menu->pending_menu_item.enabled) {
+        return false;
+    }
+    if (!menu->pending_menu_item.activatable) {
+        /* No action: block instead of step, so the row is hot for its hover (menu_im_row's read-only query)
+         * but a press beside the child never captures. The child, declared later, still wins its own area. */
+        nt_ui_block_pointer(menu->ui, row_id, NULL);
         return false;
     }
     nt_ui_context_t *ctx = menu->ui;
-    const nt_ui_interaction_t in = nt_ui_step_interaction(ctx, row_id); /* the ONE mutating step per id */
+    const nt_ui_interaction_t in = nt_ui_step(ctx, row_id, NULL); /* the ONE mutating step per id */
     /* Same single-idiom activation as item_ex: mouse same-frame, keyboard via rt->kbd_activated (1-frame).
      * Returned to the caller (item_end == "activated"); also latches the internal close-chain signal. */
     const nt_ui_menu_runtime_t *rt = menu_runtime(ctx, menu->pending_menu.menu_id);
@@ -729,7 +732,7 @@ bool nt_ui_menu_submenu_begin_ex(nt_ui_menu_ctx_t *menu, uint32_t key, const cha
     if (opts.disabled) {
         return false; /* a disabled parent never steps, never flies out, never opens */
     }
-    (void)nt_ui_step_interaction(ctx, row_id);
+    (void)nt_ui_step(ctx, row_id, NULL);
     if (in.clicked) {
         menu->pending_menu.pending_open[depth] = (int16_t)running_idx; /* mouse-open this parent (committed in menu_end) */
     }

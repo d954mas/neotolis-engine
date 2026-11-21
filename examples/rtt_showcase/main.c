@@ -91,7 +91,6 @@ static NT_UI_DECLARE_ARENA(s_ui_arena, UI_ARENA_SIZE);
 static nt_ui_context_t *s_ui_ctx;
 static nt_hash32_t s_pack_id;
 static nt_resource_t s_atlas_handle;
-static nt_resource_t s_font_resource;
 static nt_material_t s_sprite_material;
 static nt_material_t s_text_material;
 static nt_program_ref_t s_sprite_program;
@@ -277,8 +276,10 @@ static void try_bind_ui_resources(void) {
         nt_log_info("rtt_showcase: UI atlas white region bound");
     }
 
-    if (!s_font_bound && nt_resource_is_ready(s_font_resource)) {
-        nt_font_add(s_font, s_font_resource);
+    if (!s_font_bound && nt_resource_pack_state(s_pack_id) == NT_PACK_STATE_READY) {
+        uint32_t size = 0;
+        const uint8_t *bytes = nt_resource_entry_bytes(s_pack_id, ASSET_FONT_RTT_SHOWCASE_FONT, &size);
+        nt_font_fill(s_font, bytes, size);
         nt_ui_set_font(s_ui_ctx, 0U, s_font);
         s_font_bound = true;
         nt_log_info("rtt_showcase: UI font bound at slot 0");
@@ -338,7 +339,8 @@ static void declare_ui_overlay(void) {
     (void)snprintf(zoom_text, sizeof zoom_text, "%.2fx", (double)s_demo.sample_zoom);
     (void)snprintf(blur_text, sizeof blur_text, "%.1f px", (double)s_demo.blur_radius);
 
-    nt_ui_begin(s_ui_ctx, fb_w, fb_h, g_nt_app.dt, g_nt_input.pointers, NT_INPUT_MAX_POINTERS, g_nt_input.primary);
+    nt_ui_begin(s_ui_ctx,
+                &(nt_ui_frame_desc_t){.layout_w = fb_w, .layout_h = fb_h, .dt = g_nt_app.dt, .pointers = g_nt_input.pointers, .pointer_count = NT_INPUT_MAX_POINTERS, .primary = g_nt_input.primary});
     CLAY({.id = CLAY_ID("rtt_ui_root"),
           .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .padding = {.left = 18, .right = 18, .top = 14, .bottom = 0}, .layoutDirection = CLAY_TOP_TO_BOTTOM}}) {
         CLAY({.id = CLAY_ID("rtt_controls"),
@@ -500,9 +502,9 @@ static void frame(void) {
         nt_program_ref_drop(&s_text_program);
         nt_resource_invalidate(NT_ASSET_SHADER_CODE);
         s_atlas_bound = false;
-        /* The font keeps its sources across a restore -- only its GPU textures
+        /* The font keeps its CPU data across a restore -- only its GPU textures
          * died, and nt_font_step rebuilds those itself. Clearing this would make
-         * the gate call nt_font_add twice, which asserts on the duplicate. */
+         * the gate call nt_font_fill twice, which asserts on the duplicate. */
 
         /* Loss freed the targets; their textures are husks that only we can destroy. */
         destroy_targets();
@@ -588,7 +590,7 @@ int main(void) {
     s_text_program.label = "rtt_showcase/text";
     s_text_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_FRAG, NT_ASSET_SHADER_CODE);
     s_atlas_handle = nt_resource_request(ASSET_ATLAS_RTT_SHOWCASE_UI_ATLAS, NT_ASSET_ATLAS);
-    s_font_resource = nt_resource_request(ASSET_FONT_RTT_SHOWCASE_FONT, NT_ASSET_FONT);
+
     s_white_ref = nt_atlas_ref(s_atlas_handle, ASSET_ATLAS_REGION_RTT_SHOWCASE_UI_ATLAS__WHITE.value);
 
     s_sprite_material = nt_material_create(&(nt_material_create_desc_t){

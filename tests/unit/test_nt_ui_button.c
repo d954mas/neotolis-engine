@@ -91,9 +91,9 @@ static uint32_t count_cmd_of_type(const nt_ui_context_t *ctx, Clay_RenderCommand
 /* ---- Test 1: text-only button emits TEXT + background IMAGE ---- */
 static void test_button_text_only_children(void) {
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &mouse, .pointer_count = 1});
     CLAY({.id = CLAY_ID("root")}) {
-        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn"), &s_btn_style, NULL, true, NULL);
+        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn"), &s_btn_style, NULL, true);
         nt_ui_label(s_fx.ctx, NULL, "OK", &s_label_style);
         bool clicked = nt_ui_button_end(s_fx.ctx);
         TEST_ASSERT_FALSE(clicked); /* no input -> no click */
@@ -114,9 +114,9 @@ static void test_button_text_only_no_bg_image(void) {
     no_art.idle.bg = (nt_atlas_region_ref_t){0}; /* atlas.id == 0 => text-only */
 
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &mouse, .pointer_count = 1});
     CLAY({.id = CLAY_ID("root")}) {
-        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("txtbtn"), &no_art, NULL, true, NULL);
+        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("txtbtn"), &no_art, NULL, true);
         nt_ui_label(s_fx.ctx, NULL, "OK", &s_label_style);
         (void)nt_ui_button_end(s_fx.ctx);
     }
@@ -132,9 +132,9 @@ static void test_button_text_only_no_bg_image(void) {
 /* ---- Test 2: icon-only button emits IMAGE child (>=2 IMAGE, 0 TEXT) ---- */
 static void test_button_icon_only_children(void) {
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &mouse, .pointer_count = 1});
     CLAY({.id = CLAY_ID("root")}) {
-        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn"), &s_btn_style, NULL, true, NULL);
+        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn"), &s_btn_style, NULL, true);
         nt_ui_image(s_fx.ctx, NULL, &(nt_atlas_region_ref_t){.atlas = s_fx.atlas.handle, .region = s_fx.atlas.white_region_idx}, &s_img_style, NULL);
         (void)nt_ui_button_end(s_fx.ctx);
     }
@@ -148,9 +148,9 @@ static void test_button_icon_only_children(void) {
 /* ---- Test 3: icon+text button emits both child command types ---- */
 static void test_button_icon_and_text_children(void) {
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &mouse, .pointer_count = 1});
     CLAY({.id = CLAY_ID("root")}) {
-        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn"), &s_btn_style, NULL, true, NULL);
+        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn"), &s_btn_style, NULL, true);
         nt_ui_image(s_fx.ctx, NULL, &(nt_atlas_region_ref_t){.atlas = s_fx.atlas.handle, .region = s_fx.atlas.white_region_idx}, &s_img_style, NULL);
         nt_ui_label(s_fx.ctx, NULL, "Save", &s_label_style);
         (void)nt_ui_button_end(s_fx.ctx);
@@ -164,9 +164,9 @@ static void test_button_icon_and_text_children(void) {
 /* ---- Test 4: begin/end transform+opacity stack balanced (enabled path) ---- */
 static void test_button_stack_balanced(void) {
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &mouse, .pointer_count = 1});
     CLAY({.id = CLAY_ID("root")}) {
-        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn"), &s_btn_style, NULL, true, NULL);
+        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn"), &s_btn_style, NULL, true);
         nt_ui_label(s_fx.ctx, NULL, "Balance", &s_label_style);
         (void)nt_ui_button_end(s_fx.ctx);
     }
@@ -178,9 +178,9 @@ static void test_button_stack_balanced(void) {
 /* ---- Test 5: DISABLED path is balanced (begin still pushes, end still pops) ---- */
 static void test_button_disabled_path_balanced(void) {
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &mouse, .pointer_count = 1});
     CLAY({.id = CLAY_ID("root")}) {
-        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn"), &s_btn_style, NULL, false, NULL);
+        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn"), &s_btn_style, NULL, false);
         nt_ui_label(s_fx.ctx, NULL, "Off", &s_label_style);
         bool clicked = nt_ui_button_end(s_fx.ctx);
         TEST_ASSERT_FALSE(clicked); /* disabled never clicks */
@@ -222,9 +222,10 @@ static float s_pb_last_scale;
 static bool press_btn_frame(const nt_pointer_t *p) {
     static const Clay_ElementDeclaration btn_decl = {.layout = {.sizing = {CLAY_SIZING_FIXED(PB_W), CLAY_SIZING_FIXED(PB_H)}}};
     bool clicked = false;
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, p, 1, 0);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = p, .pointer_count = 1});
     CLAY({.id = CLAY_ID("pbroot"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = PB_X, .y = PB_Y}}}) {
-        clicked = nt_ui_button(s_fx.ctx, NULL, nt_ui_id("pbtn"), &s_btn_style, &btn_decl, true, NULL);
+        (void)nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("pbtn"), &s_btn_style, &btn_decl, true);
+        clicked = nt_ui_button_end(s_fx.ctx);
     }
     nt_ui_end(s_fx.ctx);
     s_pb_last_scale = 0.0F;
@@ -274,9 +275,9 @@ static void test_button_pressed_visual_unpresses_off_widget(void) {
 static void test_button_begin_label_end_inline(void) {
     nt_pointer_t mouse = {0};
     bool clicked = true;
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &mouse, .pointer_count = 1});
     CLAY({.id = CLAY_ID("root")}) {
-        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn"), &s_btn_style, NULL, true, NULL);
+        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn"), &s_btn_style, NULL, true);
         nt_ui_label(s_fx.ctx, NULL, "Go", &s_label_style);
         clicked = nt_ui_button_end(s_fx.ctx);
     }
@@ -295,10 +296,9 @@ static void test_button_label_walks_in_3d_ctx(void) {
         1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F,
     };
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
-    nt_ui_set_view_proj(s_fx.ctx, identity_vp);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &mouse, .pointer_count = 1, .view_proj = identity_vp});
     CLAY({.id = CLAY_ID("root")}) {
-        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn_3d"), &s_btn_style, NULL, true, NULL);
+        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn_3d"), &s_btn_style, NULL, true);
         nt_ui_label(s_fx.ctx, NT_UI_DATA_LAYER(2U), "Go", &s_label_style);
         (void)nt_ui_button_end(s_fx.ctx);
     }
@@ -318,9 +318,9 @@ static void test_button_slice9_scale_propagates_to_payload(void) {
     styled.slice9_scale = 2.5F;
 
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &mouse, .pointer_count = 1});
     CLAY({.id = CLAY_ID("root")}) {
-        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn_s9"), &styled, NULL, true, NULL);
+        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn_s9"), &styled, NULL, true);
         nt_ui_label(s_fx.ctx, NULL, "x", &s_label_style);
         (void)nt_ui_button_end(s_fx.ctx);
     }
@@ -342,26 +342,26 @@ static void test_button_slice9_scale_asserts_negative(void) {
     nt_pointer_t mouse = {0};
 
     bad.slice9_scale = -1.0F;
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
-    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT(nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn"), &bad, NULL, true, NULL)); }
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &mouse, .pointer_count = 1});
+    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT(nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn"), &bad, NULL, true)); }
     nt_ui_end(s_fx.ctx);
 
     bad.slice9_scale = 0.0F;
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
-    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT(nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn"), &bad, NULL, true, NULL)); }
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &mouse, .pointer_count = 1});
+    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT(nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn"), &bad, NULL, true)); }
     nt_ui_end(s_fx.ctx);
 
     bad.slice9_scale = NAN;
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
-    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT(nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn"), &bad, NULL, true, NULL)); }
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &mouse, .pointer_count = 1});
+    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT(nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn"), &bad, NULL, true)); }
     nt_ui_end(s_fx.ctx);
 }
 
 /* Per-state visual fields must be finite + in range. */
 static void try_bad_state(nt_ui_button_style_t *bad) {
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
-    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT(nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn"), bad, NULL, true, NULL)); }
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &mouse, .pointer_count = 1});
+    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT(nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn"), bad, NULL, true)); }
     nt_ui_end(s_fx.ctx);
 }
 
@@ -392,8 +392,8 @@ static void test_button_asserts_bad_state_values(void) {
 /* ---- Test 7: button_begin with id 0 (no-widget sentinel) asserts ---- */
 static void test_button_id_zero_asserts(void) {
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
-    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT(nt_ui_button_begin(s_fx.ctx, NULL, 0U, &s_btn_style, NULL, true, NULL)); }
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &mouse, .pointer_count = 1});
+    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT(nt_ui_button_begin(s_fx.ctx, NULL, 0U, &s_btn_style, NULL, true)); }
     nt_ui_end(s_fx.ctx);
 }
 
@@ -404,36 +404,36 @@ static void test_button_decl_asserts_caller_clean(void) {
     nt_pointer_t mouse = {0};
 
     /* Sub 1: decl->id.id != 0 */
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &mouse, .pointer_count = 1});
     CLAY({.id = CLAY_ID("root")}) {
         Clay_ElementDeclaration bad_id = {.id = (Clay_ElementId){.id = 0x1234U}};
-        NT_TEST_EXPECT_ASSERT(nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn"), &s_btn_style, &bad_id, true, NULL));
+        NT_TEST_EXPECT_ASSERT(nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn"), &s_btn_style, &bad_id, true));
     }
     nt_ui_end(s_fx.ctx);
 
     /* Sub 2: decl->image.imageData != NULL */
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &mouse, .pointer_count = 1});
     CLAY({.id = CLAY_ID("root")}) {
         int dummy = 0;
         Clay_ElementDeclaration bad_img = {.image = {.imageData = &dummy}};
-        NT_TEST_EXPECT_ASSERT(nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn"), &s_btn_style, &bad_img, true, NULL));
+        NT_TEST_EXPECT_ASSERT(nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn"), &s_btn_style, &bad_img, true));
     }
     nt_ui_end(s_fx.ctx);
 
     /* Sub 3: decl->backgroundColor.a != 0 */
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &mouse, .pointer_count = 1});
     CLAY({.id = CLAY_ID("root")}) {
         Clay_ElementDeclaration bad_bg = {.backgroundColor = {.r = 0.0F, .g = 0.0F, .b = 0.0F, .a = 255.0F}};
-        NT_TEST_EXPECT_ASSERT(nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn"), &s_btn_style, &bad_bg, true, NULL));
+        NT_TEST_EXPECT_ASSERT(nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn"), &s_btn_style, &bad_bg, true));
     }
     nt_ui_end(s_fx.ctx);
 
     /* Sub 4: decl->userData != NULL */
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &mouse, .pointer_count = 1});
     CLAY({.id = CLAY_ID("root")}) {
         int dummy = 0;
         Clay_ElementDeclaration bad_user = {.userData = &dummy};
-        NT_TEST_EXPECT_ASSERT(nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn"), &s_btn_style, &bad_user, true, NULL));
+        NT_TEST_EXPECT_ASSERT(nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn"), &s_btn_style, &bad_user, true));
     }
     nt_ui_end(s_fx.ctx);
 }
@@ -453,9 +453,9 @@ static void test_button_decl_fixed_size_hit_test(void) {
 
     /* Frame 1: declare so Clay caches the bbox for frame 2's hit-test. */
     nt_pointer_t f1 = {.x = 0.0F, .y = 0.0F, .active = true};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f1, 1, 0);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &f1, .pointer_count = 1});
     CLAY({.id = CLAY_ID("root")}) {
-        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("fxbtn"), &s_btn_style, &fixed_decl, true, NULL);
+        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("fxbtn"), &s_btn_style, &fixed_decl, true);
         nt_ui_label(s_fx.ctx, NULL, "Hit", &s_label_style);
         (void)nt_ui_button_end(s_fx.ctx);
     }
@@ -463,9 +463,9 @@ static void test_button_decl_fixed_size_hit_test(void) {
 
     /* Frame 2: pointer INSIDE the 320x180 bbox -- hovered. */
     nt_pointer_t f2 = {.x = 200.0F, .y = 100.0F, .active = true};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f2, 1, 0);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &f2, .pointer_count = 1});
     CLAY({.id = CLAY_ID("root")}) {
-        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("fxbtn"), &s_btn_style, &fixed_decl, true, NULL);
+        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("fxbtn"), &s_btn_style, &fixed_decl, true);
         nt_ui_label(s_fx.ctx, NULL, "Hit", &s_label_style);
         (void)nt_ui_button_end(s_fx.ctx);
     }
@@ -475,9 +475,9 @@ static void test_button_decl_fixed_size_hit_test(void) {
 
     /* Frame 3: pointer OUTSIDE the bbox -- not hovered. */
     nt_pointer_t f3 = {.x = 400.0F, .y = 100.0F, .active = true};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f3, 1, 0);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &f3, .pointer_count = 1});
     CLAY({.id = CLAY_ID("root")}) {
-        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("fxbtn"), &s_btn_style, &fixed_decl, true, NULL);
+        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("fxbtn"), &s_btn_style, &fixed_decl, true);
         nt_ui_label(s_fx.ctx, NULL, "Hit", &s_label_style);
         (void)nt_ui_button_end(s_fx.ctx);
     }
@@ -493,21 +493,22 @@ static void test_button_recovers_after_simulated_mid_button_state(void) {
     s_fx.ctx->pending_button.active = true;
 
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &mouse, .pointer_count = 1});
     /* The reset must run unconditionally in nt_ui_begin. */
     TEST_ASSERT_FALSE_MESSAGE(s_fx.ctx->pending_button.active, "nt_ui_begin must clear pending_button.active so a previously-wedged dev session recovers");
 
     /* And a normal begin/end must not assert. */
     CLAY({.id = CLAY_ID("root")}) {
-        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn"), &s_btn_style, NULL, true, NULL);
+        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn"), &s_btn_style, NULL, true);
         nt_ui_label(s_fx.ctx, NULL, "OK", &s_label_style);
         (void)nt_ui_button_end(s_fx.ctx);
     }
     nt_ui_end(s_fx.ctx);
 }
 
-/* ---- A cfg-button exposes gestures via query_events after the call, while still returning
- *      the bool clicked contract. A held press past long_press_secs reports long_pressed. ---- */
+static bool float_near(float a, float b) { return fabsf(a - b) <= 0.001F; }
+
+/* ---- nt_ui_button_begin returns its one step; end still returns clicked. ---- */
 #define CFG_X 120.0F
 #define CFG_Y 90.0F
 #define CFG_W 160.0F
@@ -515,60 +516,51 @@ static void test_button_recovers_after_simulated_mid_button_state(void) {
 #define CFG_CX (CFG_X + (CFG_W * 0.5F))
 #define CFG_CY (CFG_Y + (CFG_H * 0.5F))
 
-static bool cfg_btn_frame(const nt_pointer_t *p, float dt, const nt_ui_events_cfg_t *cfg) {
+static nt_ui_interaction_t hold_btn_frame(const nt_pointer_t *p, float dt, bool enabled, bool *clicked) {
     static const Clay_ElementDeclaration btn_decl = {.layout = {.sizing = {CLAY_SIZING_FIXED(CFG_W), CLAY_SIZING_FIXED(CFG_H)}}};
-    bool clicked = false;
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, dt, p, 1, 0);
+    nt_ui_interaction_t e = {0};
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .dt = dt, .pointers = p, .pointer_count = 1});
     CLAY({.id = CLAY_ID("cfgroot"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = CFG_X, .y = CFG_Y}}}) {
-        clicked = nt_ui_button(s_fx.ctx, NULL, nt_ui_id("cfgbtn"), &s_btn_style, &btn_decl, true, cfg);
+        e = nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("cfgbtn"), &s_btn_style, &btn_decl, enabled);
+        *clicked = nt_ui_button_end(s_fx.ctx);
     }
     nt_ui_end(s_fx.ctx);
-    return clicked;
+    return e;
 }
 
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void test_button_cfg_long_press_via_query_events(void) {
-    const nt_ui_events_cfg_t cfg = {.long_press_secs = 0.5F, .double_click = false};
+static void test_button_begin_returns_interaction(void) {
+    bool clicked = false;
+    nt_pointer_t idle = make_pointer_at(CFG_CX, CFG_CY, false, false, false);
+    (void)hold_btn_frame(&idle, 0.0F, true, &clicked);
+    nt_pointer_t press = make_pointer_at(CFG_CX, CFG_CY, true, true, false);
+    TEST_ASSERT_TRUE(hold_btn_frame(&press, 0.0F, true, &clicked).pressed_now);
 
-    /* Frame 1: warm so the bbox is baked + the id registers for arbitration. */
-    nt_pointer_t f1 = make_pointer_at(CFG_CX, CFG_CY, false, false, false);
-    (void)cfg_btn_frame(&f1, 0.0F, &cfg);
-
-    /* Frame 2: press inside. */
-    nt_pointer_t f2 = make_pointer_at(CFG_CX, CFG_CY, true, true, false);
-    (void)cfg_btn_frame(&f2, 0.0F, &cfg);
-
-    /* Hold without moving; the gesture clock crosses 0.5s and fires long_pressed once. */
-    bool long_fired = false;
     nt_pointer_t hold = make_pointer_at(CFG_CX, CFG_CY, true, false, false);
-    for (int i = 0; i < 30; ++i) {
-        (void)cfg_btn_frame(&hold, 0.1F, &cfg);
-        const nt_ui_events_t e = nt_ui_query_events(s_fx.ctx, nt_ui_id("cfgbtn"));
-        if (e.hold_progress >= 1.0F) {
-            long_fired = true;
-            break;
-        }
-    }
-    TEST_ASSERT_TRUE_MESSAGE(long_fired, "query_events after a cfg-button must report the completed long-press hold");
+    TEST_ASSERT_TRUE(float_near(hold_btn_frame(&hold, 0.25F, true, &clicked).hold_secs, 0.25F));
 
-    /* The click contract still holds: release OVER -> clicked true. */
     nt_pointer_t rel = make_pointer_at(CFG_CX, CFG_CY, false, false, true);
-    const bool clicked = cfg_btn_frame(&rel, 0.0F, &cfg);
-    TEST_ASSERT_TRUE_MESSAGE(clicked, "a cfg-button still returns bool clicked on release-over");
+    const nt_ui_interaction_t e = hold_btn_frame(&rel, 0.0F, true, &clicked);
+    TEST_ASSERT_TRUE(e.clicked);
+    TEST_ASSERT_TRUE(clicked);
 }
 
-/* ---- A NULL-cfg button is the zero-overhead path: it grows the state pool by zero slots
- *      (the gesture cell is never created). ---- */
-static void test_button_null_cfg_zero_alloc(void) {
-    nt_pointer_t f1 = make_pointer_at(CFG_CX, CFG_CY, false, false, false);
-    (void)cfg_btn_frame(&f1, 0.0F, NULL); /* warm + establish any anim slot first */
+/* ---- a disabled frame returns zero and drops the hold; only a new press restarts it ---- */
+static void test_button_disabled_frame_ends_hold(void) {
+    bool clicked = false;
+    nt_pointer_t idle = make_pointer_at(CFG_CX, CFG_CY, false, false, false);
+    (void)hold_btn_frame(&idle, 0.0F, true, &clicked);
+    nt_pointer_t press = make_pointer_at(CFG_CX, CFG_CY, true, true, false);
+    (void)hold_btn_frame(&press, 0.0F, true, &clicked);
+    nt_pointer_t hold = make_pointer_at(CFG_CX, CFG_CY, true, false, false);
+    TEST_ASSERT_TRUE(hold_btn_frame(&hold, 0.25F, true, &clicked).pressed);
 
-    const uint32_t before = nt_ui_state_used_slots(s_fx.ctx);
-    nt_pointer_t f2 = make_pointer_at(CFG_CX, CFG_CY, true, true, false);
-    (void)cfg_btn_frame(&f2, 0.0F, NULL);
-    (void)cfg_btn_frame(&f2, 0.0F, NULL);
-    const uint32_t after = nt_ui_state_used_slots(s_fx.ctx);
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(before, after, "a NULL-cfg button must not grow the state pool (no gesture cell)");
+    const nt_ui_interaction_t off = hold_btn_frame(&hold, 0.25F, false, &clicked);
+    TEST_ASSERT_FALSE(off.pressed);
+    TEST_ASSERT_TRUE(float_near(off.hold_secs, 0.0F));
+
+    const nt_ui_interaction_t on = hold_btn_frame(&hold, 0.25F, true, &clicked);
+    TEST_ASSERT_FALSE(on.pressed);
+    TEST_ASSERT_TRUE(float_near(on.hold_secs, 0.0F));
 }
 
 int main(void) {
@@ -591,7 +583,7 @@ int main(void) {
     RUN_TEST(test_button_decl_fixed_size_hit_test);
     RUN_TEST(test_button_recovers_after_simulated_mid_button_state);
     RUN_TEST(test_button_pressed_visual_unpresses_off_widget);
-    RUN_TEST(test_button_cfg_long_press_via_query_events);
-    RUN_TEST(test_button_null_cfg_zero_alloc);
+    RUN_TEST(test_button_begin_returns_interaction);
+    RUN_TEST(test_button_disabled_frame_ends_hold);
     return UNITY_END();
 }

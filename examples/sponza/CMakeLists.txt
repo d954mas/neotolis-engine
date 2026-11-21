@@ -18,7 +18,7 @@ if(NT_DEVAPI_ENABLED)
         endif()
     endforeach()
 endif()
-target_link_libraries(sponza PRIVATE nt_core nt_app nt_input nt_window nt_math nt_log nt_time nt_resource nt_material nt_shared nt_entity nt_transform_comp nt_mesh_comp nt_material_comp nt_drawable_comp nt_mesh_renderer nt_render nt_hash)
+target_link_libraries(sponza PRIVATE nt_core nt_app nt_input nt_window nt_math nt_log nt_time nt_resource nt_blob nt_material nt_shared nt_entity nt_transform_comp nt_mesh_comp nt_material_comp nt_drawable_comp nt_mesh_renderer nt_render nt_hash)
 # Generated per-pack asset headers from builder
 target_include_directories(sponza PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/generated")
 if(EMSCRIPTEN)

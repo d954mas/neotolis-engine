@@ -159,8 +159,8 @@ bool nt_ui_tab_begin(nt_ui_context_t *ctx, int index, bool active) {
     nt_ui_tab_state_t *st = &style->idle;
     if (active) {
         st = &style->selected;
-    } else if (in.hovered) {
-        st = &style->hover;
+    } else if (nt_ui_hovered_within(ctx, tab_id)) {
+        st = &style->hover; /* also over the tab's own interactive child (a close button) */
     }
 
     // #region eased state + accent value
@@ -241,7 +241,7 @@ void nt_ui_tab_end(nt_ui_context_t *ctx) {
 
     const uint32_t tab_id = ctx->pending_tab.id;
     nt_ui_clay_priv_close_element();
-    (void)nt_ui_step_interaction(ctx, tab_id); /* the canonical mutating step (registers the tab + advances capture) */
+    (void)nt_ui_step(ctx, tab_id, NULL); /* the mutating step (registers the tab + advances capture) */
     ctx->pending_tab.active = false;
 }
 

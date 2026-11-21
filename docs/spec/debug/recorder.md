@@ -155,6 +155,12 @@ Before submitting each video frame, `encodeQueueSize > 4 * fps` ends the recordi
 including during catch-up. Lockstep that outpaces the encoder can therefore accumulate just over
 four seconds of pending encode requests before the next submission ends it.
 
+On a hybrid-GPU laptop the browser renders and encodes on the integrated GPU (see
+[GPU selection](../render/architecture.md#gpu-selection)); there 1080p at 60 fps can end in
+`encoder backlog` under game load, while 30 fps keeps up. To record on the discrete GPU, set Chrome to
+High performance in Windows Settings > Display > Graphics (persistent; restart Chrome), or launch
+it once with `--force_high_performance_gpu`.
+
 When a recording ends (`stop`, or on its own) and the encoders flush, the window event
 `nt-recorder` (cancelable, `detail {name, blob, frames, error}`) is dispatched after the C call
 returns. `blob` is null and `error` set when no file was written (`'no frames'` when no frame was

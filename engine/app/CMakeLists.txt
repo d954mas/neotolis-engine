@@ -12,6 +12,9 @@ if(EMSCRIPTEN)
     )
     # RAF callback fires after main() returns -- runtime must stay alive
     target_link_options(nt_app INTERFACE "SHELL:-sNO_EXIT_RUNTIME=1")
+    # Pinned so an emsdk upgrade cannot drop browsers silently; these are the oldest Emscripten
+    # supports. Safari 15.0 is also the first with WebGL2.
+    target_link_options(nt_app INTERFACE -sMIN_CHROME_VERSION=85 -sMIN_FIREFOX_VERSION=79 -sMIN_SAFARI_VERSION=150000)
 else()
     nt_add_module(nt_app LOG_DOMAIN "app"
         nt_app.c

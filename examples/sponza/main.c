@@ -28,6 +28,7 @@
  */
 
 #include "app/nt_app.h"
+#include "blob/nt_blob.h"
 #include "core/nt_core.h"
 #include "core/nt_platform.h"
 #include "drawable_comp/nt_drawable_comp.h"
@@ -115,7 +116,6 @@ static nt_hash32_t s_tex_pack_id;
 static nt_hash32_t s_full_pack_id;
 
 static nt_resource_t s_manifest_handle;
-static nt_resource_t s_fallback_handle;
 
 static nt_resource_t s_mesh_handles[MAX_SCENE_NODES];
 static nt_resource_t s_tex_handles[MAX_SCENE_NODES * 3]; /* diffuse, normal, specular per node */
@@ -240,8 +240,9 @@ static void camera_update(float dt) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void load_scene_from_manifest(void) {
-    uint32_t manifest_size = 0;
-    const uint8_t *blob = nt_resource_get_blob(s_manifest_handle, &manifest_size);
+    const nt_blob_view_t view = nt_blob_read((nt_blob_t){nt_resource_get(s_manifest_handle)});
+    const uint8_t *blob = view.data;
+    const uint32_t manifest_size = view.size;
     if (!blob || manifest_size < sizeof(SponzaManifestHeader)) {
         nt_log_info("Manifest blob not available or too small");
         return;
@@ -648,7 +649,9 @@ int main(int argc, char **argv) {
     nt_fs_init();
 #endif
     nt_hash_init(&(nt_hash_desc_t){0});
+    nt_blob_init(2);
     nt_resource_init(&(nt_resource_desc_t){0});
+    nt_resource_register_type(NT_ASSET_BLOB, &(nt_resource_type_desc_t){.activate = nt_blob_activate, .deactivate = nt_blob_deactivate});
 
     /* 6. Register GFX activators */
     nt_resource_register_type(NT_ASSET_TEXTURE, &(nt_resource_type_desc_t){.activate = nt_gfx_activate_texture, .deactivate = nt_gfx_deactivate_texture});
@@ -682,9 +685,8 @@ int main(int argc, char **argv) {
     s_programs[SPONZA_SHADER_ALPHA].fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPONZA_ALPHA_FRAG, NT_ASSET_SHADER_CODE);
     s_programs[SPONZA_SHADER_ALPHA].label = "sponza/alpha";
 
-    /* 12. Request manifest and fallback texture resource handles */
+    /* 12. Request the manifest resource handle */
     s_manifest_handle = nt_resource_request(ASSET_BLOB_SPONZA_MANIFEST, NT_ASSET_BLOB);
-    s_fallback_handle = nt_resource_request(ASSET_TEXTURE_SPONZA_FALLBACK_CHECKER, NT_ASSET_TEXTURE);
 
     s_neutral_white_handle = nt_resource_request(ASSET_TEXTURE_SPONZA_NEUTRAL_WHITE, NT_ASSET_TEXTURE);
     s_neutral_normal_handle = nt_resource_request(ASSET_TEXTURE_SPONZA_NEUTRAL_NORMAL, NT_ASSET_TEXTURE);
@@ -764,6 +766,7 @@ int main(int argc, char **argv) {
         nt_program_ref_drop(&s_programs[t]);
     }
     nt_resource_shutdown();
+    nt_blob_shutdown();
     nt_fs_shutdown();
     nt_http_shutdown();
     nt_hash_shutdown();

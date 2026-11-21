@@ -272,7 +272,7 @@ nt_ui_popup_result_t nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t i
             close_src = NT_UI_POPUP_CLOSE_SRC_ESC;
         }
         if (is_top && dismiss_on_click) {
-            const nt_ui_interaction_t click = nt_ui_step_interaction(ctx, catcher_id);
+            const nt_ui_interaction_t click = nt_ui_step(ctx, catcher_id, NULL);
             if (close_src == NT_UI_POPUP_CLOSE_SRC_NONE && click.clicked) {
                 const int16_t pad_lrtb[4] = {close_pad, close_pad, close_pad, close_pad};
                 if (!nt_ui_internal_hit_test_padded(ctx, id, click.pos[0], click.pos[1], pad_lrtb)) {
@@ -299,9 +299,9 @@ nt_ui_popup_result_t nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t i
     nt_ui_clay_priv_configure_open_element(panel_decl);
     nt_ui_widget_register(ctx, id, reg_def, NULL, true);
     /* The panel is the innermost open floating here, so this IS the band Clay stamped. The claim below
-     * must use the 2D pointer arbiter's key (band, ties to the last declared): the winner runs the
-     * close-scan through its own catcher, so a differently-ranked slot dismisses nothing. A 3D ctx
-     * arbitrates by ray distance and does not rank overlays by band at all. */
+     * ranks by band, ties to the last declared: the panels' tree-root order, which paints them and is the
+     * 2D pointer arbiter's key, so the winner's own catcher runs the close-scan. A 3D ctx arbitrates by
+     * ray distance and does not rank overlays by band at all. */
     const int32_t panel_band = nt_ui_clay_priv_open_floating_z(ctx->clay);
     /* A catcher gates base UI from one band below its panel; at or under the base band it loses the hit
      * arbitration and silently stops gating while nt_ui_modal_active() still reports the overlay up. */

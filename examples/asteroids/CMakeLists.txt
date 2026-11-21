@@ -30,9 +30,6 @@ if(EMSCRIPTEN AND NT_CDN_URL)
 endif()
 nt_configure_shell(asteroids TITLE "Asteroids - Neotolis Engine" FULLSCREEN_BUTTON)
 if(EMSCRIPTEN)
-    # Emscripten 4.0.19's fullscreen restore helper omits this dependency;
-    # keep Closure enabled and explicitly link the existing SDK helper.
-    target_link_options(asteroids PRIVATE "-sDEFAULT_LIBRARY_FUNCS_TO_INCLUDE=['$getFullscreenElement']")
     target_link_options(asteroids PRIVATE "--pre-js=${CMAKE_CURRENT_SOURCE_DIR}/web_controls.js")
     set_property(TARGET asteroids APPEND PROPERTY LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/web_controls.js")
 endif()

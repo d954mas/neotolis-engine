@@ -8,6 +8,7 @@ if(NOT DEFINED ENGINE_ROOT)
 endif()
 
 get_filename_component(ENGINE_ROOT "${ENGINE_ROOT}" ABSOLUTE BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
+include(${ENGINE_ROOT}/cmake/nt_toolchain_check.cmake)
 add_subdirectory(${ENGINE_ROOT} ${CMAKE_BINARY_DIR}/engine)
 
 add_executable(submodule_test main.c)

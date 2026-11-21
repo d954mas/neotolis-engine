@@ -28,7 +28,9 @@ static ui_walker_fixture_t s_fx;
 
 /* Shared style for happy-path tests: font_id=0 (stub_font), size=14, red. */
 static const nt_ui_label_style_t s_style_body = {
-    .font_id = 0, .font_size = 14, .color = NT_RGBA8(255, 0, 0, 255),
+    .font_id = 0,
+    .font_size = 14,
+    .color = NT_RGBA8(255, 0, 0, 255),
     /* wrap_mode = 0 = CLAY_TEXT_WRAP_WORDS, align = 0 = CLAY_TEXT_ALIGN_LEFT */
 };
 
@@ -43,8 +45,8 @@ static nt_program_t text_program(void) { return nt_material_get_info(s_fx.text_m
 
 /* glyph_data[1] of quad `q`: 0 marks a solid decoration quad, a glyph quad has bands. */
 static uint32_t quad_band_count(nt_gfx_fake_draw_t d, uint32_t q) {
-    uint32_t bands = 0;
-    memcpy(&bands, ui_walker_fx_text_vertex(d, q, 0) + 24U, sizeof bands);
+    uint16_t bands = 0;
+    memcpy(&bands, ui_walker_fx_text_vertex(d, q, 0) + UI_WALKER_FX_TEXT_BAND_COUNT, sizeof bands);
     return bands;
 }
 
@@ -62,7 +64,7 @@ static const Clay_RenderCommand *find_first_text_cmd(const nt_ui_context_t *ctx)
 /* ---- Test 1: happy path ---- */
 static void test_label_emits_text_with_style_color(void) {
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &mouse, .pointer_count = 1});
     CLAY({.id = CLAY_ID("root")}) { nt_ui_label(s_fx.ctx, NULL, "Hello", &s_style_body); }
     nt_ui_end(s_fx.ctx);
 
@@ -86,7 +88,7 @@ static void test_label_emits_text_with_style_color(void) {
  * continuation still runs Clay__CloseElement so the frame closes balanced. */
 static void test_label_null_style_asserts(void) {
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &mouse, .pointer_count = 1});
     CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT(nt_ui_label(s_fx.ctx, NULL, "X", NULL)); }
     nt_ui_end(s_fx.ctx);
 }
@@ -99,7 +101,7 @@ static void test_label_out_of_range_font_asserts(void) {
         .color = NT_RGBA8(255, 255, 255, 255),
     };
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &mouse, .pointer_count = 1});
     CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT(nt_ui_label(s_fx.ctx, NULL, "X", &bad)); }
     nt_ui_end(s_fx.ctx);
 }
@@ -112,7 +114,7 @@ static void test_label_unbound_font_asserts(void) {
         .color = NT_RGBA8(255, 255, 255, 255),
     };
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &mouse, .pointer_count = 1});
     CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT(nt_ui_label(s_fx.ctx, NULL, "X", &bad)); }
     nt_ui_end(s_fx.ctx);
 }
@@ -125,7 +127,7 @@ static void test_label_zero_font_size_asserts(void) {
         .color = NT_RGBA8(255, 255, 255, 255),
     };
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &mouse, .pointer_count = 1});
     CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT(nt_ui_label(s_fx.ctx, NULL, "X", &bad)); }
     nt_ui_end(s_fx.ctx);
 }
@@ -142,7 +144,7 @@ static void test_label_zero_init_wraps_words_left(void) {
         .color = NT_RGBA8(255, 255, 255, 255),
     };
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &mouse, .pointer_count = 1});
     CLAY({.id = CLAY_ID("root")}) { nt_ui_label(s_fx.ctx, NULL, "ABC DEF", &s); }
     nt_ui_end(s_fx.ctx);
 
@@ -157,11 +159,15 @@ static void test_label_zero_init_wraps_words_left(void) {
  * align are layout-only fields not surfaced post-layout. */
 static void test_label_full_field_passthrough(void) {
     static const nt_ui_label_style_t s = {
-        .font_id = 0, .font_size = 16, .color = NT_RGBA8(128, 64, 32, 200), .line_height = 24, .letter_tracking = 4,
+        .font_id = 0,
+        .font_size = 16,
+        .color = NT_RGBA8(128, 64, 32, 200),
+        .line_height = 24,
+        .letter_tracking = 4,
         /* wrap_mode + align left zero-init (WORDS + LEFT). */
     };
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &mouse, .pointer_count = 1});
     /* Stub font's measure cb returns {0,0}; with non-zero letterSpacing the
      * resulting bbox is offscreen-culled. Disable culling to keep the TEXT cmd. */
     Clay_SetCullingEnabled(false);
@@ -188,7 +194,7 @@ static void test_label_per_call_override(void) {
     s.color = NT_RGBA8(32, 200, 64, 255);
 
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &mouse, .pointer_count = 1});
     CLAY({.id = CLAY_ID("root")}) { nt_ui_label(s_fx.ctx, NULL, "Override", &s); }
     nt_ui_end(s_fx.ctx);
 
@@ -203,7 +209,7 @@ static void test_label_per_call_override(void) {
  * length=0 via the measure cb's early-return path. */
 static void test_label_empty_text_accepted(void) {
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &mouse, .pointer_count = 1});
     CLAY({.id = CLAY_ID("root")}) { nt_ui_label(s_fx.ctx, NULL, "", &s_style_body); }
     nt_ui_end(s_fx.ctx);
     TEST_PASS();
@@ -215,7 +221,7 @@ static void test_label_empty_text_accepted(void) {
 static void test_label_element_data_passthrough(void) {
     int marker = 42;
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &mouse, .pointer_count = 1});
     CLAY({.id = CLAY_ID("root")}) { nt_ui_label(s_fx.ctx, NT_UI_DATA_FULL(7, &marker), "Hi", &s_style_body); }
     nt_ui_end(s_fx.ctx);
 
@@ -231,7 +237,7 @@ static void test_label_element_data_passthrough(void) {
  * reused for a second label) must not corrupt the first label's emitted content. */
 static void test_label_scratch_copies_text(void) {
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &mouse, .pointer_count = 1});
     char buf[32];
     (void)strcpy(buf, "ALPHA");
     CLAY({.id = CLAY_ID("root")}) {
@@ -272,7 +278,7 @@ static void test_label_scratch_copies_text(void) {
 /* T7: nt_ui_label_sized overrides font_size from style. */
 static void test_label_sized_overrides_font_size(void) {
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &mouse, .pointer_count = 1});
     CLAY({.id = CLAY_ID("root")}) { nt_ui_label_sized(s_fx.ctx, NULL, "Sized", &s_style_body, 28U); }
     nt_ui_end(s_fx.ctx);
 
@@ -300,7 +306,7 @@ static void test_label_decoration_reaches_the_renderer(void) {
         .shadow_color = 0xFF000000U,
     };
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &mouse, .pointer_count = 1});
     Clay_SetCullingEnabled(false);
     CLAY({.id = CLAY_ID("root")}) { nt_ui_label(s_fx.ctx, NULL, "Deco", &s); }
     nt_ui_end(s_fx.ctx);
@@ -312,7 +318,7 @@ static void test_label_decoration_reaches_the_renderer(void) {
     TEST_ASSERT_EQUAL_UINT32(1U, ui_walker_fx_draw_count(text_program()));
     const nt_gfx_fake_draw_t d = ui_walker_fx_draw_at(text_program(), 0);
     TEST_ASSERT_EQUAL_UINT32_MESSAGE((3U * 4U) + 1U, ui_walker_fx_quads(d), "shadow, outline and fill passes of 4 glyphs plus one underline quad");
-    const float fill_x1 = ui_walker_fx_vertex_float(ui_walker_fx_text_vertex(d, 8, 0), UI_WALKER_FX_TEXT_GLYPH_BOUNDS_X1);
+    const float fill_x1 = ui_walker_fx_vertex_i16(ui_walker_fx_text_vertex(d, 8, 0), UI_WALKER_FX_TEXT_GLYPH_BOUNDS_X1);
     TEST_ASSERT_TRUE_MESSAGE(fill_x1 > 400.0F, "bold label fills with an emboldened glyph variant");
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, quad_band_count(d, 12), "the last quad is the solid underline");
     const float bl_y = ui_walker_fx_vertex_float(ui_walker_fx_text_vertex(d, 12, 0), 4);
@@ -363,7 +369,7 @@ static void test_label_decoration_applies_to_wrapped_lines(void) {
         .variant = NT_UI_LABEL_VARIANT_UNDERLINE | (NT_FONT_EMBOLDEN_ENABLED ? NT_UI_LABEL_VARIANT_BOLD : 0U),
     };
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &mouse, .pointer_count = 1});
     Clay_SetCullingEnabled(false);
     CLAY({.id = CLAY_ID("root")}) { nt_ui_label(s_fx.ctx, NULL, "AAA\nBBB", &s); }
     nt_ui_end(s_fx.ctx);
@@ -403,7 +409,7 @@ static void test_label_decoration_preserves_element_data(void) {
         .variant = NT_UI_LABEL_VARIANT_UNDERLINE | (NT_FONT_EMBOLDEN_ENABLED ? NT_UI_LABEL_VARIANT_BOLD : 0U),
     };
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &mouse, .pointer_count = 1});
     Clay_SetCullingEnabled(false);
     CLAY({.id = CLAY_ID("root")}) { nt_ui_label(s_fx.ctx, NT_UI_DATA_FULL(5, &marker), "Deco+data", &s); }
     nt_ui_end(s_fx.ctx);
@@ -422,7 +428,7 @@ static void test_label_decoration_preserves_element_data(void) {
 static void test_label_plain_no_decoration(void) {
     nt_ui_set_font(s_fx.ctx, 0U, ui_walker_fixture_make_real_font(&s_fx));
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &mouse, .pointer_count = 1});
     Clay_SetCullingEnabled(false);
     CLAY({.id = CLAY_ID("root")}) { nt_ui_label(s_fx.ctx, NULL, "Plain", &s_style_body); }
     nt_ui_end(s_fx.ctx);
@@ -433,7 +439,7 @@ static void test_label_plain_no_decoration(void) {
     const nt_gfx_fake_draw_t d = ui_walker_fx_draw_at(text_program(), 0);
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(5U, ui_walker_fx_quads(d), "plain label: one fill quad per glyph, no underline");
     for (uint32_t q = 0; q < 5U; q++) {
-        TEST_ASSERT_TRUE_MESSAGE(ui_walker_fx_vertex_float(ui_walker_fx_text_vertex(d, q, 0), UI_WALKER_FX_TEXT_GLYPH_BOUNDS_X1) == 400.0F, "plain label uses the unweighted glyph");
+        TEST_ASSERT_TRUE_MESSAGE(ui_walker_fx_vertex_i16(ui_walker_fx_text_vertex(d, q, 0), UI_WALKER_FX_TEXT_GLYPH_BOUNDS_X1) == 400.0F, "plain label uses the unweighted glyph");
     }
 }
 

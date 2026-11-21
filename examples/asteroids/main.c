@@ -195,7 +195,13 @@ static bool s_paused, s_lod_colors, s_hide_hud, s_ready, s_generated;
 #ifndef NT_PLATFORM_WEB
 static bool s_fullscreen;
 #endif
-static double s_elapsed, s_last_tick, s_frame_ms, s_cpu_ms, s_update_ms, s_render_ms, s_generate_ms, s_gpu_ms = -1.0;
+static double s_elapsed, s_last_tick, s_frame_ms, s_cpu_ms, s_update_ms, s_render_ms, s_generate_ms;
+#if NT_GFX_GPU_TIMING_ENABLED
+static double s_gpu_ms = -1.0; /* -1: pending or unsupported */
+#define GPU_MS s_gpu_ms
+#else
+#define GPU_MS (-1.0) /* GPU timing compiled out */
+#endif
 static uint64_t s_mem_used, s_triangles;
 static bool s_memory_sampled;
 static uint32_t s_lod_counts[AST_SUBDIVISIONS];
@@ -1077,7 +1083,9 @@ static void load_pack(nt_hash32_t pack, const char *filename) {
 
 static void restore_gpu(void) {
     s_ready = false;
+#if NT_GFX_GPU_TIMING_ENABLED
     s_gpu_ms = -1;
+#endif
     drop_generated();
     nt_text_renderer_shutdown();
     nt_sprite_renderer_shutdown();
@@ -1279,7 +1287,7 @@ static bool ui_action(const char *id, const char *label, bool primary, bool enab
                        &(Clay_ElementDeclaration){.layout = {.sizing = {width > 0 ? CLAY_SIZING_FIXED(width) : CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(44)},
                                                              .padding = CLAY_PADDING_ALL(8),
                                                              .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}},
-                       enabled, NULL);
+                       enabled);
     nt_ui_label(s_ui, NT_UI_DATA_LAYER(2), label, &s_ui_body);
     return nt_ui_button_end(s_ui);
 }
@@ -1482,8 +1490,13 @@ static void build_ui(void) {
     const bool narrow = width < 720;
     const bool compact_status = width < 900;
     const float status_height = compact_status ? 76.0F : 56.0F;
-    nt_ui_begin(s_ui, width, height, g_nt_app.dt, g_nt_input.pointers, NT_INPUT_MAX_POINTERS, g_nt_input.primary);
-    nt_ui_set_viewport(s_ui, nt_ui_viewport_from_scale(&s_ui_scale));
+    nt_ui_begin(s_ui, &(nt_ui_frame_desc_t){.layout_w = width,
+                                            .layout_h = height,
+                                            .dt = g_nt_app.dt,
+                                            .pointers = g_nt_input.pointers,
+                                            .pointer_count = NT_INPUT_MAX_POINTERS,
+                                            .primary = g_nt_input.primary,
+                                            .viewport = nt_ui_viewport_from_scale(&s_ui_scale, g_nt_window.dpr)});
     CLAY({.id = CLAY_ID("asteroids.ui_root"), .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .padding = CLAY_PADDING_ALL(12), .layoutDirection = CLAY_TOP_TO_BOTTOM}}) {
         if (!s_hide_hud) {
             CLAY({.id = CLAY_ID("asteroids.status"), .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(status_height)}}}) {
@@ -2112,6 +2125,7 @@ static void collect_pending_noise(void) {
     select_level(s_requested_level);
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void frame(void) {
     const double begin = nt_time_now();
     const double interval = s_last_tick > 0 ? begin - s_last_tick : 0;
@@ -2138,6 +2152,13 @@ static void frame(void) {
         select_level(s_requested_level);
     }
     nt_resource_step();
+    static bool s_font_filled;
+    if (!s_font_filled && nt_resource_pack_state(nt_hash32_str("asteroids_core")) == NT_PACK_STATE_READY) {
+        uint32_t size = 0;
+        const uint8_t *bytes = nt_resource_entry_bytes(nt_hash32_str("asteroids_core"), nt_hash64_str("asteroids/font"), &size);
+        nt_font_fill(s_font, bytes, size);
+        s_font_filled = true;
+    }
     nt_font_step();
     const bool ready = prepare_gpu();
     if (ready && !s_ready) {
@@ -2184,6 +2205,7 @@ static void frame(void) {
     s_render_ms += ((nt_time_now() - render_begin) * 1000.0 - s_render_ms) * 0.05;
     s_cpu_ms += ((nt_time_now() - begin) * 1000.0 - s_cpu_ms) * 0.05;
     nt_example_frames_end(ready);
+#if NT_GFX_GPU_TIMING_ENABLED
     uint64_t gpu_ns = 0;
     if (nt_gfx_poll_segment_time_ns("asteroids", &gpu_ns)) {
         s_gpu_ms = (double)gpu_ns / 1000000.0;
@@ -2191,6 +2213,7 @@ static void frame(void) {
     if (!nt_gfx_is_gpu_timing_supported()) {
         s_gpu_ms = -1;
     }
+#endif
     static double report_time;
     if (!nt_example_frames_on() && begin - report_time > 1.0) {
         report_time = begin;
@@ -2199,7 +2222,7 @@ static void frame(void) {
         if (ready) {
             nt_log_info("Asteroids complexity=%u count=%u lod=%u/%u/%u/%u triangles=%" PRIu64 " draws=%u update_ms=%.3f render_submit_ms=%.3f cpu_frame_ms=%.3f gpu_ms=%.3f memory=%" PRIu64, s_level,
                         s_complexities[s_level].instances, s_lod_counts[0], s_lod_counts[1], s_lod_counts[2], s_lod_counts[3], s_triangles, nt_gfx_draw_calls(&g_nt_gfx.counters), s_update_ms,
-                        s_render_ms, s_cpu_ms, s_gpu_ms, s_mem_used);
+                        s_render_ms, s_cpu_ms, GPU_MS, s_mem_used);
         }
     }
     nt_window_swap_buffers();
@@ -2280,7 +2303,7 @@ int main(int argc, char **argv) {
     nt_resource_register_type(NT_ASSET_SHADER_CODE, &(nt_resource_type_desc_t){.activate = nt_gfx_activate_shader, .deactivate = nt_gfx_deactivate_shader});
     nt_font_init(&(nt_font_desc_t){.max_fonts = 1});
     s_font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 128, .measure_cache_size = 128});
-    nt_font_add(s_font, nt_resource_request(nt_hash64_str("asteroids/font"), NT_ASSET_FONT));
+
     nt_material_init(&(nt_material_desc_t){.max_materials = 2});
     s_text_material = nt_material_create(&(nt_material_create_desc_t){.blend = nt_blend_alpha_premultiplied(), .cull_mode = NT_CULL_NONE, .label = "asteroids_text"});
     init_ui();

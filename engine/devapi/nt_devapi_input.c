@@ -4,8 +4,7 @@
 #include "core/nt_assert.h"
 #include "devapi/nt_devapi_input_internal.h"
 #include "devapi/nt_devapi_internal.h"
-#include "input/nt_input.h"
-#include "input/nt_input_internal.h"
+#include "input/nt_input_feed.h"
 #include "window/nt_window.h" /* g_nt_window.fb_height — the height basis for the input.* Y flip. */
 
 /* Veneer over the core inject API: range-check bot input -> bad_params, never assert. */
@@ -13,40 +12,9 @@
 // #region devapi input schedule
 /* Schedule lives in devapi, not nt_input: only the devtool legitimately knows g_nt_app.frame. */
 
-/* NT_DEVAPI_INPUT_SCHED_MAX (bounded BSS schedule cap, -D overridable) is defined in
-   nt_devapi_input_internal.h so the ui group + the unit tests derive their sizes from the real cap. */
-
-/* Links the two caps so a full schedule's release can never exceed the immediate buffer. */
-_Static_assert(NT_DEVAPI_INPUT_SCHED_MAX <= NT_INPUT_INJECT_QUEUE_MAX, "schedule must never release more than the immediate buffer can hold");
-
 typedef struct {
     uint16_t frames_remaining; /* sim-advance countdown; 0 = release on the next advancing tick */
-    uint8_t kind;              /* nt_inject_kind_t */
-    union {
-        struct {
-            uint8_t key; /* nt_key_t fits in u8 (COUNT=69) */
-            bool down;
-        } key;
-        struct {
-            uint32_t id;
-            float x, y, pressure;
-            uint8_t type;
-            uint8_t buttons_mask;
-        } pointer; /* down / move */
-        struct {
-            uint32_t id;
-        } pointer_up;
-        struct {
-            float x, y;
-            uint8_t buttons_mask;
-        } mouse; /* move; buttons uses only the mask, at the mouse's apply-time position */
-        struct {
-            float dx, dy;
-        } wheel;
-        struct {
-            uint32_t cp;
-        } chr;
-    } u;
+    nt_input_event_t ev;
 } sched_entry_t;
 
 static sched_entry_t s_sched[NT_DEVAPI_INPUT_SCHED_MAX];
@@ -54,109 +22,14 @@ static uint32_t s_sched_count;
 
 bool nt_devapi_input_sched_can_reserve(uint32_t n) { return n <= NT_DEVAPI_INPUT_SCHED_MAX - s_sched_count; }
 
-/* Whole-or-nothing: every handler preflights nt_devapi_input_sched_can_reserve(N) for its whole command before the
-   first sched_* call, so a near-full schedule never accepts a DOWN and rejects its UP. */
-static sched_entry_t *sched_reserve(uint32_t n) {
-    NT_ASSERT(nt_devapi_input_sched_can_reserve(n));
-    sched_entry_t *first = &s_sched[s_sched_count];
-    s_sched_count += n;
-    return first;
+void nt_devapi_input_sched(nt_input_event_t ev, uint16_t at_frame) {
+    NT_ASSERT(nt_devapi_input_sched_can_reserve(1));
+    s_sched[s_sched_count++] = (sched_entry_t){at_frame, ev};
 }
 
-static void sched_key(nt_key_t key, bool down, uint16_t at_frame) {
-    sched_entry_t *e = sched_reserve(1);
-    e->frames_remaining = at_frame;
-    e->kind = NT_INJECT_KEY;
-    e->u.key.key = (uint8_t)key;
-    e->u.key.down = down;
-}
-
-static void sched_pointer(nt_inject_kind_t kind, uint32_t id, float x, float y, float pressure, uint8_t type, uint8_t buttons_mask, uint16_t at_frame) {
-    sched_entry_t *e = sched_reserve(1);
-    e->frames_remaining = at_frame;
-    e->kind = (uint8_t)kind;
-    if (kind == NT_INJECT_POINTER_UP) {
-        e->u.pointer_up.id = id;
-    } else {
-        e->u.pointer.id = id;
-        e->u.pointer.x = x;
-        e->u.pointer.y = y;
-        e->u.pointer.pressure = pressure;
-        e->u.pointer.type = type;
-        e->u.pointer.buttons_mask = buttons_mask;
-    }
-}
-
-void nt_devapi_input_sched_mouse(float x, float y, uint8_t buttons_mask, uint16_t at_frame) {
-    sched_entry_t *e = sched_reserve(1);
-    e->frames_remaining = at_frame;
-    e->kind = NT_INJECT_MOUSE_MOVE;
-    e->u.mouse.x = x;
-    e->u.mouse.y = y;
-    e->u.mouse.buttons_mask = buttons_mask;
-}
-
-/* Mask applies at the mouse's apply-time position (schedule order), so a queued move is honored. */
-void nt_devapi_input_sched_mouse_buttons(uint8_t buttons_mask, uint16_t at_frame) {
-    sched_entry_t *e = sched_reserve(1);
-    e->frames_remaining = at_frame;
-    e->kind = NT_INJECT_MOUSE_BUTTONS;
-    e->u.mouse.buttons_mask = buttons_mask;
-}
-
-void nt_devapi_input_sched_wheel(float dx, float dy, uint16_t at_frame) {
-    sched_entry_t *e = sched_reserve(1);
-    e->frames_remaining = at_frame;
-    e->kind = NT_INJECT_WHEEL;
-    e->u.wheel.dx = dx;
-    e->u.wheel.dy = dy;
-}
-
-/* down@0 + up@hold (2 entries): the tap/click hold primitive. */
-static void sched_tap(nt_key_t key, uint16_t hold_frames) {
-    sched_entry_t *e = sched_reserve(2);
-    e[0].frames_remaining = 0;
-    e[0].kind = NT_INJECT_KEY;
-    e[0].u.key.key = (uint8_t)key;
-    e[0].u.key.down = true;
-    e[1].frames_remaining = hold_frames;
-    e[1].kind = NT_INJECT_KEY;
-    e[1].u.key.key = (uint8_t)key;
-    e[1].u.key.down = false;
-}
-
-static void sched_text(const uint32_t *cps, uint32_t n) {
-    sched_entry_t *e = sched_reserve(n);
-    for (uint32_t i = 0; i < n; i++) {
-        e[i].frames_remaining = 0;
-        e[i].kind = NT_INJECT_CHAR;
-        e[i].u.chr.cp = cps[i];
-    }
-}
-
-/* Release one due entry into the immediate inject buffer. false == engine invariant violation
-   (capacity preflighted + _Static_assert), so the caller asserts. */
-static bool sched_release_one(const sched_entry_t *e) {
-    switch ((nt_inject_kind_t)e->kind) {
-    case NT_INJECT_KEY:
-        return nt_input_inject_key((nt_key_t)e->u.key.key, e->u.key.down);
-    case NT_INJECT_MOUSE_MOVE:
-        return nt_input_inject_mouse(e->u.mouse.x, e->u.mouse.y, e->u.mouse.buttons_mask);
-    case NT_INJECT_MOUSE_BUTTONS:
-        return nt_input_inject_mouse_buttons(e->u.mouse.buttons_mask);
-    case NT_INJECT_POINTER_DOWN:
-    case NT_INJECT_POINTER_MOVE:
-        return nt_input_inject_pointer((nt_inject_kind_t)e->kind, e->u.pointer.id, e->u.pointer.x, e->u.pointer.y, e->u.pointer.pressure, e->u.pointer.type, e->u.pointer.buttons_mask);
-    case NT_INJECT_POINTER_UP:
-        return nt_input_inject_pointer(NT_INJECT_POINTER_UP, e->u.pointer_up.id, 0.0F, 0.0F, 0.0F, 0, 0);
-    case NT_INJECT_WHEEL:
-        return nt_input_inject_wheel(e->u.wheel.dx, e->u.wheel.dy);
-    case NT_INJECT_CHAR: {
-        uint32_t cp = e->u.chr.cp;
-        return nt_input_inject_text(&cp, 1U);
-    }
-    }
-    return false; /* unreachable: kind is always one of the above. */
+/* A bot contact presses at full pressure. */
+static nt_input_event_t contact_ev(nt_input_event_kind_t kind, uint32_t id, float x, float y, uint8_t type, uint8_t buttons) {
+    return (nt_input_event_t){.kind = (uint8_t)kind, .contact = {id, x, y, 1.0F, type, buttons}};
 }
 
 /* Release due entries in enqueue order (preserves bot event ordering); survivors decrement + compact. */
@@ -164,9 +37,7 @@ static void sched_tick(void) {
     uint32_t out = 0;
     for (uint32_t i = 0; i < s_sched_count; i++) {
         if (s_sched[i].frames_remaining == 0) {
-            bool ok = sched_release_one(&s_sched[i]); /* due: release, do NOT carry forward. */
-            NT_ASSERT(ok);                            /* buffer >= schedule by _Static_assert; a drop is a build bug. */
-            (void)ok;
+            nt_input_inject(s_sched[i].ev); /* due: release, do NOT carry forward. */
             continue;
         }
         s_sched[i].frames_remaining--;
@@ -179,14 +50,8 @@ static void sched_tick(void) {
    first post-register tick doesn't fire spuriously. */
 static uint32_t s_last_frame;
 
-/* The keys and text of the last sim-advancing poll, which input.state reports: frozen polls clear nt_input's edges and text. */
-static struct {
-    bool down[NT_KEY_COUNT];
-    bool pressed[NT_KEY_COUNT];
-    bool released[NT_KEY_COUNT];
-    uint32_t chars[NT_INPUT_CHAR_RING];
-    uint32_t char_count;
-} s_seen;
+/* The last sim-advancing poll, which input.state reports: frozen polls clear nt_input's edges and text. */
+static nt_input_t s_seen;
 
 /* true: s_seen lacks the last advancing poll. Commands run after one tick's poll and before the next
    tick's input update (native transport phase, web between frames), so a refresh there copies it. */
@@ -197,18 +62,7 @@ static void seen_refresh(void) {
         return;
     }
     s_seen_stale = false;
-    for (int k = 0; k < NT_KEY_COUNT; k++) {
-        s_seen.down[k] = nt_input_key_is_down((nt_key_t)k);
-        s_seen.pressed[k] = nt_input_key_is_pressed((nt_key_t)k);
-        s_seen.released[k] = nt_input_key_is_released((nt_key_t)k);
-    }
-    /* Popping is safe: the coming poll drops the unread chars anyway. */
-    s_seen.char_count = 0;
-    uint32_t cp;
-    while (nt_input_pop_char(&cp)) {
-        NT_ASSERT(s_seen.char_count < NT_INPUT_CHAR_RING); /* nt_input's ring drops chars past this cap */
-        s_seen.chars[s_seen.char_count++] = cp;
-    }
+    s_seen = g_nt_input;
 }
 
 static void nt_devapi_input_update(void) {
@@ -232,20 +86,111 @@ static void nt_devapi_input_reset(void) {
 }
 // #endregion
 
-/* string -> nt_key_t, indexed by enum value; each name = the enum minus NT_KEY_. */
+/* Bot key names: each is the enum minus NT_KEY_. */
 static const char *const k_key_names[NT_KEY_COUNT] = {
-    "A",        "B",          "C",          "D",           "E",     "F",     "G",      "H",   "I",         "J",      "K",      "L",     "M",     "N",       "O",         "P",  "Q",  "R",
-    "S",        "T",          "U",          "V",           "W",     "X",     "Y",      "Z",   "0",         "1",      "2",      "3",     "4",     "5",       "6",         "7",  "8",  "9",
-    "ARROW_UP", "ARROW_DOWN", "ARROW_LEFT", "ARROW_RIGHT", "SPACE", "ENTER", "ESCAPE", "TAB", "BACKSPACE", "LSHIFT", "RSHIFT", "LCTRL", "RCTRL", "LALT",    "RALT",      "F1", "F2", "F3",
-    "F4",       "F5",         "F6",         "F7",          "F8",    "F9",    "F10",    "F11", "F12",       "DELETE", "INSERT", "HOME",  "END",   "PAGE_UP", "PAGE_DOWN",
+    [NT_KEY_A] = "A",
+    [NT_KEY_B] = "B",
+    [NT_KEY_C] = "C",
+    [NT_KEY_D] = "D",
+    [NT_KEY_E] = "E",
+    [NT_KEY_F] = "F",
+    [NT_KEY_G] = "G",
+    [NT_KEY_H] = "H",
+    [NT_KEY_I] = "I",
+    [NT_KEY_J] = "J",
+    [NT_KEY_K] = "K",
+    [NT_KEY_L] = "L",
+    [NT_KEY_M] = "M",
+    [NT_KEY_N] = "N",
+    [NT_KEY_O] = "O",
+    [NT_KEY_P] = "P",
+    [NT_KEY_Q] = "Q",
+    [NT_KEY_R] = "R",
+    [NT_KEY_S] = "S",
+    [NT_KEY_T] = "T",
+    [NT_KEY_U] = "U",
+    [NT_KEY_V] = "V",
+    [NT_KEY_W] = "W",
+    [NT_KEY_X] = "X",
+    [NT_KEY_Y] = "Y",
+    [NT_KEY_Z] = "Z",
+    [NT_KEY_0] = "0",
+    [NT_KEY_1] = "1",
+    [NT_KEY_2] = "2",
+    [NT_KEY_3] = "3",
+    [NT_KEY_4] = "4",
+    [NT_KEY_5] = "5",
+    [NT_KEY_6] = "6",
+    [NT_KEY_7] = "7",
+    [NT_KEY_8] = "8",
+    [NT_KEY_9] = "9",
+    [NT_KEY_ARROW_UP] = "ARROW_UP",
+    [NT_KEY_ARROW_DOWN] = "ARROW_DOWN",
+    [NT_KEY_ARROW_LEFT] = "ARROW_LEFT",
+    [NT_KEY_ARROW_RIGHT] = "ARROW_RIGHT",
+    [NT_KEY_SPACE] = "SPACE",
+    [NT_KEY_ENTER] = "ENTER",
+    [NT_KEY_ESCAPE] = "ESCAPE",
+    [NT_KEY_TAB] = "TAB",
+    [NT_KEY_BACKSPACE] = "BACKSPACE",
+    [NT_KEY_LSHIFT] = "LSHIFT",
+    [NT_KEY_RSHIFT] = "RSHIFT",
+    [NT_KEY_LCTRL] = "LCTRL",
+    [NT_KEY_RCTRL] = "RCTRL",
+    [NT_KEY_LALT] = "LALT",
+    [NT_KEY_RALT] = "RALT",
+    [NT_KEY_LMETA] = "LMETA",
+    [NT_KEY_RMETA] = "RMETA",
+    [NT_KEY_F1] = "F1",
+    [NT_KEY_F2] = "F2",
+    [NT_KEY_F3] = "F3",
+    [NT_KEY_F4] = "F4",
+    [NT_KEY_F5] = "F5",
+    [NT_KEY_F6] = "F6",
+    [NT_KEY_F7] = "F7",
+    [NT_KEY_F8] = "F8",
+    [NT_KEY_F9] = "F9",
+    [NT_KEY_F10] = "F10",
+    [NT_KEY_F11] = "F11",
+    [NT_KEY_F12] = "F12",
+    [NT_KEY_DELETE] = "DELETE",
+    [NT_KEY_INSERT] = "INSERT",
+    [NT_KEY_HOME] = "HOME",
+    [NT_KEY_END] = "END",
+    [NT_KEY_PAGE_UP] = "PAGE_UP",
+    [NT_KEY_PAGE_DOWN] = "PAGE_DOWN",
+    [NT_KEY_MINUS] = "MINUS",
+    [NT_KEY_EQUAL] = "EQUAL",
+    [NT_KEY_BACKQUOTE] = "BACKQUOTE",
+    [NT_KEY_BRACKET_LEFT] = "BRACKET_LEFT",
+    [NT_KEY_BRACKET_RIGHT] = "BRACKET_RIGHT",
+    [NT_KEY_BACKSLASH] = "BACKSLASH",
+    [NT_KEY_SEMICOLON] = "SEMICOLON",
+    [NT_KEY_QUOTE] = "QUOTE",
+    [NT_KEY_COMMA] = "COMMA",
+    [NT_KEY_PERIOD] = "PERIOD",
+    [NT_KEY_SLASH] = "SLASH",
+    [NT_KEY_NUMPAD_0] = "NUMPAD_0",
+    [NT_KEY_NUMPAD_1] = "NUMPAD_1",
+    [NT_KEY_NUMPAD_2] = "NUMPAD_2",
+    [NT_KEY_NUMPAD_3] = "NUMPAD_3",
+    [NT_KEY_NUMPAD_4] = "NUMPAD_4",
+    [NT_KEY_NUMPAD_5] = "NUMPAD_5",
+    [NT_KEY_NUMPAD_6] = "NUMPAD_6",
+    [NT_KEY_NUMPAD_7] = "NUMPAD_7",
+    [NT_KEY_NUMPAD_8] = "NUMPAD_8",
+    [NT_KEY_NUMPAD_9] = "NUMPAD_9",
+    [NT_KEY_NUMPAD_ENTER] = "NUMPAD_ENTER",
+    [NT_KEY_NUMPAD_ADD] = "NUMPAD_ADD",
+    [NT_KEY_NUMPAD_SUBTRACT] = "NUMPAD_SUBTRACT",
+    [NT_KEY_NUMPAD_MULTIPLY] = "NUMPAD_MULTIPLY",
+    [NT_KEY_NUMPAD_DIVIDE] = "NUMPAD_DIVIDE",
+    [NT_KEY_NUMPAD_DECIMAL] = "NUMPAD_DECIMAL",
 };
-_Static_assert(NT_COUNTOF(k_key_names) == NT_KEY_COUNT, "key-name table must match nt_key_t");
 
 static bool nt_input_key_from_name(const char *name, nt_key_t *out) {
-    if (name == NULL || out == NULL) {
-        return false;
-    }
     for (int i = 0; i < NT_KEY_COUNT; i++) {
+        NT_ASSERT(k_key_names[i] != NULL && "every nt_key_t has a bot name");
         if (strcmp(name, k_key_names[i]) == 0) {
             *out = (nt_key_t)i;
             return true;
@@ -306,7 +251,8 @@ static bool cmd_input_key(const cJSON *params, cJSON *result, nt_devapi_error *e
         if (!nt_devapi_input_sched_can_reserve(2U)) {
             return nt_devapi_fail(err, "input.key: inject schedule overflow");
         }
-        sched_tap(key, h);
+        nt_devapi_input_sched((nt_input_event_t){.kind = NT_INPUT_EV_KEY, .key = {(uint8_t)key, true}}, 0);
+        nt_devapi_input_sched((nt_input_event_t){.kind = NT_INPUT_EV_KEY, .key = {(uint8_t)key, false}}, h);
     } else {
         bool down = true;
         const cJSON *d = cJSON_GetObjectItemCaseSensitive(params, "down");
@@ -319,25 +265,25 @@ static bool cmd_input_key(const cJSON *params, cJSON *result, nt_devapi_error *e
         if (!nt_devapi_input_sched_can_reserve(1U)) {
             return nt_devapi_fail(err, "input.key: inject schedule overflow");
         }
-        sched_key(key, down, 0);
+        nt_devapi_input_sched((nt_input_event_t){.kind = NT_INPUT_EV_KEY, .key = {(uint8_t)key, down}}, 0);
     }
     devapi_add_bool(result, "ok", true);
     return true;
 }
 
-/* The contact primitive: action -> nt_inject_kind_t, type string -> nt_pointer_type_t. */
+/* The contact primitive: action -> event kind, type string -> nt_pointer_type_t. */
 static bool cmd_input_pointer(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     const cJSON *a = cJSON_GetObjectItemCaseSensitive(params, "action");
     if (!cJSON_IsString(a) || a->valuestring == NULL) {
         return nt_devapi_fail(err, "input.pointer: action must be a string");
     }
-    nt_inject_kind_t kind;
+    nt_input_event_kind_t kind;
     if (strcmp(a->valuestring, "down") == 0) {
-        kind = NT_INJECT_POINTER_DOWN;
+        kind = NT_INPUT_EV_CONTACT_DOWN;
     } else if (strcmp(a->valuestring, "move") == 0) {
-        kind = NT_INJECT_POINTER_MOVE;
+        kind = NT_INPUT_EV_CONTACT_MOVE;
     } else if (strcmp(a->valuestring, "up") == 0) {
-        kind = NT_INJECT_POINTER_UP;
+        kind = NT_INPUT_EV_CONTACT_UP;
     } else {
         return nt_devapi_fail(err, "input.pointer: action must be 'down', 'move' or 'up'");
     }
@@ -348,7 +294,7 @@ static bool cmd_input_pointer(const cJSON *params, cJSON *result, nt_devapi_erro
     }
     float x = 0.0F;
     float y = 0.0F;
-    if (kind != NT_INJECT_POINTER_UP) {
+    if (kind != NT_INPUT_EV_CONTACT_UP) {
         const cJSON *xj = cJSON_GetObjectItemCaseSensitive(params, "x");
         const cJSON *yj = cJSON_GetObjectItemCaseSensitive(params, "y");
         if (!nt_devapi_parse_f32_param(xj, err, "input.pointer: x must be a finite number for down/move", &x) ||
@@ -371,7 +317,7 @@ static bool cmd_input_pointer(const cJSON *params, cJSON *result, nt_devapi_erro
     if (!nt_devapi_input_sched_can_reserve(1U)) {
         return nt_devapi_fail(err, "input.pointer: inject schedule overflow");
     }
-    sched_pointer(kind, id, x, y, 1.0F, type, buttons, 0);
+    nt_devapi_input_sched(contact_ev(kind, id, x, y, type, buttons), 0);
     devapi_add_number(result, "queued", 1.0);
     return true;
 }
@@ -389,7 +335,7 @@ static bool cmd_input_move(const cJSON *params, cJSON *result, nt_devapi_error *
     if (!nt_devapi_input_sched_can_reserve(1U)) {
         return nt_devapi_fail(err, "input.move: inject schedule overflow");
     }
-    nt_devapi_input_sched_mouse(x, y, 0, 0);
+    nt_devapi_input_sched((nt_input_event_t){.kind = NT_INPUT_EV_MOUSE_MOVE, .mouse = {x, y, 0}}, 0);
     devapi_add_number(result, "queued", 1.0);
     return true;
 }
@@ -421,8 +367,8 @@ static bool cmd_input_click(const cJSON *params, cJSON *result, nt_devapi_error 
     if (!nt_devapi_input_sched_can_reserve(2U)) {
         return nt_devapi_fail(err, "input.click: inject schedule overflow");
     }
-    nt_devapi_input_sched_mouse(x, y, buttons, 0);
-    nt_devapi_input_sched_mouse_buttons(0, hold);
+    nt_devapi_input_sched((nt_input_event_t){.kind = NT_INPUT_EV_MOUSE_MOVE, .mouse = {x, y, buttons}}, 0);
+    nt_devapi_input_sched((nt_input_event_t){.kind = NT_INPUT_EV_MOUSE_BUTTONS, .mouse = {.buttons = 0}}, hold);
     devapi_add_number(result, "queued", 2.0);
     return true;
 }
@@ -454,17 +400,17 @@ static bool cmd_input_wheel(const cJSON *params, cJSON *result, nt_devapi_error 
         if (!nt_devapi_input_sched_can_reserve(2U)) {
             return nt_devapi_fail(err, "input.wheel: inject schedule overflow");
         }
-        nt_devapi_input_sched_mouse(x, y, 0, 0);
+        nt_devapi_input_sched((nt_input_event_t){.kind = NT_INPUT_EV_MOUSE_MOVE, .mouse = {x, y, 0}}, 0);
     } else if (!nt_devapi_input_sched_can_reserve(1U)) {
         return nt_devapi_fail(err, "input.wheel: inject schedule overflow");
     }
-    nt_devapi_input_sched_wheel(dx, dy, 0);
+    nt_devapi_input_sched((nt_input_event_t){.kind = NT_INPUT_EV_WHEEL, .wheel = {dx, dy}}, 0);
     devapi_add_bool(result, "ok", true);
     return true;
 }
 
 /* sugar: down@0 + a move per point (each on its own frame_offset using frame_stride, default 1) + up.
-   NO C interpolation — the bot supplies the path samples. Per-entry overflow -> bad_params. */
+   NO C interpolation — the bot supplies the path samples. No room for the whole gesture -> bad_params. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static bool cmd_input_gesture(const cJSON *params, cJSON *result, nt_devapi_error *err, void *ud) {
     const cJSON *idj = cJSON_GetObjectItemCaseSensitive(params, "id");
@@ -518,7 +464,7 @@ static bool cmd_input_gesture(const cJSON *params, cJSON *result, nt_devapi_erro
     const cJSON *first = cJSON_GetArrayItem(points, 0);
     float fx = (float)cJSON_GetArrayItem(first, 0)->valuedouble;
     float fy = flip_y_up_to_device((float)cJSON_GetArrayItem(first, 1)->valuedouble); /* each point's Y is Y-up. */
-    sched_pointer(NT_INJECT_POINTER_DOWN, id, fx, fy, 1.0F, type, 1U, 0);
+    nt_devapi_input_sched(contact_ev(NT_INPUT_EV_CONTACT_DOWN, id, fx, fy, type, 1U), 0);
     int idx = 0;
     cJSON_ArrayForEach(p, points) {
         if (idx == 0) {
@@ -530,10 +476,10 @@ static bool cmd_input_gesture(const cJSON *params, cJSON *result, nt_devapi_erro
         /* Compute the offset in int64 so the narrowing source is self-evidently within the
            already-validated [0, UINT16_MAX] span (idx <= npoints-1 => at <= last_offset). */
         uint16_t at = (uint16_t)((int64_t)idx * (int64_t)stride);
-        sched_pointer(NT_INJECT_POINTER_MOVE, id, mx, my, 1.0F, type, 1U, at);
+        nt_devapi_input_sched(contact_ev(NT_INPUT_EV_CONTACT_MOVE, id, mx, my, type, 1U), at);
         idx++;
     }
-    sched_pointer(NT_INJECT_POINTER_UP, id, 0.0F, 0.0F, 0.0F, type, 0, (uint16_t)last_offset);
+    nt_devapi_input_sched(contact_ev(NT_INPUT_EV_CONTACT_UP, id, 0.0F, 0.0F, type, 0), (uint16_t)last_offset);
     devapi_add_number(result, "queued", (double)npoints + 1.0);
     return true;
 }
@@ -548,7 +494,7 @@ static bool cmd_input_button(const cJSON *params, cJSON *result, nt_devapi_error
     if (!nt_devapi_input_sched_can_reserve(1U)) {
         return nt_devapi_fail(err, "input.button: inject schedule overflow");
     }
-    nt_devapi_input_sched_mouse_buttons(buttons, 0);
+    nt_devapi_input_sched((nt_input_event_t){.kind = NT_INPUT_EV_MOUSE_BUTTONS, .mouse = {.buttons = buttons}}, 0);
     devapi_add_bool(result, "ok", true);
     return true;
 }
@@ -572,8 +518,8 @@ static bool cmd_input_text(const cJSON *params, cJSON *result, nt_devapi_error *
         return nt_devapi_fail(err, "input.text: text must be a string");
     }
     const unsigned char *s = (const unsigned char *)t->valuestring;
-    /* Bounded by the char ring: beyond it the reply's queued would overstate what the game can read. */
-    uint32_t cps[NT_INPUT_CHAR_RING];
+    /* Bounded by a frame's char cap: beyond it the reply's queued would overstate what the game can read. */
+    uint32_t cps[NT_INPUT_CHAR_MAX];
     uint32_t n = 0;
     while (*s != 0) {
         uint32_t cp;
@@ -609,8 +555,8 @@ static bool cmd_input_text(const cJSON *params, cJSON *result, nt_devapi_error *
         if (cp < k_min_cp[extra] || cp > 0x10FFFFU || (cp >= 0xD800U && cp <= 0xDFFFU)) {
             return nt_devapi_fail(err, "input.text: invalid UTF-8");
         }
-        if (n >= NT_INPUT_CHAR_RING) {
-            return nt_devapi_fail(err, "input.text: more than " NT_DEVAPI_STR(NT_INPUT_CHAR_RING) " codepoints (the char ring)");
+        if (n >= NT_INPUT_CHAR_MAX) {
+            return nt_devapi_fail(err, "input.text: more than " NT_DEVAPI_STR(NT_INPUT_CHAR_MAX) " codepoints (one frame of text)");
         }
         cps[n] = cp;
         n++;
@@ -624,7 +570,16 @@ static bool cmd_input_text(const cJSON *params, cJSON *result, nt_devapi_error *
     if (!nt_devapi_input_sched_can_reserve(n)) {
         return nt_devapi_fail(err, "input.text: inject schedule overflow");
     }
-    sched_text(cps, n);
+    uint32_t due = 0; /* text already scheduled for the same frame: the cap is per frame */
+    for (uint32_t i = 0; i < s_sched_count; i++) {
+        due += (s_sched[i].ev.kind == NT_INPUT_EV_CHAR && s_sched[i].frames_remaining == 0) ? 1U : 0U;
+    }
+    if (due + n > NT_INPUT_CHAR_MAX) {
+        return nt_devapi_fail(err, "input.text: the next frame already holds text; at most " NT_DEVAPI_STR(NT_INPUT_CHAR_MAX) " codepoints per frame");
+    }
+    for (uint32_t i = 0; i < n; i++) {
+        nt_devapi_input_sched((nt_input_event_t){.kind = NT_INPUT_EV_CHAR, .cp = cps[i]}, 0);
+    }
     devapi_add_number(result, "queued", (double)n);
     return true;
 }
@@ -641,9 +596,9 @@ static bool cmd_input_state(const cJSON *params, cJSON *result, nt_devapi_error 
             return nt_devapi_fail(err, "input.state: unknown key name");
         }
         seen_refresh();
-        devapi_add_bool(result, "down", s_seen.down[key]);
-        devapi_add_bool(result, "pressed", s_seen.pressed[key]);
-        devapi_add_bool(result, "released", s_seen.released[key]);
+        devapi_add_bool(result, "down", s_seen.key_down[key]);
+        devapi_add_bool(result, "pressed", s_seen.key_pressed[key]);
+        devapi_add_bool(result, "released", s_seen.key_released[key]);
     }
     const cJSON *pt = cJSON_GetObjectItemCaseSensitive(params, "text");
     if (pt != NULL) {
@@ -714,28 +669,29 @@ static const nt_devapi_command k_input_cmds[] = {
     },
     {
         .method = "input.button",
-        .summary = "set the mouse-button mask {1,2,4} on the mouse",
+        .summary = "set the mouse-button mask {1,2,4} at the mouse's position when applied (no mouse over the window -> no-op)",
         .params_shape = "{buttons:number}",
         .result_shape = "{ok:bool}",
         .fn = cmd_input_button,
     },
     {
         .method = "input.set_player_enabled",
-        .summary = "toggle the player-input gate (false suppresses the real device; inject still flows)",
+        .summary = "toggle the player-input gate (false suppresses the real device; inject still flows; a client reset re-enables it)",
         .params_shape = "{enabled:bool}",
         .result_shape = "{enabled:bool}",
         .fn = cmd_input_set_player_enabled,
     },
     {
         .method = "input.text",
-        .summary = "decode a UTF-8 string -> codepoints and enqueue them into the char ring",
+        .summary =
+            "decode a UTF-8 string -> codepoints and enqueue them as typed text (at most " NT_DEVAPI_STR(NT_INPUT_CHAR_MAX) " per frame, all commands together; released on the next sim-advance)",
         .params_shape = "{text:string}",
         .result_shape = "{queued:number}",
         .fn = cmd_input_text,
     },
     {
         .method = "input.state",
-        .summary = "IMMEDIATE read of the last sim-advancing poll: key down/edges and the text the game left unread (an inject shows after the next sim-advance)",
+        .summary = "IMMEDIATE read of the last sim-advancing poll: key down/edges and the text it published (an inject shows after the next sim-advance)",
         .params_shape = "{key?:string, text?:bool}",
         .result_shape = "{down?:bool, pressed?:bool, released?:bool, codepoints?:[number]}",
         .fn = cmd_input_state,

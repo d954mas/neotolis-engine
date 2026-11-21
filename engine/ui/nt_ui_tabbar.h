@@ -3,7 +3,7 @@
 
 /* Reusable tab-bar. A column (or row) of full-width click targets; the active tab carries an accent bar
  * + a selected fill, hovered tabs lighten and ease. A click sets the game-owned `int *active` — the
- * widget never owns the index. No popup, no gesture cell: a tab is a plain click.
+ * widget never owns the index. No popup: a tab is a plain click.
  *
  * Customizable game UI (button/checkbox parity): each tab visual is a per-state model (idle/hover/
  * selected) with an OPTIONAL atlas-ref bg (slice9), a tint, and a flat fallback color — atlas-free still
@@ -93,7 +93,7 @@ void nt_ui_tabbar_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
  * for the game's content children. Returns true the frame this tab was clicked. */
 bool nt_ui_tab_begin(nt_ui_context_t *ctx, int index, bool active);
 
-/* Runs the open tab's step_interaction, closes the element. Pair with each nt_ui_tab_begin. */
+/* Runs the open tab's nt_ui_step, closes the element. Pair with each nt_ui_tab_begin. */
 void nt_ui_tab_end(nt_ui_context_t *ctx);
 
 /* Closes the bar container opened by nt_ui_tabbar_begin. */

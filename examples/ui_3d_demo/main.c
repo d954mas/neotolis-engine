@@ -147,7 +147,6 @@ static bool s_debug_overlay;
 /* Resources. */
 static nt_hash32_t s_pack_id;
 static nt_resource_t s_atlas_handle;
-static nt_resource_t s_font_resource;
 static nt_material_t s_sprite_material;
 static nt_material_t s_text_material;
 static nt_material_t s_overlay_sprite_material; /* depth-off overlay materials: the F2 inspector and the HUD */
@@ -427,7 +426,7 @@ static void draw_shape(void) {
 
 /* Cursor ray vs the central object's bounding sphere. *out_dist = world distance from the near plane
  * to the front hit (same metric as the UI hit distance), or false on miss. Fed to
- * nt_ui_set_pointer_occlusion so a panel directly behind the object can't be clicked through it. */
+ * the frame's occlusion so a panel directly behind the object can't be clicked through it. */
 static bool cursor_object_distance(float px, float py, float fb_w, float fb_h, const mat4 vp, float *out_dist) {
     if (fb_w <= 0.0F || fb_h <= 0.0F) {
         return false;
@@ -504,8 +503,10 @@ static void try_bind_resources(void) {
         s_atlas_bound = true;
         nt_log_info("ui_3d_demo: atlas white region bound");
     }
-    if (!s_font_bound && nt_resource_is_ready(s_font_resource)) {
-        nt_font_add(s_font, s_font_resource);
+    if (!s_font_bound && nt_resource_pack_state(s_pack_id) == NT_PACK_STATE_READY) {
+        uint32_t size = 0;
+        const uint8_t *bytes = nt_resource_entry_bytes(s_pack_id, ASSET_FONT_UI_3D_DEMO_FONT, &size);
+        nt_font_fill(s_font, bytes, size);
         nt_ui_set_font(s_ctx, 0U, s_font);
         s_font_bound = true;
         nt_log_info("ui_3d_demo: font bound");
@@ -558,7 +559,7 @@ static int test_panel_body(const char *title, const uint32_t ids[TPICK_COUNT], i
     }
     for (int i = 0; i < TPICK_COUNT; ++i) {
         nt_ui_button_style_t *style = (i == sel) ? &s_btn_active : &s_btn_idle;
-        nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_PANEL), ids[i], style, &s_tbtn_decl, true, NULL);
+        nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_PANEL), ids[i], style, &s_tbtn_decl, true);
         nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_LABEL), (i == TPICK_A) ? "A" : "B", &s_btn_label_style);
         if (nt_ui_button_end(s_ctx)) {
             clicked = i;
@@ -569,7 +570,7 @@ static int test_panel_body(const char *title, const uint32_t ids[TPICK_COUNT], i
 
 /* Two panels mounted BEHIND the central object so the cursor ray must pass it to reach them. NEAR
  * (z=-2.5) sits slightly left, FAR (z=-4.0) slightly right → they overlap along the sightline.
- *   - Aim THROUGH the object → buttons are occluded (set_pointer_occlusion blocks the click).
+ *   - Aim THROUGH the object → buttons are occluded (the frame's occlusion blocks the click).
  *   - Where NEAR & FAR overlap → only NEAR's button reacts (front-most arbitration); strafe (A/D)
  *     so the object stops blocking to see it. The side that sticks out belongs to one panel only.
  * Declared inside ui3d-root (floating, bbox at 0,0); the XFORM maps each to its world mount. */
@@ -644,7 +645,7 @@ static void declare_panels(void) {
             }
             for (int i = 0; i < SHAPE_COUNT; ++i) {
                 nt_ui_button_style_t *style = (i == s_shape_kind) ? &s_btn_active : &s_btn_idle;
-                nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_PANEL), s_id_shape_btn[i], style, &s_btn_decl, true, NULL);
+                nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_PANEL), s_id_shape_btn[i], style, &s_btn_decl, true);
                 nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_LABEL), s_shape_labels[i], &s_btn_label_style);
                 if (nt_ui_button_end(s_ctx)) {
                     s_shape_kind = i;
@@ -668,7 +669,7 @@ static void declare_panels(void) {
             }
             for (int i = 0; i < SPEED_COUNT; ++i) {
                 nt_ui_button_style_t *style = (i == s_speed_kind) ? &s_btn_active : &s_btn_idle;
-                nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_PANEL), s_id_speed_btn[i], style, &s_btn_decl, true, NULL);
+                nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_PANEL), s_id_speed_btn[i], style, &s_btn_decl, true);
                 nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_LABEL), s_speed_labels[i], &s_btn_label_style);
                 if (nt_ui_button_end(s_ctx)) {
                     s_speed_kind = i;
@@ -797,9 +798,9 @@ static void frame(void) {
         nt_program_ref_drop(&s_text_program);
         nt_resource_invalidate(NT_ASSET_SHADER_CODE);
         s_atlas_bound = false;
-        /* The font keeps its sources across a restore -- only its GPU textures
+        /* The font keeps its CPU data across a restore -- only its GPU textures
          * died, and nt_font_step rebuilds those itself. Clearing this would make
-         * the gate call nt_font_add twice, which asserts on the duplicate. */
+         * the gate call nt_font_fill twice, which asserts on the duplicate. */
     }
     nt_input_poll();
     nt_arena_reset(&g_nt_mem_scratch);
@@ -893,14 +894,11 @@ static void frame(void) {
 
     if (ui_can_render) {
         const nt_pointer_t *pointer = &g_nt_input.pointers[g_nt_input.primary];
-        nt_ui_begin(s_ctx, fb_w, fb_h, dt, pointer, 1, 0);
-        nt_ui_set_view_proj(s_ctx, (const float *)vp_3d);
         /* Occlusion: if the cursor ray crosses the central object, block UI beyond it — a panel
          * behind the object can't be clicked through it (game owns the world raycast). */
-        float occl_dist = 0.0F;
-        if (cursor_object_distance(pointer->x, pointer->y, fb_w, fb_h, vp_3d, &occl_dist)) {
-            nt_ui_set_pointer_occlusion(s_ctx, 0, occl_dist);
-        }
+        float occl_dist = INFINITY;
+        (void)cursor_object_distance(pointer->x, pointer->y, fb_w, fb_h, vp_3d, &occl_dist);
+        nt_ui_begin(s_ctx, &(nt_ui_frame_desc_t){.layout_w = fb_w, .layout_h = fb_h, .dt = dt, .pointers = pointer, .pointer_count = 1, .view_proj = (const float *)vp_3d, .occlusion = &occl_dist});
         declare_panels();
         nt_ui_end(s_ctx);
     }
@@ -1058,7 +1056,6 @@ int main(int argc, char *argv[]) {
     s_text_program.label = "ui_3d_demo/text";
     s_text_program.fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_FRAG, NT_ASSET_SHADER_CODE);
     s_atlas_handle = nt_resource_request(ASSET_ATLAS_UI_3D_DEMO_ATLAS, NT_ASSET_ATLAS);
-    s_font_resource = nt_resource_request(ASSET_FONT_UI_3D_DEMO_FONT, NT_ASSET_FONT);
 
     /* Handle is valid immediately; fill late-bound button-bg refs upfront. */
     init_button_styles();

@@ -297,11 +297,12 @@ then needs a variant that discards empty pixels so they do not occlude, and it
 accepts that the quads of one draw (neighbor glyphs, outline, shadow, underline)
 overlap in one plane, keep painter order only through blending and may z-fight
 under depth writes. The renderer does not check the material's depth state or FS;
-shaders are game assets. A variant consumes the `slug_text.vert`
-outputs `v_texcoord`, `flat uvec2 v_glyph` (band row, band count),
-`flat vec4 v_band_transform` (bbox x0, y0, band count / width, band count /
-height, in em) and `v_color`, and computes coverage with `SlugRender(coord,
-glyph, band_transform)` from `common/slug_coverage.glsl`.
+shaders are game assets. A vertex variant includes `common/slug_vertex.glsl`,
+calls `SlugVertex()` and writes `gl_Position` from `a_position`. A fragment
+variant includes `common/slug_coverage.glsl` and reads the coverage from
+`SlugCoverage()` and the color from `v_color`. The two files declare the
+vertex inputs and the varyings between the stages. A game consumes them from
+the engine's shader directory: a copy does not follow a layout change.
 
 Pipeline identity includes the program handle, so replacement makes a
 different pipeline. Destroying the old program (before the first pass or after
@@ -564,8 +565,8 @@ is borrowed only for the call; its label is static storage, kept for the capture
 context. The instanced bind asserts that instance and vertex locations do not
 overlap, and the instance buffer's type and liveness. `nt_gfx_mesh_vertex_input`
 returns a vertex input gfx owns, so the caller asks again rather than keeping
-it; it returns INVALID when the vertex input must be made on a lost context, and
-a stale mesh or buffer asserts. The registry and
+it; it returns INVALID while the mesh buffers have no live GPU storage, including
+after restore until the mesh is reconstructed. A stale mesh or buffer asserts. The registry and
 lifetime rules of both live in
 [render architecture, Vertex inputs](../render/architecture.md#vertex-inputs).
 Creating a pipeline or a vertex input

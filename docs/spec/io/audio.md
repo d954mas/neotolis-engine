@@ -180,7 +180,7 @@ void audio_on_state_changed(uint32_t running);
 
 ## Integration with frame loop
 
-In `input_begin_frame` or `platform_step`:
+After `nt_input_poll` (a pointer press is user activation):
 
 ```c
 if (audio_get_state() == AUDIO_SUSPENDED && any_pointer_pressed) {

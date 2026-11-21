@@ -94,7 +94,7 @@ typedef struct {
     const char *shortcut;       /* optional right-aligned shortcut text (e.g. "Ctrl+S"); NULL = none */
     bool disabled;              /* greyed + non-selectable when true (default false = enabled) */
     bool selected;              /* checkmark (toggle/radio menu items) */
-    bool non_activatable;       /* true = an interactive child owns the click (item_begin only; default false) */
+    bool non_activatable;       /* true = the row has no action of its own: never activates (item_begin only) */
     uint8_t _pad[1];
 } nt_ui_menu_item_opts_t;
 /* 64-bit: 16 ref + 8 ptr + 4 bools/pad = 28 -> 32 (8-align). wasm 32-bit: 16 + 4 + 4 = 24. Both = a
@@ -146,9 +146,9 @@ typedef struct nt_ui_menu_ctx {
         bool open_frame; /* this frame's menu is OPEN: false = present-only, item/submenu calls no-op */
     } pending_menu;
     struct {
-        uint32_t id;      /* the open custom-content row's id (for item_end's step_interaction) */
+        uint32_t id;      /* the open custom-content row's id (for item_end's nt_ui_step) */
         bool enabled;     /* false = a disabled row: item_end never steps/activates (mirrors item_ex's enabled gate) */
-        bool activatable; /* false = an interactive child owns the click (the row never latches activate) */
+        bool activatable; /* false = the row has no action of its own (never latches activate) */
         bool active;      /* a custom-content row element is open (between item_begin/item_end) */
     } pending_menu_item;
 
@@ -193,8 +193,8 @@ bool nt_ui_menu_item_ex(nt_ui_menu_ctx_t *menu, uint32_t key, const char *label,
 /* item_begin returns DECLARE-BODY (true while the menu is OPEN), NOT clicked — guard the custom body with it
  * (a closed/present-only menu returns false so the body is skipped, no scene leak). The row's ACTIVATION is
  * reported by item_end (parallel to item/item_ex returning clicked), so the two bools never mean the same
- * thing: item_begin = "declare the body", item_end = "the row was activated". An activatable=false row never
- * activates (item_end returns false) — its inner child owns the click.
+ * thing: item_begin = "declare the body", item_end = "the row was activated". A non_activatable row has no
+ * action of its own and never activates (item_end returns false).
  * item_end is a NO-OP when item_begin returned false (closed menu opened no row), so BOTH placements are safe:
  *   if (item_begin(...)) { ...body...; item_end(...); }   // item_end inside the guard
  *   if (item_begin(...)) { ...body...; }  item_end(...);  // item_end unconditional
@@ -214,12 +214,12 @@ void nt_ui_menu_end(nt_ui_menu_ctx_t *menu);
 
 /* Open trigger: arms the menu at the cursor on a right-click OR a caller-supplied long-press this frame.
  * Does ONLY idempotent reads — NO mutating interaction step (so it never double-steps the caller's
- * widget; nt_ui_events is the one canonical mutating step per widget per frame). `menu_id` is the menu's
+ * widget; nt_ui_step is the one mutating step per widget per frame). `menu_id` is the menu's
  * stable id (drives every level's salted state). `target_id` optionally binds the right-click to a widget:
  * 0 = arm anywhere (any right-click); non-zero = arm over that widget's bbox via a GEOMETRY hit-test (NOT
  * arbitrated hover, so a right-click RE-opens the menu through its own occluder; does not respect z-order).
  * `long_pressed` is the touch trigger: the
- * caller passes the long_pressed flag from ITS target widget's own nt_ui_events gesture step (this helper
+ * caller passes nt_ui_hold_crossed of ITS target widget's own step (this helper
  * owns no gesture timing). Returns true if it armed this frame (so the caller can stop other handling). */
 bool nt_ui_menu_open_trigger(nt_ui_context_t *ctx, uint32_t menu_id, uint32_t target_id, bool long_pressed, nt_ui_menu_state_t *st);
 

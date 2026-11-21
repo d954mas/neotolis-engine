@@ -173,7 +173,7 @@ static inline uint32_t nt_ui_next_pow2_u32(uint32_t x) {
 size_t nt_ui_min_arena_size(const nt_ui_create_desc_t *desc) {
     NT_ASSERT(desc != NULL && "nt_ui_min_arena_size: desc must be non-NULL");
     NT_ASSERT(desc->max_elements > 0U && "nt_ui_min_arena_size: desc->max_elements must be > 0");
-    NT_ASSERT(desc->max_elements <= UINT16_MAX && "nt_ui_min_arena_size: desc->max_elements exceeds uint16 sorted-index range");
+    NT_ASSERT(desc->max_elements <= UINT16_MAX && "nt_ui_min_arena_size: desc->max_elements exceeds uint16 sorted-index range (and the 16-bit halves of the stacking order)");
     /* SetMaxElementCount also writes word_cache_count = N*2; restore via the same call. */
     Clay_Context *saved_ctx = Clay_GetCurrentContext();
     const int32_t saved_default = nt_ui_clay_priv_default_max_element_count();
@@ -232,7 +232,6 @@ nt_ui_context_t *nt_ui_create_context(void *arena, size_t arena_size, const nt_u
     const size_t ctx_size = NT_ALIGN_UP(sizeof(struct nt_ui_context), NT_UI_CACHE_LINE);
     ctx->max_elements = desc->max_elements;
     ctx->use_raycast_input = desc->use_raycast_input;
-    ctx->view_proj_set = false;
     NT_ASSERT(isfinite(desc->element_depth_bias_ndc) && desc->element_depth_bias_ndc >= 0.0F && "nt_ui_create_context: element_depth_bias_ndc must be finite and non-negative");
     NT_ASSERT((desc->element_depth_bias_ndc == 0.0F || desc->use_raycast_input) && "nt_ui_create_context: element_depth_bias_ndc requires use_raycast_input=true");
     ctx->element_depth_bias_ndc = desc->element_depth_bias_ndc;
@@ -242,9 +241,10 @@ nt_ui_context_t *nt_ui_create_context(void *arena, size_t arena_size, const nt_u
      * catcher on the base band where it stops gating base UI. */
     NT_ASSERT((int)ctx->modal_zband_stride > 1 && (int)ctx->modal_zband_stride * NT_UI_MODAL_MAX_DEPTH <= INT16_MAX &&
               "nt_ui_create_context: modal_zband_stride must be > 1 and stride * NT_UI_MODAL_MAX_DEPTH must fit int16");
-    /* memset zeroed these; restore the gesture defaults (0 is not a valid dbl window / radius). */
-    ctx->gesture_dbl_window_secs = NT_UI_GESTURE_DBL_WINDOW_SECS;
-    ctx->gesture_move_radius_px = NT_UI_GESTURE_MOVE_RADIUS_PX;
+    /* Touch-friendly baseline, looser than ImGui's mouse 6px/0.3s: the engine targets mobile/WASM. */
+    ctx->gesture_dbl_window_secs = 0.50F;
+    ctx->gesture_move_radius_dp = 16.0F;
+    NT_ASSERT(NT_UI_DRAG_SLOP_DP > 0.0F && "nt_ui_create_context: NT_UI_DRAG_SLOP_DP must be > 0");
     const size_t tree_baked_bytes = NT_ALIGN_UP(sizeof(nt_ui_baked_xform_t) * desc->max_elements, NT_UI_CACHE_LINE);
     const size_t tree_root_bytes = NT_ALIGN_UP(sizeof(*ctx->tree_root_for_elem) * desc->max_elements, NT_UI_CACHE_LINE);
     const size_t tree_dfs_bytes = NT_ALIGN_UP(sizeof(nt_ui_dfs_frame_t) * NT_UI_TREE_DFS_DEPTH_CAP, NT_UI_CACHE_LINE);
@@ -364,7 +364,7 @@ bool nt_ui_context_has_frame(const nt_ui_context_t *ctx) {
 // #endregion
 
 // #region viewport
-/* Single device<->layout math path: the converters AND the lazy pointer conversion all route here.
+/* Single device<->layout math path: the converters and nt_ui_begin's pointer conversion route here.
  * device->layout: layout = (device - vp.offset) * (logical_dim / vp.size); the inverse for the other
  * direction. vp.size > 0 is the caller's contract (begin's identity default is > 0 when dims > 0). */
 static void nt_ui_screen_to_layout_vp(const nt_ui_viewport_t *vp, float logical_w, float logical_h, const float screen[2], float out_layout[2]) {
@@ -377,16 +377,6 @@ static void nt_ui_layout_to_screen_vp(const nt_ui_viewport_t *vp, float logical_
     NT_ASSERT(logical_w > 0.0F && logical_h > 0.0F && "nt_ui_layout_to_screen_vp: logical dims must be > 0");
     out_screen[0] = vp->x + layout[0] * (vp->w / logical_w);
     out_screen[1] = vp->y + layout[1] * (vp->h / logical_h);
-}
-
-// NOLINTNEXTLINE(readability-function-cognitive-complexity): the validation assert chain inflates the count; the body is two stores
-void nt_ui_set_viewport(nt_ui_context_t *ctx, nt_ui_viewport_t vp) {
-    NT_ASSERT(ctx != NULL && "nt_ui_set_viewport: ctx must be non-NULL");
-    NT_ASSERT(ctx->in_frame && "nt_ui_set_viewport: call between nt_ui_begin and the first hit-test (reset each begin)");
-    NT_ASSERT(!ctx->frame_pointers_converted && "nt_ui_set_viewport: fed too late — the pointer conversion already latched this frame; set BEFORE the first step/query/pointer_hot");
-    NT_ASSERT(isfinite(vp.x) && isfinite(vp.y) && "nt_ui_set_viewport: offset must be finite");
-    NT_ASSERT(isfinite(vp.w) && isfinite(vp.h) && vp.w > 0.0F && vp.h > 0.0F && "nt_ui_set_viewport: viewport size must be finite and > 0");
-    ctx->viewport = vp;
 }
 
 void nt_ui_screen_to_layout(const nt_ui_context_t *ctx, const float screen[2], float out_layout[2]) {
@@ -407,75 +397,138 @@ void nt_ui_set_font(nt_ui_context_t *ctx, uint16_t font_id, nt_font_t font) {
     NT_ASSERT(ctx != NULL && "nt_ui_set_font: ctx must be non-NULL");
     NT_ASSERT(!ctx->in_frame && "nt_ui_set_font: must be called outside begin/end");
     NT_ASSERT(font_id < NT_UI_MAX_FONTS && "nt_ui_set_font: font_id >= NT_UI_MAX_FONTS");
+    if (ctx->fonts[font_id].id != font.id) {
+        ctx->font_epoch = UINT32_MAX; /* the next begin resets measurements */
+    }
     ctx->fonts[font_id] = font;
 }
 // #endregion
 
 // #region begin_end
+static void resolve_hot(nt_ui_context_t *ctx);
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt, const nt_pointer_t *pointers, uint32_t count, uint32_t primary) {
-    NT_ASSERT(ctx != NULL && "nt_ui_begin: ctx must be non-NULL");
+void nt_ui_begin(nt_ui_context_t *ctx, const nt_ui_frame_desc_t *frame) {
+    NT_ASSERT(ctx != NULL && frame != NULL && "nt_ui_begin: ctx and frame must be non-NULL");
+    const float layout_w = frame->layout_w;
+    const float layout_h = frame->layout_h;
+    const float dt = frame->dt;
+    const nt_pointer_t *pointers = frame->pointers;
+    const uint32_t count = frame->pointer_count;
+    const uint32_t primary = frame->primary;
     NT_ASSERT(s_nt_ui_module_initialized && "nt_ui_begin: nt_ui_module_init() must be called before begin");
     NT_ASSERT(pointers != NULL && "nt_ui_begin: pointers must be non-NULL");
     NT_ASSERT(count > 0U && count <= NT_INPUT_MAX_POINTERS && "nt_ui_begin: count must be 1..NT_INPUT_MAX_POINTERS");
     NT_ASSERT(primary < count && "nt_ui_begin: primary must index pointers");
-    /* isfinite() rejects NaN + +-inf which `> 0.0F` alone lets through. Dims MUST be strictly positive:
-       the device->layout resolve divides by the viewport size derived from these, so 0 would trap later
-       at the first hit-test — fail-early here with a clear message instead. */
-    NT_ASSERT(isfinite(screen_w) && screen_w > 0.0F && "nt_ui_begin: screen_w must be finite and strictly positive");
-    NT_ASSERT(isfinite(screen_h) && screen_h > 0.0F && "nt_ui_begin: screen_h must be finite and strictly positive");
+    /* isfinite() rejects NaN + +-inf which `> 0.0F` alone lets through; the device<->layout conversion
+       divides by these. */
+    NT_ASSERT(isfinite(layout_w) && layout_w > 0.0F && "nt_ui_begin: layout_w must be finite and strictly positive");
+    NT_ASSERT(isfinite(layout_h) && layout_h > 0.0F && "nt_ui_begin: layout_h must be finite and strictly positive");
+    NT_ASSERT((frame->view_proj != NULL) == ctx->use_raycast_input && "nt_ui_begin: a 3D ctx (use_raycast_input) needs view_proj, a 2D ctx none");
+    NT_ASSERT((frame->occlusion == NULL || ctx->use_raycast_input) && "nt_ui_begin: occlusion is a 3D ctx input");
     NT_ASSERT(isfinite(dt) && dt >= 0.0F && "nt_ui_begin: dt must be finite and non-negative");
     NT_ASSERT(g_nt_ui_inframe_ctx == NULL && "nt_ui_begin: another ctx is mid-frame");
     NT_ASSERT(!ctx->in_frame && "nt_ui_begin: ctx already in_frame");
 
+    /* Viewport: device content rect -> layout. Zero size = identity (unscaled apps), keeping a given DPR. */
+    nt_ui_viewport_t vp = frame->viewport;
+    if (vp.w == 0.0F && vp.h == 0.0F) {
+        NT_ASSERT(vp.x == 0.0F && vp.y == 0.0F && "nt_ui_begin: a viewport offset needs a size");
+        vp = (nt_ui_viewport_t){.x = 0.0F, .y = 0.0F, .w = layout_w, .h = layout_h, .px_per_dp = (vp.px_per_dp == 0.0F) ? 1.0F : vp.px_per_dp};
+    }
+    NT_ASSERT(isfinite(vp.x) && isfinite(vp.y) && "nt_ui_begin: viewport offset must be finite");
+    NT_ASSERT(isfinite(vp.w) && isfinite(vp.h) && vp.w > 0.0F && vp.h > 0.0F && "nt_ui_begin: viewport size must be finite and > 0");
+    NT_ASSERT(isfinite(vp.px_per_dp) && vp.px_per_dp > 0.0F && "nt_ui_begin: viewport px_per_dp must be finite and > 0 (the window DPR)");
+
     /* MUST be first so subsequent Clay calls operate on ctx->clay. */
     Clay_SetCurrentContext(ctx->clay);
 
+    if (ctx->font_epoch != nt_font_content_epoch()) {
+        ctx->font_epoch = nt_font_content_epoch();
+        Clay_ResetMeasureTextCache();
+    }
+
     ctx->in_frame = true;
     g_nt_ui_inframe_ctx = ctx;
-    ctx->frame_counter++; /* one bump per frame; gates the events gesture latch (stable across the whole frame) */
+    ctx->frame_counter++; /* one bump per frame (stable across the whole frame) */
 
-    /* Snapshot pointer list + dt for engine-owned hit-test + anim cache. The pointers are RAW DEVICE
-     * coords; the lazy hot resolve converts them to layout space via ctx->viewport (set below to the
-     * identity default; a scaled app overrides it via nt_ui_set_viewport before the first hit-test). */
+    ctx->begin_w = layout_w;
+    ctx->begin_h = layout_h;
+    ctx->viewport = vp;
+    if (frame->view_proj != NULL) {
+        for (int i = 0; i < 16; ++i) {
+            NT_ASSERT(isfinite(frame->view_proj[i]) && "nt_ui_begin: view_proj must be finite");
+        }
+        memcpy(ctx->view_proj, frame->view_proj, sizeof ctx->view_proj);
+        mat4 m_in;
+        mat4 m_inv;
+        memcpy(m_in, frame->view_proj, sizeof m_in);
+        /* Catch singular matrices before invert: post-invert diagonals can stay finite while off-diagonals explode. */
+        NT_ASSERT(glm_mat4_det(m_in) != 0.0F && "nt_ui_begin: view_proj is singular (det == 0)");
+        glm_mat4_inv(m_in, m_inv);
+        memcpy(ctx->inv_view_proj, m_inv, sizeof ctx->inv_view_proj);
+    }
+
+    /* Pointers arrive in device px; every hit-test and gesture this frame reads them in layout space. */
     memcpy(ctx->frame_pointers, pointers, sizeof(nt_pointer_t) * count);
     ctx->frame_pointer_count = count;
     ctx->frame_primary = primary;
     ctx->frame_dt = dt;
-    ctx->frame_pointers_converted = false;
-#if NT_UI_DEBUG_TOOLS
-    /* Snapshot LAST frame's viewport before the identity reset below: the inspector's pointer-over is
-     * tested against last frame's tree, so it must convert with last frame's viewport. Frame 1 has no
-     * prior tree, so a degenerate prev viewport falls back to this frame's identity. */
-    if (ctx->viewport.w > 0.0F && ctx->viewport.h > 0.0F && ctx->begin_w > 0.0F && ctx->begin_h > 0.0F) {
-        ctx->prev_viewport = ctx->viewport;
-        ctx->prev_begin_w = ctx->begin_w;
-        ctx->prev_begin_h = ctx->begin_h;
-    } else {
-        ctx->prev_viewport = (nt_ui_viewport_t){.x = 0.0F, .y = 0.0F, .w = screen_w, .h = screen_h};
-        ctx->prev_begin_w = screen_w;
-        ctx->prev_begin_h = screen_h;
+    const float inv_sx = layout_w / vp.w;
+    const float inv_sy = layout_h / vp.h;
+    for (uint32_t i = 0; i < count; ++i) {
+        nt_pointer_t *p = &ctx->frame_pointers[i];
+        const float device[2] = {p->x, p->y};
+        float layout[2];
+        nt_ui_screen_to_layout_vp(&vp, layout_w, layout_h, device, layout);
+        p->x = layout[0];
+        p->y = layout[1];
+        p->dx *= inv_sx; /* delta carries only the scale (no offset) */
+        p->dy *= inv_sy;
     }
-#endif
-    /* Default viewport = identity device==layout (no set_viewport => unscaled apps unchanged). */
-    ctx->begin_w = screen_w;
-    ctx->begin_h = screen_h;
-    ctx->viewport = (nt_ui_viewport_t){.x = 0.0F, .y = 0.0F, .w = screen_w, .h = screen_h};
+    ctx->layout_per_dp[0] = vp.px_per_dp * inv_sx;
+    ctx->layout_per_dp[1] = vp.px_per_dp * inv_sy;
+
+    for (uint32_t i = 0; i < count; ++i) {
+        const nt_button_state_t btn = ctx->frame_pointers[i].buttons[NT_BUTTON_LEFT];
+        /* nt_input never publishes it: a press that follows a release waits for the next frame. */
+        NT_ASSERT(!(btn.is_pressed && btn.is_released && btn.is_down) && "nt_ui_begin: a release and a newer press of one pointer in one frame");
+        nt_ui_capture_t *cap = &ctx->captures[i];
+        if (btn.is_pressed || (!btn.is_released && !btn.is_down)) {
+            /* Frames without nt_ui_begin swallow edges. A press always starts a new gesture, and a button
+             * that is up with no release edge ended one unseen. */
+            cap->active_id = 0U;
+            cap->pending_scroll = 0U;
+        }
+        if (btn.is_pressed) {
+            cap->press_pos[0] = ctx->frame_pointers[i].x;
+            cap->press_pos[1] = ctx->frame_pointers[i].y;
+            cap->pos[0] = cap->press_pos[0];
+            cap->pos[1] = cap->press_pos[1];
+        }
+    }
 
     /* Orphan cleanup — captures unqueried last frame would hold the pointer forever. */
     for (uint32_t i = 0; i < NT_INPUT_MAX_POINTERS; ++i) {
         if (ctx->captures[i].active_id != 0U && ctx->capture_seen[i] == 0U) {
             ctx->captures[i].active_id = 0U;
         }
+        if (i >= count) {
+            ctx->captures[i].pending_scroll = 0U; /* a slot the game stopped passing holds no gesture when it returns */
+        }
+        if (ctx->captures[i].active_id != 0U) {
+            ctx->captures[i].hold_prev_secs = ctx->captures[i].hold_secs;
+            ctx->captures[i].hold_secs += dt;
+        }
         ctx->capture_seen[i] = 0U;
-        ctx->pointer_hot[i] = (nt_ui_hot_t){0}; /* resolved lazily on first step/query this frame */
-        ctx->pointer_occlusion[i] = INFINITY;   /* game re-feeds per frame; default = no cutoff */
-        /* wheel_owner[] is NOT reset here — it carries the prev-frame end-of-frame resolution into
-         * this frame's consume (innermost-wins, 1-frame lag). It's rewritten in nt_ui_end. */
+        ctx->pointer_hot[i] = (nt_ui_hot_t){0};
+        ctx->wheel_owner[i][0] = 0U;
+        ctx->wheel_owner[i][1] = 0U;
+        /* NaN would make the `t > cutoff` test always false (click through a wall). */
+        ctx->pointer_occlusion[i] = (frame->occlusion != NULL && i < count) ? frame->occlusion[i] : INFINITY;
+        NT_ASSERT(!isnan(ctx->pointer_occlusion[i]) && "nt_ui_begin: occlusion must not be NaN");
     }
-    /* New frame of wheel candidates; depth counter re-zeroes (begin++/end-- balance across the frame). */
-    ctx->wheel_candidate_count = 0U;
-    ctx->wheel_depth = 0U;
+    ctx->last_press_age += dt;
     ctx->active_modal_depth = 0U; /* modal begin++/end-- balance across the frame (asserted == 0 at end) */
     /* Commit last frame's deepest modal as the close-scan target (1-frame IM lag), then reset. */
     ctx->modal_top_id_prev = ctx->modal_top_id_cur;
@@ -494,11 +547,9 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt,
      * first-field tracker re-zeroes so a Tab off the last field wraps to this frame's first. */
     ctx->focus_tab_seek = 0U;
     ctx->focus_first_id = 0U;
-    ctx->pointer_over_any = false;
-    ctx->hot_resolved = false;
 
     /* Swap the interactive registry: this frame's resolve reads last frame's set (now _prev); _cur is
-     * refilled by this frame's step_interaction calls. */
+     * refilled by this frame's nt_ui_step calls. */
     nt_ui_interactive_t *interactive_swap = ctx->interactive_prev;
     ctx->interactive_prev = ctx->interactive_cur;
     ctx->interactive_cur = interactive_swap;
@@ -517,12 +568,6 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt,
     ctx->pending_rich = NULL;
     ctx->rich_session_open = false;
 
-    /* Stale view_proj across frames silently breaks 3D hit-test if the game forgets to refresh it
-     * after a camera move. Reset so the next ui_hit_test inside this frame asserts on missing setter. */
-    if (ctx->use_raycast_input) {
-        ctx->view_proj_set = false;
-    }
-
 #if NT_UI_DEBUG_TOOLS
     memset(ctx->widget_registry, 0, sizeof(nt_ui_widget_slot_t) * ctx->widget_registry_cap);
     /* highlight_id is per-frame; selected_id persists across frames. */
@@ -530,9 +575,9 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt,
 
     /* 3D ctx: rebuild inspector's own Y-down ortho per frame from screen dims so the inspector
      * overlay raycasts against screen-pixel coords regardless of the game's view_proj (perspective). */
-    if (ctx->use_raycast_input && screen_w > 0.0F && screen_h > 0.0F) {
+    if (ctx->use_raycast_input) {
         mat4 m;
-        glm_ortho(0.0F, screen_w, screen_h, 0.0F, -1.0F, 1.0F, m);
+        glm_ortho(0.0F, layout_w, layout_h, 0.0F, -1.0F, 1.0F, m);
         memcpy(ctx->inspector_view_proj, m, sizeof ctx->inspector_view_proj);
         mat4 m_inv;
         glm_mat4_inv(m, m_inv);
@@ -540,33 +585,18 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt,
     }
 #endif
 
-    const nt_pointer_t *primary_ptr = &pointers[primary];
-
+    const nt_pointer_t *primary_ptr = &ctx->frame_pointers[primary];
 #if NT_UI_DEBUG_TOOLS
-    /* The inspector consumes the LAYOUT-space pointer, tested against LAST frame's solved tree (the
-     * BeginLayout below wipes the roots), so the gate + Clay feed convert with prev_*. */
-    float insp_screen[2] = {primary_ptr->x, primary_ptr->y};
-    float insp_layout[2] = {primary_ptr->x, primary_ptr->y};
-    if (ctx->prev_viewport.w > 0.0F && ctx->prev_viewport.h > 0.0F && ctx->prev_begin_w > 0.0F && ctx->prev_begin_h > 0.0F) {
-        nt_ui_screen_to_layout_vp(&ctx->prev_viewport, ctx->prev_begin_w, ctx->prev_begin_h, insp_screen, insp_layout);
-    }
-    /* Initial gate value (frame-1 safe, no layout solve): layout x vs the LOGICAL panel edge. */
-    ctx->inspector_pointer_consumed = ctx->inspector_active && (insp_layout[0] >= (screen_w - ctx->inspector_metrics.panel_width));
-    const float clay_pointer_x = insp_layout[0];
-    const float clay_pointer_y = insp_layout[1];
-#else
-    const float clay_pointer_x = primary_ptr->x;
-    const float clay_pointer_y = primary_ptr->y;
+    ctx->inspector_pointer_consumed = ctx->inspector_active && (primary_ptr->x >= (layout_w - ctx->inspector_metrics.panel_width));
 #endif
 
     /* The game opts into Clay's built-in debug view per frame, after begin. */
     Clay_SetDebugModeEnabled(false);
-    Clay_SetLayoutDimensions((Clay_Dimensions){.width = screen_w, .height = screen_h});
+    Clay_SetLayoutDimensions((Clay_Dimensions){.width = layout_w, .height = layout_h});
 
     /* Clay v0.14 has no right/middle/wheel buttons; left only. Clay's pointer-over consumer is the
-     * inspector only; under DEBUG_TOOLS feed the layout-space pointer so a scaled ctx hover-picks
-     * the right zone. Identity viewport => layout==device, so unscaled feeds the raw value unchanged. */
-    Clay_SetPointerState((Clay_Vector2){.x = clay_pointer_x, .y = clay_pointer_y}, primary_ptr->buttons[NT_BUTTON_LEFT].is_down);
+     * inspector only (layout space). */
+    Clay_SetPointerState((Clay_Vector2){.x = primary_ptr->x, .y = primary_ptr->y}, primary_ptr->buttons[NT_BUTTON_LEFT].is_down);
 
     /* nt_ui scroll containers drive their own physics (nt_ui_scroll); Clay built-in scroll bypassed,
      * so drag-scrolling stays off. Still REQUIRED every frame: it runs Clay's clip/scroll-container GC.
@@ -574,6 +604,11 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt,
      * reclaims entries on its own -- without this call any CLIP element (e.g. each input field's content
      * clip) leaks a slot until the pool (64) overflows -> Clay error type=7 crash. */
     Clay_UpdateScrollContainers(false, (Clay_Vector2){0.0F, 0.0F}, ctx->frame_dt);
+
+    /* Input is decided here, from last frame's layout: the front-most record per pointer, then the
+     * scroll gestures. Every step and query of the frame reads the result. */
+    resolve_hot(ctx);
+    nt_ui_internal_scroll_arbitrate(ctx);
 
     Clay_BeginLayout();
 }
@@ -590,6 +625,7 @@ void nt_ui_end(nt_ui_context_t *ctx) {
     }
 #endif
 
+    NT_ASSERT(nt_ui_clay_priv_open_element_count(ctx->clay) == 2 && "nt_ui_end: an element is still open (a begin without its end)");
     /* Times the Clay layout solve only, not the begin->end span. */
 #if NT_UI_TIMING_ENABLED
     const double layout_t0 = nt_time_now();
@@ -604,8 +640,13 @@ void nt_ui_end(nt_ui_context_t *ctx) {
     ctx->last_build_tree_ms = (float)((nt_time_now() - build_t0) * 1000.0);
 #endif
 
-    /* Resolve this frame's wheel candidates into wheel_owner[] for next frame's consume (innermost-wins). */
-    nt_ui_internal_resolve_wheel_owners(ctx);
+    /* A pending gesture ends with its release frame (the widgets read it as a tap above), so a button
+     * found held after skipped frames never continues it. */
+    for (uint32_t i = 0; i < ctx->frame_pointer_count; ++i) {
+        if (!ctx->frame_pointers[i].buttons[NT_BUTTON_LEFT].is_down) {
+            ctx->captures[i].pending_scroll = 0U;
+        }
+    }
 
     /* Publish this frame's modal presence for nt_ui_modal_active: a game polls it next frame BEFORE
      * begin (e.g. gating its own hotkeys), so commit at end (not begin) to hold the latest result. */
@@ -1498,8 +1539,8 @@ static void emit_custom(const nt_ui_context_t *ctx, const Clay_RenderCommand *c,
 
 // #region walk
 /* SCISSOR/CUSTOM/NONE = hard barriers; never reordered. */
-/* Clay stamps zIndex on RECT/TEXT/SCISSOR only; the baked band covers every command. Only synthetic
- * scissors carry -1, and those are barriers, so a segmentable command always maps to a layout element. */
+/* The baked stacking order covers every command (Clay stamps zIndex on RECT/TEXT/SCISSOR only). Only
+ * synthetic scissors carry -1, and those are barriers, so a segmentable command always maps to a layout element. */
 static const nt_ui_baked_xform_t *cmd_baked(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, int32_t n_elements) {
     NT_ASSERT(c->nt_layout_index >= 0 && c->nt_layout_index < n_elements && "segmentable command without layout element");
     return &ctx->tree_baked[c->nt_layout_index];
@@ -1571,7 +1612,6 @@ static void apply_element_depth_bias(const nt_ui_context_t *ctx, uint16_t hierar
     if (ctx->element_depth_bias_ndc == 0.0F || hierarchy_depth == 0U) {
         return;
     }
-    NT_ASSERT(ctx->view_proj_set && "nt_ui_walk: element_depth_bias_ndc requires nt_ui_set_view_proj before nt_ui_walk");
 
     const float origin[4] = {world_mat4[12], world_mat4[13], world_mat4[14], 1.0F};
     float clip[4];
@@ -1911,11 +1951,12 @@ static void nt_ui_walk_impl(nt_ui_context_t *ctx, const nt_ui_target_t *target, 
             ++i;
             continue;
         }
-        const int16_t seg_z = cmd_baked(ctx, c, N_elements)->zindex;
+        /* One segment never spans two tree roots: a later root paints whole over an earlier one, as it hit-tests. */
+        const uint32_t seg_root = cmd_baked(ctx, c, N_elements)->order >> 16U;
         int32_t seg_end = i + 1;
         while (seg_end < arr->length) {
             const Clay_RenderCommand *next = &arr->internalArray[seg_end];
-            if (!is_segmentable(next->commandType) || cmd_baked(ctx, next, N_elements)->zindex != seg_z) {
+            if (!is_segmentable(next->commandType) || (cmd_baked(ctx, next, N_elements)->order >> 16U) != seg_root) {
                 break;
             }
             ++seg_end;
@@ -2044,26 +2085,6 @@ void nt_ui_set_custom_handler(nt_ui_context_t *ctx, nt_ui_custom_handler_t fn, v
     ctx->custom_user = userdata;
 }
 
-/* Cache inv_view_proj alongside view_proj so per-pointer hit-tests don't re-invert per call. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void nt_ui_set_view_proj(nt_ui_context_t *ctx, const float view_proj[16]) {
-    NT_ASSERT(ctx != NULL && "nt_ui_set_view_proj: ctx must be non-NULL");
-    NT_ASSERT(ctx->use_raycast_input && "nt_ui_set_view_proj: only valid when desc.use_raycast_input=true");
-    NT_ASSERT(view_proj != NULL && "nt_ui_set_view_proj: view_proj must be non-NULL");
-    for (int i = 0; i < 16; ++i) {
-        NT_ASSERT(isfinite(view_proj[i]) && "nt_ui_set_view_proj: view_proj must be finite");
-    }
-    memcpy(ctx->view_proj, view_proj, sizeof ctx->view_proj);
-    mat4 m_in;
-    mat4 m_inv;
-    memcpy(m_in, view_proj, sizeof m_in);
-    /* Catch singular matrices before invert — bulletproof vs scanning post-invert diagonals which
-     * can leave the four checked entries finite while off-diagonals explode. */
-    NT_ASSERT(glm_mat4_det(m_in) != 0.0F && "nt_ui_set_view_proj: view_proj is singular (det == 0)");
-    glm_mat4_inv(m_in, m_inv);
-    memcpy(ctx->inv_view_proj, m_inv, sizeof ctx->inv_view_proj);
-    ctx->view_proj_set = true;
-}
 // #endregion
 
 // #region nt_ui_custom
@@ -2306,11 +2327,11 @@ static bool map_pointer_to_local(const nt_ui_context_t *ctx, const nt_ui_baked_x
     return true;
 }
 
-/* out_t / out_zindex (both nullable, valid only when this returns true): out_t = world distance from
- * the near plane to the hit in 3D ctx (0 in 2D); out_zindex = the hit element's effective Clay zIndex
- * (its floating tree-root's), used for 2D front-most arbitration. */
+/* out_t / out_order (both nullable, valid only when this returns true): out_t = world distance from
+ * the near plane to the hit in 3D ctx (0 in 2D); out_order = the hit element's stacking order, used for
+ * front-most arbitration. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static bool ui_hit_test(const nt_ui_context_t *ctx, uint32_t id, float px, float py, const int16_t pad_lrtb[4], float *out_t, int16_t *out_zindex) {
+static bool ui_hit_test(const nt_ui_context_t *ctx, uint32_t id, float px, float py, const int16_t pad_lrtb[4], float *out_t, uint32_t *out_order) {
     if (id == 0U) {
         return false;
     }
@@ -2331,7 +2352,6 @@ static bool ui_hit_test(const nt_ui_context_t *ctx, uint32_t id, float px, float
     float screen_w = 0.0F;
     float screen_h = 0.0F;
     if (ctx->use_raycast_input) {
-        NT_ASSERT(ctx->view_proj_set && "ui_hit_test: ctx is 3D mode but nt_ui_set_view_proj was not called this frame");
         screen_w = nt_ui_clay_priv_layout_width(ctx->clay);
         screen_h = nt_ui_clay_priv_layout_height(ctx->clay);
     }
@@ -2342,8 +2362,8 @@ static bool ui_hit_test(const nt_ui_context_t *ctx, uint32_t id, float px, float
 
     const Clay_BoundingBox box = d.boundingBox;
     const nt_ui_baked_xform_t b = ctx->hit_baked[slot];
-    if (out_zindex != NULL) {
-        *out_zindex = b.zindex; /* slot already gated by hit_generation above */
+    if (out_order != NULL) {
+        *out_order = b.order; /* slot already gated by hit_generation above */
     }
     float lx;
     float ly;
@@ -2387,7 +2407,6 @@ static bool pointer_to_local_resolved(const nt_ui_context_t *ctx, uint32_t id, f
     float screen_w = 0.0F;
     float screen_h = 0.0F;
     if (ctx->use_raycast_input) {
-        NT_ASSERT(ctx->view_proj_set && "nt_ui_internal_pointer_to_local: 3D ctx but nt_ui_set_view_proj was not called this frame");
         screen_w = nt_ui_clay_priv_layout_width(ctx->clay);
         screen_h = nt_ui_clay_priv_layout_height(ctx->clay);
     }
@@ -2413,36 +2432,49 @@ bool nt_ui_internal_pointer_to_local(nt_ui_context_t *ctx, uint32_t id, float px
     return ok;
 }
 
+/* 3D: hits within 1e-5 of the NEAREST hit (relative, floored at one unit) are coplanar (a row on its
+ * scroll surface) and compete by stacking order like 2D. */
+static float coplanar_band(float nearest_t) { return nearest_t + (1.0e-5F * fmaxf(fabsf(nearest_t), 1.0F)); }
+
 #if NT_UI_DEBUG_TOOLS
 /* The 2D-affine screen scan can't be reused in 3D ctx — z->m maps Clay→world there, not Clay→screen —
- * so the cursor is ray-cast against each recorded zone's plane. Contract, scope, and ordering: see the
- * declaration in nt_ui_internal.h. */
+ * so the cursor is ray-cast against the zone's plane. out_t = world distance, as ui_hit_test's. */
+static bool zone_ray_hit(const nt_ui_context_t *ctx, const nt_ui_debug_zone_t *z, float px, float py, float *out_t) {
+    if (z->id == 0U) {
+        return false;
+    }
+    nt_ui_baked_xform_t b = {0};
+    memcpy(b.m, z->m, sizeof b.m);
+    float lx;
+    float ly;
+    return raycast_hit(ctx->inv_view_proj, &b, px, py, nt_ui_clay_priv_layout_width(ctx->clay), nt_ui_clay_priv_layout_height(ctx->clay), &lx, &ly, out_t) && lx >= z->visual_l && lx <= z->visual_r &&
+           ly >= z->visual_t && ly <= z->visual_b;
+}
+
 uint32_t nt_ui_internal_pick_zone_3d(const nt_ui_context_t *ctx, float px, float py) {
     NT_ASSERT(ctx != NULL && "nt_ui_internal_pick_zone_3d: ctx must be non-NULL");
     if (!ctx->use_raycast_input) {
         return 0U;
     }
-    NT_ASSERT(ctx->view_proj_set && "nt_ui_internal_pick_zone_3d: 3D ctx but nt_ui_set_view_proj was not called this frame");
-    const float screen_w = nt_ui_clay_priv_layout_width(ctx->clay);
-    const float screen_h = nt_ui_clay_priv_layout_height(ctx->clay);
-    /* Reverse order: deepest-recorded zone wins (record/step order), matching the 2D scan. */
-    for (int32_t zi = (int32_t)ctx->debug_zone_count - 1; zi >= 0; --zi) {
-        const nt_ui_debug_zone_t *z = &ctx->debug_zones[zi];
-        if (z->id == 0U) {
-            continue;
-        }
-        nt_ui_baked_xform_t b = {0};
-        memcpy(b.m, z->m, sizeof b.m);
-        float lx;
-        float ly;
-        if (!raycast_hit(ctx->inv_view_proj, &b, px, py, screen_w, screen_h, &lx, &ly, NULL)) {
-            continue;
-        }
-        if (lx >= z->visual_l && lx <= z->visual_r && ly >= z->visual_t && ly <= z->visual_b) {
-            return z->id;
+    float nearest_t = INFINITY;
+    for (uint32_t zi = 0U; zi < ctx->debug_zone_count; ++zi) {
+        float t = 0.0F;
+        if (zone_ray_hit(ctx, &ctx->debug_zones[zi], px, py, &t)) {
+            nearest_t = fminf(nearest_t, t);
         }
     }
-    return 0U;
+    const float band = coplanar_band(nearest_t);
+    uint32_t picked = 0U;
+    uint32_t best_order = 0U;
+    for (uint32_t zi = 0U; zi < ctx->debug_zone_count; ++zi) {
+        const nt_ui_debug_zone_t *z = &ctx->debug_zones[zi];
+        float t = 0.0F;
+        if (zone_ray_hit(ctx, z, px, py, &t) && t <= band && z->order >= best_order) {
+            picked = z->id;
+            best_order = z->order;
+        }
+    }
+    return picked;
 }
 #endif
 
@@ -2508,26 +2540,20 @@ static nt_ui_widget_pidx_state_t resolve_widget_pidx_state(nt_ui_context_t *ctx,
     return s;
 }
 
-static void resolve_hot_if_needed(nt_ui_context_t *ctx); /* defined below; query triggers it too */
-
-/* Compute-pure: same returned struct N calls per frame. Side effects are idempotent and frame-scoped:
- * an OR of pointer_over_any (observability for nt_ui_wants_pointer) and the once-per-frame hot resolve
- * (so a query-only frame still arbitrates); state-machine writes (capture, button edges) live in
- * step_interaction_padded. */
+/* Pure read of this widget's interaction this frame; capture and button-edge writes live in nt_ui_step,
+ * which reuses the pointer state resolved here. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-nt_ui_interaction_t nt_ui_query_interaction_padded(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lrtb[4]) {
-    NT_ASSERT(ctx != NULL && "nt_ui_query_interaction_padded: ctx must be non-NULL");
-    NT_ASSERT(id != 0U && "nt_ui_query_interaction_padded: id must be non-zero (0 = no widget)");
-    NT_ASSERT(ctx->frame_pointer_count > 0U && "nt_ui_query_interaction_padded: no frame pointer snapshot yet (call after first nt_ui_begin)");
+static nt_ui_interaction_t query_interaction_padded(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lrtb[4], bool *out_owner_over, nt_ui_widget_pidx_state_t *out_s) {
+    NT_ASSERT(ctx != NULL && "nt_ui_query_interaction: ctx must be non-NULL");
+    NT_ASSERT(id != 0U && "nt_ui_query_interaction: id must be non-zero (0 = no widget)");
+    NT_ASSERT(ctx->frame_pointer_count > 0U && "nt_ui_query_interaction: no frame pointer snapshot yet (call after first nt_ui_begin)");
     /* Negative padding is a use error — size the widget smaller instead. */
-    NT_ASSERT((pad_lrtb == NULL || (pad_lrtb[0] >= 0 && pad_lrtb[1] >= 0 && pad_lrtb[2] >= 0 && pad_lrtb[3] >= 0)) && "nt_ui_query_interaction_padded: pad_lrtb components must be >= 0");
+    NT_ASSERT((pad_lrtb == NULL || (pad_lrtb[0] >= 0 && pad_lrtb[1] >= 0 && pad_lrtb[2] >= 0 && pad_lrtb[3] >= 0)) && "nt_ui_query_interaction: pad_lrtb components must be >= 0");
 
     nt_ui_interaction_t out = {0};
+    *out_s = (nt_ui_widget_pidx_state_t){.effective_pidx = -1, .first_hover_pidx = -1};
 
 #if NT_UI_DEBUG_TOOLS
-    /* Force the device->layout conversion FIRST so the inspector gate below is evaluated in layout
-     * space (a scaled ctx fed the raw device pointer at begin, which over-claims the sidebar). */
-    nt_ui_internal_ensure_pointers_layout(ctx);
     /* Sidebar consumes the pointer; widgets behind it report no interaction. */
     if (ctx->inspector_active && ctx->inspector_pointer_consumed) {
         return out;
@@ -2543,13 +2569,10 @@ nt_ui_interaction_t nt_ui_query_interaction_padded(nt_ui_context_t *ctx, uint32_
         return out;
     }
 
-    resolve_hot_if_needed(ctx); /* once per frame; lets a query-only frame arbitrate (no step needed) */
     const nt_ui_widget_pidx_state_t s = resolve_widget_pidx_state(ctx, id, pad_lrtb);
+    *out_s = s;
     out.hovered = s.any_hovered;
     out.distance = s.distance; /* world hit distance (3D); 0 in 2D or when not hovered */
-    if (s.any_hovered) {
-        ctx->pointer_over_any = true;
-    }
 
     if (s.effective_pidx >= 0) {
         const uint32_t pidx = (uint32_t)s.effective_pidx;
@@ -2557,17 +2580,23 @@ nt_ui_interaction_t nt_ui_query_interaction_padded(nt_ui_context_t *ctx, uint32_
         const nt_ui_capture_t *cap = &ctx->captures[pidx];
         const nt_button_state_t btn = p->buttons[NT_BUTTON_LEFT];
         const bool over = ui_hit_test(ctx, id, p->x, p->y, pad_lrtb, NULL, NULL);
+        *out_owner_over = over;
         out.pressed = btn.is_down;
         out.released_now = btn.is_released;
         out.pressed_now = s.new_capture;
         out.clicked = btn.is_released && over;
         out.pointer_id = p->id;
+        out.gesture_pending = cap->pending_scroll != 0U;
         if (s.new_capture) {
             out.press_pos[0] = p->x;
             out.press_pos[1] = p->y;
         } else {
             out.press_pos[0] = cap->press_pos[0];
             out.press_pos[1] = cap->press_pos[1];
+            if (cap->hold_live && btn.is_down && over) {
+                out.hold_secs = cap->hold_secs;
+                out.hold_prev_secs = cap->hold_prev_secs;
+            }
         }
         out.pos[0] = p->x;
         out.pos[1] = p->y;
@@ -2588,126 +2617,104 @@ nt_ui_interaction_t nt_ui_query_interaction_padded(nt_ui_context_t *ctx, uint32_
     return out;
 }
 
-nt_ui_interaction_t nt_ui_query_interaction(nt_ui_context_t *ctx, uint32_t id) { return nt_ui_query_interaction_padded(ctx, id, NULL); }
-
-/* Lazy once-per-frame resolve of the front-most interactive widget per pointer, from LAST frame's
- * registry (this frame's transforms/bboxes are still prev-frame until nt_ui_end). 3D: nearest world
- * distance within the occlusion cutoff; 2D: highest effective zIndex (tie → last-registered, i.e.
- * later step_interaction call). Registry holds game-layer widgets only, so their distances share one
- * view_proj and compare cleanly. */
-
-/* Convert this frame's RAW DEVICE pointers to LAYOUT space via ctx->viewport, in place, once per frame.
- * Runs at the lazy hot resolve (after nt_ui_set_viewport, before any hit-test reads frame_pointers). The
- * identity default viewport leaves device==layout, so unscaled paths see no change. Other-TU pointer
- * consumers (scroll wheel, menu) call this too (idempotent) to stay correct independent of call order. */
-void nt_ui_internal_ensure_pointers_layout(nt_ui_context_t *ctx) {
-    if (ctx->frame_pointers_converted) {
-        return;
-    }
-    ctx->frame_pointers_converted = true;
-    const float inv_sx = ctx->begin_w / ctx->viewport.w; /* logical_dim / vp.size; see nt_ui_screen_to_layout_vp */
-    const float inv_sy = ctx->begin_h / ctx->viewport.h;
-    for (uint32_t i = 0; i < ctx->frame_pointer_count; ++i) {
-        nt_pointer_t *p = &ctx->frame_pointers[i];
-        const float screen[2] = {p->x, p->y};
-        float layout[2];
-        nt_ui_screen_to_layout_vp(&ctx->viewport, ctx->begin_w, ctx->begin_h, screen, layout);
-        p->x = layout[0];
-        p->y = layout[1];
-        p->dx *= inv_sx; /* delta carries only the scale (no offset) */
-        p->dy *= inv_sy;
-    }
-#if NT_UI_DEBUG_TOOLS
-    /* Re-gate the inspector sidebar with THIS frame's viewport now it is known: begin gated using the
-     * PREV-frame viewport (1-frame lag, off only on a resize). frame_pointers are now layout-space; the
-     * panel sits at logical x = begin_w - panel_width, so compare the converted pointer.x against it. */
-    if (ctx->frame_pointer_count > 0U) {
-        const nt_pointer_t *primary = &ctx->frame_pointers[ctx->frame_primary];
-        ctx->inspector_pointer_consumed = ctx->inspector_active && (primary->x >= (ctx->begin_w - ctx->inspector_metrics.panel_width));
-    }
-#endif
+nt_ui_interaction_t nt_ui_query_interaction(nt_ui_context_t *ctx, uint32_t id) {
+    bool owner_over = false;
+    nt_ui_widget_pidx_state_t s;
+    return query_interaction_padded(ctx, id, NULL, &owner_over, &s);
 }
 
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void resolve_hot_if_needed(nt_ui_context_t *ctx) {
-    /* MUST precede the hot_resolved early-out: a frame where set_pointer_occlusion latches hot via a
-     * different call still needs the device->layout conversion to have run before any hit-test reads. */
-    nt_ui_internal_ensure_pointers_layout(ctx);
-    if (ctx->hot_resolved) {
-        return;
+/* One registry record against a pointer: NONE when missed, occluded (3D cutoff) or a see-through
+ * scroll surface; PANE for an inspector pane; HIT otherwise. */
+static nt_ui_hit_kind_t hot_candidate(nt_ui_context_t *ctx, const nt_ui_interactive_t *rec, uint32_t pidx, float *out_t, uint32_t *out_order) {
+    const nt_pointer_t *p = &ctx->frame_pointers[pidx];
+    if (!ui_hit_test(ctx, rec->id, p->x, p->y, rec->pad, out_t, out_order)) {
+        return NT_UI_HIT_NONE;
     }
-    ctx->hot_resolved = true;
-    /* ui_hit_test -> Clay_GetElementData reads the GLOBAL current Clay ctx, so make the resolve robust
-     * to nt_ui_pointer_hot being called outside the frame or under a different current ctx. */
-    Clay_Context *saved_clay = Clay_GetCurrentContext();
-    Clay_SetCurrentContext(ctx->clay);
+    const nt_ui_hit_kind_t kind = nt_ui_internal_record_kind(ctx, rec->id);
+    if (kind == NT_UI_HIT && ctx->use_raycast_input && *out_t > ctx->pointer_occlusion[pidx]) {
+        return NT_UI_HIT_NONE; /* behind the game-fed cutoff (e.g. a wall) */
+    }
+    return kind;
+}
+
+/* nt_ui_begin's front-most record per pointer, from LAST frame's registry and layout. 3D: nearest
+ * world distance within the occlusion cutoff first. Then the highest stacking order: the later tree root
+ * (band, then declaration), then the later-declared element inside one root; neither the draw layer nor
+ * the nt_ui_step call order is consulted. Game records share one view_proj; inspector panes win outright. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void resolve_hot(nt_ui_context_t *ctx) {
     for (uint32_t pidx = 0; pidx < ctx->frame_pointer_count; ++pidx) {
         const nt_pointer_t *p = &ctx->frame_pointers[pidx];
         if (!p->active) {
             continue; /* a gone pointer hovers nothing (its hot stays 0) */
         }
+        /* 3D: the nearest hit is found first so the coplanar band never drifts with registry order. 2D
+         * needs no nearest. */
+        float nearest_t = INFINITY;
+        for (uint32_t k = 0; ctx->use_raycast_input && k < ctx->interactive_prev_count; ++k) {
+            float t = 0.0F;
+            if (hot_candidate(ctx, &ctx->interactive_prev[k], pidx, &t, NULL) == NT_UI_HIT) {
+                nearest_t = fminf(nearest_t, t);
+            }
+        }
+        const float band = coplanar_band(nearest_t);
         nt_ui_hot_t best = {0};
-        bool found = false;
-        int16_t best_zindex = INT16_MIN; /* 2D: highest effective zIndex seen so far */
+        uint32_t best_order = 0U;
         for (uint32_t k = 0; k < ctx->interactive_prev_count; ++k) {
             const nt_ui_interactive_t *rec = &ctx->interactive_prev[k];
             float t = 0.0F;
-            int16_t zi = 0;
-            if (!ui_hit_test(ctx, rec->id, p->x, p->y, rec->pad, &t, &zi)) {
+            uint32_t order = 0U;
+            const nt_ui_hit_kind_t kind = hot_candidate(ctx, rec, pidx, &t, &order);
+            if (kind == NT_UI_HIT_NONE || (ctx->use_raycast_input && kind == NT_UI_HIT && t > band)) {
                 continue;
             }
-            if (ctx->use_raycast_input) {
-                if (t > ctx->pointer_occlusion[pidx]) {
-                    continue; /* behind the game-fed cutoff (e.g. a wall) → occluded, leaves hot=0 (skip) */
-                }
-                if (!found || t < best.distance) {
-                    best.id = rec->id;
-                    best.distance = t;
-                    found = true;
-                }
-            } else {
-                /* 2D: highest effective zIndex wins; >= so a later-registered tie overwrites. Registry
-                 * order = step_interaction call order = declaration (paint) order when the game steps in
-                 * declaration order — the normal pattern. */
-                if (!found || zi >= best_zindex) {
-                    best.id = rec->id;
-                    best.distance = 0.0F;
-                    best_zindex = zi;
-                    found = true;
-                }
+            /* An inspector pane floats above the game in any view_proj, so it wins outright. */
+#if NT_UI_DEBUG_TOOLS
+            if (kind == NT_UI_HIT_PANE) {
+                order = UINT32_MAX;
+            }
+#endif
+            if (order >= best_order) {
+                best.id = rec->id;
+                best.distance = ctx->use_raycast_input ? t : 0.0F;
+                best_order = order;
             }
         }
         /* best stays {0} when nothing was hit OR all hits were occluded — both gate to skip. */
         ctx->pointer_hot[pidx] = best;
     }
-    Clay_SetCurrentContext(saved_clay);
+}
+
+/* One record per ctx, not per pointer: a quick re-tap can land in another pointer slot. */
+static bool press_pairs_with_last(const nt_ui_context_t *ctx, uint32_t id, float x, float y) {
+    const float dx = (x - ctx->last_press_pos[0]) / ctx->layout_per_dp[0];
+    const float dy = (y - ctx->last_press_pos[1]) / ctx->layout_per_dp[1];
+    const float radius = ctx->gesture_move_radius_dp;
+    return ctx->last_press_id == id && ctx->last_press_age <= ctx->gesture_dbl_window_secs && (dx * dx) + (dy * dy) <= radius * radius;
 }
 
 /* Same compute as query_padded plus state-machine commits; ONCE per widget per frame. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-nt_ui_interaction_t nt_ui_step_interaction_padded(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lrtb[4]) {
-    NT_ASSERT(ctx != NULL && "nt_ui_step_interaction_padded: ctx must be non-NULL");
-    NT_ASSERT(ctx->in_frame && ctx == g_nt_ui_inframe_ctx && "nt_ui_step_interaction_padded: must be called between nt_ui_begin and nt_ui_end on the active ctx");
-    NT_ASSERT(id != 0U && "nt_ui_step_interaction_padded: id must be non-zero (0 = no widget)");
-    NT_ASSERT(ctx->frame_pointer_count > 0U && "nt_ui_step_interaction_padded: no frame pointer snapshot");
-    NT_ASSERT((pad_lrtb == NULL || (pad_lrtb[0] >= 0 && pad_lrtb[1] >= 0 && pad_lrtb[2] >= 0 && pad_lrtb[3] >= 0)) && "nt_ui_step_interaction_padded: pad_lrtb components must be >= 0");
+nt_ui_interaction_t nt_ui_step(nt_ui_context_t *ctx, uint32_t id, const nt_ui_step_desc_t *desc) {
+    NT_ASSERT(ctx != NULL && "nt_ui_step: ctx must be non-NULL");
+    NT_ASSERT(ctx->in_frame && ctx == g_nt_ui_inframe_ctx && "nt_ui_step: must be called between nt_ui_begin and nt_ui_end on the active ctx");
+    NT_ASSERT(id != 0U && "nt_ui_step: id must be non-zero (0 = no widget)");
+    NT_ASSERT(ctx->frame_pointer_count > 0U && "nt_ui_step: no frame pointer snapshot");
+    const int16_t *pad_lrtb = (desc != NULL) ? desc->pad_lrtb : NULL;
+    const uint8_t drag_axes = (desc != NULL) ? desc->drag_axes : 0U;
+    NT_ASSERT((pad_lrtb == NULL || (pad_lrtb[0] >= 0 && pad_lrtb[1] >= 0 && pad_lrtb[2] >= 0 && pad_lrtb[3] >= 0)) && "nt_ui_step: pad_lrtb components must be >= 0");
+    NT_ASSERT(drag_axes <= (NT_UI_DRAG_X | NT_UI_DRAG_Y) && "nt_ui_step: drag_axes takes only NT_UI_DRAG_X | NT_UI_DRAG_Y");
+#if NT_UI_CHECKS
+    NT_ASSERT(!nt_ui_state_has_tag(ctx, id, NT_UI_SCROLL_TAG) && "nt_ui_step: a scroll's own id is its surface, not a widget (step a child id)");
+#endif
 
-    /* query_padded triggers the once-per-frame hot resolve; step reaches resolve_widget_pidx_state
-     * (which reads pointer_hot) only when query did NOT early-return, i.e. after that resolve ran. */
-    const nt_ui_interaction_t out = nt_ui_query_interaction_padded(ctx, id, pad_lrtb);
+    bool owner_over = false;
+    nt_ui_widget_pidx_state_t s;
+    nt_ui_interaction_t out = query_interaction_padded(ctx, id, pad_lrtb, &owner_over, &s);
 
     /* Record this interactive widget for NEXT frame's hot resolve (resolve re-validates id/transform,
-     * so recording an id that later vanishes is harmless). Silently capped at max_elements —
-     * graceful degradation (some ctx configs size the registry to 0), not a hard error. */
-    if (ctx->interactive_cur_count < ctx->max_elements) {
-        nt_ui_interactive_t *rec = &ctx->interactive_cur[ctx->interactive_cur_count++];
-        rec->id = id;
-        if (pad_lrtb != NULL) {
-            memcpy(rec->pad, pad_lrtb, sizeof rec->pad);
-        } else {
-            memset(rec->pad, 0, sizeof rec->pad);
-        }
-    }
+     * so recording an id that later vanishes is harmless). */
+    nt_ui_internal_register_interactive(ctx, id, pad_lrtb);
 
 #if NT_UI_DEBUG_TOOLS
     /* capture_seen stays 0 so next begin's orphan cleanup wipes in-progress capture (no phantom drag). */
@@ -2721,23 +2728,28 @@ nt_ui_interaction_t nt_ui_step_interaction_padded(nt_ui_context_t *ctx, uint32_t
         return out;
     }
 
-    /* Re-resolve under α: find the effective pidx for this widget after query. */
-    const nt_ui_widget_pidx_state_t s = resolve_widget_pidx_state(ctx, id, pad_lrtb);
     if (s.effective_pidx >= 0) {
         const uint32_t pidx = (uint32_t)s.effective_pidx;
         const nt_pointer_t *p = &ctx->frame_pointers[pidx];
         nt_ui_capture_t *cap = &ctx->captures[pidx];
-        const nt_button_state_t btn = p->buttons[NT_BUTTON_LEFT];
         if (s.new_capture) {
-            cap->active_id = id;
-            cap->press_pos[0] = p->x;
-            cap->press_pos[1] = p->y;
+            cap->active_id = id; /* press_pos: nt_ui_begin set it at this press edge */
+            cap->hold_secs = 0.0F;
+            cap->hold_prev_secs = 0.0F;
+            cap->hold_live = true;
+            out.double_clicked = press_pairs_with_last(ctx, id, p->x, p->y);
+            /* A completed pair empties the record so a third press starts a new pair. */
+            ctx->last_press_id = out.double_clicked ? 0U : id;
+            ctx->last_press_age = 0.0F;
+            ctx->last_press_pos[0] = p->x;
+            ctx->last_press_pos[1] = p->y;
+        } else if (!owner_over) {
+            cap->hold_live = false;
         }
-        cap->pos[0] = p->x;
-        cap->pos[1] = p->y;
+        cap->drag_axes = drag_axes;
         /* Marks not-orphan for next begin's cleanup. */
         ctx->capture_seen[pidx] = 1U;
-        if (btn.is_released) {
+        if (p->buttons[NT_BUTTON_LEFT].is_released) {
             cap->active_id = 0U;
         }
     }
@@ -2762,13 +2774,10 @@ nt_ui_interaction_t nt_ui_step_interaction_padded(nt_ui_context_t *ctx, uint32_t
         z->center_x = d.boundingBox.x + (d.boundingBox.width * 0.5F);
         z->center_y = d.boundingBox.y + (d.boundingBox.height * 0.5F);
         /* Snapshot composed mat4 — same source as walker/hit-test. */
-        const int32_t e_slot = nt_ui_clay_priv_hashmap_slot_for_id(ctx->clay, id);
-        if (e_slot >= 0 && ctx->hit_generation[e_slot] == ctx->current_generation) {
-            memcpy(z->m, ctx->hit_baked[e_slot].m, sizeof z->m);
-        } else {
-            const nt_ui_baked_xform_t b = nt_ui_internal_identity_baked();
-            memcpy(z->m, b.m, sizeof z->m);
-        }
+        const int32_t e_slot = nt_ui_internal_live_slot(ctx, id);
+        const nt_ui_baked_xform_t b = (e_slot >= 0) ? ctx->hit_baked[e_slot] : nt_ui_internal_identity_baked();
+        memcpy(z->m, b.m, sizeof z->m);
+        z->order = b.order;
         uint16_t flags = 0U;
         if (out.hovered) {
             flags |= (uint16_t)NT_UI_DEBUG_FLAG_HOVERED;
@@ -2790,184 +2799,52 @@ nt_ui_interaction_t nt_ui_step_interaction_padded(nt_ui_context_t *ctx, uint32_t
     return out;
 }
 
-nt_ui_interaction_t nt_ui_step_interaction(nt_ui_context_t *ctx, uint32_t id) { return nt_ui_step_interaction_padded(ctx, id, NULL); }
-
-// #region nt_ui_events (consolidated step + cfg-gated gesture)
-
-/* Gesture cell for nt_ui_events, owned by this TU (tag 'evgs'). hold_progress is derived from
- * press_clock/clock, so it needs NO stored field. */
-#define NT_UI_EVENTS_GESTURE_SALT 0x65C0E5A7U
-typedef struct {
-    float last_press_time; /* gesture-clock time of the previous press (valid only if has_prev) */
-    float origin_x, origin_y;
-    float clock;       /* monotonic accumulator fed by ctx->frame_dt */
-    float press_clock; /* clock value at the live press (for long-press + hold_progress timing) */
-    /* Latched gesture outputs so nt_ui_query_events can surface what the mutating step computed this
-     * frame (game-reads-gestures-via-query_events contract). Recomputed/cleared by the next step. */
-    float latched_hold_progress;
-    uint32_t latched_frame;         /* ctx->frame_counter when the latch was last written; query reads it only on the same frame (no stale leak) */
-    uint8_t latched_double_clicked; /* 1 if the mutating step fired a double-click this frame */
-    uint8_t latched_long_pressed;   /* 1 if the mutating step fired a long-press this frame */
-    uint8_t has_prev;               /* 1 once a first press has been seen (clock==0 is a valid time) */
-    uint8_t press_live;             /* 1 while a press is held without a drag-cancel or release */
-    uint8_t long_fired;             /* 1 once long-press fired for the current hold (one-shot) */
-    uint8_t _pad[3];
-} nt_ui_events_gesture_t;
-
-static inline uint32_t events_gesture_id(uint32_t id) { return nt_ui_derived_id(id, NT_UI_EVENTS_GESTURE_SALT); }
-
-/* Map the base interaction (capture/edges) into the events result. Gesture fields stay zero here. */
-static nt_ui_events_t events_from_interaction(const nt_ui_interaction_t *in) {
-    nt_ui_events_t e;
-    e.hovered = in->hovered;
-    e.pressed = in->pressed;
-    e.released = in->released_now;
-    e.held = in->pressed && in->hovered;
-    e.clicked = in->clicked;
-    e.pressed_now = in->pressed_now;
-    e.double_clicked = false;
-    e.long_pressed = false;
-    e.hold_progress = 0.0F;
-    e.pos[0] = in->pos[0];
-    e.pos[1] = in->pos[1];
-    e.drag_dx = in->drag_dx;
-    e.drag_dy = in->drag_dy;
-    e.pointer_id = in->pointer_id;
-    return e;
+bool nt_ui_hold_crossed(const nt_ui_interaction_t *in, float secs) {
+    NT_ASSERT(in != NULL && secs > 0.0F && "nt_ui_hold_crossed: in must be non-NULL, secs must be > 0");
+    return in->hold_prev_secs < secs && in->hold_secs >= secs;
 }
 
-static inline bool events_want_gesture(const nt_ui_events_cfg_t *cfg) { return cfg != NULL && (cfg->double_click || cfg->long_press_secs > 0.0F); }
-
-/* The mutating gesture step: advance the cell clock + dbl/long machine, fill the gesture fields.
- * `e` already carries the base edges. Double-click + one-shot long-press machine. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void events_step_gesture(nt_ui_context_t *ctx, uint32_t id, const nt_ui_events_cfg_t *cfg, bool pressed_now, bool released_now, nt_ui_events_t *e) {
-    const float dbl_window = ctx->gesture_dbl_window_secs;
-    const float radius = ctx->gesture_move_radius_px;
-    const float long_press_secs = cfg->long_press_secs;
-    const float pos_x = e->pos[0];
-    const float pos_y = e->pos[1];
-
-    nt_ui_events_gesture_t *g = (nt_ui_events_gesture_t *)nt_ui_state(ctx, events_gesture_id(id), (uint32_t)sizeof(nt_ui_events_gesture_t), NT_UI_STATE_TAG('e', 'v', 'g', 's'));
-    g->clock += ctx->frame_dt; /* monotonic; dt may be 0 in headless tests (caller drives time via dt) */
-
-    /* Clear last frame's latch before recomputing — query_events reads these back this frame. */
-    g->latched_double_clicked = 0U;
-    g->latched_long_pressed = 0U;
-    g->latched_hold_progress = 0.0F;
-
-    if (pressed_now) {
-        const float dx = pos_x - g->origin_x;
-        const float dy = pos_y - g->origin_y;
-        const bool in_radius = (dx * dx + dy * dy) <= (radius * radius);
-        const bool in_window = (g->has_prev != 0U) && ((g->clock - g->last_press_time) <= dbl_window);
-        if (cfg->double_click && in_window && in_radius) {
-            e->double_clicked = true;
-            g->has_prev = 0U; /* consume so a triple-press isn't two double-clicks */
-        } else {
-            g->last_press_time = g->clock;
-            g->has_prev = 1U;
-        }
-        g->origin_x = pos_x;
-        g->origin_y = pos_y;
-        g->press_clock = g->clock;
-        g->press_live = 1U;
-        g->long_fired = 0U;
-    }
-
-    /* Leaving the widget's hitbox (still pressed but no longer hovered) cancels the hold;
-     * an in-box jitter does NOT — the candidate tracks the hitbox, not a move radius
-     * (move_radius_px now gates double-click only). */
-    if (g->press_live != 0U && e->pressed && !e->held) {
-        g->press_live = 0U; /* dragged outside the hitbox -> reset long-press candidate + hold_progress */
-    }
-    if (e->held && g->press_live != 0U && long_press_secs > 0.0F && g->long_fired == 0U && (g->clock - g->press_clock) >= long_press_secs) {
-        e->long_pressed = true;
-        g->long_fired = 1U; /* one-shot per hold */
-    }
-
-    /* Linear hold_progress: only while the press candidate is live AND over the widget. press_live==0
-     * (left hitbox / release) => 0. Clamp so a malformed long_press_secs can't escape [0,1]. */
-    if (g->press_live != 0U && e->held && long_press_secs > 0.0F) {
-        e->hold_progress = nt_ui_clampf((g->clock - g->press_clock) / long_press_secs, 0.0F, 1.0F);
-    }
-
-    if (released_now) {
-        g->press_live = 0U;
-        g->long_fired = 0U;
-    }
-
-    /* Latch this frame's outputs so query_events can surface them idempotently (next step clears). Stamp
-     * the write frame so a query on a LATER frame (widget stopped requesting gestures, e.g. cfg==NULL)
-     * reads not-fired / 0 instead of a stale latch. */
-    g->latched_double_clicked = e->double_clicked ? 1U : 0U;
-    g->latched_long_pressed = e->long_pressed ? 1U : 0U;
-    g->latched_hold_progress = e->hold_progress;
-    g->latched_frame = ctx->frame_counter;
+float nt_ui_hold_progress(const nt_ui_interaction_t *in, float secs) {
+    NT_ASSERT(in != NULL && secs > 0.0F && "nt_ui_hold_progress: in must be non-NULL, secs must be > 0");
+    return in->hold_secs >= secs ? 1.0F : in->hold_secs / secs;
 }
 
-nt_ui_events_t nt_ui_events_padded(nt_ui_context_t *ctx, uint32_t id, const nt_ui_events_cfg_t *cfg, const int16_t pad_lrtb[4]) {
-    /* Base path: the verbatim capture/edge state machine (asserts live there). Single mutating call. */
-    const nt_ui_interaction_t in = nt_ui_step_interaction_padded(ctx, id, pad_lrtb);
-    nt_ui_events_t e = events_from_interaction(&in);
-
-    /* Zero-alloc gate: the gesture cell is created ONLY when requested. */
-    if (events_want_gesture(cfg)) {
-        events_step_gesture(ctx, id, cfg, in.pressed_now, in.released_now, &e);
-    }
-    return e;
-}
-
-nt_ui_events_t nt_ui_events(nt_ui_context_t *ctx, uint32_t id, const nt_ui_events_cfg_t *cfg) { return nt_ui_events_padded(ctx, id, cfg, NULL); }
-
-nt_ui_events_t nt_ui_query_events(nt_ui_context_t *ctx, uint32_t id) {
-    /* Idempotent read: base via the non-mutating query, gesture via find (no create, no advance).
-     * Gesture outputs (double_clicked / long_pressed / hold_progress) come from the cell latch the
-     * mutating step wrote this frame — same value on repeated reads; next frame's step recomputes. */
-    const nt_ui_interaction_t in = nt_ui_query_interaction_padded(ctx, id, NULL);
-    nt_ui_events_t e = events_from_interaction(&in);
-
-    /* Frame-guarded: surface the latch ONLY if the mutating step wrote it THIS frame. A stale cell (the
-     * widget stopped stepping gestures) reads not-fired / 0 — never a leaked one-shot or frozen ramp. */
-    const nt_ui_events_gesture_t *g = (const nt_ui_events_gesture_t *)nt_ui_state_find(ctx, events_gesture_id(id));
-    if (g != NULL && g->latched_frame == ctx->frame_counter) {
-        e.double_clicked = g->latched_double_clicked != 0U;
-        e.long_pressed = g->latched_long_pressed != 0U;
-        e.hold_progress = g->latched_hold_progress;
-    }
-    return e;
-}
-
-void nt_ui_set_gesture_constants(nt_ui_context_t *ctx, float dbl_window_secs, float move_radius_px) {
+void nt_ui_set_gesture_constants(nt_ui_context_t *ctx, float dbl_window_secs, float move_radius_dp) {
     NT_ASSERT(ctx != NULL && "nt_ui_set_gesture_constants: ctx must be non-NULL");
     NT_ASSERT(isfinite(dbl_window_secs) && dbl_window_secs >= 0.0F && "nt_ui_set_gesture_constants: dbl_window_secs must be finite and >= 0");
-    NT_ASSERT(isfinite(move_radius_px) && move_radius_px >= 0.0F && "nt_ui_set_gesture_constants: move_radius_px must be finite and >= 0");
+    NT_ASSERT(isfinite(move_radius_dp) && move_radius_dp >= 0.0F && "nt_ui_set_gesture_constants: move_radius_dp must be finite and >= 0");
     ctx->gesture_dbl_window_secs = dbl_window_secs;
-    ctx->gesture_move_radius_px = move_radius_px;
+    ctx->gesture_move_radius_dp = move_radius_dp;
 }
 
-// #endregion
-
-/* Inert registry entry: the id wins next-frame hot arbitration over anything behind it (topmost-z),
- * but never captures, clicks, or reports hover. Disabled widgets call this so the pointer can't leak
- * through to widgets underneath them (modal-overlay correctness) while staying visually inert. */
+/* Inert registry entry: the id wins next-frame hot arbitration over anything ranked behind it, but
+ * never captures or clicks; a query on it reads like an unstepped widget (hover and the press edge while
+ * front-most, unpadded). Disabled widgets call
+ * this so the pointer can't leak through to widgets underneath them (modal-overlay correctness). */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) — count is all NT_ASSERT guards, not logic
 void nt_ui_block_pointer(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lrtb[4]) {
     NT_ASSERT(ctx != NULL && "nt_ui_block_pointer: ctx must be non-NULL");
     NT_ASSERT(ctx->in_frame && ctx == g_nt_ui_inframe_ctx && "nt_ui_block_pointer: must be called between nt_ui_begin and nt_ui_end on the active ctx");
     NT_ASSERT(id != 0U && "nt_ui_block_pointer: id must be non-zero (0 = no widget)");
     NT_ASSERT((pad_lrtb == NULL || (pad_lrtb[0] >= 0 && pad_lrtb[1] >= 0 && pad_lrtb[2] >= 0 && pad_lrtb[3] >= 0)) && "nt_ui_block_pointer: pad_lrtb components must be >= 0");
+#if NT_UI_CHECKS
+    NT_ASSERT(!nt_ui_state_has_tag(ctx, id, NT_UI_SCROLL_TAG) && "nt_ui_block_pointer: a scroll's own id is its surface (block a child id)");
+#endif
 
     /* Same registry record as step (so next-frame resolve_hot ranks it for topmost arbitration), minus
      * the capture/button-edge state machine — an inert occluder, not an interactive widget. */
-    if (ctx->interactive_cur_count < ctx->max_elements) {
-        nt_ui_interactive_t *rec = &ctx->interactive_cur[ctx->interactive_cur_count++];
-        rec->id = id;
-        if (pad_lrtb != NULL) {
-            memcpy(rec->pad, pad_lrtb, sizeof rec->pad);
-        } else {
-            memset(rec->pad, 0, sizeof rec->pad);
-        }
+    nt_ui_internal_register_interactive(ctx, id, pad_lrtb);
+}
+
+/* One record per declared element at most: a full registry is a widget stepped twice per frame. */
+void nt_ui_internal_register_interactive(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lrtb[4]) {
+    NT_ASSERT(ctx->interactive_cur_count < ctx->max_elements && "nt_ui: interactive registry full (a widget stepped twice per frame?)");
+    nt_ui_interactive_t *rec = &ctx->interactive_cur[ctx->interactive_cur_count++];
+    rec->id = id;
+    if (pad_lrtb != NULL) {
+        memcpy(rec->pad, pad_lrtb, sizeof rec->pad);
+    } else {
+        memset(rec->pad, 0, sizeof rec->pad);
     }
 }
 
@@ -3004,13 +2881,10 @@ void nt_ui_debug_record_disabled_zone(nt_ui_context_t *ctx, uint32_t id, const i
     z->layout_b = z->visual_b + pb;
     z->center_x = d.boundingBox.x + (d.boundingBox.width * 0.5F);
     z->center_y = d.boundingBox.y + (d.boundingBox.height * 0.5F);
-    const int32_t e_slot = nt_ui_clay_priv_hashmap_slot_for_id(ctx->clay, id);
-    if (e_slot >= 0 && ctx->hit_generation[e_slot] == ctx->current_generation) {
-        memcpy(z->m, ctx->hit_baked[e_slot].m, sizeof z->m);
-    } else {
-        const nt_ui_baked_xform_t b = nt_ui_internal_identity_baked();
-        memcpy(z->m, b.m, sizeof z->m);
-    }
+    const int32_t e_slot = nt_ui_internal_live_slot(ctx, id);
+    const nt_ui_baked_xform_t b = (e_slot >= 0) ? ctx->hit_baked[e_slot] : nt_ui_internal_identity_baked();
+    memcpy(z->m, b.m, sizeof z->m);
+    z->order = b.order;
     z->state_flags = (uint16_t)NT_UI_DEBUG_FLAG_DISABLED;
 }
 #endif /* NT_UI_DEBUG_TOOLS */
@@ -3023,35 +2897,82 @@ bool nt_ui_wants_pointer(const nt_ui_context_t *ctx) {
         return true;
     }
 #endif
-    if (ctx->pointer_over_any) {
-        return true;
-    }
-    for (uint32_t i = 0; i < NT_INPUT_MAX_POINTERS; ++i) {
-        if (ctx->captures[i].active_id != 0U) {
-            return true;
+    for (uint32_t i = 0; i < ctx->frame_pointer_count; ++i) {
+        if (ctx->captures[i].active_id != 0U || ctx->captures[i].pending_scroll != 0U) {
+            return true; /* a pending press may still become a scroll */
+        }
+        /* Over a widget: the front-most record under the pointer was declared again this frame. */
+        for (uint32_t k = 0; ctx->pointer_hot[i].id != 0U && k < ctx->interactive_cur_count; ++k) {
+            if (ctx->interactive_cur[k].id == ctx->pointer_hot[i].id) {
+                return true;
+            }
         }
     }
     return false;
 }
 
-// NOLINTNEXTLINE(readability-function-cognitive-complexity) — count is all NT_ASSERT guards, not logic
-void nt_ui_set_pointer_occlusion(nt_ui_context_t *ctx, uint32_t pointer_index, float max_world_distance) {
-    NT_ASSERT(ctx != NULL && "nt_ui_set_pointer_occlusion: ctx must be non-NULL");
-    NT_ASSERT(ctx->use_raycast_input && "nt_ui_set_pointer_occlusion: only meaningful in 3D ctx (use_raycast_input)");
-    NT_ASSERT(ctx->in_frame && "nt_ui_set_pointer_occlusion: call between nt_ui_begin and the first step/query (reset each begin)");
-    NT_ASSERT(!ctx->hot_resolved && "nt_ui_set_pointer_occlusion: fed too late — the hot resolve already latched this frame; feed BEFORE the first step/query/pointer_hot");
-    NT_ASSERT(pointer_index < ctx->frame_pointer_count && "nt_ui_set_pointer_occlusion: pointer_index is not an active frame pointer");
-    /* NaN makes the `t > cutoff` test always false, silently disabling occlusion (click-through-wall);
-     * a broken game raycast must trip here. ±inf are valid (+inf = no cutoff, -inf/negative = occlude all). */
-    NT_ASSERT(!isnan(max_world_distance) && "nt_ui_set_pointer_occlusion: max_world_distance must not be NaN");
-    ctx->pointer_occlusion[pointer_index] = max_world_distance;
-}
-
-nt_ui_hot_t nt_ui_pointer_hot(nt_ui_context_t *ctx, uint32_t pointer_index) {
+nt_ui_hot_t nt_ui_pointer_hot(const nt_ui_context_t *ctx, uint32_t pointer_index) {
     NT_ASSERT(ctx != NULL && "nt_ui_pointer_hot: ctx must be non-NULL");
     NT_ASSERT(pointer_index < NT_INPUT_MAX_POINTERS && "nt_ui_pointer_hot: pointer_index out of range");
-    resolve_hot_if_needed(ctx); /* lazy: first step OR this query triggers the once-per-frame resolve */
     return ctx->pointer_hot[pointer_index];
+}
+
+int32_t nt_ui_internal_live_slot(const nt_ui_context_t *ctx, uint32_t id) {
+    const int32_t slot = nt_ui_clay_priv_hashmap_slot_for_id(ctx->clay, id); /* -1 for id 0 */
+    return (slot >= 0 && ctx->hit_generation[slot] == ctx->current_generation) ? slot : -1;
+}
+
+/* id's declaration range in last frame's hit layout: Clay indexes elements in open order, so everything
+ * declared inside id is [its index, last_inside]. False when id was not declared last frame. */
+static bool hit_range(const nt_ui_context_t *ctx, uint32_t id, uint32_t *out_first, uint32_t *out_last) {
+    const int32_t slot = nt_ui_internal_live_slot(ctx, id);
+    if (slot < 0) {
+        return false;
+    }
+    *out_first = ctx->hit_baked[slot].order & 0xFFFFU;
+    *out_last = ctx->hit_baked[slot].last_inside;
+    return true;
+}
+
+/* Pointer i's target as a layout element index: its hot. A held pointer targets its holder, and only while
+ * it is over it (its hot is the holder or inside it): a control dragged off hovers nothing, its holder included. */
+static bool pointer_target(const nt_ui_context_t *ctx, uint32_t i, uint32_t *out_t) {
+    uint32_t t_last = 0U;
+    if (!hit_range(ctx, ctx->pointer_hot[i].id, out_t, &t_last)) {
+        return false; /* a gone pointer's hot is 0 */
+    }
+    if (ctx->captures[i].active_id == 0U) {
+        return true;
+    }
+    uint32_t h = 0U;
+    uint32_t h_last = 0U;
+    if (!hit_range(ctx, ctx->captures[i].active_id, &h, &h_last) || *out_t < h || *out_t > h_last) {
+        return false;
+    }
+    *out_t = h;
+    return true;
+}
+
+bool nt_ui_hovered_within(const nt_ui_context_t *ctx, uint32_t id) {
+    NT_ASSERT(ctx != NULL && "nt_ui_hovered_within: ctx must be non-NULL");
+    NT_ASSERT(id != 0U && "nt_ui_hovered_within: id must be non-zero (0 = no widget)");
+#if NT_UI_DEBUG_TOOLS
+    if (ctx->inspector_active && ctx->inspector_pointer_consumed) {
+        return false; /* the sidebar consumes the pointer, as in every query */
+    }
+#endif
+    uint32_t first = 0U;
+    uint32_t last = 0U;
+    if (!hit_range(ctx, id, &first, &last)) {
+        return false;
+    }
+    for (uint32_t i = 0; i < ctx->frame_pointer_count; ++i) {
+        uint32_t t = 0U;
+        if (pointer_target(ctx, i, &t) && t >= first && t <= last) {
+            return true;
+        }
+    }
+    return false;
 }
 // #endregion
 

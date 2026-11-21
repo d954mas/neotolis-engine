@@ -44,6 +44,11 @@ int32_t nt_ui_clay_priv_open_floating_z(Clay_Context *clay) {
     return (len > 0) ? Clay__int32_tArray_GetValue(&clay->openFloatingZStack, len - 1) : 0;
 }
 
+int32_t nt_ui_clay_priv_open_element_count(Clay_Context *clay) {
+    NT_ASSERT(clay != NULL && "nt_ui_clay_priv_open_element_count: clay must be non-NULL");
+    return clay->openLayoutElementStack.length;
+}
+
 float nt_ui_clay_priv_layout_width(Clay_Context *clay) {
     NT_ASSERT(clay != NULL && "nt_ui_clay_priv_layout_width: clay must be non-NULL");
     return clay->layoutDimensions.width;
@@ -437,7 +442,7 @@ static void compose_transform_level(const nt_ui_transform_t *t, float cx, float 
 
 /* Floating descendants skipped (handled by outer roots loop). Text leaves have no .children. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void bt_dfs_subtree(nt_ui_context_t *ctx, Clay_Context *cc, int32_t root_elem_idx, const nt_ui_baked_xform_t *seed, int16_t root_zindex) {
+static void bt_dfs_subtree(nt_ui_context_t *ctx, Clay_Context *cc, int32_t root_elem_idx, const nt_ui_baked_xform_t *seed, uint16_t root_idx) {
     nt_ui_dfs_frame_t *S = ctx->tree_dfs_stack;
     int32_t sp = 0;
     NT_ASSERT(sp < NT_UI_TREE_DFS_DEPTH_CAP);
@@ -465,7 +470,7 @@ static void bt_dfs_subtree(nt_ui_context_t *ctx, Clay_Context *cc, int32_t root_
                     const float cx = item->boundingBox.x + (item->boundingBox.width * 0.5F);
                     const float cy = item->boundingBox.y + (item->boundingBox.height * 0.5F);
                     /* In-place compose — cglm supports aliasing accum == out. */
-                    compose_transform_level(&ad->transform, cx, cy, (float(*)[4])m_cur, (float(*)[4])m_cur);
+                    compose_transform_level(&ad->transform, cx, cy, (float (*)[4])m_cur, (float (*)[4])m_cur);
                 }
                 if ((ad->flags & NT_UI_ELEM_FLAG_HAS_OPACITY) != 0U) {
                     op *= ad->opacity;
@@ -474,7 +479,8 @@ static void bt_dfs_subtree(nt_ui_context_t *ctx, Clay_Context *cc, int32_t root_
             memcpy(ctx->tree_baked[f->elem_idx].m, m_cur, sizeof m_cur);
             ctx->tree_baked[f->elem_idx].opacity = op;
             ctx->tree_baked[f->elem_idx].hierarchy_depth = f->hierarchy_depth;
-            ctx->tree_baked[f->elem_idx].zindex = root_zindex; /* uniform per Clay tree root */
+            ctx->tree_baked[f->elem_idx].order = ((uint32_t)root_idx << 16U) | (uint32_t)f->elem_idx;
+            ctx->tree_baked[f->elem_idx].last_inside = (uint16_t)elem->nt_last_index; /* 0 for text: never a target */
             memcpy(f->m, m_cur, sizeof m_cur);
             f->opacity = op;
         }
@@ -537,10 +543,7 @@ void nt_ui_internal_build_tree(nt_ui_context_t *ctx) {
         if (root_idx < 0) {
             continue;
         }
-        Clay__LayoutElementTreeRoot *root = Clay__LayoutElementTreeRootArray_Get(&cc->layoutElementTreeRoots, root_idx);
-        /* Band is uniform per tree root; the walker segments on this baked copy, not on command zIndex. */
-        const int16_t root_zindex = root->zIndex;
-
+        const Clay__LayoutElementTreeRoot *root = Clay__LayoutElementTreeRootArray_Get(&cc->layoutElementTreeRoots, root_idx);
         nt_ui_baked_xform_t seed;
         /* The document root (Clay__RootContainer) is the only tree root with parentId 0. Identify it by
          * that, NOT by array index 0: Clay sorts tree roots by zIndex, so any floating whose effective z
@@ -556,7 +559,8 @@ void nt_ui_internal_build_tree(nt_ui_context_t *ctx) {
             seed = ctx->tree_baked[p_elem_idx];
             seed.hierarchy_depth = (uint16_t)(seed.hierarchy_depth + 1U);
         }
-        bt_dfs_subtree(ctx, cc, elem_idx, &seed, root_zindex);
+        /* Clay sorted the tree roots by band, stably: the index is the root's place in the stacking order. */
+        bt_dfs_subtree(ctx, cc, elem_idx, &seed, (uint16_t)root_idx);
     }
     // #endregion
 
@@ -1465,7 +1469,9 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
     // #endregion
 
     // #region viewport-hover-scan
-    /* No sidebar row picked → scan viewport for a user element under the cursor. */
+    /* No sidebar row picked → scan viewport for a user element under the cursor. Zones, not the pointer's
+     * hot: only stepped widgets record one, so the pick sees through block-only gates (menu occluder, a
+     * non-top popup's catcher) and scroll surfaces to the element under them. */
     if (highlightedElementId == 0U && !ctx->inspector_pointer_consumed) {
         const float panel_left_x = context->layoutDimensions.width - ctx->inspector_metrics.panel_width;
 
@@ -1480,8 +1486,9 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
                 highlightedElementId = nt_ui_internal_pick_zone_3d(ctx, px, py);
             }
         } else {
-            /* Transform-aware; LAST hit wins (deepest in record/step order). */
-            for (int32_t zi = (int32_t)ctx->debug_zone_count - 1; zi >= 0; --zi) {
+            /* Transform-aware; the hit with the highest stacking order wins. */
+            uint32_t best_order = 0U;
+            for (uint32_t zi = 0U; zi < ctx->debug_zone_count; ++zi) {
                 const nt_ui_debug_zone_t *z = &ctx->debug_zones[zi];
                 if (z->id == 0U) {
                     continue;
@@ -1510,9 +1517,9 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
                 const float ry = py - ty;
                 const float lx = (inv_a * rx) + (inv_b * ry);
                 const float ly = (inv_c * rx) + (inv_d * ry);
-                if (lx >= z->visual_l && lx <= z->visual_r && ly >= z->visual_t && ly <= z->visual_b) {
+                if (lx >= z->visual_l && lx <= z->visual_r && ly >= z->visual_t && ly <= z->visual_b && z->order >= best_order) {
                     highlightedElementId = z->id;
-                    break;
+                    best_order = z->order;
                 }
             }
 
@@ -1658,7 +1665,7 @@ static void nt_ui_internal_emit_inspector_layout(nt_ui_context_t *ctx) {
         }
         CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(1)}}, .backgroundColor = CDV_COLOR_3, .userData = debug_bg_data}) {}
         /* Resolve offset BEFORE opening the clip element (helper reads prev-frame Clay dims). */
-        const Clay_Vector2 treeOffset = nt_ui_internal_scroll_pane_offset(ctx, scrollId.id, NT_UI_STATE_TAG('i', 'n', 's', 'p'), true, true);
+        const Clay_Vector2 treeOffset = nt_ui_internal_scroll_pane_offset(ctx, scrollId.id);
         /* Static bg on the clip element itself so truncation/overscroll shows the panel, not the game
          * (Clay paints clip bg before scrolled children). Tree rows live IN the scrolled flow now —
          * each row carries its own full-width zebra/selection bg so text + stripe scroll together. */
@@ -1707,7 +1714,7 @@ static void nt_ui_internal_emit_inspector_layout(nt_ui_context_t *ctx) {
             if (selectedItem->generation == context->generation + 1U) {
                 Clay_ElementId selInfoId = Clay__HashString(CLAY_STRING("ntInsp_SelectedInfoPane"), 0, 0);
                 /* Resolve offset BEFORE opening the clip element (helper reads prev-frame Clay dims). */
-                const Clay_Vector2 selInfoOffset = nt_ui_internal_scroll_pane_offset(ctx, selInfoId.id, NT_UI_STATE_TAG('i', 'n', 's', '2'), false, true);
+                const Clay_Vector2 selInfoOffset = nt_ui_internal_scroll_pane_offset(ctx, selInfoId.id);
                 CLAY({.id = selInfoId,
                       .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(300)}, .layoutDirection = CLAY_TOP_TO_BOTTOM},
                       .backgroundColor = CDV_COLOR_2,

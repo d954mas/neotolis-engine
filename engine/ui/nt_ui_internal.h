@@ -17,6 +17,7 @@
 #include "ui/nt_ui_anim.h"
 #include "ui/nt_ui_inspector.h"
 #include "ui/nt_ui_state.h"
+#include "window/nt_window.h"
 
 /* Depth (not count) — independent of max_elements; deep nests are rare. */
 #ifndef NT_UI_TREE_DFS_DEPTH_CAP
@@ -46,6 +47,7 @@ typedef struct {
     float m[16];
     /* Used by both rotation pivot and inverse-affine so draw matches hit-test. */
     float center_x, center_y;
+    uint32_t order; /* the element's stacking order (nt_ui_baked_xform_t.order); 0 when its slot was stale */
     /* bit0 hovered, bit1 pressed, bit2 captured, bit3 disabled-heuristic. */
     uint16_t state_flags;
 } nt_ui_debug_zone_t;
@@ -61,8 +63,11 @@ typedef struct {
     float m[16];
     float opacity;
     uint16_t hierarchy_depth;
-    int16_t zindex; /* effective Clay zIndex (the owning floating tree-root's); 0 for base content. */
-    float _pad[2];
+    uint16_t last_inside; /* last layout element index declared inside this one: [own index, last_inside] */
+    /* Stacking order for painting and hit: (tree root index in Clay's sorted root order: band, then
+     * declaration) << 16 | layout element index (declaration order, preorder inside one root). */
+    uint32_t order;
+    float _pad;
 } nt_ui_baked_xform_t;
 _Static_assert(sizeof(nt_ui_baked_xform_t) == 80, "nt_ui_baked_xform_t fixed at 80B");
 
@@ -141,33 +146,16 @@ static inline int nt_ui_clampi(int v, int lo, int hi) {
 
 /* Identity baked xform — DFS seed + walker OOB fallback. */
 static inline nt_ui_baked_xform_t nt_ui_internal_identity_baked(void) {
-    nt_ui_baked_xform_t bx = {
-        .m = {1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F}, .opacity = 1.0F, .hierarchy_depth = 0U, .zindex = 0, ._pad = {0.0F, 0.0F}};
+    nt_ui_baked_xform_t bx = {.m = {1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F}, .opacity = 1.0F};
     return bx;
 }
 
-/* Per-frame record of an interactive widget (one per step_interaction), used next frame by the
+/* Per-frame record of a step, blocker, scroll surface or scrollbar, used next frame by the
  * front-most hot-widget resolve. The transform/bbox are re-fetched by id at resolve time. */
 typedef struct {
     uint32_t id;
     int16_t pad[4]; /* hit padding L/R/T/B */
 } nt_ui_interactive_t;
-
-/* Wheel-routing candidate: every scroll container/pane declared this frame appends one. The bbox is
- * NOT stored — nt_ui_end re-fetches it from the just-solved layout so the resolve and next frame's
- * consume read the same layout snapshot. Ownership is decided purely by bbox containment; per-axis
- * gating lives in the consume step. The winner per pointer lands in wheel_owner[]. */
-typedef struct {
-    uint32_t id;
-    uint16_t depth; /* scroll-nesting depth; deeper (inner) wins */
-} nt_ui_wheel_candidate_t;
-
-/* Deep scroll nesting is rare; a small cap keeps the list in BSS (no heap in hot path).
- * The DEBUG_TOOLS inspector registers 2 of these (tree + selection panes), so the effective
- * game budget is this minus 2 when the inspector is active. */
-#ifndef NT_UI_WHEEL_CANDIDATES
-#define NT_UI_WHEEL_CANDIDATES 24
-#endif
 
 /* Nested-modal cap (fail-early assert on overflow; depth is a counter, no heap). Depth is the
  * overflow guard only — bands come from Clay's relative zIndex, top-targeting from modal_top_z_cur.
@@ -181,14 +169,19 @@ typedef struct {
 #define NT_UI_COMBO_DUP_KEY_WINDOW 64
 #endif
 
-/* App-wide gesture defaults. Per-ctx, settable via nt_ui_set_gesture_constants. Touch-friendly baseline
- * (looser than ImGui's mouse 6px/0.3s) since the engine targets mobile/WASM; mouse-only apps can tighten. */
-#ifndef NT_UI_GESTURE_DBL_WINDOW_SECS
-#define NT_UI_GESTURE_DBL_WINDOW_SECS 0.50F
-#endif
-#ifndef NT_UI_GESTURE_MOVE_RADIUS_PX
-#define NT_UI_GESTURE_MOVE_RADIUS_PX 16.0F
-#endif
+typedef struct {
+    uint32_t active_id; /* widget this pointer captured; 0 = none */
+    float press_pos[2]; /* UI-space press origin */
+    float pos[2];       /* the press point, then a scroll owner's last routed position */
+    float hold_secs;    /* dt accumulated since the press */
+    float hold_prev_secs;
+    /* Where the scroll chain of this press starts while a scroll may still take it (0 = decided or
+     * none). Lives from the press edge to the release, independent of active_id (an empty-area press
+     * has none). */
+    uint32_t pending_scroll;
+    bool hold_live;    /* false once the pointer left the hitbox; only a new press restarts the hold */
+    uint8_t drag_axes; /* NT_UI_DRAG_* the capturing widget drags along itself (from its step desc) */
+} nt_ui_capture_t;
 
 /* Lives at arena head; hot fields first. Per-ctx — no module globals. Field order is deliberately
  * hot-first for cache locality, not padding-optimal; a context is per-UI (not a dense array), so the
@@ -205,38 +198,22 @@ struct nt_ui_context {
 
     nt_pointer_t frame_pointers[NT_INPUT_MAX_POINTERS];
     uint32_t frame_pointer_count;
-    uint32_t frame_primary; /* the nt_ui_begin primary: menus, rich-text links and the inspector follow it */
+    uint32_t frame_primary; /* the nt_ui_begin primary: menus and the inspector follow it */
     float frame_dt;
-    /* frame_pointers hold RAW device coords until the lazy hot resolve converts them to layout
-     * space via `viewport` (once per frame, gated by frame_pointers_converted). begin defaults the
-     * viewport to identity {0,0,screen_w,screen_h}; nt_ui_set_viewport overrides it before resolve. */
-    bool frame_pointers_converted;
     nt_ui_viewport_t viewport;
     /* begin dims (= screen_w/h) — the layout size the device<->layout conversion divides by. Stored so
      * the conversion is self-contained (no g_nt_window, no Clay read). */
     float begin_w, begin_h;
-#if NT_UI_DEBUG_TOOLS
-    /* Prev-frame viewport + dims. The inspector's pointer-over is tested against LAST frame's solved tree
-     * (Clay_BeginLayout wipes the roots), so the device->layout convert must use the viewport that laid
-     * out THAT tree — not this frame's (set later via nt_ui_set_viewport). */
-    nt_ui_viewport_t prev_viewport;
-    float prev_begin_w, prev_begin_h;
-#endif
 
     /* capture_seen[] tracks who touched the capture this frame — orphans cleared on begin. */
     nt_ui_capture_t captures[NT_INPUT_MAX_POINTERS];
-    /* Per-pointer front-most interactive widget + game-fed occlusion cutoff (3D), resolved lazily once
-     * per frame from prev-frame layout (3D: nearest ray-t within cutoff; 2D: top zIndex). Ordered here
-     * by alignment (after the 4B-aligned captures) to avoid adding struct padding. */
+    /* Per-pointer front-most interactive widget + game-fed occlusion cutoff (3D), resolved by
+     * nt_ui_begin from prev-frame layout (3D: nearest ray-t within cutoff; then the highest stacking order). Ordered
+     * here by alignment (after the 4B-aligned captures) to avoid adding struct padding. */
     nt_ui_hot_t pointer_hot[NT_INPUT_MAX_POINTERS];
     float pointer_occlusion[NT_INPUT_MAX_POINTERS]; /* max world ray distance; default +inf = no cutoff */
-    /* Exclusive wheel routing (innermost-wins): the scroll id allowed to consume this pointer's wheel
-     * this frame (0 = free). Resolved at the end of the previous frame from the candidate list below,
-     * so it carries the same 1-frame lag as every prev-frame bbox hit-test. Frame 1: all 0. */
-    uint32_t wheel_owner[NT_INPUT_MAX_POINTERS];
-    /* This frame's wheel candidates; cleared in begin, appended by every scroll_begin/pane, resolved
-     * in end (which re-fetches + sanity-checks each bbox). wheel_depth: live nesting counter (begin++/end--). */
-    nt_ui_wheel_candidate_t wheel_candidates[NT_UI_WHEEL_CANDIDATES];
+    /* Per pointer and axis (0 = x, 1 = y): the scroll allowed to consume this frame's wheel. */
+    uint32_t wheel_owner[NT_INPUT_MAX_POINTERS][2];
     /* Top-modal targeting with the standard 1-frame IM lag: _cur tracks the DEEPEST modal id seen
      * this frame; nt_ui_begin commits it into _prev, which the Esc/backdrop close-scan targets so
      * only the genuinely-topmost modal consumes the event (same-frame nesting can't be known at
@@ -256,7 +233,6 @@ struct nt_ui_context {
     uint32_t focus_tab_seek;
     uint32_t focus_first_id;
     nt_text_input_mode_t focus_first_mode;
-    uint32_t wheel_candidate_count;
     /* Raw rich-text per-block caps (0 = compile-time NT_UI_RICH_MAX_* default); resolved in
      * nt_ui_rich_begin, which owns the rich #defines. Raw here so this widget-agnostic header stays
      * rich-text-agnostic. Slotted into the uint32 run so they add no struct padding. */
@@ -265,11 +241,8 @@ struct nt_ui_context {
     uint32_t rich_max_text_bytes;
     /* Band each overlay level declares above the floating enclosing it; validated in create_context (> 1). */
     int16_t modal_zband_stride;
-    uint16_t wheel_depth;
     uint8_t active_modal_depth;
     uint8_t capture_seen[NT_INPUT_MAX_POINTERS];
-    bool pointer_over_any;
-    bool hot_resolved; /* gates the once-per-frame lazy hot resolve */
     /* Modal-presence across frames: _cur set when any modal declares a backdrop this frame;
      * nt_ui_begin commits it into _prev. nt_ui_modal_active reads _prev so the game can gate its
      * next-frame hotkeys (the live depth is always 0 by nt_ui_end, can't be queried after). */
@@ -284,7 +257,7 @@ struct nt_ui_context {
 
     /* Tab-bar begin/end core. The bar holds the per-call style ptr + layers + base_id so tab_begin can
      * emit the per-state bg + accent without re-passing them; the tab sub-state carries the open tab's id
-     * (for tab_end's step_interaction) + its click result. Bars/tabs do not nest (asserted). */
+     * (for tab_end's nt_ui_step) + its click result. Bars/tabs do not nest (asserted). */
     struct {
         const void *style; /* nt_ui_tabbar_style_t* (void to keep the internal header widget-agnostic) */
         uint32_t base_id;
@@ -372,13 +345,13 @@ struct nt_ui_context {
     uint32_t *hit_clip_parent_id;
     uint32_t *hit_generation;
 
-    /* Double-buffered interactive-widget registry (always-on). step_interaction appends to _cur this
+    /* Double-buffered interactive-widget registry (always-on). nt_ui_step appends to _cur this
      * frame; the hot resolve reads _prev (last frame). Buffers swap each begin. Arena-allocated. */
     nt_ui_interactive_t *interactive_prev;
     nt_ui_interactive_t *interactive_cur;
 
     uint32_t current_generation;
-    uint32_t frame_counter; /* ++ each nt_ui_begin; STABLE for the whole begin->end->post-end-query window (current_generation bumps mid-end, so it can't gate post-end reads) */
+    uint32_t frame_counter; /* ++ each nt_ui_begin; stable for the whole frame */
     uint32_t interactive_prev_count;
     uint32_t interactive_cur_count;
 
@@ -404,14 +377,14 @@ struct nt_ui_context {
 
     /* 3D-mode flag — copied from create_desc; gates raycast vs inverse-affine hit-test. */
     bool use_raycast_input;
-    /* Set by nt_ui_set_view_proj; reset by nt_ui_begin so a forgotten setter trips the assert
-     * inside ui_hit_test instead of silently raycasting through a stale frame's camera. */
-    bool view_proj_set;
     float element_depth_bias_ndc;
-    /* App-wide gesture constants (nt_ui_events). Set in create_context to the #define defaults,
-     * overridable via nt_ui_set_gesture_constants. Grouped with the float block to avoid padding. */
+    /* App-wide gesture constants, see nt_ui_set_gesture_constants. Grouped with the float block to avoid padding. */
     float gesture_dbl_window_secs;
-    float gesture_move_radius_px;
+    float gesture_move_radius_dp;
+    float layout_per_dp[2]; /* layout units per dp on x/y, from the viewport each frame */
+    uint32_t last_press_id; /* widget of the previous press; 0 = nothing to pair with */
+    float last_press_age;   /* dt accumulated since that press */
+    float last_press_pos[2];
     float view_proj[16];
     float inv_view_proj[16];
 #if NT_UI_DEBUG_TOOLS
@@ -421,6 +394,7 @@ struct nt_ui_context {
 #endif
 
     nt_font_t fonts[NT_UI_MAX_FONTS];
+    uint32_t font_epoch; /* nt_font_content_epoch at the last measurement-cache reset */
 
     nt_ui_anim_interaction_t anim[NT_UI_ANIM_SLOTS];
     nt_ui_anim_interaction_t anim_snap; /* nt_ui_anim no-slot fast path (both speeds 0): snapped target, consumes no pool slot */
@@ -454,7 +428,7 @@ struct nt_ui_context {
     bool inspector_active;
     uint32_t inspector_highlight_id;
     uint32_t inspector_selected_id;
-    /* Pointer inside sidebar footprint — gates step_interaction to zeroed return. */
+    /* Pointer inside sidebar footprint — gates nt_ui_step to zeroed return. */
     bool inspector_pointer_consumed;
     /* Prev-frame tree truncation state — warn only on the OFF->ON edge, not every frame. */
     bool inspector_was_truncated;
@@ -552,23 +526,23 @@ bool nt_ui_internal_widget_enabled(const nt_ui_context_t *ctx, uint32_t id);
 /* Caller (nt_ui_end) must run inside the Clay current-ctx scope. */
 void nt_ui_internal_build_tree(nt_ui_context_t *ctx);
 
-/* Idempotent once-per-frame device->layout conversion of frame_pointers via ctx->viewport. The hot
- * resolve calls it; other-TU pointer consumers (scroll wheel, menu) call it too so they read layout
- * coords regardless of whether a widget stepped first. No-op after the first call each frame. */
-void nt_ui_internal_ensure_pointers_layout(nt_ui_context_t *ctx);
-
 #ifdef NT_TEST_ACCESS
+/* The text-field auto-repeat core with explicit storage, so tests drive its timing. */
+bool nt_ui_input_key_repeat_step(uint16_t *repeat_key, float *repeat_t, nt_key_t k, bool pressed, bool down, float dt);
 const nt_ui_baked_xform_t *nt_ui_internal_test_get_tree_baked(const nt_ui_context_t *ctx, int32_t elem_idx);
 int32_t nt_ui_internal_test_get_tree_baked_count(const nt_ui_context_t *ctx);
 int32_t nt_ui_internal_test_get_tree_root_for_elem(const nt_ui_context_t *ctx, int32_t elem_idx);
 #endif
 
+/* The hit-snapshot slot of an element declared last frame, else -1 (id 0 included). */
+int32_t nt_ui_internal_live_slot(const nt_ui_context_t *ctx, uint32_t id);
+
 /* Shared overlay helpers — single source of truth for the Y-flip + per-level accum convention. */
 const nt_ui_debug_zone_t *nt_ui_internal_find_debug_zone(const nt_ui_context_t *ctx, uint32_t id);
 
-/* 3D-ctx inspector viewport pick: last-recorded zone the cursor ray hits, game view_proj (record/step
- * order, not camera distance). Scope: recorded debug_zones only (interactive widgets) — non-interactive
- * elements are tree-selectable, not scene-hover-pickable. 0 = none. */
+/* 3D-ctx inspector viewport pick: the zone the pointer would drive — nearest coplanar band of the
+ * cursor ray's hits, then the highest stacking order, as resolve_hot (game view_proj). Scope: recorded debug_zones only (interactive widgets) —
+ * non-interactive elements are tree-selectable, not scene-hover-pickable. 0 = none. */
 uint32_t nt_ui_internal_pick_zone_3d(const nt_ui_context_t *ctx, float px, float py);
 
 void nt_ui_internal_project_layout_to_world(const float m[16], float vy, float vh, float x, float y, float *out_x, float *out_y);
@@ -588,13 +562,25 @@ void nt_ui_internal_emit_outline_m(nt_resource_t atlas, uint32_t region, const f
 void nt_ui_internal_apply_scissor_logical_to_physical(const nt_ui_target_t *target, int x, int y, int wp, int hp);
 
 /* Scroll offset for an engine-internal clip pane (inspector) keyed by Clay element id; drives
- * the custom scroll integrator off prev-frame dims + wheel. Feed the result to clip.childOffset.
- * `tag` keeps each pane's state cell distinct (NT_UI_STATE_TAG). */
-Clay_Vector2 nt_ui_internal_scroll_pane_offset(nt_ui_context_t *ctx, uint32_t id, uint32_t tag, bool scroll_x, bool scroll_y);
+ * the custom scroll integrator off prev-frame dims + wheel, on the axes its clip config enables.
+ * Feed the result to clip.childOffset. */
+Clay_Vector2 nt_ui_internal_scroll_pane_offset(nt_ui_context_t *ctx, uint32_t id);
 
-/* End-of-frame wheel-owner resolve: picks, per pointer, the winning scroll candidate (max depth,
- * then min bbox area, then latest declaration) into ctx->wheel_owner[] for NEXT frame's consume. */
-void nt_ui_internal_resolve_wheel_owners(nt_ui_context_t *ctx);
+/* State-pool tag of a scroll cell (game scrolls and inspector panes). */
+#define NT_UI_SCROLL_TAG NT_UI_STATE_TAG('s', 'c', 'r', 'l')
+
+/* How a hit on a registry record counts in the front-most resolve. */
+typedef enum { NT_UI_HIT_NONE = 0, NT_UI_HIT, NT_UI_HIT_PANE } nt_ui_hit_kind_t;
+
+/* nt_ui_begin's gesture arbiter (nt_ui_scroll.c): starts press records, decides slop crossings,
+ * routes the wheel. Reads last frame's layout and this frame's front-most records. */
+void nt_ui_internal_scroll_arbitrate(nt_ui_context_t *ctx);
+
+/* How a hit on record `id` counts in the front-most resolve: a scroll's own id is its surface. */
+nt_ui_hit_kind_t nt_ui_internal_record_kind(nt_ui_context_t *ctx, uint32_t id);
+
+/* Adds a registry record for the front-most resolve. */
+void nt_ui_internal_register_interactive(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lrtb[4]);
 
 /* Prev-frame transform-aware point-in-bbox test (same 1-frame IM lag as step/query), with optional
  * L/R/T/B padding. Sets the Clay current-ctx internally. Used by the modal close-on-backdrop guard. */

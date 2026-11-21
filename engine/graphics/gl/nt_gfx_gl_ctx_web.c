@@ -168,11 +168,6 @@ EM_JS(double, nt_gfx_gl_ctx_query_result, (uint32_t query), {
 #pragma clang diagnostic pop
 // clang-format on
 
-/* WebGL2 has no KHR_debug equivalent in the spec; Spector.js intercepts at
- * the JS call level and wouldn't see glPushDebugGroup anyway. Return false
- * — segment labeling becomes a no-op on web. */
-bool nt_gfx_gl_ctx_enable_debug_groups(void) { return false; }
-
 #endif
 
 /* WebGL2 has no KHR_debug / glDebugMessageCallback — GL errors surface via the browser console

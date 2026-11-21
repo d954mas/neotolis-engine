@@ -178,7 +178,7 @@ static void ui_atlas_build_inner_blob(uint8_t *out_blob, uint32_t suffix) {
         {8, 8, UI_ATLAS_PACKED_U1, UI_ATLAS_PACKED_V0},
         {0, 8, UI_ATLAS_PACKED_U0, UI_ATLAS_PACKED_V0},
     };
-    float(*positions)[2] = (float(*)[2])(out_blob + UI_ATLAS_VERTEX_OFFSET);
+    float (*positions)[2] = (float (*)[2])(out_blob + UI_ATLAS_VERTEX_OFFSET);
     NtAtlasUv *uvs = (NtAtlasUv *)(out_blob + UI_ATLAS_UV_OFFSET);
     for (uint32_t i = 0; i < UI_ATLAS_VERTEX_COUNT; i++) {
         positions[i][0] = (float)verts[i].local_x;

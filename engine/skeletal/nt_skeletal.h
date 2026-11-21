@@ -24,7 +24,7 @@
 
 /* x - x rejects NaN and infinity without libm; requires strict IEEE math. Double
  * so one inline serves float and double callers. */
-static inline bool nt_skeletal_finite(double v) { return (v - v) == 0.0; }
+static inline bool nt_skeletal_finite(double v) { return (v - v) == 0.0; } // NOLINT(misc-redundant-expression)
 
 /* Local joint transform, AoS in joint order. Quaternion is unit xyzw; the
  * kernels' unit check assumes float32 inputs. */

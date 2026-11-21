@@ -643,10 +643,10 @@ static void test_polyline_skips_repeated_points_and_closes_once(void) {
 
 static void test_polyline_asserts_non_finite_points(void) {
     float points[][3] = {{0, 0, 0}, {1, NAN, 0}};
-    NT_TEST_EXPECT_ASSERT(nt_shape_renderer_polyline((const float(*)[3])points, 2, false, 0.02F, NT_RGBA8(255, 255, 255, 255)));
+    NT_TEST_EXPECT_ASSERT(nt_shape_renderer_polyline((const float (*)[3])points, 2, false, 0.02F, NT_RGBA8(255, 255, 255, 255)));
     points[1][1] = 0;
     points[0][2] = INFINITY;
-    NT_TEST_EXPECT_ASSERT(nt_shape_renderer_polyline((const float(*)[3])points, 2, false, 0.02F, NT_RGBA8(255, 255, 255, 255)));
+    NT_TEST_EXPECT_ASSERT(nt_shape_renderer_polyline((const float (*)[3])points, 2, false, 0.02F, NT_RGBA8(255, 255, 255, 255)));
 }
 
 static void test_width_mode_and_viewport_changes_flush_wires(void) {
@@ -721,7 +721,7 @@ static void test_polyline_overflow_preserves_all_segments(void) {
         points[i][1] = (float)(i % 2);
     }
     nt_gfx_fake_draw_trace_reset(true);
-    nt_shape_renderer_polyline((const float(*)[3])points, NT_SHAPE_RENDERER_MAX_POLYLINE_SEGMENTS + 3, false, 0.02F, NT_RGBA8(255, 255, 255, 255));
+    nt_shape_renderer_polyline((const float (*)[3])points, NT_SHAPE_RENDERER_MAX_POLYLINE_SEGMENTS + 3, false, 0.02F, NT_RGBA8(255, 255, 255, 255));
     nt_shape_renderer_flush();
     nt_test_frame_next();
     TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_fake_draw_trace_count());

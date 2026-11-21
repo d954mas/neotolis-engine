@@ -7,24 +7,9 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 TARGET="${1:-hello}"
 PRESET="wasm-release"
 
-# ---------------------------------------------------------------------------
-# Activate Emscripten SDK if not already in PATH
-# ---------------------------------------------------------------------------
-if ! command -v emcmake &>/dev/null; then
-    if [ -n "${EMSDK:-}" ] && [ -f "$EMSDK/emsdk_env.sh" ]; then
-        echo "Activating Emscripten SDK from \$EMSDK ($EMSDK)..."
-        source "$EMSDK/emsdk_env.sh" 2>/dev/null
-    else
-        echo "ERROR: emcmake not found in PATH and \$EMSDK is not set"
-        echo "Install Emscripten SDK: https://emscripten.org/docs/getting_started/downloads.html"
-        exit 1
-    fi
-fi
-
-if ! command -v cmake &>/dev/null; then
-    echo "ERROR: cmake not found in PATH"
-    exit 1
-fi
+# shellcheck source=lib/toolchain.sh
+source "$SCRIPT_DIR/lib/toolchain.sh"
+require_installed cmake ninja emsdk
 
 CMAKE_FILE="$ROOT_DIR/examples/$TARGET/CMakeLists.txt"
 if [ ! -f "$CMAKE_FILE" ]; then
@@ -121,7 +106,7 @@ inject_flags() {
 
 build_target() {
     # Reconfigure + build
-    (cd "$ROOT_DIR" && emcmake cmake --preset "$PRESET" 2>&1) && \
+    (cd "$ROOT_DIR" && cmake --preset "$PRESET" 2>&1) && \
     (cd "$ROOT_DIR" && cmake --build --preset "$PRESET" 2>&1)
 }
 
@@ -384,5 +369,5 @@ cp "$BACKUP_FILE" "$CMAKE_FILE"
 
 echo ""
 echo "Applied '$chosen_label' flags to $CMAKE_FILE"
-echo "Verify with: emcmake cmake --preset $PRESET && cmake --build --preset $PRESET"
+echo "Verify with: cmake --preset $PRESET && cmake --build --preset $PRESET"
 echo "Then check sizes: bash scripts/size.sh $TARGET"

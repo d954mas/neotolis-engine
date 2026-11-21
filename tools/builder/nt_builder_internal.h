@@ -292,7 +292,7 @@ static inline void nt_builder_narrow_stream_floats(float *data, uint32_t vertex_
     }
 }
 /* x - x rejects NaN and infinities without libm; requires strict IEEE math. */
-static inline bool nt_builder_finite(float v) { return (v - v) == 0.0F; }
+static inline bool nt_builder_finite(float v) { return (v - v) == 0.0F; } // NOLINT(misc-redundant-expression)
 
 static inline bool nt_builder_finite_n(const float *v, uint32_t count) {
     for (uint32_t i = 0; i < count; i++) {

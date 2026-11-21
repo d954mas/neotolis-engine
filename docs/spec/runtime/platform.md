@@ -52,7 +52,7 @@ Platform module handles:
 - application startup/shutdown hooks
 - canvas/window integration
 - timing and frame delta
-- input event forwarding
+- input event forwarding (native: `nt_window_poll` pumps it; web: the DOM listeners `nt_window_init` registers once per page feed it as events fire)
 - browser-specific bridges (JS interop)
 - file/network helpers (async fetch)
 - frame scheduling hook

@@ -16,6 +16,7 @@
 #include "ui/nt_ui_label.h"
 #include "ui/nt_ui_state.h"
 #include "utf8/nt_utf8.h"
+#include "window/nt_window.h"
 
 /* Password masking overrides the keyboard hint; map UI vocabulary to the platform input mode. */
 static inline nt_text_input_mode_t keyboard_mode(nt_ui_input_keyboard_t kb, bool password) {
@@ -71,6 +72,7 @@ typedef struct {
     float repeat_t;      /* seconds until the held repeat_key fires again (initial delay, then rate) */
     uint16_t repeat_key; /* the nt_key_t currently auto-repeating (0 = none) */
     uint8_t drag;        /* 1 while a press is dragging to extend the selection */
+    uint8_t tap_focus;   /* the press found the field unfocused inside a scroll: focus on its tap release */
 } nt_ui_input_state_t;
 
 static inline uint32_t input_state_id(uint32_t id) { return nt_ui_derived_id(id, NT_UI_INPUT_STATE_SALT); }
@@ -251,12 +253,12 @@ static bool allow_printable(uint32_t cp) { return cp >= 0x20U && cp != 0x7FU && 
 // #endregion
 
 static inline bool shift_held(void) { return nt_input_key_is_down(NT_KEY_LSHIFT) || nt_input_key_is_down(NT_KEY_RSHIFT); }
-static inline bool ctrl_held(void) { return nt_input_key_is_down(NT_KEY_LCTRL) || nt_input_key_is_down(NT_KEY_RCTRL); }
+/* Ctrl, or Cmd on macOS. */
+static inline bool shortcut_held(void) { return nt_input_key_is_down(NT_KEY_LCTRL) || nt_input_key_is_down(NT_KEY_RCTRL) || nt_input_key_is_down(NT_KEY_LMETA) || nt_input_key_is_down(NT_KEY_RMETA); }
 
 /* PC-style auto-repeat core. Last-pressed wins (a newer repeatable key re-arms to it).
  * Edges arrive as params so the unit test can drive timing with fake input. */
 #ifdef NT_TEST_ACCESS
-bool nt_ui_input_key_repeat_step(uint16_t *repeat_key, float *repeat_t, nt_key_t k, bool pressed, bool down, float dt);
 bool nt_ui_input_key_repeat_step(uint16_t *repeat_key, float *repeat_t, nt_key_t k, bool pressed, bool down, float dt)
 #else
 static bool key_repeat_step(uint16_t *repeat_key, float *repeat_t, nt_key_t k, bool pressed, bool down, float dt)
@@ -680,10 +682,20 @@ typedef struct {
     nt_font_t font;
     float line_h;
     uint32_t cur_len;
-    nt_ui_events_t in;
+    nt_ui_interaction_t in;
     nt_ui_bbox_t bb;
     bool focused;
 } input_frame_t;
+
+/* An unfocused field inside a scroll focuses on the tap's release, so a list drag never opens the
+ * keyboard; a scroll that takes the drag leaves the field silent. Otherwise the press focuses. */
+static bool input_focus_edge(nt_ui_input_state_t *st, const nt_ui_interaction_t *in, bool was_focused) {
+    if (in->pressed_now) {
+        st->tap_focus = (in->gesture_pending && !was_focused) ? 1U : 0U;
+        return st->tap_focus == 0U;
+    }
+    return in->clicked && st->tap_focus != 0U; /* the tap's release: a scroll that took the press gives no click */
+}
 
 /* focus-order bookkeeping (Tab wrap) + the single mutating interaction step + focus capture / drag.
  * Resolves f->st, f->in, f->bb, f->focused for the rest of the frame. */
@@ -706,7 +718,7 @@ static void focus_step(input_frame_t *f) {
         ctx->focused_input_id = id;
         ctx->focus_tab_seek = 0U;
         claimed_now = true;
-        nt_input_set_text_input_mode(keyboard_mode(props->keyboard, props->password));
+        nt_window_set_text_input_mode(keyboard_mode(props->keyboard, props->password));
     }
     // #endregion
 
@@ -725,16 +737,16 @@ static void focus_step(input_frame_t *f) {
         st->anchor = cur_len; /* keep the selection anchor in-bounds too */
     }
 
-    /* ONE mutating interaction step (the canonical-step contract): the events step with double_click
-     * opt-in. Word-select reads double_clicked off this single result — no separate call. long_press is
-     * not wanted here (<=0 disables it + hold_progress, keeping the gesture cell dbl-only). The app-wide
-     * dbl window + move radius come from the context (nt_ui_set_gesture_constants), not hard-coded. */
-    static const nt_ui_events_cfg_t s_field_gesture_cfg = {.long_press_secs = 0.0F, .double_click = true};
-    nt_ui_events_t in;
+    /* ONE mutating interaction step. Word-select reads double_clicked
+     * off this single result; the dbl window + move radius come from the context. A focused field
+     * drags its selection along x, so inside a vertical list that drag is the field's. */
+    const bool was_focused = (ctx->focused_input_id == id);
+    const nt_ui_step_desc_t step = {.drag_axes = was_focused ? NT_UI_DRAG_X : 0U};
+    nt_ui_interaction_t in;
     if (enabled) {
-        in = nt_ui_events(ctx, id, &s_field_gesture_cfg);
+        in = nt_ui_step(ctx, id, &step);
     } else {
-        in = (nt_ui_events_t){0};
+        in = (nt_ui_interaction_t){0};
         nt_ui_block_pointer(ctx, id, NULL);
         nt_ui_debug_record_disabled_zone(ctx, id, NULL);
         /* A disabled field can't be clicked to refocus and gates out Esc/Tab while focused==false, so
@@ -744,29 +756,26 @@ static void focus_step(input_frame_t *f) {
             ctx->focused_input_id = 0U;
         }
     }
-    /* The real press-began edge (one-shot, survives a same-frame press+release — `pressed` does not, so a
-     * sub-frame tap would otherwise never focus the field / place the caret). */
-    const bool pressed_now = in.pressed_now;
+    const bool focus_now = input_focus_edge(st, &in, was_focused);
 
     /* Map a pointer x (UI-space) to a codepoint boundary via the prev-frame bbox. */
     const nt_ui_bbox_t bb = nt_ui_get_bbox(ctx, id);
-    if (enabled && pressed_now) {
-        const bool was_focused = (ctx->focused_input_id == id);
+    if (enabled && focus_now) {
         ctx->focused_input_id = id;
         st->blink = 0.0F;
         if (bb.found) {
-            /* On the press frame pos == press point (the pointer has not moved yet). */
+            /* The press (or tap release) point. */
             const float local_x = (in.pos[0] - bb.x - style->pad_x) + st->scroll_x;
             st->caret = caret_from_x(style, props->password, font, buffer, cur_len, local_x);
         }
         st->anchor = st->caret; /* a fresh press collapses the selection to the click point */
-        st->drag = 1U;
+        st->drag = (uint8_t)in.pressed;
         if (!was_focused) {
-            nt_input_set_text_input_mode(keyboard_mode(props->keyboard, props->password));
+            nt_window_set_text_input_mode(keyboard_mode(props->keyboard, props->password));
         }
     }
 
-    /* Double-click select-word rides the same single events step (cfg.double_click). */
+    /* Double-click select-word rides the same single step. */
     if (enabled && in.double_clicked) {
         uint32_t ws = 0U;
         uint32_t we = 0U;
@@ -789,8 +798,8 @@ static void focus_step(input_frame_t *f) {
         st->caret = caret_from_x(style, props->password, font, buffer, cur_len, local_x);
         st->blink = 0.0F;
     }
-    if (in.released) {
-        st->drag = 0U;
+    if (!in.pressed) {
+        st->drag = 0U; /* released, or a scroll took the press */
     }
 
     /* Mark the focused field present for next begin's orphan cleanup. */
@@ -803,7 +812,7 @@ static void focus_step(input_frame_t *f) {
     // #endregion
 }
 
-/* The focused edit pipeline: drain the typed-char ring, then run the physical editing keys
+/* The focused edit pipeline: drain the typed chars, then run the physical editing keys
  * (delete/arrows/home/end), selection chords (Shift/Ctrl+A), clipboard (Ctrl+C/X/V), submit + Tab/Esc.
  * No-op when unfocused or newly reached by Tab. Sets changed/submitted; cur_len re-derived in f->cur_len. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -819,7 +828,7 @@ static void edit_step(input_frame_t *f, bool *changed, bool *submitted) {
     nt_ui_input_state_t *st = f->st;
     uint32_t cur_len = f->cur_len;
     {
-        // #region drain typed chars (FIFO from the input ring)
+        // #region drain typed chars (FIFO, this frame's)
         uint32_t cp = 0U;
         while (nt_input_pop_char(&cp)) {
             const bool ok = (props->allow != NULL) ? props->allow(cp) : allow_printable(cp);
@@ -918,16 +927,16 @@ static void edit_step(input_frame_t *f, bool *changed, bool *submitted) {
             }
             st->blink = 0.0F;
         }
-        if (ctrl_held() && nt_input_key_is_pressed(NT_KEY_A)) {
+        if (shortcut_held() && nt_input_key_is_pressed(NT_KEY_A)) {
             st->anchor = 0U; /* Ctrl+A selects the whole buffer */
             st->caret = cur_len;
             st->blink = 0.0F;
         }
         // #region clipboard chords (Ctrl+C/X/V)
-        if (ctrl_held() && nt_input_key_is_pressed(NT_KEY_C)) {
+        if (shortcut_held() && nt_input_key_is_pressed(NT_KEY_C)) {
             clipboard_copy_selection(buffer, st); /* copy selection; no-op if empty */
         }
-        if (ctrl_held() && nt_input_key_is_pressed(NT_KEY_X) && nt_clipboard_available()) {
+        if (shortcut_held() && nt_input_key_is_pressed(NT_KEY_X) && nt_clipboard_available()) {
             /* No-op cut when the clipboard is unavailable: deleting locally without a store is data loss. */
             clipboard_copy_selection(buffer, st);
             if (st->anchor != st->caret) {
@@ -940,7 +949,7 @@ static void edit_step(input_frame_t *f, bool *changed, bool *submitted) {
                 st->blink = 0.0F;
             }
         }
-        if (ctrl_held() && nt_input_key_is_pressed(NT_KEY_V)) {
+        if (shortcut_held() && nt_input_key_is_pressed(NT_KEY_V)) {
             st->caret = clipboard_paste(buffer, buffer_size, props, st, cur_len, changed);
             cur_len = (uint32_t)strlen(buffer);
             st->blink = 0.0F;
@@ -957,7 +966,7 @@ static void edit_step(input_frame_t *f, bool *changed, bool *submitted) {
             ctx->focused_input_id = ctx->focus_first_id; /* fallback: wrap (overridden if a later field claims) */
             if (ctx->focus_first_id != id) {
                 /* A later field may replace this hint; keeping it here leaves text-free UI independent of input. */
-                nt_input_set_text_input_mode(ctx->focus_first_mode);
+                nt_window_set_text_input_mode(ctx->focus_first_mode);
             }
         }
         // #endregion
@@ -1128,7 +1137,7 @@ static void emit_field(input_frame_t *f) {
         /* Password fields render one mask glyph per codepoint instead of the real bytes; the mask
          * is render-only (the game buffer is untouched). build_display_text is shared with the test
          * probe so the password branch is asserted without a GL capture. */
-        const char *disp = (props->password) ? nt_ui_input_build_display_text(buffer, cur_len) : buffer;
+        const char *disp = props->password ? nt_ui_input_build_display_text(buffer, cur_len) : buffer;
         /* Float the text at -scroll_x inside the content clip so it tracks the caret/selection when
          * the line scrolls; an inline label would stay at x=0 and desync. */
         emit_text(ctx, text_layer, -st->scroll_x, 0.0F, disp, &ts);

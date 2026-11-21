@@ -1,4 +1,5 @@
-#include "input/nt_input_internal.h"
+#include "input/nt_input_feed.h"
+#include "test_helpers/nt_input_test_frame.h"
 #include "unity.h"
 
 static bool float_near(float a, float b, float eps) { return (a - b) <= eps && (b - a) <= eps; }
@@ -7,29 +8,55 @@ void setUp(void) { nt_input_init(); }
 
 void tearDown(void) { nt_input_shutdown(); }
 
-/* ---- Key tests ---- */
+/* ---- Publish: events apply to the next frame, the poll publishes it ---- */
 
-void test_key_enum_count(void) { TEST_ASSERT_EQUAL_INT(69, NT_KEY_COUNT); }
-
-void test_key_down_after_set(void) {
-    nt_input_set_key(NT_KEY_A, true);
-    TEST_ASSERT_TRUE(nt_input_key_is_down(NT_KEY_A));
+void test_event_invisible_until_poll(void) {
+    nt_input_feed(nt_test_key(NT_KEY_A, true));
+    nt_input_feed(nt_test_mouse(5.0F, 5.0F, 1));
+    TEST_ASSERT_FALSE(nt_input_key_is_down(NT_KEY_A));
+    TEST_ASSERT_FALSE(g_nt_input.pointers[0].active);
+    nt_input_poll();
+    TEST_ASSERT_TRUE(nt_input_key_is_pressed(NT_KEY_A));
+    TEST_ASSERT_TRUE(nt_input_mouse_is_pressed(NT_BUTTON_LEFT));
 }
 
-void test_key_pressed_edge(void) {
-    nt_input_set_key(NT_KEY_W, true);
-    TEST_ASSERT_TRUE(nt_input_key_is_pressed(NT_KEY_W));
+/* A press and a release between two polls: both edges are published once. */
+void test_press_and_release_in_one_frame(void) {
+    nt_input_feed(nt_test_key(NT_KEY_E, true));
+    nt_input_feed(nt_test_key(NT_KEY_E, false));
+    nt_input_poll();
+    TEST_ASSERT_TRUE(nt_input_key_is_pressed(NT_KEY_E));
+    TEST_ASSERT_TRUE(nt_input_key_is_released(NT_KEY_E));
+    TEST_ASSERT_FALSE(nt_input_key_is_down(NT_KEY_E));
+    nt_input_poll();
+    TEST_ASSERT_FALSE(nt_input_key_is_pressed(NT_KEY_E));
+    TEST_ASSERT_FALSE(nt_input_key_is_released(NT_KEY_E));
+}
+
+/* ---- Key tests ---- */
+
+void test_key_enum_count(void) { TEST_ASSERT_EQUAL_INT(98, NT_KEY_COUNT); }
+
+void test_key_repeat_is_no_new_press(void) {
+    nt_input_feed(nt_test_key(NT_KEY_K, true));
+    nt_input_poll();
+    nt_input_feed(nt_test_key(NT_KEY_K, true)); /* GLFW_REPEAT */
+    nt_input_poll();
+    TEST_ASSERT_TRUE(nt_input_key_is_down(NT_KEY_K));
+    TEST_ASSERT_FALSE(nt_input_key_is_pressed(NT_KEY_K));
 }
 
 void test_key_released_edge(void) {
-    nt_input_set_key(NT_KEY_S, true);
+    nt_input_feed(nt_test_key(NT_KEY_S, true));
     nt_input_poll();
-    nt_input_set_key(NT_KEY_S, false);
+    nt_input_feed(nt_test_key(NT_KEY_S, false));
+    nt_input_poll();
     TEST_ASSERT_TRUE(nt_input_key_is_released(NT_KEY_S));
 }
 
 void test_key_pressed_clears_next_frame(void) {
-    nt_input_set_key(NT_KEY_D, true);
+    nt_input_feed(nt_test_key(NT_KEY_D, true));
+    nt_input_poll();
     TEST_ASSERT_TRUE(nt_input_key_is_pressed(NT_KEY_D));
     nt_input_poll();
     TEST_ASSERT_FALSE(nt_input_key_is_pressed(NT_KEY_D));
@@ -37,25 +64,268 @@ void test_key_pressed_clears_next_frame(void) {
 }
 
 void test_any_key_pressed(void) {
+    nt_input_poll();
     TEST_ASSERT_FALSE(nt_input_any_key_pressed());
-    nt_input_set_key(NT_KEY_SPACE, true);
+    nt_input_feed(nt_test_key(NT_KEY_SPACE, true));
+    nt_input_poll();
     TEST_ASSERT_TRUE(nt_input_any_key_pressed());
 }
 
-void test_clear_all_keys_sets_released(void) {
-    nt_input_set_key(NT_KEY_W, true);
-    nt_input_set_key(NT_KEY_A, true);
+/* ---- Focus loss: applied in order with the events around it ---- */
+
+void test_events_after_focus_lost_apply_in_the_same_frame(void) {
+    nt_input_feed(nt_test_key(NT_KEY_H, true));
+    nt_input_feed(nt_test_contact_down(7, 1.0F, 1.0F, 0.5F, NT_POINTER_TOUCH, 1));
     nt_input_poll();
-    nt_input_clear_all_keys();
-    TEST_ASSERT_FALSE(nt_input_key_is_down(NT_KEY_W));
-    TEST_ASSERT_TRUE(nt_input_key_is_released(NT_KEY_W));
-    TEST_ASSERT_TRUE(nt_input_key_is_released(NT_KEY_A));
+    nt_input_feed(nt_test_focus_lost());
+    nt_input_feed(nt_test_key(NT_KEY_A, true));
+    nt_input_feed(nt_test_contact_down(8, 9.0F, 9.0F, 0.5F, NT_POINTER_TOUCH, 1));
+    nt_input_poll();
+    TEST_ASSERT_TRUE(nt_input_key_is_released(NT_KEY_H));
+    TEST_ASSERT_TRUE(nt_input_key_is_pressed(NT_KEY_A));
+    TEST_ASSERT_TRUE(g_nt_input.pointers[1].buttons[NT_BUTTON_LEFT].is_released);
+    TEST_ASSERT_TRUE(g_nt_input.pointers[2].buttons[NT_BUTTON_LEFT].is_pressed);
+    nt_input_poll();
+    TEST_ASSERT_FALSE(g_nt_input.pointers[1].active);
+    TEST_ASSERT_TRUE(nt_input_key_is_down(NT_KEY_A));
+}
+
+/* A release and a new press of one key in one frame read pressed and released together. */
+void test_focus_lost_then_press_same_key(void) {
+    nt_input_feed(nt_test_key(NT_KEY_H, true));
+    nt_input_poll();
+    nt_input_feed(nt_test_focus_lost());
+    nt_input_feed(nt_test_key(NT_KEY_H, true));
+    nt_input_poll();
+    TEST_ASSERT_TRUE(nt_input_key_is_released(NT_KEY_H));
+    TEST_ASSERT_TRUE(nt_input_key_is_pressed(NT_KEY_H));
+    TEST_ASSERT_TRUE(nt_input_key_is_down(NT_KEY_H));
+}
+
+/* A pointer button shows the release first: the press that followed it waits for the next frame. */
+void test_focus_lost_then_press_same_button(void) {
+    nt_input_feed(nt_test_mouse(5.0F, 5.0F, 1));
+    nt_input_poll();
+    nt_input_feed(nt_test_focus_lost());
+    nt_input_feed(nt_test_mouse(5.0F, 5.0F, 1));
+    nt_input_poll();
+    nt_button_state_t b = g_nt_input.pointers[0].buttons[NT_BUTTON_LEFT];
+    TEST_ASSERT_TRUE(b.is_released && !b.is_pressed && !b.is_down);
+    nt_input_poll();
+    b = g_nt_input.pointers[0].buttons[NT_BUTTON_LEFT];
+    TEST_ASSERT_TRUE(g_nt_input.pointers[0].active);
+    TEST_ASSERT_TRUE(b.is_pressed && b.is_down && !b.is_released);
+}
+
+/* Up at one point, a hover and down at another between two polls: the release is published where it
+   happened; the press, its position and the motion since the release one frame later. */
+void test_release_then_press_takes_two_frames(void) {
+    nt_input_feed(nt_test_mouse(5.0F, 5.0F, 1));
+    nt_input_poll();
+    nt_input_feed(nt_test_mouse(6.0F, 5.0F, 0));
+    nt_input_feed(nt_test_mouse(50.0F, 20.0F, 0));
+    nt_input_feed(nt_test_mouse(90.0F, 40.0F, 1));
+    nt_input_feed(nt_test_mouse(92.0F, 40.0F, 1));
+    nt_input_poll();
+    const nt_pointer_t *m = &g_nt_input.pointers[0];
+    TEST_ASSERT_TRUE(m->buttons[NT_BUTTON_LEFT].is_released && !m->buttons[NT_BUTTON_LEFT].is_pressed && !m->buttons[NT_BUTTON_LEFT].is_down);
+    TEST_ASSERT_EQUAL_INT(6, (int)m->x);
+    TEST_ASSERT_EQUAL_INT(5, (int)m->y);
+    TEST_ASSERT_EQUAL_INT(1, (int)m->dx);
+    nt_input_poll();
+    TEST_ASSERT_TRUE(m->buttons[NT_BUTTON_LEFT].is_pressed && m->buttons[NT_BUTTON_LEFT].is_down && !m->buttons[NT_BUTTON_LEFT].is_released);
+    TEST_ASSERT_EQUAL_INT(92, (int)m->x);
+    TEST_ASSERT_EQUAL_INT(40, (int)m->y);
+    TEST_ASSERT_EQUAL_INT(86, (int)m->dx);
+    TEST_ASSERT_EQUAL_INT(35, (int)m->dy);
+    nt_input_poll();
+    TEST_ASSERT_TRUE(m->buttons[NT_BUTTON_LEFT].is_down && !m->buttons[NT_BUTTON_LEFT].is_pressed);
+}
+
+/* A bot's button event has no position: a waiting press keeps the one it was made at. */
+void test_waiting_press_keeps_its_position_through_a_buttons_event(void) {
+    nt_input_inject(nt_test_mouse(5.0F, 5.0F, 1));
+    nt_input_poll();
+    nt_input_inject(nt_test_mouse_buttons(0));
+    nt_input_inject(nt_test_mouse(90.0F, 40.0F, 1));
+    nt_input_inject(nt_test_mouse_buttons(0));
+    nt_input_poll();
+    nt_input_poll();
+    const nt_pointer_t *m = &g_nt_input.pointers[0];
+    TEST_ASSERT_TRUE(m->buttons[NT_BUTTON_LEFT].is_pressed && m->buttons[NT_BUTTON_LEFT].is_released);
+    TEST_ASSERT_EQUAL_INT(90, (int)m->x);
+    TEST_ASSERT_EQUAL_INT(40, (int)m->y);
+}
+
+/* A waiting tap is published where it was made, not where the mouse went after it. */
+void test_waiting_tap_keeps_its_point(void) {
+    nt_input_feed(nt_test_mouse(5.0F, 5.0F, 1));
+    nt_input_poll();
+    nt_input_feed(nt_test_mouse(5.0F, 5.0F, 0));
+    nt_input_feed(nt_test_mouse(90.0F, 40.0F, 1));
+    nt_input_feed(nt_test_mouse(90.0F, 40.0F, 0));
+    nt_input_feed(nt_test_mouse(300.0F, 200.0F, 0));
+    nt_input_poll();
+    nt_input_poll();
+    const nt_pointer_t *m = &g_nt_input.pointers[0];
+    TEST_ASSERT_TRUE(m->buttons[NT_BUTTON_LEFT].is_pressed && m->buttons[NT_BUTTON_LEFT].is_released);
+    TEST_ASSERT_EQUAL_INT(90, (int)m->x);
+    TEST_ASSERT_EQUAL_INT(40, (int)m->y);
+}
+
+/* A mouse that left after its release and came back in the same frame: the release is still published
+   where it happened, the new place one frame later with no delta for the jump. */
+void test_mouse_back_after_release_reports_no_delta(void) {
+    nt_input_feed(nt_test_mouse(10.0F, 10.0F, 1));
+    nt_input_poll();
+    nt_input_feed(nt_test_mouse(10.0F, 10.0F, 0));
+    nt_input_feed(nt_test_leave());
+    nt_input_feed(nt_test_mouse(500.0F, 10.0F, 0));
+    nt_input_poll();
+    const nt_pointer_t *m = &g_nt_input.pointers[0];
+    TEST_ASSERT_TRUE(m->active && m->buttons[NT_BUTTON_LEFT].is_released);
+    TEST_ASSERT_EQUAL_INT(10, (int)m->x);
+    TEST_ASSERT_EQUAL_INT(0, (int)m->dx);
+    nt_input_poll();
+    TEST_ASSERT_EQUAL_INT(500, (int)m->x);
+    TEST_ASSERT_EQUAL_INT(0, (int)m->dx);
+    nt_input_feed(nt_test_mouse(510.0F, 10.0F, 0));
+    nt_input_poll();
+    TEST_ASSERT_EQUAL_INT(10, (int)m->dx); /* tracked again */
+}
+
+/* A waiting tap is published before a mouse that left in the same frame is gone. */
+void test_waiting_tap_survives_a_leave(void) {
+    nt_input_feed(nt_test_mouse(5.0F, 5.0F, 1));
+    nt_input_poll();
+    nt_input_feed(nt_test_mouse(5.0F, 5.0F, 0));
+    nt_input_feed(nt_test_mouse(5.0F, 5.0F, 1));
+    nt_input_feed(nt_test_mouse(5.0F, 5.0F, 0));
+    nt_input_feed(nt_test_leave());
+    nt_input_poll();
+    TEST_ASSERT_TRUE(nt_input_mouse_is_released(NT_BUTTON_LEFT) && !nt_input_mouse_is_pressed(NT_BUTTON_LEFT));
+    nt_input_poll();
+    TEST_ASSERT_TRUE(nt_input_mouse_is_pressed(NT_BUTTON_LEFT) && nt_input_mouse_is_released(NT_BUTTON_LEFT));
+    nt_input_poll();
+    TEST_ASSERT_FALSE(g_nt_input.pointers[0].active);
+}
+
+/* A tap that follows a release in the same frame is published whole one frame later; a press that
+   follows a tap from an up button waits the same way. */
+void test_release_then_tap_and_tap_then_press(void) {
+    nt_input_feed(nt_test_mouse(5.0F, 5.0F, 1));
+    nt_input_poll();
+    nt_input_feed(nt_test_mouse(5.0F, 5.0F, 0));
+    nt_input_feed(nt_test_mouse(5.0F, 5.0F, 1));
+    nt_input_feed(nt_test_mouse(5.0F, 5.0F, 0));
+    nt_input_poll();
+    nt_button_state_t b = g_nt_input.pointers[0].buttons[NT_BUTTON_LEFT];
+    TEST_ASSERT_TRUE(b.is_released && !b.is_pressed && !b.is_down);
+    nt_input_poll();
+    b = g_nt_input.pointers[0].buttons[NT_BUTTON_LEFT];
+    TEST_ASSERT_TRUE(b.is_pressed && b.is_released && !b.is_down);
+    nt_input_poll();
+    b = g_nt_input.pointers[0].buttons[NT_BUTTON_LEFT];
+    TEST_ASSERT_TRUE(!b.is_pressed && !b.is_released && !b.is_down);
+
+    nt_input_feed(nt_test_mouse(5.0F, 5.0F, 1));
+    nt_input_feed(nt_test_mouse(5.0F, 5.0F, 0));
+    nt_input_feed(nt_test_mouse(5.0F, 5.0F, 1));
+    nt_input_poll();
+    b = g_nt_input.pointers[0].buttons[NT_BUTTON_LEFT];
+    TEST_ASSERT_TRUE(b.is_pressed && b.is_released && !b.is_down);
+    nt_input_poll();
+    b = g_nt_input.pointers[0].buttons[NT_BUTTON_LEFT];
+    TEST_ASSERT_TRUE(b.is_pressed && b.is_down && !b.is_released);
+}
+
+/* A press waiting for the next frame holds the mouse like a held button: a leave does not drop it. */
+void test_waiting_press_keeps_the_mouse_through_a_leave(void) {
+    nt_input_feed(nt_test_mouse(5.0F, 5.0F, 1));
+    nt_input_poll();
+    nt_input_feed(nt_test_mouse(5.0F, 5.0F, 0));
+    nt_input_feed(nt_test_mouse(5.0F, 5.0F, 1));
+    nt_input_feed(nt_test_leave());
+    nt_input_poll();
+    nt_input_poll();
+    TEST_ASSERT_TRUE(g_nt_input.pointers[0].active);
+    TEST_ASSERT_TRUE(nt_input_mouse_is_pressed(NT_BUTTON_LEFT) && nt_input_mouse_is_down(NT_BUTTON_LEFT));
+}
+
+void test_mouse_focus_lost_drops_pressure(void) {
+    nt_input_feed(nt_test_mouse(10.0F, 10.0F, 1));
+    nt_input_poll();
+    nt_input_feed(nt_test_focus_lost());
+    nt_input_poll();
+    TEST_ASSERT_TRUE(nt_input_mouse_is_released(NT_BUTTON_LEFT));
+    TEST_ASSERT_TRUE(float_near(0.0F, g_nt_input.pointers[0].pressure, 1e-6F));
+}
+
+void test_init_forgets_unpublished_events(void) {
+    nt_input_feed(nt_test_key(NT_KEY_A, true));
+    nt_input_init();
+    nt_input_poll();
+    TEST_ASSERT_FALSE(nt_input_key_is_down(NT_KEY_A));
+}
+
+/* The published frame never changes between polls, whatever arrives. */
+void test_published_frame_stable_between_polls(void) {
+    nt_input_feed(nt_test_key(NT_KEY_A, true));
+    nt_input_feed(nt_test_contact_down(3, 1.0F, 1.0F, 0.5F, NT_POINTER_TOUCH, 1));
+    nt_input_poll();
+    nt_input_feed(nt_test_key(NT_KEY_A, false));
+    nt_input_feed(nt_test_contact_up(3));
+    nt_input_feed(nt_test_mouse(9.0F, 9.0F, 1));
+    nt_input_feed(nt_test_wheel(0.0F, 1.0F));
+    nt_input_feed(nt_test_focus_lost());
+    TEST_ASSERT_TRUE(nt_input_key_is_down(NT_KEY_A));
+    TEST_ASSERT_FALSE(g_nt_input.pointers[0].active);
+    TEST_ASSERT_TRUE(nt_input_key_is_pressed(NT_KEY_A));
+    TEST_ASSERT_TRUE(g_nt_input.pointers[1].buttons[NT_BUTTON_LEFT].is_down);
+}
+
+/* A click and a tap between two polls are both readable: pressed and released together. */
+void test_click_and_tap_in_one_frame(void) {
+    nt_input_feed(nt_test_mouse(5.0F, 5.0F, 0));
+    nt_input_poll();
+    nt_input_feed(nt_test_mouse(5.0F, 5.0F, 1));
+    nt_input_feed(nt_test_mouse(5.0F, 5.0F, 0));
+    nt_input_feed(nt_test_contact_down(9, 1.0F, 1.0F, 0.5F, NT_POINTER_TOUCH, 1));
+    nt_input_feed(nt_test_contact_up(9));
+    nt_input_poll();
+    const nt_button_state_t mouse = g_nt_input.pointers[0].buttons[NT_BUTTON_LEFT];
+    const nt_button_state_t tap = g_nt_input.pointers[1].buttons[NT_BUTTON_LEFT];
+    TEST_ASSERT_TRUE(mouse.is_pressed && mouse.is_released && !mouse.is_down);
+    TEST_ASSERT_TRUE(tap.is_pressed && tap.is_released && !tap.is_down);
+    nt_input_poll();
+    TEST_ASSERT_FALSE(g_nt_input.pointers[1].active);
+}
+
+void test_mouse_deactivates_after_focus_lost(void) {
+    nt_input_feed(nt_test_mouse(5.0F, 5.0F, 0));
+    nt_input_poll();
+    nt_input_feed(nt_test_focus_lost());
+    nt_input_poll();
+    TEST_ASSERT_TRUE(g_nt_input.pointers[0].active); /* the loss frame is still readable */
+    nt_input_poll();
+    TEST_ASSERT_FALSE(g_nt_input.pointers[0].active);
+}
+
+void test_mouse_move_after_focus_lost_keeps_mouse(void) {
+    nt_input_feed(nt_test_mouse(5.0F, 5.0F, 0));
+    nt_input_poll();
+    nt_input_feed(nt_test_focus_lost());
+    nt_input_feed(nt_test_mouse(6.0F, 5.0F, 0));
+    nt_input_poll();
+    nt_input_poll();
+    TEST_ASSERT_TRUE(g_nt_input.pointers[0].active);
 }
 
 /* ---- Mouse: pointers[0], kept across a release ---- */
 
 void test_mouse_move_activates_slot_0(void) {
-    nt_input_mouse_move(50.0F, 60.0F, 0);
+    nt_input_feed(nt_test_mouse(50.0F, 60.0F, 0));
+    nt_input_poll();
     TEST_ASSERT_TRUE(g_nt_input.pointers[0].active);
     TEST_ASSERT_EQUAL_UINT8(NT_POINTER_MOUSE, g_nt_input.pointers[0].type);
     TEST_ASSERT_TRUE(float_near(50.0F, g_nt_input.pointers[0].x, 1e-3F));
@@ -63,72 +333,85 @@ void test_mouse_move_activates_slot_0(void) {
 }
 
 void test_mouse_release_keeps_mouse(void) {
-    nt_input_mouse_move(1.0F, 1.0F, 1);
-    TEST_ASSERT_TRUE(nt_input_mouse_is_pressed(NT_BUTTON_LEFT));
+    nt_input_feed(nt_test_mouse(1.0F, 1.0F, 1));
     nt_input_poll();
-    nt_input_mouse_move(1.0F, 1.0F, 0);
+    TEST_ASSERT_TRUE(nt_input_mouse_is_pressed(NT_BUTTON_LEFT));
+    nt_input_feed(nt_test_mouse(1.0F, 1.0F, 0));
+    nt_input_poll();
     TEST_ASSERT_TRUE(nt_input_mouse_is_released(NT_BUTTON_LEFT));
     nt_input_poll();
     TEST_ASSERT_TRUE(g_nt_input.pointers[0].active);
 }
 
 void test_mouse_leave_deactivates_next_poll(void) {
-    nt_input_mouse_move(1.0F, 1.0F, 0);
+    nt_input_feed(nt_test_mouse(1.0F, 1.0F, 0));
     nt_input_poll();
-    nt_input_mouse_leave();
+    nt_input_feed(nt_test_leave());
+    nt_input_poll();
     TEST_ASSERT_TRUE(g_nt_input.pointers[0].active);
     nt_input_poll();
     TEST_ASSERT_FALSE(g_nt_input.pointers[0].active);
 }
 
 void test_mouse_leave_ignored_while_held(void) {
-    nt_input_mouse_move(1.0F, 1.0F, 1);
-    nt_input_mouse_leave();
+    nt_input_feed(nt_test_mouse(1.0F, 1.0F, 1));
+    nt_input_feed(nt_test_leave());
+    nt_input_poll();
     nt_input_poll();
     TEST_ASSERT_TRUE(nt_input_mouse_is_down(NT_BUTTON_LEFT));
 }
 
-/* Leave and come back in one poll: the release before the leave stays readable. */
+/* Leave and come back in one frame: the release before the leave stays readable. */
 void test_mouse_back_before_leave_keeps_release(void) {
-    nt_input_mouse_move(1.0F, 1.0F, 1);
+    nt_input_feed(nt_test_mouse(1.0F, 1.0F, 1));
     nt_input_poll();
-    nt_input_mouse_move(1.0F, 1.0F, 0);
-    nt_input_mouse_leave();
-    nt_input_mouse_move(2.0F, 2.0F, 0);
+    nt_input_feed(nt_test_mouse(1.0F, 1.0F, 0));
+    nt_input_feed(nt_test_leave());
+    nt_input_feed(nt_test_mouse(2.0F, 2.0F, 0));
+    nt_input_poll();
     TEST_ASSERT_TRUE(nt_input_mouse_is_released(NT_BUTTON_LEFT));
     nt_input_poll();
     TEST_ASSERT_TRUE(g_nt_input.pointers[0].active);
 }
 
-/* Out at one edge and in at another within one poll: no jump in the delta. */
+/* Out at one edge and in at another within one frame: no jump in the delta. */
 void test_mouse_back_before_leave_no_jump(void) {
-    nt_input_mouse_move(10.0F, 10.0F, 0);
+    nt_input_feed(nt_test_mouse(10.0F, 10.0F, 0));
     nt_input_poll();
-    nt_input_mouse_leave();
-    nt_input_mouse_move(500.0F, 10.0F, 0);
+    nt_input_feed(nt_test_leave());
+    nt_input_feed(nt_test_mouse(500.0F, 10.0F, 0));
+    nt_input_poll();
     TEST_ASSERT_TRUE(float_near(0.0F, g_nt_input.pointers[0].dx, 1e-3F));
 }
 
 void test_mouse_delta(void) {
-    nt_input_mouse_move(100.0F, 200.0F, 0);
+    nt_input_feed(nt_test_mouse(100.0F, 200.0F, 0));
     nt_input_poll();
-    nt_input_mouse_move(120.0F, 230.0F, 0);
+    nt_input_feed(nt_test_mouse(110.0F, 210.0F, 0));
+    nt_input_feed(nt_test_mouse(120.0F, 230.0F, 0));
+    nt_input_poll();
     TEST_ASSERT_TRUE(float_near(20.0F, g_nt_input.pointers[0].dx, 1e-3F));
     TEST_ASSERT_TRUE(float_near(30.0F, g_nt_input.pointers[0].dy, 1e-3F));
+    nt_input_poll();
+    TEST_ASSERT_TRUE(float_near(0.0F, g_nt_input.pointers[0].dx, 1e-3F));
 }
 
 void test_wheel_needs_mouse_over_window(void) {
-    nt_input_wheel(0.0F, 1.0F);
+    nt_input_feed(nt_test_wheel(0.0F, 1.0F));
+    nt_input_poll();
     TEST_ASSERT_TRUE(float_near(0.0F, g_nt_input.pointers[0].wheel_dy, 1e-3F));
-    nt_input_mouse_move(1.0F, 1.0F, 0);
-    nt_input_wheel(0.0F, 1.0F);
-    TEST_ASSERT_TRUE(float_near(1.0F, g_nt_input.pointers[0].wheel_dy, 1e-3F));
+    nt_input_feed(nt_test_mouse(1.0F, 1.0F, 0));
+    nt_input_feed(nt_test_wheel(0.0F, 1.0F));
+    nt_input_feed(nt_test_wheel(0.0F, 0.5F));
+    nt_input_poll();
+    TEST_ASSERT_TRUE(float_near(1.5F, g_nt_input.pointers[0].wheel_dy, 1e-3F));
 }
 
 /* ---- Contacts: slots 1.., from down to up ---- */
 
 void test_contact_never_takes_slot_0(void) {
-    nt_input_pointer_down(0, 100.0F, 200.0F, 0.5F, NT_POINTER_TOUCH, 1);
+    nt_input_feed(nt_test_contact_down(0, 100.0F, 200.0F, 0.5F, NT_POINTER_TOUCH, 1));
+    nt_input_poll();
     TEST_ASSERT_FALSE(g_nt_input.pointers[0].active);
     TEST_ASSERT_TRUE(g_nt_input.pointers[1].active);
     TEST_ASSERT_EQUAL_UINT32(0, g_nt_input.pointers[1].id);
@@ -136,18 +419,20 @@ void test_contact_never_takes_slot_0(void) {
 }
 
 void test_contact_move_and_delta(void) {
-    nt_input_pointer_down(42, 100.0F, 200.0F, 0.5F, NT_POINTER_TOUCH, 1);
+    nt_input_feed(nt_test_contact_down(42, 100.0F, 200.0F, 0.5F, NT_POINTER_TOUCH, 1));
     nt_input_poll();
-    nt_input_pointer_move(42, 120.0F, 230.0F, 0.5F, 1);
+    nt_input_feed(nt_test_contact_move(42, 120.0F, 230.0F, 0.5F, 1));
+    nt_input_poll();
     TEST_ASSERT_TRUE(float_near(120.0F, g_nt_input.pointers[1].x, 1e-3F));
     TEST_ASSERT_TRUE(float_near(20.0F, g_nt_input.pointers[1].dx, 1e-3F));
     TEST_ASSERT_TRUE(float_near(30.0F, g_nt_input.pointers[1].dy, 1e-3F));
 }
 
 void test_contact_up_deactivates_next_poll(void) {
-    nt_input_pointer_down(42, 100.0F, 200.0F, 0.5F, NT_POINTER_TOUCH, 1);
+    nt_input_feed(nt_test_contact_down(42, 100.0F, 200.0F, 0.5F, NT_POINTER_TOUCH, 1));
     nt_input_poll();
-    nt_input_pointer_up(42);
+    nt_input_feed(nt_test_contact_up(42));
+    nt_input_poll();
     /* Slot stays active for one frame so game can read is_released */
     TEST_ASSERT_TRUE(g_nt_input.pointers[1].active);
     TEST_ASSERT_TRUE(g_nt_input.pointers[1].buttons[NT_BUTTON_LEFT].is_released);
@@ -155,47 +440,71 @@ void test_contact_up_deactivates_next_poll(void) {
     TEST_ASSERT_FALSE(g_nt_input.pointers[1].active);
 }
 
-/* Lift and a new down with the same id in one poll: the lifted contact keeps its release edge. */
+/* Lift and a new down with the same id in one frame: the lifted contact keeps its release edge. */
 void test_contact_same_id_down_after_up_new_slot(void) {
-    nt_input_pointer_down(4, 1.0F, 1.0F, 0.5F, NT_POINTER_TOUCH, 1);
+    nt_input_feed(nt_test_contact_down(4, 1.0F, 1.0F, 0.5F, NT_POINTER_TOUCH, 1));
     nt_input_poll();
-    nt_input_pointer_up(4);
-    nt_input_pointer_down(4, 9.0F, 9.0F, 0.5F, NT_POINTER_TOUCH, 1);
+    nt_input_feed(nt_test_contact_up(4));
+    nt_input_feed(nt_test_contact_down(4, 9.0F, 9.0F, 0.5F, NT_POINTER_TOUCH, 1));
+    nt_input_poll();
     TEST_ASSERT_TRUE(g_nt_input.pointers[1].buttons[NT_BUTTON_LEFT].is_released);
     TEST_ASSERT_TRUE(g_nt_input.pointers[2].buttons[NT_BUTTON_LEFT].is_pressed);
 }
 
+void test_contacts_fill_slots_1_to_7(void) {
+    for (uint32_t id = 1; id <= NT_INPUT_MAX_POINTERS; id++) {
+        nt_input_feed(nt_test_contact_down(id, 1.0F, 1.0F, 0.5F, NT_POINTER_TOUCH, 1));
+    }
+    nt_input_poll();
+    TEST_ASSERT_FALSE(g_nt_input.pointers[0].active);
+    for (uint32_t i = 1; i < NT_INPUT_MAX_POINTERS; i++) {
+        TEST_ASSERT_EQUAL_UINT32(i, g_nt_input.pointers[i].id); /* the 8th down finds no slot */
+    }
+}
+
 void test_contact_move_without_down_ignored(void) {
-    nt_input_pointer_move(5, 50.0F, 60.0F, 0.0F, 0); /* a hovering pen */
+    nt_input_feed(nt_test_contact_move(5, 50.0F, 60.0F, 0.0F, 0)); /* a hovering pen */
+    nt_input_poll();
     for (int i = 0; i < NT_INPUT_MAX_POINTERS; i++) {
         TEST_ASSERT_FALSE(g_nt_input.pointers[i].active);
     }
 }
 
-void test_mouse_focus_lost_drops_pressure(void) {
-    nt_input_mouse_move(10.0F, 10.0F, 1);
-    nt_input_poll();
-    nt_input_focus_lost();
-    TEST_ASSERT_TRUE(float_near(0.0F, g_nt_input.pointers[0].pressure, 1e-6F));
-}
-
 void test_mouse_convenience(void) {
-    nt_input_mouse_move(100.0F, 200.0F, 1);
+    nt_input_feed(nt_test_mouse(100.0F, 200.0F, 1));
+    nt_input_poll();
     TEST_ASSERT_TRUE(nt_input_mouse_is_down(NT_BUTTON_LEFT));
-    nt_input_pointer_down(3, 1.0F, 1.0F, 0.5F, NT_POINTER_TOUCH, 0);
-    nt_input_mouse_move(100.0F, 200.0F, 0);
+    nt_input_feed(nt_test_contact_down(3, 1.0F, 1.0F, 0.5F, NT_POINTER_TOUCH, 1));
+    nt_input_feed(nt_test_mouse(100.0F, 200.0F, 0));
+    nt_input_poll();
     TEST_ASSERT_FALSE(nt_input_mouse_is_down(NT_BUTTON_LEFT)); /* reads the mouse, never a contact */
 }
 
 int main(void) {
     UNITY_BEGIN();
+    RUN_TEST(test_event_invisible_until_poll);
+    RUN_TEST(test_press_and_release_in_one_frame);
     RUN_TEST(test_key_enum_count);
-    RUN_TEST(test_key_down_after_set);
-    RUN_TEST(test_key_pressed_edge);
+    RUN_TEST(test_key_repeat_is_no_new_press);
     RUN_TEST(test_key_released_edge);
     RUN_TEST(test_key_pressed_clears_next_frame);
     RUN_TEST(test_any_key_pressed);
-    RUN_TEST(test_clear_all_keys_sets_released);
+    RUN_TEST(test_events_after_focus_lost_apply_in_the_same_frame);
+    RUN_TEST(test_focus_lost_then_press_same_key);
+    RUN_TEST(test_focus_lost_then_press_same_button);
+    RUN_TEST(test_release_then_press_takes_two_frames);
+    RUN_TEST(test_waiting_press_keeps_its_position_through_a_buttons_event);
+    RUN_TEST(test_waiting_tap_survives_a_leave);
+    RUN_TEST(test_waiting_tap_keeps_its_point);
+    RUN_TEST(test_mouse_back_after_release_reports_no_delta);
+    RUN_TEST(test_release_then_tap_and_tap_then_press);
+    RUN_TEST(test_waiting_press_keeps_the_mouse_through_a_leave);
+    RUN_TEST(test_mouse_focus_lost_drops_pressure);
+    RUN_TEST(test_init_forgets_unpublished_events);
+    RUN_TEST(test_published_frame_stable_between_polls);
+    RUN_TEST(test_click_and_tap_in_one_frame);
+    RUN_TEST(test_mouse_deactivates_after_focus_lost);
+    RUN_TEST(test_mouse_move_after_focus_lost_keeps_mouse);
     RUN_TEST(test_mouse_move_activates_slot_0);
     RUN_TEST(test_mouse_release_keeps_mouse);
     RUN_TEST(test_mouse_leave_deactivates_next_poll);
@@ -208,8 +517,8 @@ int main(void) {
     RUN_TEST(test_contact_move_and_delta);
     RUN_TEST(test_contact_up_deactivates_next_poll);
     RUN_TEST(test_contact_same_id_down_after_up_new_slot);
+    RUN_TEST(test_contacts_fill_slots_1_to_7);
     RUN_TEST(test_contact_move_without_down_ignored);
-    RUN_TEST(test_mouse_focus_lost_drops_pressure);
     RUN_TEST(test_mouse_convenience);
     return UNITY_END();
 }

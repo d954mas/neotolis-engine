@@ -72,32 +72,26 @@ static void declare_btn_element(void) {
     CLAY({.id = CLAY_ID("btn"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = BTN_X, .y = BTN_Y}}, .layout = {.sizing = {CLAY_SIZING_FIXED(BTN_W), CLAY_SIZING_FIXED(BTN_H)}}}) {}
 }
 
-static nt_ui_viewport_t letterbox_vp(void) { return (nt_ui_viewport_t){.x = VP_OFF_X, .y = VP_OFF_Y, .w = SCREEN_W * VP_SCALE, .h = SCREEN_H * VP_SCALE}; }
+static nt_ui_viewport_t letterbox_vp(void) { return (nt_ui_viewport_t){.x = VP_OFF_X, .y = VP_OFF_Y, .w = SCREEN_W * VP_SCALE, .h = SCREEN_H * VP_SCALE, .px_per_dp = 1.0F}; }
 
 /* w/SCREEN_W (=2.0) != h/SCREEN_H (=0.5): a per-axis-scale converter that transposed w<->h would map
    the device pointer to the WRONG layout coord, missing the widget (the non-vacuous guard below). */
-static nt_ui_viewport_t aniso_vp(void) { return (nt_ui_viewport_t){.x = ANISO_OFF_X, .y = ANISO_OFF_Y, .w = SCREEN_W * ANISO_SCALE_X, .h = SCREEN_H * ANISO_SCALE_Y}; }
+static nt_ui_viewport_t aniso_vp(void) { return (nt_ui_viewport_t){.x = ANISO_OFF_X, .y = ANISO_OFF_Y, .w = SCREEN_W * ANISO_SCALE_X, .h = SCREEN_H * ANISO_SCALE_Y, .px_per_dp = 1.0F}; }
 
 /* Warm + step frame so btn enters the interactive registry; optionally set a viewport first.
  * Front-most arbitration reads the PREVIOUS frame's registry, so the widget reacts only from the
  * frame after its first step. */
 static void warm_btn_frame(const nt_pointer_t *p, bool set_vp) {
-    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, p, 1, 0);
-    if (set_vp) {
-        nt_ui_set_viewport(s_fx.ctx, letterbox_vp());
-    }
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = SCREEN_W, .layout_h = SCREEN_H, .pointers = p, .pointer_count = 1, .viewport = set_vp ? letterbox_vp() : (nt_ui_viewport_t){0}});
     declare_btn_element();
-    (void)nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btn"));
+    (void)nt_ui_step(s_fx.ctx, nt_ui_id("btn"), NULL);
     nt_ui_end(s_fx.ctx);
 }
 
 static nt_ui_interaction_t query_btn_frame(const nt_pointer_t *p, bool set_vp) {
-    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, p, 1, 0);
-    if (set_vp) {
-        nt_ui_set_viewport(s_fx.ctx, letterbox_vp());
-    }
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = SCREEN_W, .layout_h = SCREEN_H, .pointers = p, .pointer_count = 1, .viewport = set_vp ? letterbox_vp() : (nt_ui_viewport_t){0}});
     declare_btn_element();
-    nt_ui_interaction_t in = nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btn"));
+    nt_ui_interaction_t in = nt_ui_step(s_fx.ctx, nt_ui_id("btn"), NULL);
     nt_ui_end(s_fx.ctx);
     return in;
 }
@@ -150,7 +144,7 @@ static void test_converters_roundtrip_and_default_identity(void) {
     nt_pointer_t p = make_pointer(0.0F, 0.0F, false, false);
 
     /* Default (no set_viewport): screen_to_layout is identity. */
-    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &p, 1, 0);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = SCREEN_W, .layout_h = SCREEN_H, .pointers = &p, .pointer_count = 1});
     const float screen0[2] = {BTN_CX, BTN_CY};
     float layout0[2];
     nt_ui_screen_to_layout(s_fx.ctx, screen0, layout0);
@@ -159,8 +153,7 @@ static void test_converters_roundtrip_and_default_identity(void) {
     nt_ui_end(s_fx.ctx);
 
     /* Scaled viewport: layout -> screen -> layout round-trips. */
-    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &p, 1, 0);
-    nt_ui_set_viewport(s_fx.ctx, letterbox_vp());
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = SCREEN_W, .layout_h = SCREEN_H, .pointers = &p, .pointer_count = 1, .viewport = letterbox_vp()});
     const float layout_in[2] = {BTN_X, BTN_Y};
     float screen[2];
     float layout_back[2];
@@ -177,18 +170,16 @@ static void test_converters_roundtrip_and_default_identity(void) {
 /* ---- 4: ANISOTROPIC viewport — per-axis scale differs, so an axis transposition is visible ---- */
 
 static void warm_btn_frame_aniso(const nt_pointer_t *p) {
-    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, p, 1, 0);
-    nt_ui_set_viewport(s_fx.ctx, aniso_vp());
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = SCREEN_W, .layout_h = SCREEN_H, .pointers = p, .pointer_count = 1, .viewport = aniso_vp()});
     declare_btn_element();
-    (void)nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btn"));
+    (void)nt_ui_step(s_fx.ctx, nt_ui_id("btn"), NULL);
     nt_ui_end(s_fx.ctx);
 }
 
 static nt_ui_interaction_t query_btn_frame_aniso(const nt_pointer_t *p) {
-    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, p, 1, 0);
-    nt_ui_set_viewport(s_fx.ctx, aniso_vp());
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = SCREEN_W, .layout_h = SCREEN_H, .pointers = p, .pointer_count = 1, .viewport = aniso_vp()});
     declare_btn_element();
-    nt_ui_interaction_t in = nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btn"));
+    nt_ui_interaction_t in = nt_ui_step(s_fx.ctx, nt_ui_id("btn"), NULL);
     nt_ui_end(s_fx.ctx);
     return in;
 }
@@ -216,8 +207,7 @@ static void test_anisotropic_viewport_device_pointer_hits(void) {
 
     /* layout -> screen -> layout round-trip under the anisotropic viewport. */
     nt_pointer_t p = make_pointer(0.0F, 0.0F, false, false);
-    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &p, 1, 0);
-    nt_ui_set_viewport(s_fx.ctx, aniso_vp());
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = SCREEN_W, .layout_h = SCREEN_H, .pointers = &p, .pointer_count = 1, .viewport = aniso_vp()});
     const float layout_in[2] = {BTN_CX, BTN_CY};
     float screen[2];
     float layout_back[2];
@@ -255,8 +245,7 @@ static void test_scaled_inspector_uses_layout_pointer(void) {
 
     /* Frame 1: declare widget on the scaled ctx so frame 2's pointer-over tests against this tree. */
     nt_pointer_t f1 = make_pointer(dev_cx, dev_cy, false, false);
-    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &f1, 1, 0);
-    nt_ui_set_viewport(s_fx.ctx, letterbox_vp());
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = SCREEN_W, .layout_h = SCREEN_H, .pointers = &f1, .pointer_count = 1, .viewport = letterbox_vp()});
     CLAY({.id = CLAY_ID("insp_target"),
           .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = ins_btn_x, .y = ins_btn_y}},
           .layout = {.sizing = {CLAY_SIZING_FIXED(ins_btn_w), CLAY_SIZING_FIXED(ins_btn_h)}}}) {}
@@ -265,12 +254,11 @@ static void test_scaled_inspector_uses_layout_pointer(void) {
     /* Frame 2: same device pointer. The gate is recomputed in layout space at the hot resolve, so a
      * step here forces the conversion before reading the consumed flag. */
     nt_pointer_t f2 = make_pointer(dev_cx, dev_cy, false, false);
-    nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &f2, 1, 0);
-    nt_ui_set_viewport(s_fx.ctx, letterbox_vp());
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = SCREEN_W, .layout_h = SCREEN_H, .pointers = &f2, .pointer_count = 1, .viewport = letterbox_vp()});
     CLAY({.id = CLAY_ID("insp_target"),
           .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = ins_btn_x, .y = ins_btn_y}},
           .layout = {.sizing = {CLAY_SIZING_FIXED(ins_btn_w), CLAY_SIZING_FIXED(ins_btn_h)}}}) {
-        (void)nt_ui_step_interaction(s_fx.ctx, nt_ui_id("insp_target"));
+        (void)nt_ui_step(s_fx.ctx, nt_ui_id("insp_target"), NULL);
     }
     /* Layout-space gate: device 490 maps to layout 300 (< 400) -> NOT over the sidebar, so normal
      * interaction is not spuriously suppressed (the raw 490 >= 400 path would consume it). */

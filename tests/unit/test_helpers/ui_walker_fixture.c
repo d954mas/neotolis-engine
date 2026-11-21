@@ -23,6 +23,7 @@
 #include "hash/nt_hash.h"
 #include "material/nt_material.h"
 #include "memory/nt_mem_scratch.h"
+#include "nt_font_format.h"
 #include "nt_pack_format.h"
 #include "renderers/nt_sprite_renderer.h"
 #include "renderers/nt_text_renderer.h"
@@ -49,6 +50,11 @@ static nt_material_t make_material(bool with_page_sampler) {
 }
 
 static const nt_pass_desc_t FIXTURE_PASS = {.clear_depth = 1.0F};
+
+void ui_walker_fixture_fill_stub_font(ui_walker_fixture_t *fx) {
+    const NtFontAssetHeader payload = {.magic = NT_FONT_MAGIC, .version = NT_FONT_VERSION, .units_per_em = 1000, .ascent = 800, .descent = -200};
+    nt_font_fill(fx->stub_font, (const uint8_t *)&payload, sizeof payload);
+}
 
 void ui_walker_fixture_init(ui_walker_fixture_t *fx, void *arena, size_t arena_size, ui_walker_fx_bind_t bind) {
     NT_ASSERT(fx != NULL);
@@ -169,8 +175,7 @@ nt_font_t ui_walker_fixture_make_real_font(ui_walker_fixture_t *fx) {
         fx->real_font_blob = nt_test_font_blob(32U, 126U, &fx->real_font_blob_size);
     }
     const nt_font_t font = nt_font_create(&(nt_font_create_desc_t){.max_glyphs = 16});
-    nt_font_add(font, nt_font_test_resource(nt_font_test_register_data(fx->real_font_blob, fx->real_font_blob_size)));
-    nt_resource_step();
+    nt_font_fill(font, fx->real_font_blob, fx->real_font_blob_size);
     nt_font_step();
     return font;
 }
@@ -213,11 +218,18 @@ float ui_walker_fx_vertex_float(const uint8_t *vertex, uint32_t byte_offset) {
     return v;
 }
 
+int16_t ui_walker_fx_vertex_i16(const uint8_t *vertex, uint32_t byte_offset) {
+    int16_t v = 0;
+    memcpy(&v, vertex + byte_offset, sizeof v);
+    return v;
+}
+
 #endif /* NT_TEST_ACCESS */
 
 void ui_walker_fixture_inject_cmds(ui_walker_fixture_t *fx, Clay_RenderCommand *cmds, int32_t count, int32_t capacity) {
     nt_pointer_t mouse = {0};
-    nt_ui_begin(fx->ctx, 800.0F, 600.0F, 0.0F, &mouse, 1, 0);
+    static const float identity[16] = {1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F};
+    nt_ui_begin(fx->ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &mouse, .pointer_count = 1, .view_proj = fx->ctx->use_raycast_input ? identity : NULL});
     nt_ui_end(fx->ctx);
     fx->ctx->frozen_cmds.internalArray = cmds;
     fx->ctx->frozen_cmds.length = count;

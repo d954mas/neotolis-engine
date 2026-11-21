@@ -366,7 +366,7 @@ static void draw_letter(float ox, float oz, float scale, const float *strokes, i
         float x1 = ox + (strokes[si + 2] * scale);
         float z1 = oz - (strokes[si + 3] * scale);
         if (point_count != 0 && (points[point_count - 1][0] != x0 || points[point_count - 1][2] != z0)) {
-            draw_letter_path((const float(*)[3])points, point_count, color);
+            draw_letter_path((const float (*)[3])points, point_count, color);
             point_count = 0;
         }
         if (point_count == 0) {
@@ -378,7 +378,7 @@ static void draw_letter(float ox, float oz, float scale, const float *strokes, i
         points[point_count][1] = 0.02F;
         points[point_count++][2] = z1;
     }
-    draw_letter_path((const float(*)[3])points, point_count, color);
+    draw_letter_path((const float (*)[3])points, point_count, color);
 }
 
 /* clang-format off */

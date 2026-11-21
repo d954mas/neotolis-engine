@@ -91,6 +91,18 @@ Clay's pinned API (`CLAY_PINNED_MAJOR/MINOR` enforced via
 publicly-promised surface; bumping Clay can require coordinated
 game-side changes.
 
+## Font measurements
+
+Each context keeps the last `nt_font_content_epoch` it saw. Before layout,
+`nt_ui_begin` resets Clay's measurement cache if any font was filled since,
+including when this context was inactive during the fill. `nt_ui_set_font`
+forces the next reset when a different handle is bound under the same font ID.
+GPU glyph eviction and texture recovery do not change the epoch. A destroyed
+font may stay bound while no text uses its font ID; using it is invalid, and the
+measurement callback or text rendering asserts.
+Fill fonts before `nt_ui_begin`: a fill after it leaves this frame's Clay
+measurements stale until the next begin.
+
 ## Widget IDs
 
 Never assign sibling widget IDs as `base_id + index`: Clay's anonymous child IDs
@@ -132,21 +144,23 @@ Bands accumulate with declaration nesting, NOT with attachment:
 declared as one `modal_zband_stride` each, so nested overlays accumulate
 one stride per level, themselves included, when every enclosing floating
 is an engine overlay. A widget's own floating parts declare delta 0 and
-paint above their container's content because they are declared last.
-Under a clip ancestor their clipTo opens a SCISSOR barrier, so `layer`
-never reorders them against that content; without one they order by
-`layer` like the rest of the band. A floating declared AFTER one of them
-in the same band paints over it. There is no way out
+paint above their container's content because each is a later tree root
+of the same band, and `layer` never reorders across tree roots. A floating
+declared AFTER one of them in the same band paints over it. There is no way out
 of an enclosing stacking context: a game floating that must stay under
 all UI belongs at the root level.
 
 The value Clay stores and reports for a floating is the accumulated
-band, not the declared delta. `nt_ui` bakes that band per element and
-the walker orders on it — the `zIndex` field of individual render
-commands is never read by the engine (Clay fills it only for RECTANGLE,
-TEXT and the floating root's clip SCISSOR). Paint order is band asc, then
-`layer` asc within each barrier-delimited run, then declaration;
-SCISSOR/CUSTOM are hard barriers. An accumulated band that would saturate
+band, not the declared delta. Clay sorts its tree roots (the document and
+every floating element) by that band, stably, so equal bands keep
+declaration order. `nt_ui` bakes each element's stacking order — its tree
+root's place in that sort, then its declaration index — and the walker and
+the pointer arbiter both order on it; the `zIndex` field of individual
+render commands is never read by the engine (Clay fills it only for
+RECTANGLE, TEXT and the floating root's clip SCISSOR). Paint order is tree
+root, then `layer` asc within each barrier-delimited run of one root, then
+Clay's command order (a parent's border after its children); SCISSOR/CUSTOM
+are hard barriers. An accumulated band that would saturate
 `int16` raises a Clay error, which `nt_ui` asserts on rather than
 silently merging two bands. That caps what a game floating may declare: its own
 `zIndex` plus one stride per overlay level nested inside it must still
@@ -206,7 +220,7 @@ Two coord-space modes are gated by `nt_ui_create_desc_t.use_raycast_input`:
   add `vy+vh` to m[13]). Hit-test reverses through the top-left 2×2 +
   col3 of the same mat4 (closed-form inverse-affine).
 - **3D ctx** (`use_raycast_input=true`): walker leaves `world_mat4`
-  unflipped; the game owns the screen mapping via `nt_ui_set_view_proj`.
+  unflipped; the game owns the screen mapping via `nt_ui_frame_desc_t.view_proj`.
   Hit-test raycasts pointer → NDC (Clay Y-down to NDC Y-up) → world ray
   via `inv_view_proj` → ray-plane at widget Z=0 → `mat4_inv_trs(baked.m)`
   back to widget-local → bbox check. Optional `element_depth_bias_ndc`
@@ -215,7 +229,12 @@ Two coord-space modes are gated by `nt_ui_create_desc_t.use_raycast_input`:
   write depth need it above 0, or their children are coplanar with the
   background. Text drawn without depth writes occludes nothing: a farther
   panel drawn later covers a label wherever the label's own background does
-  not. Hit-test stays on the unbiased widget plane. Debug inspector render commands are excluded
+  not. Hit-test stays on the unbiased widget plane. With depth-writing
+  panels the depth test, not the stacking order, decides what is drawn on
+  top: the bias grows with `hierarchy_depth`, so document content nested
+  deeper than an overlay can cover it while the pointer goes to the
+  overlay. This is a known divergence from the stacking order, tracked in
+  #875. Debug inspector render commands are excluded
   from the regular 3D walk and drawn by `nt_ui_debug_inspector_walk` as
   a separate final screen-space pass. The game binds a 2D UI projection
   first; `nt_ui_make_screen_view_proj(w, h, ...)` provides the standard
@@ -246,13 +265,27 @@ measured peak.
 
 ## Interaction model
 
-Game ids interact via `nt_ui_query_interaction`
-(pure, multiple calls per frame OK) and `nt_ui_step_interaction`
-(mutating, exactly one call per id per frame). Capture is per-pointer:
+A frame starts with `nt_ui_begin(ctx, &frame)`: `nt_ui_frame_desc_t` carries everything
+the frame's input decisions read — layout size, dt, the raw device pointers, the device
+viewport (zero = identity), and for a 3D ctx the `view_proj` and per-pointer occlusion.
+Begin converts the pointers to layout space, resolves the front-most record per pointer
+and decides the scroll gestures; no setter may change that input later in the frame.
+Game ids interact via `nt_ui_query_interaction` (a pure read, multiple calls per frame OK) and
+`nt_ui_step(ctx, id, desc)` (mutating, exactly one call per id per frame; `desc` carries
+the hit padding and the drag axes the widget consumes itself, NULL for a plain tap
+target). The step commits capture, so a later
+query that frame can read different edges: read one-shot edges from the step's
+result, and `double_clicked` only from there. Capture is per-pointer:
 a press records `active_id`; release clears. Other widgets are
-`exclusive_gated` while one holds capture. **Orphan cleanup** at
+`exclusive_gated` while one holds capture. A frame carries a pointer's release or a
+whole tap, never a release with a newer press: `nt_input` publishes that press one frame
+later ([Input](../io/input.md)), and `nt_ui_begin` asserts the one shape it can see in a
+pointer built by hand (pressed, released and still down). A press always starts a new
+gesture: whatever the pointer still held is dropped. **Orphan cleanup** at
 `nt_ui_begin` drops `active_id` if the widget didn't call step last
-frame — covers scene switches, conditional disable, and widget hide.
+frame — covers scene switches, conditional disable, and widget hide. It also drops
+`active_id` when a pointer has no release edge and its button is up or newly pressed:
+frames without `nt_ui_begin` swallow edges, and the pointer must not stay bound.
 Result: 1-frame IM-lag is intrinsic (current frame reads previous
 frame's bbox); no stuck input on widget disappearance.
 
@@ -260,18 +293,29 @@ frame's bbox); no stuck input on widget disappearance.
 
 When interactive widgets overlap a pointer, only
 the front-most may react; the rest are gated off. The hot widget per pointer
-is resolved once per frame — lazily, on the first `step_interaction` /
-`query_interaction` / `nt_ui_pointer_hot` — from the PREVIOUS frame's
-interactive registry; only widgets that called `nt_ui_step_interaction` last
-frame are candidates. 3D ctx (`use_raycast_input`): nearest world ray-distance
-within a game-fed occlusion cutoff (`nt_ui_set_pointer_occlusion`, reset each
-begin) so UI can't be clicked through world geometry — the game owns the
-raycast, the engine only takes the cutoff distance; `nt_ui_interaction_t.distance`
-reports the hit distance. 2D ctx: highest effective Clay zIndex (tie →
-last-registered, i.e. the later `step_interaction` call; widget code should step
-in declaration order so this matches paint order). A free pointer drives a
+is resolved once per frame, in `nt_ui_begin`, from the PREVIOUS frame's
+interactive registry; only widgets that called `nt_ui_step` (or registered as a
+blocker or scroll surface) last frame are candidates. 3D ctx (`use_raycast_input`):
+nearest world ray-distance within a game-fed occlusion cutoff
+(`nt_ui_frame_desc_t.occlusion`) so UI can't be clicked through
+world geometry — the game owns the raycast, the engine only takes the cutoff distance;
+`nt_ui_interaction_t.distance` reports the hit distance. Hits within 1e-5 of the nearest
+distance (relative, floored at one unit) are coplanar and compete like 2D. 2D ctx: the
+ranking is the stacking order (see "Floating zIndex is relative"): the later tree root wins
+(band, then declaration), and inside one root the later-declared element wins, so a child is
+over its parent and a later sibling over an earlier one. The order `nt_ui_step` is called in
+does not matter. The draw `layer` is not part of it: it reorders painting inside one root for
+batching and never changes which element gets the pointer. A child overlaps its parent: a
+parent on a higher layer than its interactive child, or the parent's border (Clay emits it
+after the children), paints over the child while the child gets the pointer, so keep an
+interactive child's layer at or above its parent's. Siblings of one root overlap only
+through a transform, overflow without a clip, or hit padding; put such interactive parts on
+one layer or make the upper one floating. `nt_ui_wants_pointer` is true
+while a pointer of the current frame holds a capture or a pending scroll gesture, or its front-most record is declared again this frame (a
+record that vanished this frame is not UI under the pointer). A free pointer drives a
 widget only if it is the resolved hot
 widget or already holds capture; `nt_ui_pointer_hot` exposes the resolved id.
+
 Consequence: a freshly-shown widget registers on its first step and only
 becomes eligible the NEXT frame; on the first frame (empty registry) nothing
 reacts — reliability over instant first-frame response, no raw-hit fallback
@@ -281,9 +325,26 @@ frame stays a hot candidate for that ONE transition frame (it can gate widgets
 beneath it but itself reacts to nothing), then orphan cleanup drops it next frame.
 A statically-disabled widget never registers, so never gates — unless it opts in via
 `nt_ui_block_pointer(ctx, id, pad_lrtb)`, which writes an INERT hit-registry entry (the
-same record `step_interaction` makes, minus any interaction). It blocks input to widgets
-behind it but never captures, clicks, or reports hover — the stock disabled widgets
-(button/checkbox/slider) call it so a disabled overlay or modal can't leak clicks through.
+same record `nt_ui_step` makes, minus any interaction). It blocks input to widgets
+behind it but never captures or clicks; a query on a blocked id reads like an
+unstepped widget: hover and the press edge while it is front-most (unpadded). The stock disabled widgets (button/checkbox/slider) call it so a
+disabled overlay or modal can't leak clicks through.
+
+Two hover questions have two answers. `hovered` means "this record is the pointer's
+target and the pointer is over it": it is exclusive, like the press, except that a capture
+holder reports it over its whole box, even under an element declared later. `nt_ui_hovered_within(ctx, id)`
+means "the pointer's target is `id` or an element declared inside `id`" (CSS `:hover` on an
+ancestor). The target is the pointer's hot; a held pointer targets its capture holder
+instead, and only while its hot is the holder or inside it, so a control dragged off hovers
+nothing, its holder included, and dragging one row's control over another row hovers neither.
+`id` need not be interactive, but only records are targets: the empty area of a plain
+container is not inside it, so a container that should hover over its gaps blocks the
+pointer itself (`nt_ui_block_pointer`; its children are declared later and still win).
+Floating children count as inside, overlays too: a combo or menu opened inside a container
+puts its full-viewport catcher or occluder inside that container, so the container reads
+hovered within over the whole screen while the overlay is open (as CSS does for a fixed
+overlay inside a hovered element); a tooltip on that container shows over the open overlay. Combo rows, the combo trigger, tabs, menu rows and
+tooltips read hover within; a sidebar-consumed pointer hovers nothing, as in every query.
 
 ## Anim cache
 
@@ -385,36 +446,71 @@ and animated `nt_ui_scroll_to`. Release-fling velocity is tracked over a TIME WI
 (`TAU_GAIN`/`TAU_DECAY`), not a per-frame delta: a moving frame blends toward the
 instantaneous sample, a zero-delta frame decays toward 0, so a fling survives pointer
 events arriving slower than the render loop instead of depending on release-frame parity.
-A press landing on a flinging container stops the fling and is swallowed (tap-to-stop).
 Per-container scroll state (pos/vel/target/flags)
-rides the state pool keyed by the scroll id; no heap. Wheel input is normalized to a
-NOTCH unit at the platform edge — `1.0 == one physical detent` (GLFW pass-through; web
-`deltaMode` divided to notches), so wheel strength is platform-independent and the
-consumer scales by `wheel_step_px`. Wheel routing is exclusive
-(innermost-wins): each frame every scroll container registers as a candidate, and
-ownership is resolved at frame END — for each pointer the engine picks the candidate
-whose just-solved bbox holds it (ranked by max scroll-nesting depth, then smallest
-area, then latest declaration) and writes a single owner per pointer. That owner is
-consumed the NEXT frame, so wheel routing carries a 1-frame lag: a newly shown
-container sees its first wheel notch one frame late (the same intrinsic IM lag as
-hit-test, which reads the previous frame's bbox). All scroll sizes and pixel
-thresholds (`NT_UI_SCROLL_STEAL_THRESHOLD_PX`, `wheel_step_px`, bar/hit dimensions)
-are in the coordinate space passed to `nt_ui_begin` — NOT framebuffer pixels; games
-typically feed `nt_ui_scale`'s logical space, so these are resolution-independent.
-Capture-steal-by-threshold
-(`NT_UI_SCROLL_STEAL_THRESHOLD_PX`, ~8 px) arbitrates an inner widget's click vs a
-scroll drag: a drag past the threshold cancels the inner capture and scrolls; a tap
-below it leaves the inner widget to click. On the latch frame the steal routes zero
-positional delta (the inner widget already applied it), tracking 1:1 from the next
-frame; the cancelled inner widget keeps any value change it made before the steal
-(Model D — the value lives in the game, so the engine cannot revert it). The
+rides the state pool keyed by the scroll id; no heap. With `rubber_band_c == 0` the
+edge is hard for drag and fling (no reversal dead zone); a rubber band needs
+`bounce_speed > 0` to return (asserted).
+
+**Gesture arbitration.** One arbiter per frame decides every pointer's scroll gesture,
+in `nt_ui_begin` right after the hot resolve, so every step and query of the frame only
+reads its result. It reads only last frame's layout: the
+interactive registry and each scroll's eligible axes (clipped AND overflowing, from the
+clip data Clay keeps for a scroll declared last frame). A scroll container registers its own bbox as a
+*surface* record, so an empty-area press resolves through the normal front-most
+arbitration (z-order, blockers, modals, transforms, 3D occlusion); a scroll whose content
+fits (within half a unit) is see-through. The scroll chain of an element is the scrolls
+that clip it, innermost first: it is read from last frame's clip tree, the one the hit
+test walks, so no declaration order or bookkeeping is involved. A floating element takes
+no clip unless it asks for one (`clipTo`), so everything inside a popup (dropdown, menu,
+modal, tooltip) and the menu occluder has an empty chain, and a drag inside a popup never
+reaches a scroll behind it (a scroll declared inside the popup, a dropdown list, is on the
+chain of its own content); the same holds for a game's own unclipped floating element
+declared inside a scroll: neither a drag nor the wheel over it reaches that scroll.
+Scrollbars clip to their scroll, so they belong to its chain (the wheel over a bar
+scrolls it). A thumb is not driven on an axis the style stopped scrolling (its owner is dropped the next
+frame). A bar has a hit record only while it shows a thumb that can move: thumb art,
+a non-zero thickness, an overflowing axis, room for the thumb to travel, and not faded out; otherwise its strip belongs to the content under
+it. `nt_ui_scroll_begin` / `_end` must balance: `nt_ui_end` asserts that no element is left
+open. A scroll's own id is its surface and must not be stepped as a widget (checked under
+`NT_UI_CHECKS`).
+
+A press starts a gesture record on the chain of the front-most record under it; a press on a bar that can move makes the pointer its scroll's owner by the thumb
+at once (a thumb has no slop; one owner per scroll, by content or by a thumb), and a chain with no eligible axis decides at once (widgets
+in fitting panels are never pending). A chain link counts
+only if that scroll was declared and its layout solved last frame, so a vanished scroll
+takes nothing. While pending, the pressed widget sees `gesture_pending`. Each frame the
+pointer's displacement from the press is compared per axis with the drag slop
+(`NT_UI_DRAG_SLOP_DP`, 8 dp, Android touchSlop): candidates are the
+pressed widget's own `drag_axes` and the chain's eligible axes, inner first. The
+strongest crossing (|d| / slop) wins, ties going to the widget, then the inner scroll;
+nothing crossed keeps the gesture pending. A scroll that wins takes the capture — the
+widget sees a foreign owner and goes silent (no release, no click), keeping any value it wrote (Model D:
+draggables hold value changes while pending). The excess past
+the slop is routed (no jump, no lost distance).
+A crossing on the release frame still claims (fling, no click), and the owner keeps the
+capture through its release frame. A release with nothing crossed stays pending through
+its release frame (`nt_ui_end` ends it, so skipped frames never continue it): the widget gets its release (click when over it) with `gesture_pending`,
+which marks a tap; a pending draggable applies a tap only when `clicked`. The newest pointer to claim a scroll or press its bar takes
+it from older pointers (Android). A press on a flinging, undragged scroll of the chain
+stops the fling and is swallowed (tap-to-stop). Wheel goes per pointer and axis to the
+first scroll of the hovered chain that can move on that axis, consumed the same frame:
+a vertical wheel over a horizontal track reaches its vertical parent. Engine-internal
+inspector panes are chain roots; the sidebar's pointer only reaches panes, and a game
+drag that enters the sidebar ends. Wheel input is normalized to a NOTCH unit at the
+platform edge — `1.0 == one physical detent` (GLFW pass-through; web `deltaMode` divided
+to notches), so wheel strength is platform-independent and the consumer scales by
+`wheel_step_px`. Scroll sizes (`wheel_step_px`, bar/hit dimensions) are in the coordinate
+space passed to `nt_ui_begin`; gesture tolerances (slop, double-click radius, tap-to-stop
+speed) are in dp, converted per axis through `nt_ui_viewport_t.px_per_dp` (the window
+DPR; the identity viewport uses 1). The
 scrollbar (2-piece slice9 track + thumb, both axes) emits as floating children of
 the container with
 ALWAYS / AUTO / AUTO_HIDE visibility (AUTO_HIDE shows on scroll activity and fades
 out `bar_hide_delay` seconds after the last motion, via one `nt_ui_anim` value_t).
-A thumb press grabs at the press offset inside the thumb (no jump-to-center); a click
-on the track off the thumb smooth-jumps to the clicked spot (`nt_ui_scroll_to`). A
-thin bar still gets a ≥ 24 px touch target via a cross-axis hit pad. The
+A thumb press grabs at the press offset inside the thumb (no jump-to-center); a press
+on the track off the thumb centers the thumb under the pointer: a held press at once, a
+tap within one frame smoothly (`nt_ui_scroll_to`). A
+thin bar gets a wider touch target from the style's `bar_hit_pad` (default 12, a 24-wide target): extra hit width from the visual bar toward the content only, since the container clips the outer side; the bar floats over the content, so that zone takes presses from the content under it; 0 leaves the visual bar alone. The
 "Scissor limitation" note below still holds (AABB clip of a rotated scroll
 container is unchanged).
 
@@ -448,14 +544,17 @@ integer pixel gap is used for Clay child spacing, row stride and spacers.
 only caret/selection/scroll/blink/focus in the state pool). Editing is UTF-8
 codepoint-aware: insert/backspace/delete/arrows never split a multi-byte sequence
 and clamp to `buffer_size-1` / `max_length-1` bytes. Typed text arrives via the
-`nt_input_pop_char` UTF-32 ring (frame-local, drained each frame while focused);
+`nt_input_pop_char` UTF-32 characters (frame-local, read each frame while focused);
 physical keys drive navigation/edit. T2 adds selection (Shift+arrows, mouse drag,
-double-click word-select, Ctrl+A), copy/cut/paste via the swappable `nt_clipboard`
+double-click word-select, Ctrl+A; Cmd works as Ctrl on macOS), copy/cut/paste via the swappable `nt_clipboard`
 façade (paste decodes untrusted bytes per-codepoint, runs the allow-predicate,
 clamps, and drops a non-fitting multibyte codepoint whole), a render-only password
 mask, stock allow-predicates (numeric/email/url), a per-field `placeholder` string
 shown dimmed while empty+unfocused, and a minimal focus arbiter (Esc unfocus, Tab
-advance/wrap). A field reached by Tab starts processing keyboard input on the
+advance/wrap). A press focuses the field, except an unfocused field whose press waits
+for a scroll (`gesture_pending`): it focuses on the tap's release, so a list drag never
+opens the keyboard. A focused field drags its selection along x (`drag_axes`).
+A field reached by Tab starts processing keyboard input on the
 next frame; it never replays editing or submit events handled by the source field.
 Focus queries report the destination during the transition frame, while the source
 keeps its focused appearance until the next frame, equally for advance and wrap.
@@ -475,21 +574,31 @@ then inserts the clipboard text codepoint by codepoint: each passes the
 allow-predicate, and the paste stops at the first codepoint that does not fit
 the buffer or `max_length` (both count the NUL byte). A codepoint is never split.
 
-## Consolidated interaction events
+## Gestures
 
-`nt_ui_events(ctx, id, cfg)` is the single
-canonical MUTATING interaction step (one per widget per frame), superseding the
-raw `nt_ui_step_interaction` as the widget-facing call: it returns the base
-capture edges (`hovered/pressed/released/held/clicked`) PLUS cfg-gated gestures
-(`double_clicked`, `long_pressed`, `hold_progress` — a linear 0..1 ramp toward
-`long_press_secs` while `held && hovered`). The base path delegates to
-`step_interaction` verbatim (byte-for-byte capture parity); the gesture cell is
-allocated ONLY when `cfg` opts in (`cfg==NULL` grows the state pool by zero), so
-zero-overhead is the default — explicit-over-implicit. The dbl-click window and
-drag move-radius are engine-global (`nt_ui_set_gesture_constants`); dragging off
-the bbox or past the radius resets `hold_progress` and suppresses `long_pressed`.
-`nt_ui_query_events` is the idempotent read-side mirror (advances nothing).
-`hold_progress` is the hold-to-confirm feedback signal and feeds the radial phase.
+`nt_ui_step` also reports the gestures of a press; `nt_ui_button_begin`
+returns the same result. Gesture state follows the press, not the widget, and uses no
+state-pool cell:
+
+- **Hold** lives in the capturing pointer's capture and counts `dt` since the press:
+  `hold_secs` and `hold_prev_secs`. Motion inside the hitbox keeps the hold. When that
+  pointer leaves the hitbox, the hold reads 0 until a new press. A widget that skips its
+  step loses the capture at the next `nt_ui_begin`, so its hold cannot resume without a
+  new press.
+- **Long press** is a threshold over the hold. `nt_ui_hold_crossed` fires once as the
+  hold crosses `secs`, which must be positive and stay constant for the whole hold.
+  `nt_ui_hold_progress` is the linear 0..1 ramp for hold-to-confirm feedback.
+- **Double-click** pairs a stepped press with the previous stepped press through one
+  record per context: same widget, within the window and the move radius (dp)
+  (`nt_ui_set_gesture_constants`). A stepped press on another widget replaces the
+  record, even from another finger; a completed pair empties it, so a third press starts a new pair.
+  The move radius gates double-click only.
+
+Gesture time is UI time. Every `nt_ui_begin` advances it by `dt`, whether or not the
+widget stepped, so frames with a disabled widget count toward the window and
+`dt==0` pauses both gestures. A frame without `nt_ui_begin` adds no gesture time: the
+game passes the elapsed time in the next `dt` if it must count. Edges lost in such a
+frame end the capture, see "Interaction model".
 
 ## Popup-core
 
@@ -505,20 +614,11 @@ floating (Clay accumulates the nesting, see "Floating zIndex is relative" above;
 NT_ASSERT before the push so a runaway nesting fails early); and a present-only, transparent light-dismiss
 catcher at `panel_z-1` (outside-click raises a close signal). Esc and the
 outside-click scan run on ONE CATCHER-BEARING popup per frame: the highest
-effective band, ties to the last declared. That is the POINTER arbiter's key,
-not the paint key, and deliberately so — the winner performs the dismissal
-through its own catcher's interaction, so a slot ranked by draw layer would
-hand the scan to a popup whose catcher never wins the click and NEITHER
-would dismiss. The cost is real and accepted: two catcher-bearing popups on
-one band with different draw layers paint by layer but dismiss by
-declaration, so an outside click can close the one underneath. Ranking the
-slot by paint order requires making the pointer arbiter layer-aware first
-(`resolve_hot_if_needed` is band-only today) — until then the two must use
-one key, and this is that key. The agreement is a 2D-context property: a 3D
+effective band, ties to the last declared. That is the panels' tree-root
+order, so the popup that paints on top is the one whose catcher wins the
+click and performs the dismissal. The agreement is a 2D-context property: a 3D
 ctx arbitrates the pointer by ray distance and does not rank overlays by
-band at all. The agreement is a 2D-context property: a
-3D ctx arbitrates the pointer by ray distance and does not rank overlays
-by band at all. A catcher-less
+band at all. A catcher-less
 overlay (menu, tooltip) never claims that slot and runs its own dismiss; the
 text field's Esc-unfocus is independent of both. A fully-closed
 popup declares NO catcher, so the base UI stays clickable; a hover-driven
@@ -544,6 +644,18 @@ state (`nt_ui_menu_state_t` / `bool *open`) and, for the combo, the `int`
 selection; the widget only signals and clears `open` on a pick (Model D, same
 as popup-core). Both build on the kept popup-core (+ the scroll wrapper for a
 long combo list). There is no data-array form — immediate-only.
+
+A custom-content row (`item_begin..item_end`, `selectable_begin..selectable_end`,
+`preview_begin..preview_end`, and a tab's `nt_ui_tab_begin..nt_ui_tab_end`) steps
+in its `_end`, after its children, but the stacking order is declaration, so an
+interactive child declared inside the row wins the press over its own area; the
+rest of the row activates it. Over the child the row's own `hovered` is false,
+but it is hovered within: combo rows, the combo trigger and tabs keep their hover
+look, and a menu row keeps highlight, hover focus and the leaf collapse. A rich-text block
+with links is one record over its whole box, so inside a row it takes the press
+over all of its text, not only over the links. A menu row with `non_activatable`
+has no action of its own (for a row that only hosts a control): it never steps,
+only blocks the pointer, so it hovers but never captures or activates.
 
 Per-frame menu scratch is GAME-owned (`nt_ui_menu_ctx_t`, allocated by the
 game — static / app field / arena slice — and init via `nt_ui_menu_init`), so

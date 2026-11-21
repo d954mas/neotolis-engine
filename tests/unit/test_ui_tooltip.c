@@ -4,7 +4,7 @@
  * an eps helper.
  *
  * Hover model: nt_ui_query_interaction reports hovered only for a widget in the front-most arbitration
- * registry, which is populated by step_interaction (NOT query). A tooltip therefore attaches to an
+ * registry, which is populated by nt_ui_step (NOT query). A tooltip therefore attaches to an
  * INTERACTIVE target that steps itself; the tooltip read stays idempotent (query) so it never adds a
  * second mutating step on the target id. Arbitration reads the PREV-frame registry, so the
  * target is stepped each frame and the cursor needs one warm frame before hover registers. */
@@ -16,7 +16,6 @@
 
 #include "atlas/nt_atlas.h"
 #include "clay.h"
-#include "input/nt_input_internal.h"
 #include "sprite_comp/nt_sprite_comp.h" /* NT_SPRITE_FLAG_FLIP_Y */
 #include "test_helpers/nt_assert_trap.h"
 #include "test_helpers/ui_test_arena.h"
@@ -45,14 +44,10 @@ static ui_walker_fixture_t s_fx;
 
 void setUp(void) {
     nt_test_assert_install();
-    nt_input_clear_all_keys();
     ui_walker_fixture_init(&s_fx, s_arena, sizeof s_arena, UI_WALKER_FX_BIND_ALL);
 }
 
-void tearDown(void) {
-    nt_input_clear_all_keys();
-    ui_walker_fixture_shutdown(&s_fx);
-}
+void tearDown(void) { ui_walker_fixture_shutdown(&s_fx); }
 
 static bool float_near(float a, float b, float eps) { return fabsf(a - b) <= eps; }
 
@@ -74,17 +69,17 @@ static nt_ui_tooltip_style_t test_style(void) {
  * popup edge-flips ABOVE (caret-flip). x stays 0 so the centered tooltip stays in the viewport. */
 #define TGT_BOTTOM_Y 560.0F
 
-/* One full frame: declare the INTERACTIVE target (step_interaction registers it for arbitration +
+/* One full frame: declare the INTERACTIVE target (nt_ui_step registers it for arbitration +
  * bakes its bbox) + declare the tooltip after it; returns whether the tooltip panel was declared. */
 static bool tooltip_frame_at(const nt_pointer_t *p, nt_ui_tooltip_style_t *st, bool at_bottom) {
-    nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, DT, p, 1, 0);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = DT, .pointers = p, .pointer_count = 1});
     if (at_bottom) {
         /* Float the target near the bottom border (mirrors the dropdown edge-flip fixture). */
         CLAY({.floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = 0.0F, .y = TGT_BOTTOM_Y}}}) {
-            CLAY({.id = (Clay_ElementId){.id = TGT_ID}, .layout = {.sizing = {CLAY_SIZING_FIXED(TGT_W), CLAY_SIZING_FIXED(TGT_H)}}}) { (void)nt_ui_step_interaction(s_fx.ctx, TGT_ID); }
+            CLAY({.id = (Clay_ElementId){.id = TGT_ID}, .layout = {.sizing = {CLAY_SIZING_FIXED(TGT_W), CLAY_SIZING_FIXED(TGT_H)}}}) { (void)nt_ui_step(s_fx.ctx, TGT_ID, NULL); }
         }
     } else {
-        CLAY({.id = (Clay_ElementId){.id = TGT_ID}, .layout = {.sizing = {CLAY_SIZING_FIXED(TGT_W), CLAY_SIZING_FIXED(TGT_H)}}}) { (void)nt_ui_step_interaction(s_fx.ctx, TGT_ID); }
+        CLAY({.id = (Clay_ElementId){.id = TGT_ID}, .layout = {.sizing = {CLAY_SIZING_FIXED(TGT_W), CLAY_SIZING_FIXED(TGT_H)}}}) { (void)nt_ui_step(s_fx.ctx, TGT_ID, NULL); }
     }
     const bool shown = nt_ui_tooltip(s_fx.ctx, NT_UI_DATA_LAYER(1), 2U, TGT_ID, "hint text", st);
     nt_ui_end(s_fx.ctx);
@@ -137,6 +132,39 @@ static void test_tooltip_delayed_reveal(void) {
     TEST_ASSERT_TRUE(saw_reveal);
 }
 
+/* ---- A tooltip on a container reveals over an interactive child declared inside it and hides the first
+ *      frame the pointer leaves. Only records are targets: the container's own gap counts only when the
+ *      container blocks the pointer itself. ---- */
+#define TGT_CHILD_ID 0x7A1D02U
+static bool container_tooltip_frame(const nt_pointer_t *p, nt_ui_tooltip_style_t *st, bool block) {
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = DT, .pointers = p, .pointer_count = 1});
+    CLAY({.id = (Clay_ElementId){.id = TGT_ID}, .layout = {.sizing = {CLAY_SIZING_FIXED(TGT_W), CLAY_SIZING_FIXED(TGT_H)}}}) {
+        if (block) {
+            nt_ui_block_pointer(s_fx.ctx, TGT_ID, NULL);
+        }
+        CLAY({.id = (Clay_ElementId){.id = TGT_CHILD_ID}, .layout = {.sizing = {CLAY_SIZING_FIXED(20), CLAY_SIZING_FIXED(TGT_H)}}}) { (void)nt_ui_step(s_fx.ctx, TGT_CHILD_ID, NULL); }
+    }
+    const bool shown = nt_ui_tooltip(s_fx.ctx, NT_UI_DATA_LAYER(1), 2U, TGT_ID, "hint text", st);
+    nt_ui_end(s_fx.ctx);
+    return shown;
+}
+
+static void test_tooltip_on_container_reveals_over_its_child(void) {
+    const nt_pointer_t on_child = pointer_at(10.0F, TGT_H * 0.5F);
+    const nt_pointer_t on_gap = pointer_at(TGT_W - 10.0F, TGT_H * 0.5F);
+    const nt_pointer_t away = pointer_at(VIEW_W - 10.0F, VIEW_H - 10.0F);
+    for (int block = 0; block < 2; ++block) {
+        nt_ui_tooltip_style_t st = test_style();
+        bool shown = false;
+        for (int i = 0; i < (int)ceilf(DELAY / DT) + 4 && !shown; ++i) {
+            shown = container_tooltip_frame(&on_child, &st, block != 0);
+        }
+        TEST_ASSERT_TRUE(shown);
+        TEST_ASSERT_EQUAL(block != 0, container_tooltip_frame(&on_gap, &st, block != 0));
+        TEST_ASSERT_FALSE(container_tooltip_frame(&away, &st, block != 0));
+    }
+}
+
 /* ---- Hide on leave: once revealed, moving the cursor off the target resets the timer to 0 and hides
  *      the tooltip. ---- */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -182,13 +210,13 @@ static void test_tooltip_declares_no_catcher(void) {
 }
 
 /* ---- No double-mutation: the tooltip reads the target via an IDEMPOTENT query, so the game's own
- *      mutating step_interaction on the SAME target id sees an unperturbed capture machine. A press on
+ *      mutating nt_ui_step on the SAME target id sees an unperturbed capture machine. A press on
  *      the target still produces pressed_now/clicked exactly as if the tooltip were not present. ---- */
 static nt_ui_interaction_t target_frame_with_tooltip(const nt_pointer_t *p, nt_ui_tooltip_style_t *st) {
-    nt_ui_begin(s_fx.ctx, VIEW_W, VIEW_H, DT, p, 1, 0);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = DT, .pointers = p, .pointer_count = 1});
     nt_ui_interaction_t in;
     CLAY({.id = (Clay_ElementId){.id = TGT_ID}, .layout = {.sizing = {CLAY_SIZING_FIXED(TGT_W), CLAY_SIZING_FIXED(TGT_H)}}}) {
-        in = nt_ui_step_interaction(s_fx.ctx, TGT_ID); /* the game's single mutating step */
+        in = nt_ui_step(s_fx.ctx, TGT_ID, NULL); /* the game's single mutating step */
     }
     (void)nt_ui_tooltip(s_fx.ctx, NT_UI_DATA_LAYER(1), 2U, TGT_ID, "hint text", st); /* idempotent read on the same id */
     nt_ui_end(s_fx.ctx);
@@ -401,6 +429,7 @@ int main(void) {
     RUN_TEST(test_tooltip_defaults_valid);
     RUN_TEST(test_tooltip_delayed_reveal);
     RUN_TEST(test_tooltip_hide_on_leave);
+    RUN_TEST(test_tooltip_on_container_reveals_over_its_child);
     RUN_TEST(test_tooltip_declares_no_catcher);
     RUN_TEST(test_tooltip_no_double_mutation);
     RUN_TEST(test_tooltip_caret_on_first_frame);

@@ -14,7 +14,7 @@
 #include "resource/nt_resource.h"
 #include "ui/nt_ui_internal.h"
 
-/* Recording filled inside step_interaction_padded; drawing called by game after nt_ui_walk. */
+/* Recording filled inside nt_ui_step; drawing called by game after nt_ui_walk. */
 
 // #region toggle + getters
 void nt_ui_debug_set_recording(nt_ui_context_t *ctx, bool on) {

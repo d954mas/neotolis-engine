@@ -26,11 +26,13 @@ bool nt_gfx_gl_ctx_query_lost(void);
  * support (native). Returns true if GL_TIME_ELAPSED queries are usable. */
 bool nt_gfx_gl_ctx_enable_timer_query(void);
 
-/* KHR_debug check (native: GL 4.3+ or KHR_debug extension; web: usually
- * absent). Returns true if glPushDebugGroup / glPopDebugGroup are safe to
- * call. The GL backend uses these to label GPU timer segments so RenderDoc
- * / Apitrace / gDEBugger show segment names as debug groups. */
+#ifndef NT_PLATFORM_WEB
+/* KHR_debug check (GL 4.3+ or the KHR_debug extension; WebGL2 has none).
+ * Returns true if glPushDebugGroup / glPopDebugGroup are safe to call. The
+ * GL backend uses these to label GPU timer segments so RenderDoc / Apitrace
+ * / gDEBugger show segment names as debug groups. */
 bool nt_gfx_gl_ctx_enable_debug_groups(void);
+#endif
 
 #ifdef NT_PLATFORM_WEB
 double nt_gfx_gl_ctx_query_result(uint32_t query);

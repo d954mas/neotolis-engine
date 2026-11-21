@@ -8,6 +8,9 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 if command -v cygpath > /dev/null 2>&1; then
     ROOT_DIR="$(cygpath -m "$ROOT_DIR")"
 fi
+# shellcheck source=lib/toolchain.sh
+source "$SCRIPT_DIR/lib/toolchain.sh"
+require_installed llvm
 BUILD_DIR="${1:-build/_cmake/native-debug}"
 if [ "$#" -gt 0 ]; then shift; fi
 

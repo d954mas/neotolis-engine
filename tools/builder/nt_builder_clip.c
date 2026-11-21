@@ -213,6 +213,7 @@ static void clip_unpack_track(clip_track_t *track, float *scratch) {
         /* CUBICSPLINE tangents are directions, not rotations; only the value
          * of each key is a quaternion. */
         double *q = track->values + ((((size_t)k * per_key) + (per_key / 2U)) * 4U);
+        // NOLINTNEXTLINE(clang-analyzer-core.UndefinedBinaryOperatorResult): the path assumes 0 keys above and keys here
         const double len2 = (q[0] * q[0]) + (q[1] * q[1]) + (q[2] * q[2]) + (q[3] * q[3]);
         if (len2 < CLIP_MIN_Q_LEN2) {
             NT_BUILD_FAIL("animation rotation key is too short to normalize", "%s: %s.rotation key %u (%g, %g, %g, %g) is too short to be a rotation", label, name, k, q[0], q[1], q[2], q[3]);

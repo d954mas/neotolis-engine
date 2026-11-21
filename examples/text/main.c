@@ -72,7 +72,6 @@ static float s_pitch;
 static float s_vel_yaw;
 static float s_vel_pitch;
 static float s_cam_dist = 12.0F;
-static bool s_grabbed;
 
 static nt_font_t s_font;
 static nt_material_t s_text_material;
@@ -106,7 +105,6 @@ static bool s_prof_cjk_reset;    /* true after CJK load triggered a reset */
 static void trackball_update(float dt) {
     /* Mouse drag rotation */
     if (nt_input_mouse_is_down(NT_BUTTON_LEFT)) {
-        s_grabbed = true;
         float dx = g_nt_input.pointers[0].dx;
         float dy = g_nt_input.pointers[0].dy;
         float new_yaw = dx * MOUSE_SENS;
@@ -239,6 +237,20 @@ static void frame(void) {
 
     /* Step resource system */
     nt_resource_step();
+    static int s_font_stage; /* 0: empty, 1: base filled, 2: CJK filled */
+    if (s_font_stage == 0 && nt_resource_pack_state(s_base_pack_id) == NT_PACK_STATE_READY) {
+        uint32_t size = 0;
+        const uint8_t *bytes = nt_resource_entry_bytes(s_base_pack_id, ASSET_FONT_TEXT_FONT_BASE, &size);
+        nt_font_fill(s_font, bytes, size);
+        s_font_stage = 1;
+    }
+    if (s_font_stage == 1 && nt_resource_pack_state(s_cjk_pack_id) == NT_PACK_STATE_READY) {
+        uint32_t size = 0;
+        const uint8_t *bytes = nt_resource_entry_bytes(s_cjk_pack_id, ASSET_FONT_TEXT_FONT_CJK, &size);
+        nt_font_fill(s_font, bytes, size);
+        nt_resource_evict(s_cjk_pack_id);
+        s_font_stage = 2;
+    }
     if (nt_program_ref_update(&s_text_program)) {
         nt_material_set_program(s_text_material, s_text_program.program);
     }
@@ -426,7 +438,7 @@ int main(int argc, char *argv[]) {
 
     /* 4. GFX init */
     nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
-    gfx_desc.frame_capacity[NT_GFX_FRAME_VERTEX] = 32U * 1024U; /* the scene peaks at 11.3 KB: 60 glyphs */
+    gfx_desc.frame_capacity[NT_GFX_FRAME_VERTEX] = 32U * 1024U; /* the scene peaks at 8.4 KB: 60 glyphs */
     gfx_desc.frame_capacity[NT_GFX_FRAME_INDEX] = 4U * 1024U;
     nt_gfx_init(&gfx_desc);
 
@@ -481,14 +493,6 @@ int main(int argc, char *argv[]) {
         .max_glyphs = 256,
         .measure_cache_size = 256,
     });
-
-    /* Request font resources (resolved when packs arrive) */
-    nt_resource_t font_base_res = nt_resource_request(ASSET_FONT_TEXT_FONT_BASE, NT_ASSET_FONT);
-    nt_font_add(s_font, font_base_res);
-
-    /* CJK font resource -- resolved when CJK pack loads (progressive) */
-    nt_resource_t font_cjk_res = nt_resource_request(ASSET_FONT_TEXT_FONT_CJK, NT_ASSET_FONT);
-    nt_font_add(s_font, font_cjk_res);
 
     /* 15. Unlimited activation budget during loading (0 = no time limit) */
     nt_resource_set_activate_time_budget(0);

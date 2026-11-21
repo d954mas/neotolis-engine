@@ -42,9 +42,9 @@ jobs:
   # #region producers
   packs:
     name: Native Release & Packs
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
         with:
           lfs: "true"
@@ -55,7 +55,7 @@ jobs:
 
       # Cold sponza encode is the long pole (up to ~2h); the cache keeps it in seconds.
       - name: Restore builder cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: build/examples/*/_cache
           key: builder-cache-${{ github.sha }}
@@ -99,7 +99,7 @@ jobs:
           exit $bad
 
       - name: Upload example packs
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: example-packs
           path: build/examples/*/*.ntpack
@@ -109,9 +109,9 @@ jobs:
   # The full Basis baseline feeds every wasm test_basisu_trimmed run.
   goldens:
     name: Basis Goldens
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
         with:
           lfs: "true"
@@ -124,7 +124,7 @@ jobs:
           ctest --preset native-release-test --no-tests=error -R '^test_basisu_golden_produce$'
 
       - name: Upload Basis goldens
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: basisu-goldens
           path: |
@@ -137,10 +137,10 @@ jobs:
   # #region wasm
   wasm-debug:
     name: WASM Debug
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     needs: [packs, goldens]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
         with:
           lfs: "true"
@@ -151,11 +151,11 @@ jobs:
 
       # Restores build/examples/<name>/<pack>.ntpack — upload-artifact roots the
       # archive at the pre-wildcard prefix of its glob (build/examples).
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: example-packs
           path: build/examples
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: basisu-goldens
           path: build/tests/basisu_golden
@@ -193,10 +193,10 @@ jobs:
 
   wasm-release:
     name: WASM Release & Sizes
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     needs: [packs, goldens]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
         with:
           lfs: "true"
@@ -205,23 +205,23 @@ jobs:
           ccache-key: wasm-release
           ccache-size: 600M
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: example-packs
           path: build/examples
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: basisu-goldens
           path: build/tests/basisu_golden
 
       - name: Verify optional UI composition in WASM release
         run: |
-          emcmake cmake -S tests/submodule -B build/_cmake/ui-composition-wasm-release -G Ninja -DENGINE_ROOT="$PWD" -DCMAKE_BUILD_TYPE=Release -DNT_BUILD_TESTS=OFF -DNT_FONT_EMBOLDEN_ENABLED=OFF -DNT_UI_CLAY_DEBUG_VIEW=OFF -DNT_UI_DEBUG_TOOLS=OFF
+          cmake -S tests/submodule -B build/_cmake/ui-composition-wasm-release -G Ninja -DCMAKE_TOOLCHAIN_FILE="$EMSDK/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake" -DENGINE_ROOT="$PWD" -DCMAKE_BUILD_TYPE=Release -DNT_BUILD_TESTS=OFF -DNT_FONT_EMBOLDEN_ENABLED=OFF -DNT_UI_CLAY_DEBUG_VIEW=OFF -DNT_UI_DEBUG_TOOLS=OFF
           python3 scripts/check_ui_composition.py build/_cmake/ui-composition-wasm-release --nm "$EMSDK/upstream/bin/llvm-nm"
 
       - name: Build optional UI features in WASM release
         run: |
-          emcmake cmake --preset wasm-release -B build/_cmake/wasm-release-ui-on -DNT_FONT_EMBOLDEN_ENABLED=ON -DNT_UI_CLAY_DEBUG_VIEW=ON
+          cmake --preset wasm-release -B build/_cmake/wasm-release-ui-on -DNT_FONT_EMBOLDEN_ENABLED=ON -DNT_UI_CLAY_DEBUG_VIEW=ON
           cmake --build build/_cmake/wasm-release-ui-on --target ui_showcase
 
       # The paired index.wasm is the wasm-release baseline (only the shell differs).
@@ -279,7 +279,7 @@ jobs:
           done
 
       - name: Upload size data
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: wasm-size-sizes
           path: /tmp/size_*.json
@@ -287,10 +287,10 @@ jobs:
 
   wasm-analysis:
     name: WASM Analysis & Reports
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     needs: [packs, goldens]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
         with:
           lfs: "true"
@@ -300,11 +300,11 @@ jobs:
           ccache-key: wasm-analysis
           ccache-size: 600M
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: example-packs
           path: build/examples
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: basisu-goldens
           path: build/tests/basisu_golden
@@ -356,7 +356,7 @@ jobs:
           done
 
       - name: Upload size reports
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: wasm-size-reports
           path: /tmp/report_*.txt
@@ -368,9 +368,9 @@ jobs:
   # display tests alone on the shared xvfb display.
   native-release:
     name: Native Release Tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
         with:
           lfs: "true"
@@ -398,9 +398,9 @@ jobs:
   # devapi + ui/obs/entity_write/capture groups ON so the devapi test targets build and run.
   native-debug:
     name: Native Debug Tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
         with:
           lfs: "true"
@@ -432,18 +432,17 @@ jobs:
         run: |
           cmake -S tests/submodule -B build/submodule-test \
             -DENGINE_ROOT=${{ github.workspace }} \
-            -DCMAKE_C_COMPILER=clang -G Ninja
+            -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/cmake/nt_llvm_toolchain.cmake -G Ninja
           cmake --build build/submodule-test
           ./build/submodule-test/submodule_test
 
   # Compile and link only: no other job builds the Windows recorder backend (Media Foundation).
   windows-recorder:
     name: Windows Recorder Build
-    runs-on: windows-latest
+    runs-on: windows-2025-vs2026
     steps:
-      - uses: actions/checkout@v4
-      - name: Install ninja
-        run: choco install ninja -y --no-progress
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
       - name: Build devapi_host with the recorder group, and the frame inspector (Win32 file dialog)
         shell: bash
         run: |
@@ -453,9 +452,9 @@ jobs:
   # Debug configurations that differ from native-debug in one feature set.
   native-variants:
     name: Native Feature Variants
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
         with:
           lfs: "true"
@@ -465,7 +464,7 @@ jobs:
       # Debug + FULL asserts + sanitizers: the only ctest over every stub body.
       - name: Build native debug with optional features OFF
         run: |
-          cmake -B build/_cmake/native-debug-off -DCMAKE_BUILD_TYPE=Debug -DCMAKE_C_STANDARD=17 -DCMAKE_C_STANDARD_REQUIRED=ON -DCMAKE_C_COMPILER=clang -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DNT_UI_DEBUG_TOOLS=OFF -DNT_ASSERT_MODE=2 -DNT_SKELETAL_CHECKS=ON -DNT_UI_CHECKS=ON -DNT_GFX_NATIVE_GL_DEBUG=ON -DNT_HTTP_CURL=ON -DNT_SKIP_EXAMPLE_PACKS="$NT_ALL_EXAMPLE_PACKS" -G Ninja
+          cmake -B build/_cmake/native-debug-off -DCMAKE_BUILD_TYPE=Debug -DCMAKE_C_STANDARD=17 -DCMAKE_C_STANDARD_REQUIRED=ON -DCMAKE_TOOLCHAIN_FILE="$PWD/cmake/nt_llvm_toolchain.cmake" -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DNT_UI_DEBUG_TOOLS=OFF -DNT_ASSERT_MODE=2 -DNT_SKELETAL_CHECKS=ON -DNT_UI_CHECKS=ON -DNT_GFX_NATIVE_GL_DEBUG=ON -DNT_HTTP_CURL=ON -DNT_SKIP_EXAMPLE_PACKS="$NT_ALL_EXAMPLE_PACKS" -G Ninja
           cmake --build build/_cmake/native-debug-off
 
       # The atlas tests check builder geometry and the sweep script, not optional features;
@@ -511,12 +510,10 @@ jobs:
   # #region lint and smoke
   lint:
     name: Format & Tidy
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
-        with:
-          extra-packages: clang-tidy
 
       - name: Check formatting
         run: |
@@ -557,13 +554,12 @@ jobs:
 
   devapi-smoke:
     name: DevAPI Smoke (live socket UAT)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # No LFS: devapi_host clears a two-tone pattern and loads no asset pack.
       - uses: ./.github/actions/setup
         with:
-          extra-packages: python3-pip
           ccache-key: devapi-smoke
 
       # Pillow + numpy are the capture-path-only decode deps, pinned + installed ONLY here.
@@ -601,19 +597,19 @@ jobs:
   # path) only runs in a real headless Chromium: the same Python scenarios through PlaywrightTransport.
   web-smoke:
     name: Web Smoke (devapi, blocking)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # No LFS / pack builder: devapi_host loads no asset pack.
       - uses: ./.github/actions/setup
         with:
           emsdk: "true"
           ccache-key: web-smoke
-          extra-packages: ffmpeg python3-pip
+          extra-packages: ffmpeg
 
       - name: Build devapi_host wasm (debug, every group)
         run: |
-          emcmake cmake --preset wasm-debug -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_CORE=ON -DNT_DEVAPI_GROUP_TIME=ON -DNT_DEVAPI_GROUP_CAPTURE=ON -DNT_DEVAPI_GROUP_GFX=ON -DNT_DEVAPI_GROUP_OBS=ON -DNT_DEVAPI_GROUP_RECORDER=ON -DNT_DEVAPI_GROUP_UI=ON -DNT_DEVAPI_GROUP_ENTITY_WRITE=ON -DNT_DEVAPI_GROUP_INPUT=ON
+          cmake --preset wasm-debug -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_CORE=ON -DNT_DEVAPI_GROUP_TIME=ON -DNT_DEVAPI_GROUP_CAPTURE=ON -DNT_DEVAPI_GROUP_GFX=ON -DNT_DEVAPI_GROUP_OBS=ON -DNT_DEVAPI_GROUP_RECORDER=ON -DNT_DEVAPI_GROUP_UI=ON -DNT_DEVAPI_GROUP_ENTITY_WRITE=ON -DNT_DEVAPI_GROUP_INPUT=ON
           cmake --build --preset wasm-debug --target devapi_host
 
       # The wasm-release preset enables Closure over the window.__devapi bridge and the recorder's
@@ -621,11 +617,11 @@ jobs:
       # it builds the groups of the Closure subset below (OBS with the providers it needs).
       - name: Build devapi_host wasm (release, Closure subset groups)
         run: |
-          emcmake cmake --preset wasm-release -B build/_cmake/wasm-release-devapi -DNT_LOG_RING_ENABLED=ON -DNT_METRICS_ENABLED=ON -DNT_INTROSPECT_ENABLED=ON -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_CORE=ON -DNT_DEVAPI_GROUP_TIME=ON -DNT_DEVAPI_GROUP_CAPTURE=ON -DNT_DEVAPI_GROUP_OBS=ON -DNT_DEVAPI_GROUP_RECORDER=ON
+          cmake --preset wasm-release -B build/_cmake/wasm-release-devapi -DNT_LOG_RING_ENABLED=ON -DNT_METRICS_ENABLED=ON -DNT_INTROSPECT_ENABLED=ON -DNT_DEVAPI_ENABLED=ON -DNT_DEVAPI_GROUP_CORE=ON -DNT_DEVAPI_GROUP_TIME=ON -DNT_DEVAPI_GROUP_CAPTURE=ON -DNT_DEVAPI_GROUP_OBS=ON -DNT_DEVAPI_GROUP_RECORDER=ON
           cmake --build build/_cmake/wasm-release-devapi --target devapi_host
 
       - name: Cache Playwright browsers
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/ms-playwright
           key: playwright-py-${{ hashFiles('tools/devapi/requirements-web.txt') }}
@@ -662,13 +658,13 @@ jobs:
   # release diagnostics rows.
   browser-test:
     name: Browser (${{ matrix.part }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     strategy:
       fail-fast: false
       matrix:
         part: [smoke, basis, diagnostics]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
         with:
           lfs: "true"
@@ -687,14 +683,14 @@ jobs:
       - name: Build browser_smoke wasm (debug)
         if: matrix.part == 'smoke'
         run: |
-          emcmake cmake --preset wasm-debug
+          cmake --preset wasm-debug
           cmake --build --preset wasm-debug --target browser_smoke
           # A missing pack must fail here, not as a 30 s Playwright timeout.
           test -f build/tests/browser/app/wasm-debug/assets/ui_showcase.ntpack
           test -f build/tests/browser/app/wasm-debug/assets/basis_fixture.ntpack
 
       - name: Cache Playwright browsers
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ hashFiles('tests/browser/package-lock.json') }}
@@ -722,7 +718,7 @@ jobs:
             cmake --preset native-debug -B "build/_cmake/$name-native" ${flags//,/ } -DNT_HTTP_CURL=OFF -DNT_SKIP_EXAMPLE_PACKS="$NT_ALL_EXAMPLE_PACKS"
             cmake --build "build/_cmake/$name-native" --target browser_smoke_packs
             dir="$name-wasm-debug"
-            emcmake cmake --preset wasm-debug -B "build/_cmake/$dir" ${flags//,/ } -DNT_SKIP_EXAMPLE_PACKS="$NT_ALL_EXAMPLE_PACKS"
+            cmake --preset wasm-debug -B "build/_cmake/$dir" ${flags//,/ } -DNT_SKIP_EXAMPLE_PACKS="$NT_ALL_EXAMPLE_PACKS"
             cmake --build "build/_cmake/$dir" --target browser_smoke
             test -f "build/tests/browser/app/$dir/assets/ui_showcase.ntpack"
             test -f "build/tests/browser/app/$dir/assets/basis_fixture.ntpack"
@@ -735,7 +731,7 @@ jobs:
           for timing in "0 0" "0 1" "1 0"; do
             read -r ui gpu <<< "$timing"
             name="diagnostics-web-ui-$ui-gpu-$gpu"
-            emcmake cmake --preset wasm-release -B "build/_cmake/$name" -DNT_PRESET_NAME="$name" -DNT_UI_TIMING_ENABLED="$ui" -DNT_GFX_GPU_TIMING_ENABLED="$gpu"
+            cmake --preset wasm-release -B "build/_cmake/$name" -DNT_PRESET_NAME="$name" -DNT_UI_TIMING_ENABLED="$ui" -DNT_GFX_GPU_TIMING_ENABLED="$gpu"
             cmake --build "build/_cmake/$name" --target browser_smoke
             test -f "build/tests/browser/app/$name/assets/ui_showcase.ntpack"
             test -f "build/tests/browser/app/$name/assets/basis_fixture.ntpack"
@@ -747,18 +743,18 @@ jobs:
 
   deploy:
     name: Deploy
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     needs: [packs, wasm-debug, wasm-release, wasm-analysis, native-release, native-debug, windows-recorder, native-variants, lint, devapi-smoke, web-smoke, browser-test]
     if: github.ref == 'refs/heads/master' && github.event_name == 'push'
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Restores build/examples/<name>/<pack>.ntpack — upload-artifact roots the
       # archive at the pre-wildcard prefix of its glob (build/examples).
       - name: Download example packs
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: example-packs
           path: build/examples
@@ -793,14 +789,14 @@ jobs:
       # Metrics ON: the deployed bunnymark / ui_showcase HUDs read nt_metrics (stubs would show zeros).
       - name: Build paired WASM release for deploy
         run: |
-          emcmake cmake --preset wasm-release-paired -DNT_CDN_URL="https://cdn.neotolis-engine.dev" -DNT_METRICS_ENABLED=ON
-          emcmake cmake --preset wasm-release-simd -DNT_CDN_URL="https://cdn.neotolis-engine.dev" -DNT_METRICS_ENABLED=ON
+          cmake --preset wasm-release-paired -DNT_CDN_URL="https://cdn.neotolis-engine.dev" -DNT_METRICS_ENABLED=ON
+          cmake --preset wasm-release-simd -DNT_CDN_URL="https://cdn.neotolis-engine.dev" -DNT_METRICS_ENABLED=ON
           cmake --build --preset wasm-release-paired
           cmake --build --preset wasm-release-simd
           ./scripts/package_all_simd.sh wasm-release-paired wasm-release-simd
 
       - name: Checkout gh-pages branch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: gh-pages
           path: gh-pages-data
@@ -850,7 +846,7 @@ jobs:
         run: cp -r neotolis-engine-site/dist/* gh-pages-data/
 
       - name: Deploy to Cloudflare Pages
-        uses: cloudflare/wrangler-action@v3
+        uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -858,25 +854,25 @@ jobs:
 
   persist-sizes:
     name: Persist Size Data
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     needs: [wasm-release, wasm-analysis]
     if: github.ref == 'refs/heads/master' && github.event_name == 'push'
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           sparse-checkout: scripts
 
       - name: Download size data
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: wasm-size-*
           merge-multiple: true
           path: /tmp
 
       - name: Checkout gh-pages branch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: gh-pages
           path: gh-pages-data
@@ -936,7 +932,7 @@ jobs:
           done
 
       - name: Persist size data to gh-pages
-        uses: peaceiris/actions-gh-pages@v4
+        uses: peaceiris/actions-gh-pages@v4.1.0
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: gh-pages-data
@@ -944,18 +940,18 @@ jobs:
 
   pr-size-comment:
     name: PR Size Comment
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     needs: [wasm-release, wasm-analysis]
     if: github.event_name == 'pull_request'
     permissions:
       pull-requests: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           sparse-checkout: scripts
 
       - name: Download size data
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: wasm-size-*
           merge-multiple: true
@@ -963,7 +959,7 @@ jobs:
 
       - name: Fetch baseline from gh-pages
         id: baseline
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: gh-pages
           path: gh-pages-baseline

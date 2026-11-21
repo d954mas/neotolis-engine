@@ -255,7 +255,7 @@ static void replace_geometry(nt_atlas_data_t *ad, const nt_atlas_blob_view_t *v)
     const uint32_t capacity = bytes < sizeof(float[2]) ? (uint32_t)sizeof(float[2]) : bytes;
     if (capacity > ad->geometry_capacity) {
         free(ad->positions);
-        ad->positions = (float(*)[2])malloc(capacity);
+        ad->positions = (float (*)[2])malloc(capacity);
         NT_ASSERT(ad->positions);
         ad->geometry_capacity = capacity;
     }
@@ -471,7 +471,7 @@ const float (*nt_atlas_get_region_positions(nt_resource_t atlas, uint32_t region
     const nt_atlas_data_t *ad = (const nt_atlas_data_t *)nt_resource_peek_user_data(atlas);
     NT_ASSERT(ad != NULL && "nt_atlas_get_region_positions on unresolved atlas");
     NT_ASSERT(region_index < ad->region_count && "nt_atlas_get_region_positions: region_index out of range");
-    return (const float(*)[2]) & ad->positions[ad->regions[region_index].vertex_start];
+    return (const float (*)[2]) & ad->positions[ad->regions[region_index].vertex_start];
 }
 
 const nt_atlas_uv_t *nt_atlas_get_region_uvs(nt_resource_t atlas, uint32_t region_index) {
@@ -499,7 +499,7 @@ void nt_atlas_get_region_handles(nt_resource_t atlas, uint32_t region_index, nt_
 
     const nt_texture_region_t *r = &ad->regions[region_index];
     out->region = r;
-    out->positions = (const float(*)[2]) & ad->positions[r->vertex_start];
+    out->positions = (const float (*)[2]) & ad->positions[r->vertex_start];
     out->uvs = &ad->uvs[r->vertex_start];
     out->indices = &ad->indices[r->index_start];
     out->page_resource = ad->page_resources[r->page_index];
@@ -561,7 +561,7 @@ void nt_atlas_test_reset(void) { s_atlas.initialized = false; }
 
 const float (*nt_atlas_test_positions(const struct nt_atlas_data *ad))[2] {
     NT_ASSERT(ad != NULL);
-    return (const float(*)[2])ad->positions;
+    return (const float (*)[2])ad->positions;
 }
 
 const nt_atlas_uv_t *nt_atlas_test_uvs(const struct nt_atlas_data *ad) {

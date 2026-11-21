@@ -150,7 +150,9 @@ void setUp(void) {
     nt_gfx_begin_frame();
     nt_http_init();
     nt_fs_init();
+    nt_blob_init(2);
     nt_resource_init(&(nt_resource_desc_t){0});
+    nt_resource_register_type(NT_ASSET_BLOB, &(nt_resource_type_desc_t){.activate = nt_blob_activate, .deactivate = nt_blob_deactivate});
     nt_resource_set_activate_time_budget(0);
     nt_resource_register_type(NT_ASSET_SHADER_CODE, &(nt_resource_type_desc_t){.activate = nt_gfx_activate_shader, .deactivate = nt_gfx_deactivate_shader});
     nt_material_init(&(nt_material_desc_t){.max_materials = TEST_NODE_COUNT});
@@ -176,6 +178,7 @@ void tearDown(void) {
     nt_entity_shutdown();
     nt_material_shutdown();
     nt_resource_shutdown();
+    nt_blob_shutdown();
     nt_fs_shutdown();
     nt_http_shutdown();
     nt_gfx_shutdown();
@@ -272,8 +275,24 @@ static void test_context_restore_reassigns_existing_material_handles(void) {
     assert_idle_link();
 }
 
+static void test_core_and_full_manifests_coexist(void) {
+    load_manifest();
+    const nt_blob_t core = {nt_resource_get(s_manifest_handle)};
+    const nt_blob_view_t retained = nt_blob_read(core);
+    const struct {
+        NtBlobAssetHeader blob;
+        SponzaManifestHeader manifest;
+    } full = {.blob = {.magic = NT_BLOB_MAGIC, .version = NT_BLOB_VERSION}, .manifest = {.node_count = 0}};
+    load_asset(ASSET_BLOB_SPONZA_MANIFEST, NT_ASSET_BLOB, &full, sizeof full);
+    nt_resource_step();
+    TEST_ASSERT_NOT_EQUAL_UINT32(core.id, nt_resource_get(s_manifest_handle));
+    TEST_ASSERT_EQUAL_PTR(retained.data, nt_blob_read(core).data);
+    TEST_ASSERT_EQUAL_UINT32(sizeof(SponzaManifestHeader), nt_blob_read((nt_blob_t){nt_resource_get(s_manifest_handle)}).size);
+}
+
 int main(void) {
     UNITY_BEGIN();
+    RUN_TEST(test_core_and_full_manifests_coexist);
     RUN_TEST(test_stages_before_manifest_assigns_at_material_creation);
     RUN_TEST(test_manifest_before_stages_assigns_all_programs_in_one_step);
     RUN_TEST(test_shader_pairs_arrive_in_separate_steps);

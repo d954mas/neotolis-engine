@@ -75,7 +75,7 @@ static uint32_t build_mock_atlas_blob(uint8_t *out, uint32_t cap, const mock_atl
     if (region_bytes > 0) {
         memcpy(out + sizeof(NtAtlasHeader) + page_bytes, spec->regions, region_bytes);
     }
-    float(*positions)[2] = (float(*)[2])(out + vertex_offset);
+    float (*positions)[2] = (float (*)[2])(out + vertex_offset);
     NtAtlasUv *uvs = (NtAtlasUv *)(out + uv_offset);
     for (uint32_t i = 0; i < spec->total_vertex_count; i++) {
         positions[i][0] = (float)spec->vertices[i].local_x * hdr->inverse_pixels_per_unit;

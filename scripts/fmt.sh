@@ -7,6 +7,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$(cd "$SCRIPT_DIR/.." && pwd)"
 # shellcheck source=lib/changed_files.sh
 source "$SCRIPT_DIR/lib/changed_files.sh"
+# shellcheck source=lib/toolchain.sh
+source "$SCRIPT_DIR/lib/toolchain.sh"
+require_installed llvm
 
 FILES="$(compute_changed_files | grep -E '\.(c|h)$' | grep -v 'deps/\|/generated/' || true)"
 if [ -z "$FILES" ]; then

@@ -6,6 +6,7 @@
 
 /* clang-format off */
 #include "nt_builder_atlas_geometry.h"
+#include "nt_builder_atlas_test.h" /* polygon_max_boundary_distance */
 #include "nt_builder.h"          /* NT_BUILD_ASSERT */
 #include "nt_clipper2_bridge.h"  /* nt_clipper2_inflate, nt_clipper2_triangulate */
 #include "log/nt_log.h"          /* NT_LOG_WARN */

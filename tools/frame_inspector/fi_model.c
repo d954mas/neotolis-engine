@@ -685,7 +685,7 @@ static void index_aliases(fi_frame_t *fr) {
     for (uint32_t i = 0; i < n; i++) {
         shared += ev[i].kind == NT_GFX_EVENT_DEFINITION && ev[i].operation == NT_GFX_OP_CREATE && (ev[i].object_kind == NT_GFX_OBJECT_SAMPLER || ev[i].object_kind == NT_GFX_OBJECT_INSTANCE_LAYOUT);
     }
-    fr->content_label = (char(*)[FI_CONTENT_LABEL])fi_alloc(shared, FI_CONTENT_LABEL);
+    fr->content_label = (char (*)[FI_CONTENT_LABEL])fi_alloc(shared, FI_CONTENT_LABEL);
     const uint32_t slots = table_size(cap);
     fr->alias_slot = (uint32_t *)fi_alloc(slots, sizeof(uint32_t));
     fr->alias_mask = slots - 1U;
@@ -2046,7 +2046,7 @@ static void index_frame(fi_frame_t *fr) {
     for (uint32_t i = 0; i < n; i++) {
         keys += fr->view.events[i].kind == NT_GFX_EVENT_NOTE || fr->view.events[i].kind == NT_GFX_EVENT_MARKER_PUSH;
     }
-    fr->group_key = (char(*)[FI_KEY_LEN])fi_alloc(keys, FI_KEY_LEN);
+    fr->group_key = (char (*)[FI_KEY_LEN])fi_alloc(keys, FI_KEY_LEN);
     fr->group_parent = (uint32_t *)fi_alloc(keys, sizeof(uint32_t));
     fr->group_is_note = (uint8_t *)fi_alloc(keys, sizeof(uint8_t));
     fr->group_label = (const char **)fi_alloc(keys, sizeof(const char *));

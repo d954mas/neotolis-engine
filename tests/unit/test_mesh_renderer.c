@@ -1803,6 +1803,31 @@ void test_mesh_stream_cannot_overlap_the_color_location(void) {
 }
 
 #if NT_GFX_CAPTURE_ENABLED
+void test_restored_context_notes_unreconstructed_mesh(void) {
+    nt_mesh_t mesh = create_test_mesh();
+    nt_material_t mat = create_test_material();
+    nt_render_item_t item = {.entity = create_test_entity(mesh, mat).id, .batch_key = nt_mesh_renderer_batch_key(mat, mesh)};
+    draw_list(&item, 1);
+    TEST_ASSERT_EQUAL_UINT32(1, drawn_calls());
+
+    nt_test_frame_close();
+    nt_gfx_fake_lose_and_restore_context();
+    nt_gfx_begin_frame();
+    TEST_ASSERT_TRUE(g_nt_gfx.context_restored);
+    nt_material_set_program(mat, create_test_program());
+    nt_gfx_end_frame();
+    nt_test_frame_open();
+    TEST_ASSERT_FALSE(g_nt_gfx.context_lost);
+
+    nt_gfx_capture_request();
+    record_list(&item, 1);
+    const uint32_t first = nt_test_note(0, "mesh");
+    const uint32_t skipped = nt_test_note(first + 1U, "mesh");
+    TEST_ASSERT_EQUAL_STRING("mesh not ready", nt_test_note_str(skipped, "drop"));
+    nt_test_frame_next();
+    TEST_ASSERT_EQUAL_UINT32(0, drawn_calls());
+}
+
 /* Each run notes its material and mesh before its work; a run whose program is not ready notes the skip. */
 void test_draw_list_notes_each_run_and_its_skip(void) {
     nt_mesh_t mesh = create_test_mesh();
@@ -1854,6 +1879,7 @@ int main(void) {
     RUN_TEST(test_draw_list_same_material_mesh_batching);
     RUN_TEST(test_draw_list_skips_a_not_ready_run_without_packing_it);
 #if NT_GFX_CAPTURE_ENABLED
+    RUN_TEST(test_restored_context_notes_unreconstructed_mesh);
     RUN_TEST(test_draw_list_notes_each_run_and_its_skip);
 #endif
     RUN_TEST(test_draw_list_skips_a_run_whose_program_was_destroyed);

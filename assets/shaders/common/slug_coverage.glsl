@@ -8,6 +8,12 @@
 // mediump, not the lowp sampler default: band offsets and counts are read back as integers.
 uniform mediump sampler2D u_curve_texture;
 
+// The varyings SlugVertex() writes (common/slug_vertex.glsl).
+in highp vec2 v_texcoord;
+flat in highp uvec2 v_glyph;         // band_row, band_count
+flat in highp vec4 v_band_transform; // bbox x0, y0, band_count / width, band_count / height (em)
+in vec4 v_color;
+
 // Linear fallback for truly degenerate (a.y == 0) curves; near-tangential
 // cases are handled by the Citardauq stable form in the solvers below.
 #ifndef SLUG_LINEAR_FALLBACK_EPSILON
@@ -159,3 +165,6 @@ float SlugRender(vec2 coord, uvec2 glyph, vec4 band_transform) {
 
     return CalcCoverage(xcov, ycov, xwgt, ywgt);
 }
+
+// Coverage of this fragment from the text varyings.
+float SlugCoverage() { return SlugRender(v_texcoord, v_glyph, v_band_transform); }

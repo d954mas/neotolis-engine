@@ -291,6 +291,13 @@ static void frame(void) {
 #endif
 
     nt_resource_step();
+    static bool s_overlay_font_filled;
+    if (!s_overlay_font_filled && nt_resource_pack_state(s_pack_id) == NT_PACK_STATE_READY) {
+        uint32_t size = 0;
+        const uint8_t *bytes = nt_resource_entry_bytes(s_pack_id, ASSET_FONT_BUNNYMARK_FONT_OVERLAY, &size);
+        nt_font_fill(s_overlay_font, bytes, size);
+        s_overlay_font_filled = true;
+    }
     link_programs();
     nt_sprite_comp_sync_resources();
 
@@ -560,8 +567,8 @@ int main(int argc, char **argv) {
 
     nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
     /* Every bunny is one rect quad: 4 vertices of 20 B and 6 uint32 indices; the HUD text adds
-     * 192 B of vertices and 24 B of indices per glyph of its overlay buffer. */
-    gfx_desc.frame_capacity[NT_GFX_FRAME_VERTEX] = (BUNNY_MAX * 4U * 20U) + (BUNNY_OVERLAY_BYTES * 192U);
+     * 144 B of vertices and 24 B of indices per glyph of its overlay buffer. */
+    gfx_desc.frame_capacity[NT_GFX_FRAME_VERTEX] = (BUNNY_MAX * 4U * 20U) + (BUNNY_OVERLAY_BYTES * 144U);
     gfx_desc.frame_capacity[NT_GFX_FRAME_INDEX] = (BUNNY_MAX * 6U * 4U) + (BUNNY_OVERLAY_BYTES * 24U);
     nt_gfx_init(&gfx_desc);
 
@@ -637,10 +644,9 @@ int main(int argc, char **argv) {
         .label = "stats_overlay",
     });
     s_overlay_font = nt_font_create(&(nt_font_create_desc_t){
-        .max_glyphs = 256, .measure_cache_size = 0, /* bunnymark never calls nt_font_measure*; disable to skip the alloc. */
+        .max_glyphs = 256,
+        .measure_cache_size = 0, /* bunnymark never calls nt_font_measure*; disable to skip the alloc. */
     });
-    nt_resource_t overlay_font_res = nt_resource_request(ASSET_FONT_BUNNYMARK_FONT_OVERLAY, NT_ASSET_FONT);
-    nt_font_add(s_overlay_font, overlay_font_res);
 
     nt_resource_set_activate_time_budget(0);
 

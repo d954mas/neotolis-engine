@@ -4,7 +4,7 @@
  * Minimal program that initializes the engine, verifies success,
  * shuts down, and exits. Built with -sMODULARIZE for Node.js loading.
  *
- * Build: emcmake cmake --preset wasm-debug && cmake --build --preset wasm-debug
+ * Build: cmake --preset wasm-debug && cmake --build --preset wasm-debug
  * Run:   node tests/wasm/smoke_test.js
  */
 #include "core/nt_core.h"

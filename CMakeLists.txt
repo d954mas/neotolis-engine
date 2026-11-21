@@ -1,5 +1,8 @@
 cmake_minimum_required(VERSION 3.25)
 project(neotolis-engine LANGUAGES C)
+if(PROJECT_IS_TOP_LEVEL)
+    include(cmake/nt_toolchain_check.cmake)
+endif()
 
 # Engine root — use instead of CMAKE_SOURCE_DIR for paths to deps/
 # (CMAKE_SOURCE_DIR points to the top-level project, not engine root when used as submodule)
@@ -60,7 +63,7 @@ option(NT_FONT_EMBOLDEN_ENABLED "Build synthetic font weight and outline support
 
 option(NT_UI_CLAY_DEBUG_VIEW "Build the upstream Clay debug view." OFF)
 
-option(NT_UI_CHECKS "Check duplicate keys in UI menu and combo lists." OFF)
+option(NT_UI_CHECKS "Check duplicate keys in UI menu and combo lists and a scroll id stepped as a widget." OFF)
 option(NT_UI_DEBUG_TOOLS "Build nt_ui inspector + debug overlay subsystem." OFF)
 set(NT_LOG_MIN_LEVEL "0" CACHE STRING "Compiled log floor: 0=INFO, 1=WARN, 2=ERROR, 3=NONE.")
 set_property(CACHE NT_LOG_MIN_LEVEL PROPERTY STRINGS 0 1 2 3)
@@ -167,14 +170,6 @@ if(EMSCRIPTEN)
     if(NT_WASM_CLOSURE)
         add_link_options(--closure 1)
     endif()
-
-    # Opt-in web GL debug (NT_GFX_WEB_GL_DEBUG): link-time GL glue validation + per-call logging.
-    if(NT_GFX_WEB_GL_DEBUG)
-        add_link_options(-sGL_ASSERTIONS=1 -sGL_DEBUG=1)
-    endif()
-
-    # The GL backend creates a WebGL2 context and nothing falls back to WebGL1.
-    add_link_options(-sUSE_WEBGL2=1 -sMAX_WEBGL_VERSION=2 -sMIN_WEBGL_VERSION=2)
 
     if(CMAKE_BUILD_TYPE STREQUAL "Debug")
         add_link_options(-sASSERTIONS=2 -gsource-map)
@@ -334,8 +329,7 @@ if(NOT EMSCRIPTEN)
     nt_set_static_crt(glfw)
 endif()
 
-# Tests build only at top level. NT_BUILDING_TESTS gates the test targets; it does not touch the
-# nt_input automation surface, so production nt_input stays lean under a devapi-OFF build.
+# Tests build only at top level. NT_BUILDING_TESTS gates the test targets.
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     set(NT_BUILDING_TESTS ON)
 endif()
