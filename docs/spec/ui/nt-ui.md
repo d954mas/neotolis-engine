@@ -462,7 +462,7 @@ fits (within half a unit) is see-through. The scroll chain of an element is the 
 that clip it, innermost first: it is read from last frame's clip tree, the one the hit
 test walks, so no declaration order or bookkeeping is involved. A floating element takes
 no clip unless it asks for one (`clipTo`), so everything inside a popup (dropdown, menu,
-modal, tooltip) and the menu occluder has an empty chain, and a drag inside a popup never
+modal, tooltip) has an empty chain, and a drag inside a popup never
 reaches a scroll behind it (a scroll declared inside the popup, a dropdown list, is on the
 chain of its own content); the same holds for a game's own unclipped floating element
 declared inside a scroll: neither a drag nor the wheel over it reaches that scroll.
@@ -648,11 +648,15 @@ calls the matching end (`if (nt_ui_menu_begin(...)) { ...; nt_ui_menu_end(...);
 }`). The game decides when a menu opens — a right-click, a long-press on its
 widget, a button — and opens it with `nt_ui_menu_open(menu, x, y)` at a point in
 UI space, from anywhere outside `nt_ui_menu_begin..nt_ui_menu_end`, even outside
-a UI frame; `nt_ui_pointer_pos` gives the primary pointer there. The root's
-top-left sits at that point and shifts left to stay on screen from its second
-frame. Opening is the only way in: it starts the navigation fresh, and the
-first `nt_ui_menu_end` after it ignores the outside press. Setting `open = true`
-directly reopens with the old navigation.
+a UI frame; `nt_ui_pointer_pos`, called inside a UI frame, gives the primary
+pointer in that space. The root's top-left sits at that point and shifts left to
+stay on screen from its second frame. A menu opens only through
+`nt_ui_menu_open`: it starts the navigation fresh, and the frame after it
+ignores the outside press and last frame's hover and clicks, which belong to the
+old place. An open menu is a modal overlay: its root claims the modal top like a
+popup with a catcher, so the UI under it takes no pointer, `nt_ui_modal_active`
+reports it, and Esc goes to the menu, not to a modal under it. Each open panel
+blocks the pointer, so nothing under it is hovered or clicked.
 
 A custom-content row (`item_begin..item_end`, `selectable_begin..selectable_end`,
 `preview_begin..preview_end`, and a tab's `nt_ui_tab_begin..nt_ui_tab_end`) steps
@@ -713,9 +717,10 @@ not declare as an enabled parent closes its branch; Up, Down, Left and Esc do
 nothing in a frame that did not declare the focused row's level, or whose Right
 or Enter moved focus into a child.
 
-The primary pointer drives hover, the mouse-aim corridor and the outside-press
-dismiss (a left or right press outside every panel shown last frame). It moves
-focus to the enabled row under it; a disabled row, padding or a separator under
+A row is hovered by any pointer over it, as every `nt_ui` hover; the primary
+pointer drives the mouse-aim corridor, the end of keyboard mode and the
+outside-press dismiss (a left or right press outside every panel shown last
+frame). The pointer moves focus to the enabled row under it; a disabled row, padding or a separator under
 it changes neither focus nor the open chain. A key hands focus and the open
 chain to the keyboard: a pointer resting on a row neither moves focus nor opens
 or closes a submenu until it moves or presses; clicks always act. Every open

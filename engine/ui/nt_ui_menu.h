@@ -160,9 +160,8 @@ float nt_ui_menu_test_aim_near_x(float sub_x, float sub_w, float apex_x);
  * passed AIM_FALLBACK. An unprimed aim latches its apex at the cursor and keeps. */
 bool nt_ui_menu_test_hover_intent(nt_ui_menu_aim_t *aim, float mouse_x, float mouse_y, float sub_x, float sub_y, float sub_w, float sub_h, float dt);
 
-/* A level's panel id and the single root occluder id, for prev-frame bbox queries. */
+/* A level's panel id, for prev-frame bbox queries. */
 uint32_t nt_ui_menu_test_panel_id(uint32_t menu_id, uint8_t depth);
-uint32_t nt_ui_menu_test_occluder_id(uint32_t menu_id);
 
 /* A row's sub-element ids (submenu arrow, icon gutter, shortcut text, selected checkmark), derived from
  * the row id, for prev-frame bbox queries. */

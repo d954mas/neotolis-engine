@@ -2956,11 +2956,12 @@ static bool pointer_target(const nt_ui_context_t *ctx, uint32_t i, uint32_t *out
     return true;
 }
 
-void nt_ui_pointer_pos(const nt_ui_context_t *ctx, float *x, float *y) {
+void nt_ui_pointer_pos(const nt_ui_context_t *ctx, float *out_x, float *out_y) {
     NT_ASSERT(ctx != NULL && ctx->in_frame && "nt_ui_pointer_pos: call between nt_ui_begin/end");
+    NT_ASSERT(out_x != NULL && out_y != NULL && "nt_ui_pointer_pos: out_x and out_y must be non-NULL");
     const nt_pointer_t *p = &ctx->frame_pointers[ctx->frame_primary];
-    *x = p->x;
-    *y = p->y;
+    *out_x = p->x;
+    *out_y = p->y;
 }
 
 bool nt_ui_hovered_within(const nt_ui_context_t *ctx, uint32_t id) {
