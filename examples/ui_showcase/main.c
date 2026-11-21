@@ -37,6 +37,7 @@
 #include "ui/nt_ui_menu.h"
 #include "ui/nt_ui_modal.h"
 #include "ui/nt_ui_panel.h"
+#include "ui/nt_ui_popup.h"
 #include "ui/nt_ui_progress.h"
 #include "ui/nt_ui_radial.h"
 #include "ui/nt_ui_radial_image.h"
@@ -3660,15 +3661,15 @@ static void frame(void) {
     }
     nt_arena_reset(&g_nt_mem_scratch);
 
-    /* Gameplay/global hotkeys yield to an open modal so Esc closes the top modal first and the
-     * palette/inspector keys don't fire underneath it. nt_ui_modal_active reports last frame's
+    /* Gameplay/global hotkeys yield to an open overlay (a modal, a menu, a dropdown) so Esc closes it first
+     * and the palette/inspector keys don't fire underneath it. nt_ui_overlay_active reports last frame's
      * presence (polled here before this frame's nt_ui_begin) -- the inherent IM 1-frame gate. */
-    const bool modal_was_active = nt_ui_modal_active(s_ctx);
+    const bool overlay_was_active = nt_ui_overlay_active(s_ctx);
 
 #ifndef NT_PLATFORM_WEB
-    /* Esc unfocuses a focused field first (the field consumes it in its own pass); an open menu counts as a
-     * modal. Only quit when no modal or field holds it, both last frame's (read pre-begin). */
-    if (!modal_was_active && !nt_ui_input_any_focused(s_ctx) && nt_input_key_is_pressed(NT_KEY_ESCAPE)) {
+    /* Esc unfocuses a focused field first (the field consumes it in its own pass); an open menu counts as an
+     * overlay. Only quit when no modal or field holds it, both last frame's (read pre-begin). */
+    if (!overlay_was_active && !nt_ui_input_any_focused(s_ctx) && nt_input_key_is_pressed(NT_KEY_ESCAPE)) {
         nt_app_quit();
     }
 #endif
@@ -3676,7 +3677,7 @@ static void frame(void) {
     /* Single-key [T]/[D] hotkeys yield while a field holds focus so typing 'd'/'t' edits the field
      * instead of toggling the inspector/palette. any_focused reads last frame's focus, same as the
      * modal gate above (both polled here before this frame's nt_ui_begin). */
-    if (!modal_was_active && !nt_ui_input_any_focused(s_ctx)) {
+    if (!overlay_was_active && !nt_ui_input_any_focused(s_ctx)) {
         if (nt_input_key_is_pressed(NT_KEY_T)) {
             g_current = (g_current == &g_dark) ? &g_light : &g_dark;
             nt_log_info("ui_showcase: palette -> %s", g_current->name);

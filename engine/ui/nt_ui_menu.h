@@ -74,7 +74,7 @@ typedef struct {
 _Static_assert(sizeof(nt_ui_menu_item_opts_t) == 16 + (((sizeof(void *) + 4) + 7) / 8 * 8), "nt_ui_menu_item_opts_t stable ABI (16 ref + ptr + 2 bool + pad, 8-aligned)");
 
 /* The mouse-aim corridor guarding one open child level. apex: the cursor when another row of the parent's
- * level was first hovered; timer: hovered time since then, reset over the child. depth 0 = not primed. */
+ * level was first hovered; timer: time since then, reset over the child. depth 0 = not primed. */
 typedef struct {
     float apex_x, apex_y;
     float timer;
@@ -101,6 +101,8 @@ typedef struct {
     bool nav_passed;       /* the navigated level has declared the focused row */
     bool focus_first;      /* a keyboard-opened child gives focus to its first enabled row */
     bool hover_opens;      /* hover_id is a parent */
+    bool focus_seen;       /* the focused row is declared and enabled this frame */
+    bool focus_opens;      /* the focused row is a parent */
     bool activated;        /* a row activated: the chain closes */
     bool item_enabled;     /* the open custom row is enabled */
     bool item_activatable; /* the open custom row has an action of its own */

@@ -893,17 +893,17 @@ static bool menu_over_modal_frame(nt_ui_menu_t *st, nt_ui_menu_style_t *style) {
     return modal_close;
 }
 
-/* ---- An open menu is a modal overlay: nt_ui_modal_active reports it, and Esc over a modal closes only
+/* ---- An open menu is a modal overlay: nt_ui_overlay_active reports it, and Esc over a modal closes only
  *      the menu. ---- */
 static void test_menu_is_modal_overlay(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
     nt_ui_menu_t st = {0};
     menu_im_open(&st, 120.0F, 80.0F);
     menu_im_frame25(&st, &style, 0.0F, 0.0F);
-    TEST_ASSERT_TRUE_MESSAGE(nt_ui_modal_active(s_fx.ctx), "an open menu counts as a modal");
+    TEST_ASSERT_TRUE_MESSAGE(nt_ui_overlay_active(s_fx.ctx), "an open menu counts as an overlay");
     st.open = false;
     menu_im_frame25(&st, &style, 0.0F, 0.0F);
-    TEST_ASSERT_FALSE(nt_ui_modal_active(s_fx.ctx));
+    TEST_ASSERT_FALSE(nt_ui_overlay_active(s_fx.ctx));
 
     menu_im_open(&st, 120.0F, 80.0F);
     TEST_ASSERT_FALSE(menu_over_modal_frame(&st, &style));
@@ -1377,9 +1377,8 @@ static void test_menu_check_cell_when_selected(void) {
 
 /* One menu frame: root = [File submenu (2 items), Edit leaf]. Cursor at (px,py). Used by the hover-open
  * corridor tests — File is the parent that flies out on hover; Edit is the sibling leaf that collapses it. */
-static void menu_im_hover_frame(nt_ui_menu_t *st, nt_ui_menu_style_t *style, float px, float py) {
-    const nt_pointer_t p = {.x = px, .y = py, .active = true};
-    menu_frame_begin(&p);
+static void menu_im_hover_frame_ptr(nt_ui_menu_t *st, nt_ui_menu_style_t *style, const nt_pointer_t *p) {
+    menu_frame_begin(p);
     if (nt_ui_menu_begin(st, s_fx.ctx, NULL, 0U, MENU_A, style)) {
         if (nt_ui_menu_submenu_begin(st, KEY_FILE, "File")) {
             (void)nt_ui_menu_item(st, KEY_NEW, "New");
@@ -1390,6 +1389,11 @@ static void menu_im_hover_frame(nt_ui_menu_t *st, nt_ui_menu_style_t *style, flo
         nt_ui_menu_end(st);
     }
     nt_ui_end(s_fx.ctx);
+}
+
+static void menu_im_hover_frame(nt_ui_menu_t *st, nt_ui_menu_style_t *style, float px, float py) {
+    const nt_pointer_t p = {.x = px, .y = py, .active = true};
+    menu_im_hover_frame_ptr(st, style, &p);
 }
 
 /* ---- The mouse-aim corridor keeps File's submenu open while the pointer crosses the Edit leaf, then
@@ -1749,6 +1753,32 @@ static void test_menu_reopen_ignores_last_frame_hits(void) {
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, st.open_path[0], "the opening frame opens nothing from the old place");
 }
 
+/* ---- The switch the pointer leaves on a sibling runs off the rows too: after Edit takes focus beside File's
+ *      open submenu, the pointer leaving the rows, or the window, still collapses it. ---- */
+static void test_menu_pending_switch_lands_off_the_rows(void) {
+    for (int c = 0; c < 2; ++c) {
+        nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
+        nt_ui_menu_t st = {0};
+        menu_im_open(&st, 120.0F, 80.0F);
+        menu_im_hover_frame(&st, &style, 0.0F, 0.0F);
+        menu_hover_open(&st, &style, nt_ui_menu_test_item_id(MENU_A, KEY_FILE), 1U, menu_im_hover_frame);
+        const uint32_t edit = nt_ui_menu_test_item_id(MENU_A, KEY_EDIT);
+        float ex = 0.0F;
+        float ey = 0.0F;
+        menu_row_center(edit, &ex, &ey);
+        menu_im_hover_frame(&st, &style, ex, ey);
+        menu_im_hover_frame(&st, &style, ex, ey);
+        TEST_ASSERT_EQUAL_UINT32(edit, st.focus);
+        TEST_ASSERT_TRUE_MESSAGE(menu_level_found(1U), "the corridor holds File's submenu");
+        const nt_pointer_t away = {.x = 20.0F, .y = 580.0F, .active = (c == 0)};
+        for (int f = 0; f < 30; ++f) {
+            menu_im_hover_frame_ptr(&st, &style, &away);
+        }
+        TEST_ASSERT_FALSE_MESSAGE(menu_level_found(1U), c == 0 ? "off the rows the switch still lands" : "outside the window the switch still lands");
+        TEST_ASSERT_EQUAL_UINT32(edit, st.focus);
+    }
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_menu_one_activation_per_frame);
@@ -1757,6 +1787,7 @@ int main(void) {
     RUN_TEST(test_menu_closed_focus_level_clears_focus);
     RUN_TEST(test_menu_right_beside_open_sibling_defers);
     RUN_TEST(test_menu_reopen_ignores_last_frame_hits);
+    RUN_TEST(test_menu_pending_switch_lands_off_the_rows);
     RUN_TEST(test_menu_is_modal_overlay);
     RUN_TEST(test_menu_resting_pointer_yields_to_keyboard);
     RUN_TEST(test_menu_keys_act_on_the_focused_level);

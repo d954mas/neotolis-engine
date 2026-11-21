@@ -241,7 +241,7 @@ nt_ui_popup_result_t nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t i
     const bool want_catcher = present && (dismiss_on_click || has_backdrop || force_catcher);
     nt_ui_popup_close_src_t close_src = NT_UI_POPUP_CLOSE_SRC_NONE;
     /* Only a catcher-bearing popup gates base UI, so only it claims present/top-id. A catcher-less popup
-     * (e.g. a tooltip, flags=0) is visible but must NOT make nt_ui_modal_active() true nor steal the
+     * (e.g. a tooltip, flags=0) is visible but must NOT make nt_ui_overlay_active() true nor steal the
      * top-id dismiss slot from a coexisting dropdown. */
     if (want_catcher) {
         ctx->modal_present_cur = true;
@@ -304,7 +304,7 @@ nt_ui_popup_result_t nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t i
      * ray distance and does not rank overlays by band at all. */
     const int32_t panel_band = nt_ui_clay_priv_open_floating_z(ctx->clay);
     /* A catcher gates base UI from one band below its panel; at or under the base band it loses the hit
-     * arbitration and silently stops gating while nt_ui_modal_active() still reports the overlay up. */
+     * arbitration and silently stops gating while nt_ui_overlay_active() still reports the overlay up. */
     NT_ASSERT((!want_catcher || panel_band > 1) && "nt_ui_popup: the catcher must sit above the base band (0)");
     if (want_catcher && panel_band >= ctx->modal_top_z_cur) {
         ctx->modal_top_z_cur = panel_band;
@@ -352,6 +352,11 @@ bool nt_ui_popup_visible(nt_ui_context_t *ctx, uint32_t id, const nt_ui_popup_st
         return false;
     }
     return true;
+}
+
+bool nt_ui_overlay_active(const nt_ui_context_t *ctx) {
+    NT_ASSERT(ctx != NULL && "nt_ui_overlay_active: ctx must be non-NULL");
+    return ctx->modal_present_prev;
 }
 
 void nt_ui_popup_clear_state(nt_ui_context_t *ctx, uint32_t id) {

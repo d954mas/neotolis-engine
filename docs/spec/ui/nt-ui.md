@@ -654,7 +654,7 @@ stay on screen from its second frame. A menu opens only through
 `nt_ui_menu_open`: it starts the navigation fresh, and the frame after it
 ignores the outside press and last frame's hover and clicks, which belong to the
 old place. An open menu is a modal overlay: its root claims the modal top like a
-popup with a catcher, so the UI under it takes no pointer, `nt_ui_modal_active`
+popup with a catcher, so the UI under it takes no pointer, `nt_ui_overlay_active`
 reports it, and Esc goes to the menu, not to a modal under it. Each open panel
 blocks the pointer, so nothing under it is hovered or clicked.
 
@@ -723,12 +723,14 @@ outside-press dismiss (a left or right press outside every panel shown last
 frame). The pointer moves focus to the enabled row under it; a disabled row, padding or a separator under
 it changes neither focus nor the open chain. A key hands focus and the open
 chain to the keyboard: a pointer resting on a row neither moves focus nor opens
-or closes a submenu until it moves or presses; clicks always act. Every open
-parent stays highlighted. A hovered row switches its level's open child (a
-parent opens its own, a leaf collapses it): at once when no child is open;
-otherwise not while the pointer is over the child panel, after up to twice
-`NT_UI_MENU_AIM_FALLBACK_SECS` of hovered time inside the triangle toward the
-child's near edge, and after `NT_UI_MENU_AIM_FALLBACK_SECS` elsewhere.
+or closes a submenu until it moves or presses; clicks always act. A level highlights one
+row: the focused one, or its open parent while focus is inside that parent's
+child. A hovered row switches its level's open child (a parent opens its own, a
+leaf collapses it): at once when no child is open; otherwise not while the
+pointer is over the child panel, after up to twice
+`NT_UI_MENU_AIM_FALLBACK_SECS` inside the triangle toward the child's near edge,
+and after `NT_UI_MENU_AIM_FALLBACK_SECS` elsewhere, also off the rows or outside
+the window.
 
 ## Atlas region identity
 
