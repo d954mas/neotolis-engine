@@ -40,7 +40,7 @@ Text input is separate from key state: characters arrive as UTF-32 codepoints, u
 
 ```c
 bool nt_input_pop_char(uint32_t *out_codepoint);  // false when empty
-void nt_window_set_text_input_mode(nt_text_input_mode_t mode);  // soft-keyboard hint (window/nt_window.h); no-op on native/stub
+void nt_window_set_text_input_mode(nt_text_input_mode_t mode);  // soft-keyboard hint, declared each frame a text field is focused (window/nt_window.h); no-op on native/stub
 ```
 
 - Chars carry *text* (layout-resolved, includes key repeat); physical keys carry

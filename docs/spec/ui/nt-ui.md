@@ -540,23 +540,29 @@ integer pixel gap is used for Clay child spacing, row stride and spacers.
 ## Text input
 
 `nt_ui_input_text` is a single-line field over a game-owned
-`char*` buffer (Model D — the engine never reallocs or owns the string; it stores
-only caret/selection/scroll/blink/focus in the state pool). Editing is UTF-8
+`char*` buffer: the engine never reallocs or owns the string. The state pool keeps
+caret, selection, scroll and blink; focus lives in the context. Editing is UTF-8
 codepoint-aware: insert/backspace/delete/arrows never split a multi-byte sequence
 and clamp to `buffer_size-1` / `max_length-1` bytes. Typed text arrives via the
 `nt_input_pop_char` UTF-32 characters (frame-local, read each frame while focused);
-physical keys drive navigation/edit. T2 adds selection (Shift+arrows, mouse drag,
+physical keys drive navigation/edit. It supports selection (Shift+arrows, mouse drag,
 double-click word-select, Ctrl+A; Cmd works as Ctrl on macOS), copy/cut/paste via the swappable `nt_clipboard`
-façade (paste decodes untrusted bytes per-codepoint, runs the allow-predicate,
-clamps, and drops a non-fitting multibyte codepoint whole), a render-only password
+façade, a render-only password
 mask, stock allow-predicates (numeric/email/url), a per-field `placeholder` string
 shown dimmed while empty+unfocused, and a minimal focus arbiter (Esc unfocus, Tab
 advance/wrap). A press focuses the field, except an unfocused field whose press waits
 for a scroll (`gesture_pending`): it focuses on the tap's release, so a list drag never
-opens the keyboard. A focused field drags its selection along x (`drag_axes`). Caret, selection highlight, and the text all float as clipped
-children carrying a `HAS_TRANSFORM` offset of `pad_x - scroll_x` (set as the Clay
-element `userData`, which the walker reads for layer+transform), so the line
-scrolls to keep the caret visible while clipping to the field box. Cut is a no-op
+opens the keyboard. A focused field drags its selection along x (`drag_axes`).
+Tab moves focus to the next enabled field declared after the focused one, wrapping
+to the first enabled field, at the next `nt_ui_begin`: for the rest of the Tab frame
+the source keeps focus, so the destination never sees that frame's keys. A press
+focuses at once, so a press and a Tab in one frame act as press, then Tab. Esc
+unfocuses and wins over a Tab in the same frame. A focused field loses focus when
+it is declared disabled or not declared for a frame. While a field is focused, the
+game may shorten its buffer but must not rewrite its content. The focused field
+declares its keyboard hint (`nt_window_set_text_input_mode`) every frame. The line
+scrolls horizontally to keep the caret visible and clips to the field's
+`pad_x`-inset content box, also inside an outer scroll. Cut is a no-op
 when `nt_clipboard_available()` is false (no silent delete-without-copy).
 
 The allow-predicate must not call `nt_clipboard_*`. Paste replaces the selection,

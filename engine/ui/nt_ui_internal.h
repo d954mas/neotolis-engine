@@ -222,14 +222,14 @@ struct nt_ui_context {
     /* Highest band claimed this frame; ties go to the last declared, matching the pointer arbiter that
      * delivers the dismiss click. INT32_MIN until the first claim. */
     int32_t modal_top_z_cur;
-    /* Keyboard-focus arbiter: the input field that eats typed chars + editing keys.
-     * 0 = none. A press inside a field sets it; Esc clears it; Tab moves it to the next
-     * field declared this frame. Survives across frames (not reset by begin). */
+    /* Keyboard-focus arbiter (0 = none): a press sets it; Esc or a disabled declaration clears it.
+     * Survives frames; begin only drops an orphan and applies a pending Tab. */
     uint32_t focused_input_id;
-    /* Tab focus-advance bookkeeping, scoped to one frame: _seek set the frame a focused field
-     * sees Tab; the NEXT field declared that frame claims focus and clears _seek. _first_id
-     * tracks the earliest field so Tab off the last field wraps to the first. */
+    /* Tab bookkeeping for one frame: the focused field seeing Tab sets _seek and points _pending at
+     * _first_id (the earliest enabled field, for wrap); the next enabled field declared after it
+     * takes _pending and clears _seek. nt_ui_begin moves _pending into focused_input_id. */
     uint32_t focus_tab_seek;
+    uint32_t focus_tab_pending;
     uint32_t focus_first_id;
     /* Raw rich-text per-block caps (0 = compile-time NT_UI_RICH_MAX_* default); resolved in
      * nt_ui_rich_begin, which owns the rich #defines. Raw here so this widget-agnostic header stays
@@ -527,6 +527,11 @@ void nt_ui_internal_build_tree(nt_ui_context_t *ctx);
 #ifdef NT_TEST_ACCESS
 /* The text-field auto-repeat core with explicit storage, so tests drive its timing. */
 bool nt_ui_input_key_repeat_step(uint16_t *repeat_key, float *repeat_t, nt_key_t k, bool pressed, bool down, float dt);
+/* Text-field probes: password mask string, rendered placeholder, live caret/drag/scroll_x (false if
+ * the field has no state slot; out pointers may be NULL). */
+const char *nt_ui_input_build_display_text(const char *buffer, uint32_t len);
+const char *nt_ui_input_placeholder_for(const char *buffer, const char *placeholder, bool focused);
+bool nt_ui_input_test_state(nt_ui_context_t *ctx, uint32_t id, uint32_t *out_caret, uint8_t *out_drag, float *out_scroll_x);
 const nt_ui_baked_xform_t *nt_ui_internal_test_get_tree_baked(const nt_ui_context_t *ctx, int32_t elem_idx);
 int32_t nt_ui_internal_test_get_tree_baked_count(const nt_ui_context_t *ctx);
 int32_t nt_ui_internal_test_get_tree_root_for_elem(const nt_ui_context_t *ctx, int32_t elem_idx);

@@ -945,7 +945,6 @@ static void init_styles(void) {
     input_base.placeholder.font_id = 0;
     input_base.placeholder.font_size = 22.0F;
     input_base.pad_x = 10.0F;
-    input_base.pad_y = 8.0F;
     s_input_dark = input_base;
     s_input_dark.placeholder.color = NT_RGBA8(120, 126, 138, 255); /* dimmed vs the bright text */
     s_input_light = input_base;

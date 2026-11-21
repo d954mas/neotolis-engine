@@ -19,6 +19,7 @@ declare global {
       field_visible(): boolean;
       field_css(): { x: number; y: number };
       mouse(): { active: boolean; down: boolean };
+      drawn_frames(): number;
     };
   }
 }
@@ -101,6 +102,63 @@ test('input field: real keydown (Cyrillic) + paste reaches the buffer and the re
   // The typed text must also reach the render path (walker emitted text commands this frame).
   const cmdCount = await page.evaluate(() => window.__nt!.walk_text_cmd_count());
   expect(cmdCount).toBeGreaterThan(0);
+});
+
+// Fields: disabled URL, email (clicked), password. Tab reaches the password field, then wraps past the
+// disabled field back to email; the canvas follows each destination's hint and idle frames rewrite nothing.
+test('input Tab wrap: the destination keyboard hint replaces the source one', async ({ page }) => {
+  await page.goto('/index.html?input_wrap');
+  const frame = () => page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
+  await page.waitForFunction(() => window.__nt?.ready && window.__nt.field_visible(), null, { timeout: 30_000 });
+  const canvas = page.locator('canvas');
+  const { x, y } = await page.evaluate(() => window.__nt!.field_css());
+  await page.mouse.move(x, y);
+  await frame();
+  await page.mouse.down();
+  await frame();
+  await page.mouse.up();
+  await frame();
+  await expect(canvas).toHaveAttribute('inputmode', 'email');
+  expect(await canvas.getAttribute('type')).toBeNull();
+
+  // Attribute mutations also count writes of the same value, exposing per-frame hint updates.
+  const probe = await canvas.evaluateHandle((el) => {
+    const writes: string[] = [];
+    const observer = new MutationObserver((records) => {
+      for (const record of records) writes.push(record.attributeName!);
+    });
+    observer.observe(el, { attributes: true, attributeFilter: ['inputmode', 'type'] });
+    return { writes, observer };
+  });
+  const tabThenIdle = async () => {
+    await page.keyboard.down('Tab');
+    await frame();
+    await page.keyboard.up('Tab');
+    await frame();
+  };
+  const expectNoIdleWrites = async () => {
+    await probe.evaluate((p) => p.writes.splice(0));
+    const n = await page.evaluate(() => window.__nt!.drawn_frames());
+    await page.waitForFunction((n0) => window.__nt!.drawn_frames() >= n0 + 3, n);
+    expect(await probe.evaluate((p) => p.writes.splice(0))).toEqual([]);
+  };
+
+  await tabThenIdle();
+  await expect(canvas).toHaveAttribute('type', 'password');
+  await expectNoIdleWrites();
+
+  await tabThenIdle();
+  await expect(canvas).toHaveAttribute('inputmode', 'email');
+  expect(await canvas.getAttribute('type')).toBeNull();
+  await expectNoIdleWrites();
+  await probe.evaluate((p) => p.observer.disconnect());
+  await probe.dispose();
+
+  await page.keyboard.down('x');
+  await frame();
+  await page.keyboard.up('x');
+  await frame();
+  expect(await page.evaluate(() => window.__nt!.input_buffer())).toBe('x');
 });
 
 // A real mouse dragged from the canvas and released outside it: the captured release lands and the mouse
