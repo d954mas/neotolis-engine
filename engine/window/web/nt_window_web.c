@@ -417,8 +417,16 @@ EM_JS(void, nt_window_js_set_text_input_mode, (int mode), {
 })
 /* clang-format on */
 
-/* Map the field's text-input mode to the web on-screen keyboard (canvas inputmode/type). */
-void nt_window_set_text_input_mode(nt_text_input_mode_t mode) { nt_window_js_set_text_input_mode((int)mode); }
+/* The focused field declares its mode every frame; touch the DOM only on a change. -1 = nothing
+ * written yet, so the first call also replaces attributes the page shipped with. */
+static int s_text_input_mode = -1;
+
+void nt_window_set_text_input_mode(nt_text_input_mode_t mode) {
+    if ((int)mode != s_text_input_mode) {
+        s_text_input_mode = (int)mode;
+        nt_window_js_set_text_input_mode((int)mode);
+    }
+}
 
 /* ---- Presentation ---- */
 

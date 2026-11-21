@@ -558,9 +558,8 @@ Tab moves focus to the next enabled field declared after the focused one, wrappi
 to the first enabled field, at the next `nt_ui_begin`: for the rest of the Tab frame
 the source keeps focus, so the destination never sees that frame's keys. A press
 focuses at once, so a press and a Tab in one frame act as press, then Tab. Esc
-unfocuses and wins over a Tab in the same frame. The focused field sets the
-platform keyboard hint (`nt_window_set_text_input_mode`) only when its mode differs
-from the last one set. Caret, selection highlight, and the text all float as clipped
+unfocuses and wins over a Tab in the same frame. The focused field declares its
+keyboard hint (`nt_window_set_text_input_mode`) every frame. Caret, selection highlight, and the text all float as clipped
 children carrying a `HAS_TRANSFORM` offset of `pad_x - scroll_x` (set as the Clay
 element `userData`, which the walker reads for layer+transform), so the line
 scrolls to keep the caret visible while clipping to the field box. Cut is a no-op

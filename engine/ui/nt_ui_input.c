@@ -18,11 +18,7 @@
 #include "utf8/nt_utf8.h"
 #include "window/nt_window.h"
 
-/* The keyboard hint is UX only (web soft keyboard); the allow filter restricts input. Password
- * masking overrides the keyboard kind. The platform has one text-entry surface, starting in TEXT,
- * so the focused field writes its mode only when it differs from the last one written. */
-static nt_text_input_mode_t s_text_input_mode = NT_TEXT_INPUT_TEXT;
-
+/* The keyboard hint is UX only (web soft keyboard); the allow filter restricts input. */
 static inline void apply_keyboard_hint(nt_ui_input_keyboard_t kb, bool password) {
     nt_text_input_mode_t mode = NT_TEXT_INPUT_TEXT;
     if (password) {
@@ -47,10 +43,7 @@ static inline void apply_keyboard_hint(nt_ui_input_keyboard_t kb, bool password)
             break;
         }
     }
-    if (mode != s_text_input_mode) {
-        s_text_input_mode = mode;
-        nt_window_set_text_input_mode(mode);
-    }
+    nt_window_set_text_input_mode(mode);
 }
 
 const nt_ui_widget_def_t NT_UI_INPUT_DEF = {
@@ -717,7 +710,7 @@ static void focus_step(input_frame_t *f) {
     if (f->enabled && ctx->focus_first_id == 0U) {
         ctx->focus_first_id = id;
     }
-    if (f->enabled && ctx->focus_tab_seek != 0U && ctx->focus_tab_seek != id) {
+    if (f->enabled && ctx->focus_tab_seek != 0U) {
         ctx->focus_tab_pending = id; /* replaces the wrap fallback */
         ctx->focus_tab_seek = 0U;
     }
@@ -962,7 +955,6 @@ static void edit_step(input_frame_t *f, bool *changed, bool *submitted) {
         if (nt_input_key_is_pressed(NT_KEY_ESCAPE)) {
             ctx->focused_input_id = 0U; /* unfocus first; modal close (if any) handles the next Esc */
         } else if (nt_input_key_is_pressed(NT_KEY_TAB)) {
-            /* Next enabled field declared after this one, else wrap to the first; applied next begin. */
             ctx->focus_tab_seek = id;
             ctx->focus_tab_pending = ctx->focus_first_id;
         }

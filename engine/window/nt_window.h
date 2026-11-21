@@ -55,7 +55,7 @@ typedef enum {
     NT_TEXT_INPUT_PASSWORD,
 } nt_text_input_mode_t;
 
-/* Hint the keyboard for the focused text field. Apply it when a field gains focus. */
+/* Declare the keyboard for the focused text field every frame it is focused; repeating a mode is free. */
 void nt_window_set_text_input_mode(nt_text_input_mode_t mode);
 
 /* ---- Presentation ---- */

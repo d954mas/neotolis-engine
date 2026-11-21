@@ -223,8 +223,8 @@ struct nt_ui_context {
      * delivers the dismiss click. INT32_MIN until the first claim. */
     int32_t modal_top_z_cur;
     /* Keyboard-focus arbiter: the input field that eats typed chars + editing keys.
-     * 0 = none. A press inside a field sets it; Esc clears it; Tab sets it at the next begin.
-     * Survives across frames (not reset by begin). */
+     * 0 = none. A press inside a field sets it; Esc clears it. Survives frames; begin only drops an
+     * orphan and applies a pending Tab. */
     uint32_t focused_input_id;
     /* Tab bookkeeping for one frame: the focused field seeing Tab sets _seek and points _pending at
      * _first_id (the earliest enabled field, for wrap); the next enabled field declared after it

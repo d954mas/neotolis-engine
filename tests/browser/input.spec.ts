@@ -105,7 +105,7 @@ test('input field: real keydown (Cyrillic) + paste reaches the buffer and the re
 });
 
 // Fields: disabled URL, email (clicked), password. Tab reaches the password field, then wraps past the
-// disabled field back to email; each hint lands once and idle frames rewrite nothing.
+// disabled field back to email; the canvas follows each destination's hint and idle frames rewrite nothing.
 test('input Tab wrap: the destination keyboard hint replaces the source one', async ({ page }) => {
   await page.goto('/index.html?input_wrap');
   const frame = () => page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))));

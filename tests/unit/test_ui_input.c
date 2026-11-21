@@ -1291,27 +1291,27 @@ static void test_press_and_tab_in_one_frame(void) {
     TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, ic));
 }
 
-/* A and C disabled: wrap skips the disabled first field and keeps B, the only enabled one, focused. */
-static void test_tab_wrap_keeps_only_enabled_field_focused(void) {
+/* A disabled, C focused: Tab off the last field wraps past A to B, the first enabled field. */
+static void test_tab_wrap_skips_disabled_first_field(void) {
     char a[32] = {0};
     char b[32] = {0};
     char c[32] = {0};
-    const uint32_t ia = nt_ui_id("sa");
-    const uint32_t ib = nt_ui_id("sb");
-    const uint32_t ic = nt_ui_id("sc");
-    three_field_frame(&IDLE_PTR, ia, a, false, ib, b, true, ic, c, false);
+    const uint32_t ia = nt_ui_id("wa");
+    const uint32_t ib = nt_ui_id("wb");
+    const uint32_t ic = nt_ui_id("wc");
+    three_field_frame(&IDLE_PTR, ia, a, false, ib, b, true, ic, c, true);
 
-    const float by = IN_Y + IN_H + (IN_H * 0.5F);
-    nt_pointer_t press = make_pointer(IN_X + PAD_X + 1.0F, by, true, true, false);
-    three_field_frame(&press, ia, a, false, ib, b, true, ic, c, false);
-    nt_pointer_t rel = make_pointer(IN_X + PAD_X + 1.0F, by, false, false, true);
-    three_field_frame(&rel, ia, a, false, ib, b, true, ic, c, false);
-    TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, ib));
+    const float cy = IN_Y + (2.0F * IN_H) + (IN_H * 0.5F);
+    nt_pointer_t press = make_pointer(IN_X + PAD_X + 1.0F, cy, true, true, false);
+    three_field_frame(&press, ia, a, false, ib, b, true, ic, c, true);
+    nt_pointer_t rel = make_pointer(IN_X + PAD_X + 1.0F, cy, false, false, true);
+    three_field_frame(&rel, ia, a, false, ib, b, true, ic, c, true);
+    TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, ic));
 
     nt_input_feed(nt_test_key(NT_KEY_TAB, true));
-    three_field_frame(&IDLE_PTR, ia, a, false, ib, b, true, ic, c, false);
+    three_field_frame(&IDLE_PTR, ia, a, false, ib, b, true, ic, c, true);
     nt_input_feed(nt_test_key(NT_KEY_TAB, false));
-    three_field_frame(&IDLE_PTR, ia, a, false, ib, b, true, ic, c, false);
+    three_field_frame(&IDLE_PTR, ia, a, false, ib, b, true, ic, c, true);
     TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, ib));
 }
 
@@ -1763,7 +1763,7 @@ int main(void) {
     RUN_TEST(test_tab_does_not_replay_edit_or_submit);
     RUN_TEST(test_escape_cancels_tab_advance);
     RUN_TEST(test_press_and_tab_in_one_frame);
-    RUN_TEST(test_tab_wrap_keeps_only_enabled_field_focused);
+    RUN_TEST(test_tab_wrap_skips_disabled_first_field);
     RUN_TEST(test_scroll_responsive_width);
     RUN_TEST(test_offscreen_clip_scissor_balanced);
     RUN_TEST(test_state_speed_eases_bg_color);
