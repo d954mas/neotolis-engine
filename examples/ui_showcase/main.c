@@ -356,8 +356,8 @@ typedef struct {
  * (right-click anywhere in the tab) and a ZONE menu bound to a panel (right-click only over it). */
 typedef struct {
     /* One game-owned menu each, kept across frames; zero-init is the closed state. */
-    nt_ui_menu_t global_menu; /* target_id == 0: arms on a right-click anywhere */
-    nt_ui_menu_t zone_menu;   /* target_id == panel: arms only over the bound panel */
+    nt_ui_menu_t global_menu; /* opens on a right-click outside the panel */
+    nt_ui_menu_t zone_menu;   /* opens on a right-click or long-press over the panel */
     const char *last_chosen;  /* readout label of the last chosen row; points at the row's static literal (NULL = none) */
     bool show_grid;           /* checkmark-toggle row state (global menu) */
     uint8_t opacity_pct;      /* custom-row state the inner "reset" button restores to 100 */
@@ -3213,9 +3213,7 @@ static void render_menu(nt_ui_context_t *ctx, tab_state_t *st) {
         st->menu.zone_menu.open = false;
     }
 
-    /* Render both menus (independent state + ids); arming is gated so at most one is open. Each tree is
-     * built in CODE; every row reports activation via its inline bool (if (menu_item(...)) ...), writing
-     * last_chosen — the SINGLE idiom for both mouse and keyboard (no chosen_id sink). */
+    /* Render both menus; the open branch above keeps at most one open. Rows report activation inline. */
     render_menu_global(ctx, st);
     render_menu_zone(ctx, st);
 
@@ -3669,7 +3667,7 @@ static void frame(void) {
 
 #ifndef NT_PLATFORM_WEB
     /* Esc unfocuses a focused field first (the field consumes it in its own pass) and closes an open menu
-     * level; only quit when no modal, field or menu holds it. Both are last frame's (read pre-begin). */
+     * level; only quit when no modal, field or menu holds it. All three are last frame's (read pre-begin). */
     const bool menu_open = s_state.menu.global_menu.open || s_state.menu.zone_menu.open;
     if (!modal_was_active && !menu_open && !nt_ui_input_any_focused(s_ctx) && nt_input_key_is_pressed(NT_KEY_ESCAPE)) {
         nt_app_quit();

@@ -34,7 +34,7 @@ static ui_walker_fixture_t s_fx;
  * (both must agree). */
 #define EXPECTED_MENU_STYLE_ABI 112U
 
-/* Sibling item keys for the immediate driver (unique among siblings; scope stack disambiguates depth). */
+/* Row keys, unique among siblings; the parent's row id scopes each level. */
 #define KEY_FILE 1U
 #define KEY_EDIT 2U
 #define KEY_NEW 10U
@@ -187,9 +187,7 @@ static bool menu_level_found(uint8_t depth) { return nt_ui_get_bbox(s_fx.ctx, nt
 
 static void menu_im_open(nt_ui_menu_t *st, float anchor_x, float anchor_y) { nt_ui_menu_open(st, anchor_x, anchor_y); }
 
-/* One immediate menu frame, tree: File > (New, Open > (Project, File2), Quit), Edit. Declares the tree
- * via begin/item/submenu_begin..submenu_end/menu_end. The snapshot pointer is positioned but the keyboard
- * path is what most tests assert against (deterministic, no prev-frame bbox). */
+/* One menu frame, tree: File > (New, Open > (Project, File2), Quit), Edit. */
 static void menu_im_frame_ptr(nt_ui_menu_t *st, nt_ui_menu_style_t *style, const nt_pointer_t *p) {
     menu_frame_begin(p);
     if (nt_ui_menu_begin(st, s_fx.ctx, NULL, 0U, MENU_A, style)) {
@@ -819,7 +817,7 @@ static void menu_im_frame25(nt_ui_menu_t *st, nt_ui_menu_style_t *style, float p
 }
 
 /* ---- Icon gutter: with icon_size > 0 the iconed AND non-iconed rows both reserve the leading gutter,
- *      so their labels start at the SAME x. Re-expressed against item_ex(opts{.icon=...}). ---- */
+ *      so their labels start at the SAME x. ---- */
 static void test_menu_icon_gutter_aligns_labels(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
     style.icon_size = 20U;
@@ -930,21 +928,20 @@ static void test_menu_pointer_pos(void) {
 
 /* ============================ immediate-mode full menu ============================ */
 
-/* ---- Scope-stack id distinctness — sibling keys at one scope and the SAME key under a pushed submenu
- *      scope all derive distinct, non-zero ids (mirrors the menu_hash_id non-alias guarantee). Drives
- *      nt_ui_menu_test_item_id(scope, key) — position-stable, no idx folded in. ---- */
+/* ---- Row ids: sibling keys at one scope and the SAME key under a parent row's scope all derive
+ *      distinct, non-zero ids. ---- */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) — flat distinctness asserts, not real nesting
 static void test_menu_item_id_distinct_siblings_and_scopes(void) {
     /* root scope = the menu id; two sibling keys at idx 0/1 */
     const uint32_t a = nt_ui_menu_test_item_id(MENU_A, KEY_FILE);
     const uint32_t b = nt_ui_menu_test_item_id(MENU_A, KEY_EDIT);
-    /* the SAME key reused under a pushed submenu scope (submenu_begin pushes its derived id as scope) */
+    /* the SAME key reused under the File row's scope */
     const uint32_t sub_scope = nt_ui_menu_test_item_id(MENU_A, KEY_FILE); /* the File submenu's own id == its row id */
     const uint32_t c = nt_ui_menu_test_item_id(sub_scope, KEY_FILE);      /* reuse KEY_FILE one level deeper */
 
     TEST_ASSERT_TRUE_MESSAGE(a != 0U && b != 0U && c != 0U, "no derived item id may be 0 (the no-widget sentinel)");
     TEST_ASSERT_TRUE_MESSAGE(a != b, "sibling keys at one scope must derive distinct ids");
-    TEST_ASSERT_TRUE_MESSAGE(a != c, "the same key under a pushed submenu scope must NOT alias the root id");
+    TEST_ASSERT_TRUE_MESSAGE(a != c, "the same key under a parent row's scope must NOT alias the root id");
     TEST_ASSERT_TRUE_MESSAGE(b != c, "cross-scope ids must stay distinct");
 }
 
@@ -1037,7 +1034,7 @@ static void test_menu_item_begin_child_owns_its_press(void) {
     TEST_ASSERT_TRUE(st.open);
 }
 
-/* ---- Beside the child a non_activatable row takes hover focus but never captures, activates or
+/* ---- Beside the child a not-activatable row takes hover focus but never captures, activates or
  *      closes (first, on a fresh registry); an activatable row activates and closes the chain. ---- */
 static void test_menu_item_begin_press_beside_child(void) {
     nt_ui_menu_t st = {0};
@@ -1198,8 +1195,8 @@ static void test_menu_row_inside_custom_row_asserts(void) {
     TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "inside a custom row"));
 }
 
-/* ---- Duplicate sibling key: two nt_ui_menu_item calls sharing a key in ONE open level alias the same
- *      scope-stack id -> Clay's duplicate-id error asserts. ---- */
+/* ---- Duplicate sibling key: two nt_ui_menu_item calls sharing a key in ONE open level share a row id ->
+ *      Clay's duplicate-id error asserts. ---- */
 static void test_menu_duplicate_sibling_key_asserts(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
     nt_ui_menu_t st = {0};
