@@ -1,5 +1,5 @@
 # Size Report: ui_showcase (wasm-analysis-paired)
-# Commit: 3d9afe6
+# Commit: 4635702
 
 ## WASM Section Sizes
 
@@ -13,21 +13,21 @@ Memory                 7 B
 Global                 9 B
 Export                47 B
 Elem                 126 B
-Code              385850 B
-Data               41775 B
+Code              385646 B
+Data               41780 B
 Custom             10918 B
 ---------------- ----------
-TOTAL             440227 B
+TOTAL             440028 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-84757 B   frame
+84761 B   frame
 16947 B   dispatch_command
 13116 B   create_gpu
-10221 B   input_field
- 9084 B   main
+10034 B   input_field
+ 9076 B   main
  8771 B   Clay__ConfigureOpenElementPtr
  8240 B   nt_ui_rich_text_markup
  6571 B   render_rich
@@ -37,9 +37,9 @@ TOTAL             440227 B
  4596 B   render_radial
  4501 B   slider_core
  4357 B   upload_glyph
- 4106 B   rich_solve
+ 4109 B   rich_solve
  4019 B   Clay__MeasureTextCached
- 3765 B   rich_emit_custom
+ 3766 B   rich_emit_custom
  3629 B   menu_im_row
  3591 B   nt_http_request_ex
  3372 B   Clay__CloseElement
@@ -55,7 +55,7 @@ TOTAL             440227 B
  2461 B   nt_sprite_renderer_set_material
 
 Total functions: 331
-Total code size: 385264 B
+Total code size: 385060 B
 
 ## Built Engine Archives
 
@@ -116,18 +116,18 @@ libnt_sprite_renderer.a    16182 B
 libnt_text_renderer.a       7482 B
 libnt_time.a                 914 B
 libnt_transform_comp.a      5350 B
-libnt_ui.a                358050 B
+libnt_ui.a                357822 B
 libnt_ui_rich.a            39672 B
 libnt_ui_rich_fx.a          3068 B
 libnt_ui_stub.a             1284 B
 libnt_utf8.a                1112 B
 libnt_version.a              652 B
-libnt_window.a             14590 B
+libnt_window.a             14688 B
 libnt_window_stub.a         1988 B
 ------------------------ ----------
-TOTAL (archives)         2632434 B
+TOTAL (archives)         2632304 B
 
 ## Data Segments Summary
 
 Segments: 165
-Total data size: 40611 B
+Total data size: 40616 B

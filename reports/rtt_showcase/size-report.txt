@@ -1,5 +1,5 @@
 # Size Report: rtt_showcase (wasm-analysis-paired)
-# Commit: 3d9afe6
+# Commit: 4635702
 
 ## WASM Section Sizes
 
@@ -13,17 +13,17 @@ Memory                 7 B
 Global                 9 B
 Export                29 B
 Elem                  44 B
-Code              243314 B
+Code              243349 B
 Data               22024 B
 Custom              6558 B
 ---------------- ----------
-TOTAL             273113 B
+TOTAL             273148 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-67873 B   frame
+67908 B   frame
 19152 B   dispatch_command
 13103 B   create_gpu
 10765 B   declare_slider_control
@@ -55,7 +55,7 @@ TOTAL             273113 B
  1306 B   ui_hit_test
 
 Total functions: 181
-Total code size: 242998 B
+Total code size: 243033 B
 
 ## Built Engine Archives
 
@@ -116,16 +116,16 @@ libnt_sprite_renderer.a    16182 B
 libnt_text_renderer.a       7482 B
 libnt_time.a                 914 B
 libnt_transform_comp.a      5350 B
-libnt_ui.a                358050 B
+libnt_ui.a                357822 B
 libnt_ui_rich.a            39672 B
 libnt_ui_rich_fx.a          3068 B
 libnt_ui_stub.a             1284 B
 libnt_utf8.a                1112 B
 libnt_version.a              652 B
-libnt_window.a             14590 B
+libnt_window.a             14688 B
 libnt_window_stub.a         1988 B
 ------------------------ ----------
-TOTAL (archives)         2632434 B
+TOTAL (archives)         2632304 B
 
 ## Data Segments Summary
 

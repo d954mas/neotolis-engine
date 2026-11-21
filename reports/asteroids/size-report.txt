@@ -1,5 +1,5 @@
 # Size Report: asteroids (wasm-analysis-paired)
-# Commit: 3d9afe6
+# Commit: 4635702
 
 ## WASM Section Sizes
 
@@ -13,17 +13,17 @@ Memory                 7 B
 Global                 9 B
 Export                47 B
 Elem                  60 B
-Code              402164 B
+Code              402199 B
 Data              219383 B
 Custom             12879 B
 ---------------- ----------
-TOTAL             635892 B
+TOTAL             635927 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-92143 B   frame
+92178 B   frame
 31599 B   basist::basisu_lowlevel_etc1s_transcoder::transcode_slice(void*, unsigned int, unsigned int, unsigned char const*, unsigned int, basist::block_format, unsigned int, bool, bool, bool, unsigned int, unsigned int, unsigned int, unsigned int, basist::basisu_transcoder_state*, bool, void*, unsigned int, unsigned int)
 27269 B   basist::basisu_lowlevel_uastc_ldr_4x4_transcoder::transcode_slice(void*, unsigned int, unsigned int, unsigned char const*, unsigned int, basist::block_format, unsigned int, bool, bool, unsigned int, unsigned int, unsigned int, basist::basisu_transcoder_state*, unsigned int, int, int, unsigned int)
 20624 B   ui_panel
@@ -55,7 +55,7 @@ TOTAL             635892 B
  2404 B   select_level
 
 Total functions: 247
-Total code size: 401731 B
+Total code size: 401766 B
 
 ## Built Engine Archives
 
@@ -116,16 +116,16 @@ libnt_sprite_renderer.a    16182 B
 libnt_text_renderer.a       7482 B
 libnt_time.a                 914 B
 libnt_transform_comp.a      5350 B
-libnt_ui.a                358050 B
+libnt_ui.a                357822 B
 libnt_ui_rich.a            39672 B
 libnt_ui_rich_fx.a          3068 B
 libnt_ui_stub.a             1284 B
 libnt_utf8.a                1112 B
 libnt_version.a              652 B
-libnt_window.a             14590 B
+libnt_window.a             14688 B
 libnt_window_stub.a         1988 B
 ------------------------ ----------
-TOTAL (archives)         2632434 B
+TOTAL (archives)         2632304 B
 
 ## Data Segments Summary
 
