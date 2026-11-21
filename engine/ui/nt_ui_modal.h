@@ -106,11 +106,6 @@ bool nt_ui_modal_visible(nt_ui_context_t *ctx, uint32_t id, const nt_ui_modal_st
  * when it should not survive close/reopen. */
 void nt_ui_modal_clear_state(nt_ui_context_t *ctx, uint32_t id);
 
-/* True if a modal was up LAST frame (prev-frame presence — the live depth is 0 after nt_ui_end).
- * The game gates its keyboard/gameplay hotkeys on this; pointer routing is already auto-gated by
- * the backdrop occluder. */
-bool nt_ui_modal_active(const nt_ui_context_t *ctx);
-
 #ifdef NT_TEST_ACCESS
 void nt_ui_modal_test_last_panel_offset(float *ox, float *oy); /* panel transform offset of the last begin */
 #endif

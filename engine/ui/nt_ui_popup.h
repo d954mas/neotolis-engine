@@ -87,6 +87,11 @@ void nt_ui_popup_end(nt_ui_context_t *ctx);
  *   } */
 bool nt_ui_popup_visible(nt_ui_context_t *ctx, uint32_t id, const nt_ui_popup_style_t *style, const nt_ui_popup_anchor_t *anchor, bool *p_open);
 
+/* True if an overlay that captures input (a popup with a catcher: a modal, an open menu or dropdown) was up
+ * LAST frame; the live depth is 0 after nt_ui_end. The game gates its keyboard/gameplay hotkeys on this;
+ * the catcher already keeps the pointer off the UI under it. */
+bool nt_ui_overlay_active(const nt_ui_context_t *ctx);
+
 /* Drop popup-owned retained view state for `id` after the game has closed a transient popup/sheet.
  * This clears only popup-core state, not game-owned data or child widget state such as scroll/input
  * cells inside the popup body. */

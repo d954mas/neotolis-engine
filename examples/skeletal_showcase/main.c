@@ -56,6 +56,7 @@
 #include "ui/nt_ui_inspector.h"
 #include "ui/nt_ui_label.h"
 #include "ui/nt_ui_modal.h"
+#include "ui/nt_ui_popup.h"
 #include "ui/nt_ui_scale.h"
 #include "ui/nt_ui_scroll.h"
 #include "ui/nt_ui_slider.h"
@@ -2653,8 +2654,8 @@ static void frame(void) {
     }
     nt_arena_reset(&g_nt_mem_scratch);
 #ifndef NT_PLATFORM_WEB
-    const bool modal_was_active = nt_ui_modal_active(s_ui);
-    if (!modal_was_active && nt_input_key_is_pressed(NT_KEY_ESCAPE)) {
+    const bool overlay_was_active = nt_ui_overlay_active(s_ui);
+    if (!overlay_was_active && nt_input_key_is_pressed(NT_KEY_ESCAPE)) {
         nt_app_quit();
     }
 #endif

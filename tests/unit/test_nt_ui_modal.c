@@ -544,7 +544,7 @@ static void test_modal_closed_does_not_block_base(void) {
     TEST_ASSERT_FALSE(nt_ui_wants_pointer(s_fx.ctx)); /* closed modal must not gate empty space */
 }
 
-/* ---- nt_ui_modal_active reports PREV-FRAME presence (not the live within-frame depth, which is
+/* ---- nt_ui_overlay_active reports PREV-FRAME presence (not the live within-frame depth, which is
  *      always 0 once nt_ui_end balanced the stack). A game polls it before its next nt_ui_begin to
  *      gate hotkeys. Frame with a modal up -> active next; frame with no modal -> inactive next. ---- */
 static void test_modal_active_prev_frame(void) {
@@ -552,7 +552,7 @@ static void test_modal_active_prev_frame(void) {
     st.ease_speed = 0.0F; /* instant */
 
     /* Before any frame: nothing was up. */
-    TEST_ASSERT_FALSE(nt_ui_modal_active(s_fx.ctx));
+    TEST_ASSERT_FALSE(nt_ui_overlay_active(s_fx.ctx));
 
     /* Frame 1: a modal is open. The live depth is 0 after end, but presence must be published. */
     ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1, 0);
@@ -560,13 +560,13 @@ static void test_modal_active_prev_frame(void) {
     nt_ui_modal_end(s_fx.ctx);
     nt_ui_end(s_fx.ctx);
     TEST_ASSERT_EQUAL_UINT8(0U, s_fx.ctx->active_modal_depth); /* live depth IS 0 ... */
-    TEST_ASSERT_TRUE(nt_ui_modal_active(s_fx.ctx));            /* ... yet prev-frame presence is true */
+    TEST_ASSERT_TRUE(nt_ui_overlay_active(s_fx.ctx));          /* ... yet prev-frame presence is true */
 
     /* Frame 2: no modal declared at all -> presence falls back to inactive. */
     ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1, 0);
     CLAY({.id = CLAY_ID("base2"), .layout = {.sizing = {CLAY_SIZING_FIXED(100), CLAY_SIZING_FIXED(100)}}}) {}
     nt_ui_end(s_fx.ctx);
-    TEST_ASSERT_FALSE(nt_ui_modal_active(s_fx.ctx));
+    TEST_ASSERT_FALSE(nt_ui_overlay_active(s_fx.ctx));
 
     /* A fully-closed modal (settled, declares no backdrop) does NOT count as present. */
     bool open = false;
@@ -576,7 +576,7 @@ static void test_modal_active_prev_frame(void) {
         nt_ui_modal_end(s_fx.ctx);
     }
     nt_ui_end(s_fx.ctx);
-    TEST_ASSERT_FALSE(nt_ui_modal_active(s_fx.ctx));
+    TEST_ASSERT_FALSE(nt_ui_overlay_active(s_fx.ctx));
 }
 
 /* ---- Sequential SAME-DEPTH modals in one frame: a FULLY-CLOSED first must not steal top from an

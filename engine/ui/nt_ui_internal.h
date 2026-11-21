@@ -242,7 +242,7 @@ struct nt_ui_context {
     uint8_t active_modal_depth;
     uint8_t capture_seen[NT_INPUT_MAX_POINTERS];
     /* Modal-presence across frames: _cur set when any modal declares a backdrop this frame;
-     * nt_ui_begin commits it into _prev. nt_ui_modal_active reads _prev so the game can gate its
+     * nt_ui_begin commits it into _prev. nt_ui_overlay_active reads _prev so the game can gate its
      * next-frame hotkeys (the live depth is always 0 by nt_ui_end, can't be queried after). */
     bool modal_present_cur;
     bool modal_present_prev;
@@ -282,10 +282,6 @@ struct nt_ui_context {
         bool empty;       /* count==0 or degenerate -> no spacers */
         bool active;      /* between vlist_begin/vlist_end */
     } pending_vlist;
-
-    /* The immediate-menu scratch lives in the game-owned nt_ui_menu_ctx_t (engine/ui/nt_ui_menu.h): it is
-     * heavy (~4.2 KB) and would otherwise drag that header into this one. tabbar/combo scratch are
-     * void*-decoupled and cheap, so they stay below. */
 
     /* Immediate-combo begin/selectable/end. Combos do NOT nest (single level, asserted). combo_begin
      * stashes the per-call style ptr + the game-owned open ptr + the combo id + layers; each

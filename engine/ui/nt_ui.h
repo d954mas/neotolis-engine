@@ -636,6 +636,8 @@ nt_ui_hot_t nt_ui_pointer_hot(const nt_ui_context_t *ctx, uint32_t pointer_index
  * holder instead, and only while it is over it. id need not be interactive. Last frame's layout, like
  * every query. Read-only; `hovered` stays "this record is the target". */
 bool nt_ui_hovered_within(const nt_ui_context_t *ctx, uint32_t id);
+/* The primary pointer's position this frame in UI (layout) space; call between nt_ui_begin and nt_ui_end. */
+void nt_ui_pointer_pos(const nt_ui_context_t *ctx, float *out_x, float *out_y);
 // #endregion
 
 // #region test_access

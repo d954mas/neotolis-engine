@@ -159,13 +159,6 @@ bool nt_ui_modal_visible(nt_ui_context_t *ctx, uint32_t id, const nt_ui_modal_st
     return true; /* caller declares the body then MUST call nt_ui_modal_end */
 }
 
-bool nt_ui_modal_active(const nt_ui_context_t *ctx) {
-    NT_ASSERT(ctx != NULL && "nt_ui_modal_active: ctx must be non-NULL");
-    /* Prev-frame presence: the live depth is always 0 once nt_ui_end balanced the stack, so the
-     * game gates its NEXT-frame hotkeys on whether a modal was up last frame (inherent IM lag). */
-    return ctx->modal_present_prev;
-}
-
 void nt_ui_modal_clear_state(nt_ui_context_t *ctx, uint32_t id) { nt_ui_popup_clear_state(ctx, id); }
 
 #ifdef NT_TEST_ACCESS

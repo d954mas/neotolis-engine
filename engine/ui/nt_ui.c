@@ -535,7 +535,7 @@ void nt_ui_begin(nt_ui_context_t *ctx, const nt_ui_frame_desc_t *frame) {
     ctx->modal_top_id_cur = 0U;
     ctx->modal_top_z_cur = INT32_MIN;
     /* Reset this frame's modal presence; committed into _prev at nt_ui_end (so a game that polls
-     * nt_ui_modal_active BEFORE this frame's begin still sees last frame's result). */
+     * nt_ui_overlay_active BEFORE this frame's begin still sees last frame's result). */
     ctx->modal_present_cur = false;
     /* Orphan-focus cleanup: a focused field not re-declared last frame would gate global Esc forever,
      * so drop focus before this frame runs (mirrors the capture_seen orphan sweep above). */
@@ -651,7 +651,7 @@ void nt_ui_end(nt_ui_context_t *ctx) {
         }
     }
 
-    /* Publish this frame's modal presence for nt_ui_modal_active: a game polls it next frame BEFORE
+    /* Publish this frame's modal presence for nt_ui_overlay_active: a game polls it next frame BEFORE
      * begin (e.g. gating its own hotkeys), so commit at end (not begin) to hold the latest result. */
     ctx->modal_present_prev = ctx->modal_present_cur;
 
@@ -2954,6 +2954,14 @@ static bool pointer_target(const nt_ui_context_t *ctx, uint32_t i, uint32_t *out
     }
     *out_t = h;
     return true;
+}
+
+void nt_ui_pointer_pos(const nt_ui_context_t *ctx, float *out_x, float *out_y) {
+    NT_ASSERT(ctx != NULL && ctx->in_frame && "nt_ui_pointer_pos: call between nt_ui_begin/end");
+    NT_ASSERT(out_x != NULL && out_y != NULL && "nt_ui_pointer_pos: out_x and out_y must be non-NULL");
+    const nt_pointer_t *p = &ctx->frame_pointers[ctx->frame_primary];
+    *out_x = p->x;
+    *out_y = p->y;
 }
 
 bool nt_ui_hovered_within(const nt_ui_context_t *ctx, uint32_t id) {
