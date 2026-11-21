@@ -3668,9 +3668,10 @@ static void frame(void) {
     const bool modal_was_active = nt_ui_modal_active(s_ctx);
 
 #ifndef NT_PLATFORM_WEB
-    /* Esc unfocuses a focused field first (the field consumes it in its own pass); only quit when
-     * no modal is up AND no field holds focus. focused_input_id is last frame's (read pre-begin). */
-    if (!modal_was_active && !nt_ui_input_any_focused(s_ctx) && nt_input_key_is_pressed(NT_KEY_ESCAPE)) {
+    /* Esc unfocuses a focused field first (the field consumes it in its own pass) and closes an open menu
+     * level; only quit when no modal, field or menu holds it. Both are last frame's (read pre-begin). */
+    const bool menu_open = s_state.menu.global_menu.open || s_state.menu.zone_menu.open;
+    if (!modal_was_active && !menu_open && !nt_ui_input_any_focused(s_ctx) && nt_input_key_is_pressed(NT_KEY_ESCAPE)) {
         nt_app_quit();
     }
 #endif
