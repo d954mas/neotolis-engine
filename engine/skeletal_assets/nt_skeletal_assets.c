@@ -28,16 +28,13 @@ static struct {
 // #endregion
 
 // #region slots
-/* Copies the payload into a fresh slot; the caller points the slot's view into
- * the copy. Payload arrays are read in place through typed pointers over the
- * copy; malloc's alignment carries them. */
-static uint32_t skel_take_slot(const uint8_t *data, uint32_t size) {
+/* One final allocation for the caller to copy or decode into. */
+static uint32_t skel_take_slot(uint32_t size) {
     const uint32_t id = nt_pool_alloc(&s_assets.pool);
     NT_ASSERT(id != 0 && "skeletal asset pool exhausted -- raise nt_skeletal_assets_init(max_assets)");
     nt_skeletal_slot_t *slot = &s_assets.slots[nt_pool_slot_index(id)];
     slot->mem = malloc(size);
     NT_ASSERT(slot->mem != NULL);
-    memcpy(slot->mem, data, size);
     return id;
 }
 
@@ -92,8 +89,9 @@ uint32_t nt_skeletal_assets_activate_skeleton(const uint8_t *data, uint32_t size
     NtSklHeader header = {0};
     skl_check(data, size, &header);
 
-    const uint32_t id = skel_take_slot(data, size);
+    const uint32_t id = skel_take_slot(size);
     nt_skeletal_slot_t *slot = &s_assets.slots[nt_pool_slot_index(id)];
+    memcpy(slot->mem, data, size);
     const uint8_t *mem = (const uint8_t *)slot->mem;
     const size_t joints = header.joint_count;
     slot->view.skeleton = (nt_skeletal_skeleton_t){
@@ -122,8 +120,9 @@ uint32_t nt_skeletal_assets_activate_skin_binding(const uint8_t *data, uint32_t 
     NtSknHeader header = {0};
     skn_check(data, size, &header);
 
-    const uint32_t id = skel_take_slot(data, size);
+    const uint32_t id = skel_take_slot(size);
     nt_skeletal_slot_t *slot = &s_assets.slots[nt_pool_slot_index(id)];
+    memcpy(slot->mem, data, size);
     const uint8_t *mem = (const uint8_t *)slot->mem;
     slot->view.binding = (nt_skin_binding_t){
         .rig_compat_id = (nt_hash64_t){.value = header.rig_compat_id},
@@ -146,7 +145,10 @@ static void anm_check_header(const uint8_t *data, uint32_t size, NtAnmHeader *ou
     NT_ASSERT(out->joint_count != 0 && out->sample_count != 0 && "clip has no joints or samples");
     /* duration sizes the grid the sampler indexes, so it is structure. */
     NT_ASSERT(nt_skeletal_finite((double)out->duration) && out->duration >= 0.0F && "clip duration is negative or not finite");
+    NT_ASSERT(nt_skeletal_format_size((nt_skeletal_format_t)out->t_format) != 0U && nt_skeletal_format_size((nt_skeletal_format_t)out->q_format) != 0U &&
+              nt_skeletal_format_size((nt_skeletal_format_t)out->s_format) != 0U && "unsupported clip format");
     NT_ASSERT((uint64_t)size == nt_anm_size(out) && "clip size does not match its counts");
+    NT_ASSERT(nt_anm_decoded_size(out) <= UINT32_MAX && "decoded clip exceeds 4 GB");
     /* Interpolation reads two adjacent grid entries, so a row needs a second
      * sample and an interval to step through. */
     const bool sampled = (out->n_t | out->n_q | out->n_s) != 0U;
@@ -155,25 +157,25 @@ static void anm_check_header(const uint8_t *data, uint32_t size, NtAnmHeader *ou
 
 uint32_t nt_skeletal_assets_activate_clip(const uint8_t *data, uint32_t size) {
     NT_ASSERT(s_assets.slots != NULL && "nt_skeletal_assets_init must run before the skeletal activators");
+    NT_ASSERT(data != NULL && ((uintptr_t)data & 3U) == 0U && "NANM payload must be 4-aligned");
 
     NtAnmHeader header = {0};
     anm_check_header(data, size, &header);
 
     /* Every table entry is a write index the sampler turns into a position in
      * the caller's pose. */
-    nt_skeletal_clip_t check;
-    nt_skeletal_clip_view(data, &check);
-    const uint16_t *const table[3] = {check.t_joint, check.q_joint, check.s_joint};
-    const uint16_t counts[3] = {check.n_t, check.n_q, check.n_s};
-    for (uint32_t t = 0; t < 3; ++t) {
-        for (uint32_t k = 0; k < counts[t]; ++k) {
-            NT_ASSERT(table[t][k] < check.joint_count && "clip joint table names a joint out of range");
-        }
+    const size_t rows = (size_t)header.n_t + header.n_q + header.n_s;
+    const uint8_t *table = data + size - (rows * sizeof(uint16_t));
+    for (size_t k = 0; k < rows; ++k) {
+        uint16_t joint;
+        memcpy(&joint, table + (k * sizeof(joint)), sizeof(joint));
+        NT_ASSERT(joint < header.joint_count && "clip joint table names a joint out of range");
     }
 
-    const uint32_t id = skel_take_slot(data, size);
+    const uint32_t decoded_size = (uint32_t)nt_anm_decoded_size(&header);
+    const uint32_t id = skel_take_slot(decoded_size);
     nt_skeletal_slot_t *slot = &s_assets.slots[nt_pool_slot_index(id)];
-    nt_skeletal_clip_view((const uint8_t *)slot->mem, &slot->view.clip);
+    nt_skeletal_clip_decode(data, slot->mem, decoded_size, &slot->view.clip);
     return id;
 }
 

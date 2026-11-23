@@ -179,6 +179,8 @@ typedef struct {
     bool animation_bad_times;        /* the Joint3 STEP input runs backwards: 0.75 then 0.25 */
     bool animation_cubic_origin;     /* the Joint2 CUBICSPLINE rotation runs identity -> (0, 0, 0, -1) with zero tangents: through the origin */
     bool animation_negated_last_key; /* the Joint1 LINEAR rotation is identity at 0, 0.25 and 0.5 s and (0, 0, 0, -1) held from 1.0 s: one rotation, two signs */
+    bool animation_large_constant;   /* Joint4 constant translation is outside half range but belongs in FP32 base */
+    bool animation_half_overflow;    /* Joint4 translation moves from zero beyond half range */
     bool reparent_joint2;            /* Joint2 hangs under Joint3 instead of Joint1 (same name, same rest) */
 } rigged_glb_opts_t;
 
