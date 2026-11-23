@@ -4,8 +4,8 @@
 /* Popup-core: the shared floating-overlay primitive. One panel floating element + a
  * transparent light-dismiss catcher (block_pointer occluder) + an open/close value_t tween + a
  * one-stride-per-level z-band + trigger-anchoring with per-side edge-flip. The game owns the `bool open`;
- * the core only RAISES close_requested (outside-click on the catcher) and never closes itself.
- * begin/end are balanced (mirror nt_ui_modal_begin/end). The modal is re-expressed on top of this
+ * the core clears it on an outside click (light-dismiss) and never opens it.
+ * Conditional begin/end like the menu: end only after begin returned true. The modal is re-expressed on top of this
  * core (modal = popup-core centered + dim backdrop). Dropdown / tooltip / context-menu reuse it. */
 
 #include <stdbool.h>
@@ -37,17 +37,13 @@ typedef struct {
 } nt_ui_popup_anchor_t;
 _Static_assert(sizeof(nt_ui_popup_anchor_t) == 20, "nt_ui_popup_anchor_t stable ABI (4 float + 1 u8 + 3 pad)");
 
-/* Per-frame result. t is the eased open amount; visible gates body declaration (IM exit-anim: keep
- * declaring the body while t>epsilon so the close tween plays). side is the side actually chosen this
- * frame after edge-flip (probe + submenu mirroring). */
+/* Per-frame info, for a game that draws with the tween or the chosen side (nullable out of begin). */
 typedef struct {
-    float t;              /* eased 0..1 open amount */
-    bool close_requested; /* outside-click on the catcher raised a close this frame */
-    bool visible;         /* open || t > epsilon — body should be declared */
-    bool fully_closed;    /* !open && t <= epsilon */
-    uint8_t side;         /* nt_ui_popup_side_t actually chosen (post edge-flip) */
-} nt_ui_popup_result_t;
-_Static_assert(sizeof(nt_ui_popup_result_t) == 8, "nt_ui_popup_result_t stable ABI (1 float + 3 bool + 1 u8)");
+    float t;      /* eased 0..1 open amount */
+    uint8_t side; /* nt_ui_popup_side_t actually chosen (post edge-flip) */
+    uint8_t _pad[3];
+} nt_ui_popup_info_t;
+_Static_assert(sizeof(nt_ui_popup_info_t) == 8, "nt_ui_popup_info_t stable ABI (1 float + 1 u8 + 3 pad)");
 
 /* Catcher mode: a popup that wants light-dismiss declares a transparent full-viewport catcher under
  * its panel; a tooltip (NO dismiss) declares none. */
@@ -67,25 +63,21 @@ _Static_assert(sizeof(nt_ui_popup_style_t) == 80, "nt_ui_popup_style_t stable AB
  * identity (scale 1) so a {0}-init never trips nt_ui_anim's scale_*>0 assert. */
 nt_ui_popup_style_t nt_ui_popup_style_defaults(void);
 
-/* Low-level, UNCONDITIONAL begin/end (like nt_ui_scroll_begin): always begin -> ... -> end. Opens the
- * catcher (light-dismiss) + panel floating elements (a root popup on the frame's next root band, a nested
- * one a band above its parent) eased toward open?1:0,
- * placed at the anchor with edge-flip (or centered for a CENTER anchor). Panel stays OPEN until
- * nt_ui_popup_end. id non-zero, style non-NULL, anchor non-NULL. Asserts depth < NT_UI_MODAL_MAX_DEPTH
- * BEFORE push (overflow, no fallback). Prefer the scoped nt_ui_popup_visible unless you need the side. */
-nt_ui_popup_result_t nt_ui_popup_begin(nt_ui_context_t *ctx, uint32_t id, const nt_ui_popup_style_t *style, const nt_ui_popup_anchor_t *anchor, bool open);
-void nt_ui_popup_end(nt_ui_context_t *ctx);
-
-/* High-level scoped form: the game stores ONE bool. Returns "declare the body THIS frame?" —
- * true while open OR still animating closed. On an outside-click close it clears *p_open; once fully
- * closed it balances the stack itself (no nt_ui_popup_end in that branch):
+/* Returns whether the popup shows this frame: open, or still easing closed after the game cleared *open.
+ * Only then it opens the catcher (light-dismiss) + panel floating elements (a root popup on the frame's
+ * next root band, a nested one a band above its parent) eased toward open?1:0, placed at the anchor with
+ * edge-flip (or centered for a CENTER anchor); the game declares the body and calls nt_ui_popup_end. A
+ * hidden popup declares nothing. An outside click clears *open. The game owns *open:
  *
  *   if (clicked_trigger) open = true;
- *   if (nt_ui_popup_visible(ctx, ID, &style, &anchor, &open)) {
+ *   if (nt_ui_popup_begin(ctx, ID, &style, &anchor, &open, NULL)) {
  *       CLAY({ ...popup body... }) { if (select) open = false; }
  *       nt_ui_popup_end(ctx);
- *   } */
-bool nt_ui_popup_visible(nt_ui_context_t *ctx, uint32_t id, const nt_ui_popup_style_t *style, const nt_ui_popup_anchor_t *anchor, bool *p_open);
+ *   }
+ *
+ * id non-zero, style, anchor and open non-NULL; info nullable. Asserts depth < NT_UI_MODAL_MAX_DEPTH. */
+bool nt_ui_popup_begin(nt_ui_context_t *ctx, uint32_t id, const nt_ui_popup_style_t *style, const nt_ui_popup_anchor_t *anchor, bool *open, nt_ui_popup_info_t *info);
+void nt_ui_popup_end(nt_ui_context_t *ctx);
 
 /* Drop popup-owned retained view state for `id` after the game has closed a transient popup/sheet.
  * This clears only popup-core state, not game-owned data or child widget state such as scroll/input

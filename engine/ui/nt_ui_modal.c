@@ -88,13 +88,14 @@ static nt_ui_modal_close_reason_t modal_reason_from_src(nt_ui_popup_close_src_t 
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-nt_ui_modal_result_t nt_ui_modal_begin(nt_ui_context_t *ctx, uint32_t id, const nt_ui_modal_style_t *style, bool open) {
+bool nt_ui_modal_begin(nt_ui_context_t *ctx, uint32_t id, const nt_ui_modal_style_t *style, bool *open, nt_ui_modal_info_t *info) {
     NT_ASSERT(style != NULL && "nt_ui_modal_begin: style must be non-NULL");
     NT_ASSERT(isfinite(style->ease_speed) && style->ease_speed >= 0.0F && "nt_ui_modal_begin: ease_speed must be finite >= 0");
     NT_ASSERT(isfinite(style->backdrop_alpha) && style->backdrop_alpha >= 0.0F && style->backdrop_alpha <= 1.0F && "nt_ui_modal_begin: backdrop_alpha must be in [0,1]");
     NT_ASSERT(style->backdrop_close_pad >= 0 && "nt_ui_modal_begin: backdrop_close_pad must be >= 0");
     /* Validate the active recipe before any push so a bad recipe fails early. */
-    const nt_ui_modal_anim_t *anim = open ? &style->open : &style->close;
+    NT_ASSERT(open != NULL && "nt_ui_modal_begin: open must be non-NULL");
+    const nt_ui_modal_anim_t *anim = *open ? &style->open : &style->close;
     NT_ASSERT(anim->type <= NT_UI_MODAL_ANIM_SLIDE && "nt_ui_modal_begin: anim.type out of range");
     NT_ASSERT((anim->type != NT_UI_MODAL_ANIM_SCALE_POP || (isfinite(anim->scale_start) && anim->scale_start > 0.0F)) && "nt_ui_modal_begin: SCALE_POP scale_start must be finite > 0");
     NT_ASSERT((anim->type != NT_UI_MODAL_ANIM_SLIDE || (isfinite(anim->offset) && anim->edge <= NT_UI_MODAL_RIGHT)) && "nt_ui_modal_begin: SLIDE offset finite + edge in range");
@@ -121,38 +122,22 @@ nt_ui_modal_result_t nt_ui_modal_begin(nt_ui_context_t *ctx, uint32_t id, const 
         .force_catcher = true, /* a modal ALWAYS gates click-through (inert occluder when no backdrop-close) */
     };
     nt_ui_popup_close_src_t src = NT_UI_POPUP_CLOSE_SRC_NONE;
-    const nt_ui_popup_result_t pr = nt_ui_popup_begin_internal(ctx, id, &pstyle, &anchor, open, &ext, &src);
-    const nt_ui_modal_close_reason_t reason = modal_reason_from_src(src);
+    nt_ui_popup_info_t pi = {0};
+    const bool shown = nt_ui_popup_begin_internal(ctx, id, &pstyle, &anchor, open, &ext, &pi, &src);
 
 #ifdef NT_TEST_ACCESS
     /* Panel offset = start offset eased by (1-t); matches popup-core's panel transform exactly. */
-    s_last_panel_off_x = start.offset_x * (1.0F - pr.t);
-    s_last_panel_off_y = start.offset_y * (1.0F - pr.t);
+    s_last_panel_off_x = start.offset_x * (1.0F - pi.t);
+    s_last_panel_off_y = start.offset_y * (1.0F - pi.t);
 #endif
 
-    return (nt_ui_modal_result_t){
-        .t = pr.t,
-        .reason = reason,
-        .close_requested = (reason != NT_UI_MODAL_CLOSE_NONE),
-        .visible = pr.visible,
-        .fully_closed = pr.fully_closed,
-    };
+    if (info != NULL) {
+        *info = (nt_ui_modal_info_t){.t = pi.t, .reason = modal_reason_from_src(src)};
+    }
+    return shown;
 }
 
 void nt_ui_modal_end(nt_ui_context_t *ctx) { nt_ui_popup_end(ctx); }
-
-bool nt_ui_modal_visible(nt_ui_context_t *ctx, uint32_t id, const nt_ui_modal_style_t *style, bool *p_open) {
-    NT_ASSERT(p_open != NULL && "nt_ui_modal_visible: p_open must be non-NULL");
-    const nt_ui_modal_result_t r = nt_ui_modal_begin(ctx, id, style, *p_open);
-    if (r.close_requested) {
-        *p_open = false; /* signal -> game's bool clears; t decays over the next frames */
-    }
-    if (!r.visible) {
-        nt_ui_modal_end(ctx); /* fully closed: balance the stack, caller skips the body */
-        return false;
-    }
-    return true; /* caller declares the body then MUST call nt_ui_modal_end */
-}
 
 void nt_ui_modal_clear_state(nt_ui_context_t *ctx, uint32_t id) { nt_ui_popup_clear_state(ctx, id); }
 

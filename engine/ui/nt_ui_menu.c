@@ -454,7 +454,8 @@ static void menu_open_level(const nt_ui_menu_t *menu, uint8_t depth, const nt_ui
     pst.ease_speed = 0.0F;
     pst.layer = f->fill_layer;
     const nt_ui_popup_ext_t ext = {.def = &NT_UI_MENU_DEF, .force_catcher = (depth == 0U)};
-    (void)nt_ui_popup_begin_internal(f->ui, menu_level_id(f->menu_id, depth), &pst, anchor, true, &ext, NULL);
+    bool level_open = true; /* a declared level is open: the menu closes by not declaring it */
+    (void)nt_ui_popup_begin_internal(f->ui, menu_level_id(f->menu_id, depth), &pst, anchor, &level_open, &ext, NULL, NULL);
     menu_open_panel(f->ui, f->fill_layer, f->menu_id, depth, f->style); /* LEFT open for the level's rows */
 }
 

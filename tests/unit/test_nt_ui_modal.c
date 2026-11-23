@@ -1,6 +1,6 @@
 /* Modal helper tests — Clay-floating smoke, z-band math, stack push/pop balance,
  * depth-overflow death, top-only close targeting, open/close tween clamp +
- * fully_closed/visible transition, high-level wrapper contract, and the world
+ * fully_closed/visible transition, open-bool contract, and the world
  * auto-gate via wants_pointer.
  *
  * Driven through the walker fixture + NT_TEST_ACCESS probes (no GL surface).
@@ -48,9 +48,26 @@ static bool float_near(float a, float b, float eps) { return fabsf(a - b) <= eps
 #define MODAL_A 0x4D0001U
 #define MODAL_B 0x4D0002U
 
+/* Begins a modal the test holds open: a fresh `true` per call, so a raised close never sticks across
+ * frames. An open modal always shows, so the caller declares the body and ends it unconditionally. */
+static nt_ui_modal_info_t modal_begin_open(nt_ui_context_t *ctx, uint32_t id, const nt_ui_modal_style_t *st) {
+    bool open = true;
+    nt_ui_modal_info_t info = {0};
+    TEST_ASSERT_TRUE(nt_ui_modal_begin(ctx, id, st, &open, &info));
+    return info;
+}
+
+/* Begins a modal the test holds closed; ends it only when it still shows (easing closed). */
+static void modal_begin_closed(nt_ui_context_t *ctx, uint32_t id, const nt_ui_modal_style_t *st) {
+    bool open = false;
+    if (nt_ui_modal_begin(ctx, id, st, &open, NULL)) {
+        nt_ui_modal_end(ctx);
+    }
+}
+
 /* ---- ABI sanity: the _Static_asserts compile; assert the runtime sizes match too. ---- */
 static void test_modal_abi_sizes(void) {
-    TEST_ASSERT_EQUAL_UINT(12U, (unsigned)sizeof(nt_ui_modal_result_t));
+    TEST_ASSERT_EQUAL_UINT(8U, (unsigned)sizeof(nt_ui_modal_info_t));
     TEST_ASSERT_EQUAL_UINT(12U, (unsigned)sizeof(nt_ui_modal_anim_t));
     TEST_ASSERT_EQUAL_UINT(40U, (unsigned)sizeof(nt_ui_modal_style_t));
 }
@@ -98,14 +115,15 @@ static void test_modal_floating_smoke(void) {
     nt_pointer_t p = {.active = true};
     ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1, 0);
     CLAY({.id = CLAY_ID("base"), .layout = {.sizing = {CLAY_SIZING_FIXED(800), CLAY_SIZING_FIXED(600)}}}) {}
-    nt_ui_modal_result_t r = nt_ui_modal_begin(s_fx.ctx, MODAL_A, &st, true);
-    {
+    bool open = true;
+    const bool visible = nt_ui_modal_begin(s_fx.ctx, MODAL_A, &st, &open, NULL);
+    if (visible) {
         CLAY({.id = CLAY_ID("modal_body"), .layout = {.sizing = {CLAY_SIZING_FIXED(300), CLAY_SIZING_FIXED(200)}}, .backgroundColor = {8, 8, 8, 255}}) {}
+        nt_ui_modal_end(s_fx.ctx);
     }
-    nt_ui_modal_end(s_fx.ctx);
     nt_ui_end(s_fx.ctx); /* walks: balanced scissor assert + transform compose must not trip */
     TEST_ASSERT_EQUAL_INT32((int32_t)1000, band_of_rect(s_fx.ctx, CLAY_ID("modal_body").id));
-    TEST_ASSERT_TRUE(r.visible);
+    TEST_ASSERT_TRUE(visible);
     TEST_ASSERT_EQUAL_UINT8(0U, s_fx.ctx->overlay_depth); /* balanced */
 }
 
@@ -115,10 +133,10 @@ static void test_modal_zband_and_nesting(void) {
     st.ease_speed = 0.0F;
     nt_pointer_t p = {.active = true};
     ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1, 0);
-    nt_ui_modal_begin(s_fx.ctx, MODAL_A, &st, true);
+    (void)modal_begin_open(s_fx.ctx, MODAL_A, &st);
     /* Opaque bodies so each panel subtree emits a rectangle carrying its root's band. */
-    CLAY({.id = CLAY_ID("body_a"), .layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(20)}}, .backgroundColor = {8, 8, 8, 255}}) {}
-    nt_ui_modal_begin(s_fx.ctx, MODAL_B, &st, true); /* modal-over-modal */
+    CLAY({.id = CLAY_ID("body_a"), .layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(20)}}, .backgroundColor = {8, 8, 8, 255}}){}(void)modal_begin_open(s_fx.ctx, MODAL_B,
+                                                                                                                                                                     &st); /* modal-over-modal */
     CLAY({.id = CLAY_ID("body_b"), .layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(20)}}, .backgroundColor = {8, 8, 8, 255}}) {}
     TEST_ASSERT_EQUAL_UINT8(2U, s_fx.ctx->overlay_depth);
     nt_ui_modal_end(s_fx.ctx);
@@ -137,7 +155,7 @@ static void test_modal_stack_depth_zero_balanced(void) {
     nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
     TEST_ASSERT_EQUAL_UINT8(0U, s_fx.ctx->overlay_depth);
     ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1, 0);
-    nt_ui_modal_begin(s_fx.ctx, MODAL_A, &st, true);
+    (void)modal_begin_open(s_fx.ctx, MODAL_A, &st);
     TEST_ASSERT_EQUAL_UINT8(1U, s_fx.ctx->overlay_depth);
     nt_ui_modal_end(s_fx.ctx);
     TEST_ASSERT_EQUAL_UINT8(0U, s_fx.ctx->overlay_depth);
@@ -150,17 +168,18 @@ static void test_modal_depth_overflow_asserts(void) {
     st.ease_speed = 0.0F;
     ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1, 0);
     for (uint32_t i = 0; i < NT_UI_MODAL_MAX_DEPTH; ++i) {
-        nt_ui_modal_begin(s_fx.ctx, 0x4D1000U + i, &st, true);
+        (void)modal_begin_open(s_fx.ctx, 0x4D1000U + i, &st);
     }
     TEST_ASSERT_EQUAL_UINT8((uint8_t)NT_UI_MODAL_MAX_DEPTH, s_fx.ctx->overlay_depth);
-    NT_TEST_EXPECT_ASSERT(nt_ui_modal_begin(s_fx.ctx, 0x4D1FFFU, &st, true));
+    bool open = true;
+    NT_TEST_EXPECT_ASSERT(nt_ui_modal_begin(s_fx.ctx, 0x4D1FFFU, &st, &open, NULL));
     for (uint32_t i = 0; i < NT_UI_MODAL_MAX_DEPTH; ++i) {
         nt_ui_modal_end(s_fx.ctx);
     }
     nt_ui_end(s_fx.ctx);
 }
 
-/* ---- Esc raises close_requested{ESC} on the TOP modal only; a non-top modal stays silent.
+/* ---- Esc raises a close (reason ESC) on the TOP modal only; a non-top modal stays silent.
  *      Top-targeting carries the standard 1-frame IM lag (the deepest modal resolved last frame
  *      is "top"), so frame 1 establishes the nesting and frame 2 holds Esc. ---- */
 static void test_modal_esc_top_only(void) {
@@ -170,8 +189,8 @@ static void test_modal_esc_top_only(void) {
 
     /* Frame 1: establish A (outer) then B (inner, deepest) — no Esc yet. */
     ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1, 0);
-    nt_ui_modal_begin(s_fx.ctx, MODAL_A, &st, true);
-    nt_ui_modal_begin(s_fx.ctx, MODAL_B, &st, true);
+    (void)modal_begin_open(s_fx.ctx, MODAL_A, &st);
+    (void)modal_begin_open(s_fx.ctx, MODAL_B, &st);
     nt_ui_modal_end(s_fx.ctx);
     nt_ui_modal_end(s_fx.ctx);
     nt_ui_end(s_fx.ctx);
@@ -179,13 +198,13 @@ static void test_modal_esc_top_only(void) {
     /* Frame 2: Esc held. Only B (last frame's deepest = top) consumes it; A stays silent. */
     nt_input_feed(nt_test_key(NT_KEY_ESCAPE, true));
     ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1, 0);
-    nt_ui_modal_result_t outer = nt_ui_modal_begin(s_fx.ctx, MODAL_A, &st, true); /* NOT top */
-    nt_ui_modal_result_t inner = nt_ui_modal_begin(s_fx.ctx, MODAL_B, &st, true); /* TOP */
+    const nt_ui_modal_info_t outer = modal_begin_open(s_fx.ctx, MODAL_A, &st); /* NOT top */
+    const nt_ui_modal_info_t inner = modal_begin_open(s_fx.ctx, MODAL_B, &st); /* TOP */
     nt_ui_modal_end(s_fx.ctx);
     nt_ui_modal_end(s_fx.ctx);
     nt_ui_end(s_fx.ctx);
-    TEST_ASSERT_FALSE(outer.close_requested); /* non-top never consumes Esc */
-    TEST_ASSERT_TRUE(inner.close_requested);
+    TEST_ASSERT_FALSE(outer.reason != NT_UI_MODAL_CLOSE_NONE); /* non-top never consumes Esc */
+    TEST_ASSERT_TRUE(inner.reason != NT_UI_MODAL_CLOSE_NONE);
     TEST_ASSERT_EQUAL_INT(NT_UI_MODAL_CLOSE_ESC, inner.reason);
 }
 
@@ -195,23 +214,33 @@ static void test_modal_esc_requires_flag(void) {
     st.ease_speed = 0.0F;
     st.flags = 0U; /* no LISTEN_ESC, no CLOSE_ON_BACKDROP */
     ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1, 0);
-    (void)nt_ui_modal_begin(s_fx.ctx, MODAL_A, &st, true); /* top from the next frame on */
+    (void)modal_begin_open(s_fx.ctx, MODAL_A, &st); /* top from the next frame on */
     nt_ui_modal_end(s_fx.ctx);
     nt_ui_end(s_fx.ctx);
     nt_input_feed(nt_test_key(NT_KEY_ESCAPE, true));
     ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1, 0);
-    nt_ui_modal_result_t r = nt_ui_modal_begin(s_fx.ctx, MODAL_A, &st, true);
+    const nt_ui_modal_info_t r = modal_begin_open(s_fx.ctx, MODAL_A, &st);
     nt_ui_modal_end(s_fx.ctx);
     nt_ui_end(s_fx.ctx);
-    TEST_ASSERT_FALSE(r.close_requested);
+    TEST_ASSERT_FALSE(r.reason != NT_UI_MODAL_CLOSE_NONE);
 }
 
 /* ---- Open/close tween: t rises toward 1 while open, decays toward 0 after close, stays in [0,1];
  *      visible == (t>eps); fully_closed only when (!open && t<=eps). ---- */
-static void modal_frame(uint32_t id, const nt_ui_modal_style_t *st, bool open, nt_ui_modal_result_t *out) {
+typedef struct {
+    nt_ui_modal_info_t info;
+    bool visible;      /* begin showed the modal */
+    bool fully_closed; /* hidden while the caller held it closed */
+} modal_frame_t;
+
+static void modal_frame(uint32_t id, const nt_ui_modal_style_t *st, bool open, modal_frame_t *out) {
     ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1, 0);
-    *out = nt_ui_modal_begin(s_fx.ctx, id, st, open);
-    nt_ui_modal_end(s_fx.ctx);
+    bool o = open;
+    out->visible = nt_ui_modal_begin(s_fx.ctx, id, st, &o, &out->info);
+    out->fully_closed = !out->visible && !open;
+    if (out->visible) {
+        nt_ui_modal_end(s_fx.ctx);
+    }
     nt_ui_end(s_fx.ctx);
 }
 
@@ -219,26 +248,26 @@ static void modal_frame(uint32_t id, const nt_ui_modal_style_t *st, bool open, n
 static void test_modal_tween_clamp_and_transition(void) {
     nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
     st.ease_speed = 8.0F; /* finite ease so t moves gradually, never snaps */
-    nt_ui_modal_result_t r;
+    modal_frame_t r;
 
     /* Open: t monotonically rises toward 1, always in [0,1]. */
     float prev = 0.0F;
     for (int i = 0; i < 120; ++i) {
         modal_frame(MODAL_A, &st, true, &r);
-        TEST_ASSERT_TRUE(r.t >= -0.0001F && r.t <= 1.0001F);
-        TEST_ASSERT_TRUE(r.t >= prev - 0.0001F); /* non-decreasing while opening */
-        prev = r.t;
+        TEST_ASSERT_TRUE(r.info.t >= -0.0001F && r.info.t <= 1.0001F);
+        TEST_ASSERT_TRUE(r.info.t >= prev - 0.0001F); /* non-decreasing while opening */
+        prev = r.info.t;
         TEST_ASSERT_TRUE(r.visible);
         TEST_ASSERT_FALSE(r.fully_closed);
     }
-    TEST_ASSERT_TRUE(float_near(r.t, 1.0F, 0.02F));
+    TEST_ASSERT_TRUE(float_near(r.info.t, 1.0F, 0.02F));
 
     /* Close: t decays toward 0; once t<=eps the modal reports fully_closed + !visible. */
     bool saw_fully_closed = false;
     for (int i = 0; i < 300; ++i) {
         modal_frame(MODAL_A, &st, false, &r);
-        TEST_ASSERT_TRUE(r.t >= -0.0001F && r.t <= 1.0001F);
-        TEST_ASSERT_EQUAL_INT((r.t > (1.0F / 256.0F)), r.visible);
+        TEST_ASSERT_TRUE(r.info.t >= -0.0001F && r.info.t <= 1.0001F);
+        TEST_ASSERT_EQUAL_INT((r.info.t > (1.0F / 256.0F)), r.visible);
         if (r.fully_closed) {
             TEST_ASSERT_FALSE(r.visible);
             saw_fully_closed = true;
@@ -254,18 +283,18 @@ static void test_modal_tween_clamp_and_transition(void) {
 static void test_modal_open_entrance_eases_from_zero(void) {
     nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
     st.ease_speed = 8.0F; /* finite: entrance must animate, not snap */
-    nt_ui_modal_result_t r;
+    modal_frame_t r;
 
     /* Frame 1 (first ever sight, open): t starts at ~0 and has only one dt of ease -> well under 1. */
     modal_frame(MODAL_A, &st, true, &r);
-    TEST_ASSERT_TRUE(r.t < 0.5F);  /* a fresh open slot eases, never snaps to 1 */
-    TEST_ASSERT_TRUE(r.t >= 0.0F); /* eased up from 0, not negative */
+    TEST_ASSERT_TRUE(r.info.t < 0.5F);  /* a fresh open slot eases, never snaps to 1 */
+    TEST_ASSERT_TRUE(r.info.t >= 0.0F); /* eased up from 0, not negative */
 
     /* After many frames it settles near 1. */
     for (int i = 0; i < 120; ++i) {
         modal_frame(MODAL_A, &st, true, &r);
     }
-    TEST_ASSERT_TRUE(float_near(r.t, 1.0F, 0.02F));
+    TEST_ASSERT_TRUE(float_near(r.info.t, 1.0F, 0.02F));
 }
 
 /* ---- An explicitly-open modal declares its body on frame 1 even before t crosses epsilon: visible
@@ -273,10 +302,10 @@ static void test_modal_open_entrance_eases_from_zero(void) {
 static void test_modal_open_visible_before_epsilon(void) {
     nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
     st.ease_speed = 0.1F; /* very slow: first eased t stays well below epsilon (1/256) */
-    nt_ui_modal_result_t r;
+    modal_frame_t r;
     modal_frame(MODAL_A, &st, true, &r);
-    TEST_ASSERT_TRUE(r.t < (1.0F / 256.0F)); /* still under epsilon on frame 1 */
-    TEST_ASSERT_TRUE(r.visible);             /* yet visible because open == true */
+    TEST_ASSERT_TRUE(r.info.t < (1.0F / 256.0F)); /* still under epsilon on frame 1 */
+    TEST_ASSERT_TRUE(r.visible);                  /* yet visible because open == true */
     TEST_ASSERT_FALSE(r.fully_closed);
 }
 
@@ -285,14 +314,13 @@ static void test_modal_open_visible_before_epsilon(void) {
 static void test_modal_open_instant_snaps(void) {
     nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
     st.ease_speed = 0.0F;
-    nt_ui_modal_result_t r;
+    modal_frame_t r;
     modal_frame(MODAL_A, &st, true, &r);
-    TEST_ASSERT_TRUE(float_near(r.t, 1.0F, 0.0001F));
+    TEST_ASSERT_TRUE(float_near(r.info.t, 1.0F, 0.0001F));
     TEST_ASSERT_TRUE(r.visible);
 }
 
-/* ---- High-level wrapper: returns true while animating (open OR closing), clears *p_open on
- *      close_requested, returns false once fully closed. ---- */
+/* ---- begin returns true while animating (open OR closing), clears *open on a raised close, returns false once fully closed. ---- */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_modal_wrapper_contract(void) {
     nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
@@ -302,7 +330,7 @@ static void test_modal_wrapper_contract(void) {
 
     /* Frame 1: open -> wrapper returns true, declares body. */
     ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1, 0);
-    bool declared = nt_ui_modal_visible(s_fx.ctx, MODAL_A, &st, &open);
+    bool declared = nt_ui_modal_begin(s_fx.ctx, MODAL_A, &st, &open, NULL);
     TEST_ASSERT_TRUE(declared);
     if (declared) {
         nt_ui_modal_end(s_fx.ctx);
@@ -313,9 +341,9 @@ static void test_modal_wrapper_contract(void) {
     /* Frame 2: Esc -> wrapper clears *open but STILL returns true (animating closed). */
     nt_input_feed(nt_test_key(NT_KEY_ESCAPE, true));
     ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1, 0);
-    declared = nt_ui_modal_visible(s_fx.ctx, MODAL_A, &st, &open);
+    declared = nt_ui_modal_begin(s_fx.ctx, MODAL_A, &st, &open, NULL);
     TEST_ASSERT_TRUE(declared); /* body still declared during the close animation */
-    TEST_ASSERT_FALSE(open);    /* close_requested cleared the bool */
+    TEST_ASSERT_FALSE(open);    /* the raised close cleared the bool */
     if (declared) {
         nt_ui_modal_end(s_fx.ctx);
     }
@@ -326,7 +354,7 @@ static void test_modal_wrapper_contract(void) {
     bool went_false = false;
     for (int i = 0; i < 300; ++i) {
         ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1, 0);
-        declared = nt_ui_modal_visible(s_fx.ctx, MODAL_A, &st, &open);
+        declared = nt_ui_modal_begin(s_fx.ctx, MODAL_A, &st, &open, NULL);
         if (declared) {
             nt_ui_modal_end(s_fx.ctx);
         }
@@ -348,13 +376,13 @@ static void test_modal_wants_pointer_while_open(void) {
 
     /* Frame 1: declare the modal; the backdrop occluder records for next-frame arbitration. */
     ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1, 0);
-    nt_ui_modal_begin(s_fx.ctx, MODAL_A, &st, true);
+    (void)modal_begin_open(s_fx.ctx, MODAL_A, &st);
     nt_ui_modal_end(s_fx.ctx);
     nt_ui_end(s_fx.ctx);
 
     /* Frame 2: the prev-frame backdrop wins topmost-z; the hot record is declared again -> wants_pointer. */
     ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1, 0);
-    nt_ui_modal_begin(s_fx.ctx, MODAL_A, &st, true);
+    (void)modal_begin_open(s_fx.ctx, MODAL_A, &st);
     nt_ui_modal_end(s_fx.ctx);
     nt_ui_end(s_fx.ctx);
     TEST_ASSERT_TRUE(nt_ui_wants_pointer(s_fx.ctx));
@@ -399,7 +427,7 @@ static nt_ui_interaction_t modal_gate_base_frame(const nt_ui_modal_style_t *st, 
     CLAY({.id = (Clay_ElementId){.id = nt_ui_id("gated_base_btn")}, .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(120)}}}) {
         in = nt_ui_step(s_fx.ctx, nt_ui_id("gated_base_btn"), NULL);
     }
-    const bool declared = nt_ui_modal_visible(s_fx.ctx, MODAL_A, st, &open);
+    const bool declared = nt_ui_modal_begin(s_fx.ctx, MODAL_A, st, &open, NULL);
     if (declared) {
         nt_ui_modal_end(s_fx.ctx);
     }
@@ -433,7 +461,7 @@ static void test_modal_no_backdrop_close_still_gates(void) {
 
 static nt_ui_interaction_t modal_button_frame(const nt_ui_modal_style_t *st, const nt_pointer_t *p) {
     ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, p, 1, 0);
-    s_frame_close_reason = nt_ui_modal_begin(s_fx.ctx, MODAL_A, st, true).reason;
+    s_frame_close_reason = modal_begin_open(s_fx.ctx, MODAL_A, st).reason;
     nt_ui_interaction_t in;
     CLAY({.id = (Clay_ElementId){.id = nt_ui_id("modal_btn")}, .layout = {.sizing = {CLAY_SIZING_FIXED(MODAL_BTN_W), CLAY_SIZING_FIXED(MODAL_BTN_H)}}}) {
         in = nt_ui_step(s_fx.ctx, nt_ui_id("modal_btn"), NULL);
@@ -509,8 +537,8 @@ static nt_ui_interaction_t closed_modal_base_frame(const nt_ui_modal_style_t *st
         in = nt_ui_step(s_fx.ctx, nt_ui_id("closed_base_btn"), NULL);
     }
     /* Settled-closed modal called every frame (the showcase Modals-tab pattern). */
-    const bool declared = nt_ui_modal_visible(s_fx.ctx, MODAL_A, st, &open);
-    TEST_ASSERT_FALSE(declared); /* fully closed -> wrapper balances its own stack, no body */
+    const bool declared = nt_ui_modal_begin(s_fx.ctx, MODAL_A, st, &open, NULL);
+    TEST_ASSERT_FALSE(declared); /* fully closed -> declares nothing, no body, no end */
     nt_ui_end(s_fx.ctx);
     return in;
 }
@@ -556,7 +584,7 @@ static void test_overlay_active_prev_frame(void) {
 
     /* Frame 1: a modal is open. The live depth is 0 after end, but presence must be published. */
     ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1, 0);
-    nt_ui_modal_begin(s_fx.ctx, MODAL_A, &st, true);
+    (void)modal_begin_open(s_fx.ctx, MODAL_A, &st);
     nt_ui_modal_end(s_fx.ctx);
     nt_ui_end(s_fx.ctx);
     TEST_ASSERT_EQUAL_UINT8(0U, s_fx.ctx->overlay_depth); /* live depth IS 0 ... */
@@ -573,7 +601,7 @@ static void test_overlay_active_prev_frame(void) {
     /* A fully-closed modal (settled, declares no backdrop) does NOT count as present. */
     bool open = false;
     ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1, 0);
-    const bool declared = nt_ui_modal_visible(s_fx.ctx, MODAL_A, &st, &open);
+    const bool declared = nt_ui_modal_begin(s_fx.ctx, MODAL_A, &st, &open, NULL);
     if (declared) {
         nt_ui_modal_end(s_fx.ctx);
     }
@@ -594,11 +622,11 @@ static void test_modal_closed_same_depth_does_not_steal_top(void) {
      * Both sit at depth 1 (sequential, not nested) since each balances before the next. */
     ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1, 0);
     bool a_open = false;
-    const bool a_decl = nt_ui_modal_visible(s_fx.ctx, MODAL_A, &st, &a_open); /* closed -> balances itself */
+    const bool a_decl = nt_ui_modal_begin(s_fx.ctx, MODAL_A, &st, &a_open, NULL); /* closed -> declares nothing */
     if (a_decl) {
         nt_ui_modal_end(s_fx.ctx);
     }
-    nt_ui_modal_begin(s_fx.ctx, MODAL_B, &st, true); /* open at the same depth */
+    (void)modal_begin_open(s_fx.ctx, MODAL_B, &st); /* open at the same depth */
     nt_ui_modal_end(s_fx.ctx);
     nt_ui_end(s_fx.ctx);
     TEST_ASSERT_FALSE(a_decl); /* the closed modal declared no body */
@@ -607,14 +635,14 @@ static void test_modal_closed_same_depth_does_not_steal_top(void) {
     nt_input_feed(nt_test_key(NT_KEY_ESCAPE, true));
     ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1, 0);
     a_open = false;
-    const bool a_decl2 = nt_ui_modal_visible(s_fx.ctx, MODAL_A, &st, &a_open);
+    const bool a_decl2 = nt_ui_modal_begin(s_fx.ctx, MODAL_A, &st, &a_open, NULL);
     if (a_decl2) {
         nt_ui_modal_end(s_fx.ctx);
     }
-    nt_ui_modal_result_t b = nt_ui_modal_begin(s_fx.ctx, MODAL_B, &st, true);
+    const nt_ui_modal_info_t b = modal_begin_open(s_fx.ctx, MODAL_B, &st);
     nt_ui_modal_end(s_fx.ctx);
     nt_ui_end(s_fx.ctx);
-    TEST_ASSERT_TRUE(b.close_requested); /* the open second modal is top -> Esc fires */
+    TEST_ASSERT_TRUE(b.reason != NT_UI_MODAL_CLOSE_NONE); /* the open second modal is top -> Esc fires */
     TEST_ASSERT_EQUAL_INT(NT_UI_MODAL_CLOSE_ESC, b.reason);
 }
 
@@ -634,9 +662,9 @@ static void test_modal_custom_zband_stride(void) {
     st.ease_speed = 0.0F;
     nt_pointer_t p = {.active = true};
     ui_frame_begin(ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1, 0);
-    nt_ui_modal_begin(ctx, MODAL_A, &st, true); /* root -> stride */
-    CLAY({.id = CLAY_ID("cs_a"), .layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(20)}}, .backgroundColor = {8, 8, 8, 255}}) {}
-    nt_ui_modal_begin(ctx, MODAL_B, &st, true); /* nested -> one band above */
+    (void)modal_begin_open(ctx, MODAL_A, &st); /* root -> stride */
+    CLAY({.id = CLAY_ID("cs_a"), .layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(20)}}, .backgroundColor = {8, 8, 8, 255}}){}(void)modal_begin_open(ctx, MODAL_B,
+                                                                                                                                                                   &st); /* nested -> one band above */
     CLAY({.id = CLAY_ID("cs_b"), .layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(20)}}, .backgroundColor = {8, 8, 8, 255}}) {}
     nt_ui_modal_end(ctx);
     nt_ui_modal_end(ctx);
@@ -663,7 +691,7 @@ static void test_modal_stride_one_gates_base_ui(void) {
         nt_pointer_t p = {.x = 20.0F, .y = 20.0F, .active = true};
         p.buttons[NT_BUTTON_LEFT] = (nt_button_state_t){.is_down = f == 2, .is_pressed = f == 2, .is_released = f == 3};
         ui_frame_begin(ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1, 0);
-        nt_ui_modal_begin(ctx, MODAL_A, &st, true);
+        (void)modal_begin_open(ctx, MODAL_A, &st);
         CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(20)}}}) {}
         nt_ui_modal_end(ctx);
         /* A game floating on the base band declared after the modal: only the catcher's band keeps it under. */
@@ -684,9 +712,10 @@ static void test_modal_root_band_overflow_asserts(void) {
     nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
     st.ease_speed = 0.0F;
     ui_frame_begin(ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1, 0);
-    nt_ui_modal_begin(ctx, MODAL_A, &st, true);
+    (void)modal_begin_open(ctx, MODAL_A, &st);
     nt_ui_modal_end(ctx);
-    NT_TEST_EXPECT_ASSERT(nt_ui_modal_begin(ctx, MODAL_B, &st, true)); /* asserts before the push */
+    bool open_b = true;
+    NT_TEST_EXPECT_ASSERT(nt_ui_modal_begin(ctx, MODAL_B, &st, &open_b, NULL)); /* asserts before the push */
     nt_ui_end(ctx);
     nt_ui_destroy_context(ctx);
 }
@@ -701,10 +730,9 @@ static void test_modal_closed_root_takes_no_band(void) {
     nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
     st.ease_speed = 0.0F;
     ui_frame_begin(ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1, 0);
-    nt_ui_modal_begin(ctx, MODAL_A, &st, true);
+    (void)modal_begin_open(ctx, MODAL_A, &st);
     nt_ui_modal_end(ctx);
-    nt_ui_modal_begin(ctx, MODAL_B, &st, false);
-    nt_ui_modal_end(ctx);
+    modal_begin_closed(ctx, MODAL_B, &st);
     nt_ui_end(ctx);
     nt_ui_destroy_context(ctx);
 }
@@ -725,7 +753,7 @@ static void modal_slide_offset_frame(nt_ui_modal_edge_t edge, float *ox, float *
     st.ease_speed = 8.0F; /* finite: first frame t << 1 -> offset near anim.offset */
     st.open = (nt_ui_modal_anim_t){.type = NT_UI_MODAL_ANIM_SLIDE, .edge = (uint8_t)edge, .offset = 40.0F};
     ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1, 0);
-    nt_ui_modal_begin(s_fx.ctx, MODAL_A + (uint32_t)edge, &st, true); /* distinct id per edge -> each eases from a fresh slot */
+    (void)modal_begin_open(s_fx.ctx, MODAL_A + (uint32_t)edge, &st); /* distinct id per edge -> each eases from a fresh slot */
     nt_ui_modal_end(s_fx.ctx);
     nt_ui_end(s_fx.ctx);
     nt_ui_modal_test_last_panel_offset(ox, oy);
@@ -765,7 +793,7 @@ static void test_modal_asymmetric_open_close(void) {
 
     /* Opening (open=true): slide recipe -> vertical offset present. */
     ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1, 0);
-    nt_ui_modal_begin(s_fx.ctx, MODAL_B, &st, true);
+    (void)modal_begin_open(s_fx.ctx, MODAL_B, &st);
     nt_ui_modal_end(s_fx.ctx);
     nt_ui_end(s_fx.ctx);
     nt_ui_modal_test_last_panel_offset(&ox, &oy);
@@ -773,8 +801,7 @@ static void test_modal_asymmetric_open_close(void) {
 
     /* Closing (open=false): fade recipe -> identity, no offset regardless of t. */
     ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1, 0);
-    nt_ui_modal_begin(s_fx.ctx, MODAL_B, &st, false);
-    nt_ui_modal_end(s_fx.ctx);
+    modal_begin_closed(s_fx.ctx, MODAL_B, &st);
     nt_ui_end(s_fx.ctx);
     nt_ui_modal_test_last_panel_offset(&ox, &oy);
     TEST_ASSERT_TRUE(float_near(ox, 0.0F, 0.0001F)); /* fade close -> no offset */
@@ -787,22 +814,23 @@ static void test_modal_anim_asserts(void) {
     nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
     st.ease_speed = 0.0F;
     ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1, 0);
+    bool open = true;
 
     nt_ui_modal_style_t bad = st;
     bad.open = (nt_ui_modal_anim_t){.type = NT_UI_MODAL_ANIM_SCALE_POP, .scale_start = 0.0F};
-    NT_TEST_EXPECT_ASSERT(nt_ui_modal_begin(s_fx.ctx, MODAL_A, &bad, true)); /* SCALE_POP scale_start must be > 0 */
+    NT_TEST_EXPECT_ASSERT(nt_ui_modal_begin(s_fx.ctx, MODAL_A, &bad, &open, NULL)); /* SCALE_POP scale_start must be > 0 */
 
     bad = st;
     bad.open = (nt_ui_modal_anim_t){.type = NT_UI_MODAL_ANIM_SLIDE, .edge = NT_UI_MODAL_BOTTOM, .offset = NAN};
-    NT_TEST_EXPECT_ASSERT(nt_ui_modal_begin(s_fx.ctx, MODAL_A, &bad, true)); /* SLIDE offset must be finite */
+    NT_TEST_EXPECT_ASSERT(nt_ui_modal_begin(s_fx.ctx, MODAL_A, &bad, &open, NULL)); /* SLIDE offset must be finite */
 
     bad = st;
     bad.open = (nt_ui_modal_anim_t){.type = NT_UI_MODAL_ANIM_SLIDE, .edge = 4, .offset = 10.0F};
-    NT_TEST_EXPECT_ASSERT(nt_ui_modal_begin(s_fx.ctx, MODAL_A, &bad, true)); /* edge out of range */
+    NT_TEST_EXPECT_ASSERT(nt_ui_modal_begin(s_fx.ctx, MODAL_A, &bad, &open, NULL)); /* edge out of range */
 
     bad = st;
     bad.open.type = 7;
-    NT_TEST_EXPECT_ASSERT(nt_ui_modal_begin(s_fx.ctx, MODAL_A, &bad, true)); /* type out of range */
+    NT_TEST_EXPECT_ASSERT(nt_ui_modal_begin(s_fx.ctx, MODAL_A, &bad, &open, NULL)); /* type out of range */
 
     nt_ui_end(s_fx.ctx);
 }
@@ -818,15 +846,14 @@ static void test_modal_close_uses_close_recipe(void) {
     float oy = 0.0F;
 
     ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1, 0);
-    nt_ui_modal_begin(s_fx.ctx, MODAL_B, &st, true);
+    (void)modal_begin_open(s_fx.ctx, MODAL_B, &st);
     nt_ui_modal_end(s_fx.ctx);
     nt_ui_end(s_fx.ctx);
     nt_ui_modal_test_last_panel_offset(&ox, &oy);
     TEST_ASSERT_TRUE(ox < 0.0F); /* open recipe = LEFT */
 
     ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1, 0);
-    nt_ui_modal_begin(s_fx.ctx, MODAL_B, &st, false);
-    nt_ui_modal_end(s_fx.ctx);
+    modal_begin_closed(s_fx.ctx, MODAL_B, &st);
     nt_ui_end(s_fx.ctx);
     nt_ui_modal_test_last_panel_offset(&ox, &oy);
     TEST_ASSERT_TRUE(ox > 0.0F); /* close recipe = RIGHT (from style.close) */
@@ -845,7 +872,7 @@ static void test_modal_zband_matches_popup_core(void) {
 
     /* Modal at depth 0 -> panel z. */
     ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1, 0);
-    nt_ui_modal_begin(s_fx.ctx, MODAL_A, &mst, true);
+    (void)modal_begin_open(s_fx.ctx, MODAL_A, &mst);
     CLAY({.id = CLAY_ID("dele_body"), .layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(20)}}, .backgroundColor = {8, 8, 8, 255}}) {}
     nt_ui_modal_end(s_fx.ctx);
     nt_ui_end(s_fx.ctx);
@@ -855,9 +882,11 @@ static void test_modal_zband_matches_popup_core(void) {
 
     /* Popup at depth 0 -> the same panel band (one shared depth counter + stride). */
     ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1, 0);
-    nt_ui_popup_begin(s_fx.ctx, MODAL_A, &pst, &panc, true);
-    CLAY({.id = CLAY_ID("dele_body"), .layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(20)}}, .backgroundColor = {8, 8, 8, 255}}) {}
-    nt_ui_popup_end(s_fx.ctx);
+    bool popup_open = true;
+    if (nt_ui_popup_begin(s_fx.ctx, MODAL_A, &pst, &panc, &popup_open, NULL)) {
+        CLAY({.id = CLAY_ID("dele_body"), .layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(20)}}, .backgroundColor = {8, 8, 8, 255}}) {}
+        nt_ui_popup_end(s_fx.ctx);
+    }
     nt_ui_end(s_fx.ctx);
     const int32_t popup_z = band_of_rect(s_fx.ctx, CLAY_ID("dele_body").id);
     TEST_ASSERT_TRUE_MESSAGE(popup_z != INT32_MIN, "the popup body must emit a rectangle to measure");

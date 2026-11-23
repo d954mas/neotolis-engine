@@ -34,9 +34,10 @@ typedef struct {
     bool force_catcher;                /* declare the catcher even with no backdrop + no dismiss (inert input gate) */
 } nt_ui_popup_ext_t;
 
-/* The shared core: z-band push + tween + present-only catcher/backdrop + close-scan + panel decl.
- * out_src (nullable) receives the close source. ext (nullable) layers backdrop/esc/pad/def on top. */
-nt_ui_popup_result_t nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t id, const nt_ui_popup_style_t *style, const nt_ui_popup_anchor_t *anchor, bool open, const nt_ui_popup_ext_t *ext,
-                                                nt_ui_popup_close_src_t *out_src);
+/* The shared core: tween + z-band push + catcher/backdrop + close-scan + panel decl, only for a shown popup.
+ * A raised close clears *open; out_src (nullable) receives its source. ext (nullable) layers
+ * backdrop/esc/pad/def on top. */
+bool nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t id, const nt_ui_popup_style_t *style, const nt_ui_popup_anchor_t *anchor, bool *open, const nt_ui_popup_ext_t *ext,
+                                nt_ui_popup_info_t *info, nt_ui_popup_close_src_t *out_src);
 
 #endif /* NT_UI_POPUP_INTERNAL_H */

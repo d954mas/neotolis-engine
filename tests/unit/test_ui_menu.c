@@ -856,8 +856,11 @@ static bool menu_over_modal_frame(nt_ui_menu_t *st, nt_ui_menu_style_t *style) {
     nt_ui_modal_style_t ms = nt_ui_modal_style_defaults();
     ms.flags |= NT_UI_MODAL_LISTEN_ESC;
     menu_frame_begin(&(nt_pointer_t){.active = true});
-    const bool modal_close = nt_ui_modal_begin(s_fx.ctx, MODAL_ID, &ms, true).close_requested;
-    nt_ui_modal_end(s_fx.ctx);
+    bool modal_open = true;
+    if (nt_ui_modal_begin(s_fx.ctx, MODAL_ID, &ms, &modal_open, NULL)) {
+        nt_ui_modal_end(s_fx.ctx);
+    }
+    const bool modal_close = !modal_open;
     if (nt_ui_menu_begin(st, s_fx.ctx, NULL, 0U, MENU_A, style)) {
         (void)nt_ui_menu_item(st, KEY_NEW, "New");
         nt_ui_menu_end(st);
@@ -1362,8 +1365,10 @@ static void menu_im_hover_frame_ptr(nt_ui_menu_t *st, nt_ui_menu_style_t *style,
     }
     if (s_modal_over) {
         const nt_ui_modal_style_t ms = nt_ui_modal_style_defaults();
-        (void)nt_ui_modal_begin(s_fx.ctx, MODAL_ID, &ms, true);
-        nt_ui_modal_end(s_fx.ctx);
+        bool modal_open = true;
+        if (nt_ui_modal_begin(s_fx.ctx, MODAL_ID, &ms, &modal_open, NULL)) {
+            nt_ui_modal_end(s_fx.ctx);
+        }
     }
     nt_ui_end(s_fx.ctx);
 }
@@ -1864,8 +1869,11 @@ static bool menu_under_modal_frame(nt_ui_menu_t *st, nt_ui_menu_style_t *style, 
         act_capture(nt_ui_menu_test_item_id(MENU_A, KEY_NEW), nt_ui_menu_item(st, KEY_NEW, "New"));
         nt_ui_menu_end(st);
     }
-    const bool modal_close = nt_ui_modal_begin(s_fx.ctx, MODAL_ID, &ms, true).close_requested;
-    nt_ui_modal_end(s_fx.ctx);
+    bool modal_open = true;
+    if (nt_ui_modal_begin(s_fx.ctx, MODAL_ID, &ms, &modal_open, NULL)) {
+        nt_ui_modal_end(s_fx.ctx);
+    }
+    const bool modal_close = !modal_open;
     nt_ui_end(s_fx.ctx);
     return modal_close;
 }
@@ -1905,10 +1913,13 @@ static bool menu_over_modal_button_frame(nt_ui_menu_t *st, nt_ui_menu_style_t *s
     nt_ui_modal_style_t ms = nt_ui_modal_style_defaults();
     ms.ease_speed = 0.0F;
     menu_frame_begin(p);
-    (void)nt_ui_modal_begin(s_fx.ctx, MODAL_ID, &ms, true);
-    CLAY({.id = (Clay_ElementId){.id = MODAL_BTN}, .layout = {.sizing = {CLAY_SIZING_FIXED(80), CLAY_SIZING_FIXED(30)}}}) {}
-    const bool clicked = nt_ui_step(s_fx.ctx, MODAL_BTN, NULL).clicked;
-    nt_ui_modal_end(s_fx.ctx);
+    bool modal_open = true;
+    bool clicked = false;
+    if (nt_ui_modal_begin(s_fx.ctx, MODAL_ID, &ms, &modal_open, NULL)) {
+        CLAY({.id = (Clay_ElementId){.id = MODAL_BTN}, .layout = {.sizing = {CLAY_SIZING_FIXED(80), CLAY_SIZING_FIXED(30)}}}) {}
+        clicked = nt_ui_step(s_fx.ctx, MODAL_BTN, NULL).clicked;
+        nt_ui_modal_end(s_fx.ctx);
+    }
     if (nt_ui_menu_begin(st, s_fx.ctx, NULL, 0U, MENU_A, style)) {
         (void)nt_ui_menu_item(st, KEY_NEW, "New");
         nt_ui_menu_end(st);
@@ -2078,7 +2089,7 @@ static void menu_row_popup_frame(nt_ui_menu_t *st, nt_ui_menu_style_t *style, co
         pst.ease_speed = 0.0F;
         const nt_ui_popup_anchor_t anchor = {.x = 600.0F, .y = 450.0F, .prefer_side = NT_UI_POPUP_BELOW};
         bool open = true;
-        if (nt_ui_popup_visible(s_fx.ctx, ROW_POPUP_ID, &pst, &anchor, &open)) {
+        if (nt_ui_popup_begin(s_fx.ctx, ROW_POPUP_ID, &pst, &anchor, &open, NULL)) {
             CLAY({.id = (Clay_ElementId){.id = ROW_POPUP_BOX}, .layout = {.sizing = {CLAY_SIZING_FIXED(60), CLAY_SIZING_FIXED(40)}}}){}(void)nt_ui_step(s_fx.ctx, ROW_POPUP_BOX, NULL);
             nt_ui_popup_end(s_fx.ctx);
         }
@@ -2273,9 +2284,11 @@ static void menu_row_popup_branch_frame(nt_ui_menu_t *st, nt_ui_menu_style_t *st
             nt_ui_popup_style_t ps = nt_ui_popup_style_defaults();
             ps.ease_speed = 0.0F;
             const nt_ui_popup_anchor_t anc = {.x = 500.0F, .y = 350.0F, .prefer_side = NT_UI_POPUP_BELOW};
-            (void)nt_ui_popup_begin(s_fx.ctx, ROW_POPUP, &ps, &anc, true);
-            CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(60), CLAY_SIZING_FIXED(30)}}}) {}
-            nt_ui_popup_end(s_fx.ctx);
+            bool popup_open = true;
+            if (nt_ui_popup_begin(s_fx.ctx, ROW_POPUP, &ps, &anc, &popup_open, NULL)) {
+                CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(60), CLAY_SIZING_FIXED(30)}}}) {}
+                nt_ui_popup_end(s_fx.ctx);
+            }
         }
         nt_ui_menu_item_end(st);
         if (nt_ui_menu_submenu_begin(st, KEY_P1, "Parent")) {
@@ -2428,9 +2441,11 @@ static void test_menu_covered_rows_take_no_tap(void) {
         nt_ui_popup_style_t ps = nt_ui_popup_style_defaults();
         ps.ease_speed = 0.0F;
         const nt_ui_popup_anchor_t anc = {.x = 500.0F, .y = 350.0F, .prefer_side = NT_UI_POPUP_BELOW};
-        (void)nt_ui_popup_begin(s_fx.ctx, ROW_POPUP, &ps, &anc, true);
-        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(60), CLAY_SIZING_FIXED(30)}}}) {}
-        nt_ui_popup_end(s_fx.ctx);
+        bool popup_open = true;
+        if (nt_ui_popup_begin(s_fx.ctx, ROW_POPUP, &ps, &anc, &popup_open, NULL)) {
+            CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(60), CLAY_SIZING_FIXED(30)}}}) {}
+            nt_ui_popup_end(s_fx.ctx);
+        }
         nt_ui_menu_item_end(&st);
         if (nt_ui_menu_submenu_begin(&st, KEY_P1, "Parent")) {
             act_capture(opt, nt_ui_menu_item(&st, KEY_OPT, "Opt"));
@@ -2602,9 +2617,11 @@ static void menu_deep_popup_frame(nt_ui_menu_t *st, nt_ui_menu_style_t *style, f
                 nt_ui_popup_style_t ps = nt_ui_popup_style_defaults();
                 ps.ease_speed = 0.0F;
                 const nt_ui_popup_anchor_t anc = {.x = 600.0F, .y = 450.0F, .prefer_side = NT_UI_POPUP_BELOW};
-                (void)nt_ui_popup_begin(s_fx.ctx, ROW_POPUP, &ps, &anc, true);
-                CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(60), CLAY_SIZING_FIXED(30)}}}) {}
-                nt_ui_popup_end(s_fx.ctx);
+                bool popup_open = true;
+                if (nt_ui_popup_begin(s_fx.ctx, ROW_POPUP, &ps, &anc, &popup_open, NULL)) {
+                    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(60), CLAY_SIZING_FIXED(30)}}}) {}
+                    nt_ui_popup_end(s_fx.ctx);
+                }
             }
             nt_ui_menu_item_end(st);
             if (nt_ui_menu_submenu_begin(st, KEY_OPEN, "Open")) {

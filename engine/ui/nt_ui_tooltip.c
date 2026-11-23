@@ -132,11 +132,11 @@ bool nt_ui_tooltip(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8
     nt_atlas_resolve_ref(&style->panel_art);
     const bool panel_art = (style->panel_art.atlas.id != 0U && style->panel_art.region != NT_ATLAS_INVALID_REGION);
 
-    bool shown = false;
-    /* Low-level begin/end (no one-bool wrapper): the open state is engine-derived from the hover timer,
-     * not a game bool, and there is no close_requested path to harvest. */
-    const nt_ui_popup_result_t r = nt_ui_popup_begin(ctx, tooltip_popup_id(target_id), &pst, &anc, open);
-    if (r.visible) {
+    /* The open state is engine-derived from the hover timer, not a game bool; no catcher, so nothing clears it. */
+    bool popup_open = open;
+    nt_ui_popup_info_t info = {0};
+    const bool shown = nt_ui_popup_begin(ctx, tooltip_popup_id(target_id), &pst, &anc, &popup_open, &info);
+    if (shown) {
         const uint32_t panel_id = tooltip_panel_id(target_id);
         const nt_ui_label_style_t lbl = {.font_id = style->font_id, .font_size = style->font_size, .color = style->text_color};
         Clay_SizingAxis w = (style->max_width > 0U) ? CLAY_SIZING_FIT(.max = (float)style->max_width) : CLAY_SIZING_FIT(0);
@@ -162,12 +162,11 @@ bool nt_ui_tooltip(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8
 
         nt_ui_clay_priv_open_element();
         nt_ui_clay_priv_configure_open_element(panel);
-        tooltip_declare_caret(fill_layer, style, r.side);
+        tooltip_declare_caret(fill_layer, style, info.side);
         nt_ui_label(ctx, nt_ui_make_element_data(label_layer, NULL), content, &lbl);
         nt_ui_clay_priv_close_element();
-        shown = true;
+        nt_ui_popup_end(ctx);
     }
-    nt_ui_popup_end(ctx);
     return shown;
 }
 

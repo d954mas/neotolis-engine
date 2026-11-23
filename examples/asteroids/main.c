@@ -1545,16 +1545,19 @@ static void build_ui(void) {
                 }
             }
             if (narrow) {
-                const nt_ui_modal_result_t modal = nt_ui_modal_begin(s_ui, CLAY_ID("asteroids.compact_modal").id, &s_ui_modal, s_ui_panel_open);
-                s_ui_keyboard_blocked = modal.visible || s_ui_panel_open;
-                if (modal.close_requested) {
+                const bool was_open = s_ui_panel_open;
+                nt_ui_modal_info_t modal = {0};
+                const bool shown = nt_ui_modal_begin(s_ui, CLAY_ID("asteroids.compact_modal").id, &s_ui_modal, &s_ui_panel_open, &modal);
+                s_ui_keyboard_blocked = shown || was_open;
+                if (modal.reason != NT_UI_MODAL_CLOSE_NONE) {
                     s_ui_escape_consumed = modal.reason == NT_UI_MODAL_CLOSE_ESC;
-                    s_ui_panel_open = false;
                 }
-                if (modal.visible && height > 180) {
-                    ui_panel(fminf(352, width - 24), fminf(680, height - 100));
+                if (shown) {
+                    if (height > 180) {
+                        ui_panel(fminf(352, width - 24), fminf(680, height - 100));
+                    }
+                    nt_ui_modal_end(s_ui);
                 }
-                nt_ui_modal_end(s_ui);
             }
         }
     }

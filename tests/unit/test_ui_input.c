@@ -1685,11 +1685,13 @@ static void test_field_text_above_modal_band(void) {
     mst.ease_speed = 0.0F;
 
     ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1, 0);
-    (void)nt_ui_modal_begin(s_fx.ctx, 0x1F0001U, &mst, true);
-    CLAY({.id = CLAY_ID("modal_panel"), .layout = {.sizing = {CLAY_SIZING_FIXED(400.0F), CLAY_SIZING_FIXED(200.0F)}}, .backgroundColor = {10, 10, 10, 255}}) {
-        (void)nt_ui_input_text(s_fx.ctx, NULL, 0, nt_ui_id("modal_field"), buf, sizeof buf, &s_props, &s_style, &s_field_decl, true, NULL);
+    bool modal_open = true;
+    if (nt_ui_modal_begin(s_fx.ctx, 0x1F0001U, &mst, &modal_open, NULL)) {
+        CLAY({.id = CLAY_ID("modal_panel"), .layout = {.sizing = {CLAY_SIZING_FIXED(400.0F), CLAY_SIZING_FIXED(200.0F)}}, .backgroundColor = {10, 10, 10, 255}}) {
+            (void)nt_ui_input_text(s_fx.ctx, NULL, 0, nt_ui_id("modal_field"), buf, sizeof buf, &s_props, &s_style, &s_field_decl, true, NULL);
+        }
+        nt_ui_modal_end(s_fx.ctx);
     }
-    nt_ui_modal_end(s_fx.ctx);
     nt_ui_end(s_fx.ctx);
 
     int32_t text_at = -1;
@@ -1713,22 +1715,23 @@ static void test_field_text_above_modal_band(void) {
 #define FIELD_MODAL 0x1F0103U
 
 /* One frame: a field in the base UI, then a modal (open or closing) holding a second field. */
-static nt_ui_modal_result_t modal_field_frame(const nt_pointer_t *p, bool open, float ease, char *base_buf, char *modal_buf) {
+static bool modal_field_frame(const nt_pointer_t *p, bool open, float ease, char *base_buf, char *modal_buf) {
     ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 0.016F, p, 1, 0);
     CLAY({.id = CLAY_ID("base_root"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = IN_X, .y = IN_Y}}}) {
         (void)nt_ui_input_text(s_fx.ctx, NULL, 0, BASE_FIELD, base_buf, 32U, &s_props, &s_style, &s_field_decl, true, NULL);
     }
     nt_ui_modal_style_t mst = nt_ui_modal_style_defaults();
     mst.ease_speed = ease;
-    const nt_ui_modal_result_t r = nt_ui_modal_begin(s_fx.ctx, FIELD_MODAL, &mst, open);
-    if (r.visible) {
+    bool o = open;
+    const bool visible = nt_ui_modal_begin(s_fx.ctx, FIELD_MODAL, &mst, &o, NULL);
+    if (visible) {
         CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(400.0F), CLAY_SIZING_FIXED(200.0F)}}}) {
             (void)nt_ui_input_text(s_fx.ctx, NULL, 0, MODAL_FIELD, modal_buf, 32U, &s_props, &s_style, &s_field_decl, true, NULL);
         }
+        nt_ui_modal_end(s_fx.ctx);
     }
-    nt_ui_modal_end(s_fx.ctx);
     nt_ui_end(s_fx.ctx);
-    return r;
+    return visible;
 }
 
 /* Taps the modal's field (press and release in one frame). */
@@ -1770,8 +1773,8 @@ static void test_closing_modal_is_inert(void) {
     (void)modal_field_frame(&IDLE_PTR, false, 8.0F, a, b);
     TEST_ASSERT_FALSE_MESSAGE(nt_ui_input_focused(s_fx.ctx, MODAL_FIELD), "a field in a closing modal loses focus");
     tap_modal_field(false, 8.0F, a, b);
-    const nt_ui_modal_result_t r = modal_field_frame(&IDLE_PTR, false, 8.0F, a, b);
-    TEST_ASSERT_TRUE_MESSAGE(r.visible, "the modal still fades");
+    const bool visible = modal_field_frame(&IDLE_PTR, false, 8.0F, a, b);
+    TEST_ASSERT_TRUE_MESSAGE(visible, "the modal still fades");
     TEST_ASSERT_FALSE_MESSAGE(nt_ui_input_focused(s_fx.ctx, MODAL_FIELD), "a closing modal's field takes no tap");
 }
 

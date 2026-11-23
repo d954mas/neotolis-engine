@@ -1,8 +1,8 @@
 #ifndef NT_UI_TOOLTIP_H
 #define NT_UI_TOOLTIP_H
 
-/* Tooltip built ON popup-core WITHOUT a light-dismiss catcher: hover-driven with no close_requested
- * path, so it never gates base UI. The engine tracks the hover-delay in a state-pool cell keyed by a
+/* Tooltip built ON popup-core WITHOUT a light-dismiss catcher: hover-driven with no close
+ * source, so it never gates base UI. The engine tracks the hover-delay in a state-pool cell keyed by a
  * SALTED tooltip id (engine-owned, not a game bool) — the game just declares the target_id + content +
  * delay. The cell accumulates hover seconds (ctx->frame_dt) while the cursor is over the target and
  * resets to 0 on leave; the floating panel is declared at the target's anchor only once the accumulated

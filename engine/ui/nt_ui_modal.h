@@ -2,8 +2,8 @@
 #define NT_UI_MODAL_H
 
 /* Modal helper: panel + full-viewport backdrop floating elements, an input-gate occluder, and an
- * open/close tween. The game owns the `bool open`; the helper only RAISES close_requested and never
- * closes itself. begin/end are balanced (mirror nt_ui_scroll_begin/end). It owns no scene, lifecycle,
+ * open/close tween. The game owns the `bool open`; Esc and a backdrop click (per flags) clear it. Conditional
+ * begin/end: end only after begin returned true. It owns no scene, lifecycle,
  * or assets, and pauses nothing — only pointer routing is auto-gated by the backdrop occluder. */
 
 #include <stdbool.h>
@@ -23,19 +23,14 @@ typedef enum {
     NT_UI_MODAL_CLOSE_BACK, /* reserved; no platform back event yet */
 } nt_ui_modal_close_reason_t;
 
-/* Per-frame result. t is the eased open amount; visible gates body declaration
- * (IM exit-anim: keep declaring the body while t>epsilon, so the close tween plays). */
+/* Per-frame info (nullable out of begin): the tween, and the source that closed the modal this frame. */
 typedef struct {
     float t;                           /* eased 0..1 open amount */
-    nt_ui_modal_close_reason_t reason; /* source that raised the close this frame */
-    bool close_requested;              /* reason != NONE */
-    bool visible;                      /* t > epsilon — body should be declared */
-    bool fully_closed;                 /* !open && t <= epsilon */
-} nt_ui_modal_result_t;
-_Static_assert(sizeof(nt_ui_modal_result_t) == 12, "nt_ui_modal_result_t stable ABI (1 float + 1 enum[4] + 3 bool + 1 pad)");
+    nt_ui_modal_close_reason_t reason; /* NONE unless a source cleared *open this frame */
+} nt_ui_modal_info_t;
+_Static_assert(sizeof(nt_ui_modal_info_t) == 8, "nt_ui_modal_info_t stable ABI (1 float + 1 enum[4])");
 
-/* Style flags — only gate close SOURCES (Esc / backdrop click). A flag lets a source RAISE
- * close_requested; it never closes by itself. */
+/* Style flags — only gate close SOURCES (Esc / backdrop click): a flagged source clears the game's open bool. */
 #define NT_UI_MODAL_LISTEN_ESC ((uint8_t)(1U << 0))
 #define NT_UI_MODAL_CLOSE_ON_BACKDROP ((uint8_t)(1U << 1))
 
@@ -77,29 +72,22 @@ _Static_assert(sizeof(nt_ui_modal_style_t) == 40, "nt_ui_modal_style_t stable AB
 /* Valid baseline: symmetric scale-pop entrance + exit. scale_start > 0 (nt_ui_anim asserts scale_* > 0). */
 nt_ui_modal_style_t nt_ui_modal_style_defaults(void);
 
-/* Low-level, UNCONDITIONAL begin/end (like nt_ui_scroll_begin): always begin -> ... -> end. Opens the
- * backdrop + panel floating elements (a root modal on the frame's next root band, a nested one a band
- * above its parent) and eases t toward
- * open?1:0; returns the full result (t / close reason / visible). Panel stays OPEN until nt_ui_modal_end.
- * id non-zero, style non-NULL. Asserts depth < NT_UI_MODAL_MAX_DEPTH BEFORE push (overflow, no fallback).
- * Prefer the scoped nt_ui_modal_visible() unless you need the close reason. */
-nt_ui_modal_result_t nt_ui_modal_begin(nt_ui_context_t *ctx, uint32_t id, const nt_ui_modal_style_t *style, bool open);
-void nt_ui_modal_end(nt_ui_context_t *ctx);
-
-/* High-level scoped form: the game stores ONE bool. Returns "declare the body THIS frame?" — true while
- * open OR still animating closed; this is NOT "is open" (the block keeps running a few frames after you
- * set open=false, so the close tween plays). On close it clears *p_open; once fully closed it balances
- * the stack itself (no nt_ui_modal_end in that branch). Open from anywhere by just setting your bool:
+/* Returns whether the modal shows this frame: open, or still easing closed after *open was cleared. Only
+ * then it opens the backdrop + panel floating elements (a root modal on the frame's next root band, a
+ * nested one a band above its parent); the game declares the body and calls nt_ui_modal_end. Esc and a
+ * backdrop click (per style flags) clear *open; info->reason says which. The game owns *open:
  *
- *   if (clicked_show) open = true;                       // "open" = set your bool (any site)
- *   if (nt_ui_modal_visible(ctx, ID, &style, &open)) {   // declare once per frame, stable place
+ *   if (clicked_show) open = true;                            // open from any site: set your bool
+ *   if (nt_ui_modal_begin(ctx, ID, &style, &open, NULL)) {    // declare once per frame, stable place
  *       CLAY({ ...panel... }) { if (ok_clicked) open = false; }
  *       nt_ui_modal_end(ctx);
  *   }
  *
  * One window, many open sites = ONE bool + ONE id; call this from the active container's body so
- * nesting/z follow context. Two windows at once = two ids + two bools. */
-bool nt_ui_modal_visible(nt_ui_context_t *ctx, uint32_t id, const nt_ui_modal_style_t *style, bool *p_open);
+ * nesting/z follow context. id non-zero, style and open non-NULL, info nullable. Asserts depth <
+ * NT_UI_MODAL_MAX_DEPTH. */
+bool nt_ui_modal_begin(nt_ui_context_t *ctx, uint32_t id, const nt_ui_modal_style_t *style, bool *open, nt_ui_modal_info_t *info);
+void nt_ui_modal_end(nt_ui_context_t *ctx);
 
 /* Drop modal-owned retained view state for `id` after a transient modal/sheet has closed. Child
  * scroll/input/slider state inside the modal body remains caller-owned and should be cleared by id

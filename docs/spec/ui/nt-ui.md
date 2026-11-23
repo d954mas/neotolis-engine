@@ -631,9 +631,14 @@ frame end the capture, see "Interaction model".
 
 ## Popup-core
 
-A single floating-overlay primitive (`nt_ui_popup_begin/end` +
-a one-bool `nt_ui_popup_visible` wrapper) underpins every transient overlay —
-modal, dropdown, tooltip, and context-menu. It owns: a Clay floating panel
+A single floating-overlay primitive underpins every transient overlay —
+modal, dropdown, tooltip, and context-menu. Its form is conditional, like the
+menu's: `if (nt_ui_popup_begin(ctx, id, &style, &anchor, &open, &info)) { body;
+nt_ui_popup_end(ctx); }` (`nt_ui_modal_begin/end` the same). Begin returns
+whether the popup shows (open, or easing closed after the game cleared
+`open`); a hidden popup declares nothing. The game owns `open`: a close the
+popup raises (an outside click, the modal's Esc or backdrop) clears it, and
+the modal's `info.reason` says which. It owns: a Clay floating panel
 attached to the ROOT (anchor-derived offset, no trigger-id dependency, so a
 missing trigger element can't trip Clay's parent-not-found); trigger-anchored
 placement with per-side edge-flip (BELOW/ABOVE/RIGHT/LEFT, CENTER for modal)

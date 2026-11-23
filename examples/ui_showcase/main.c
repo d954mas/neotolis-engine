@@ -1695,7 +1695,7 @@ static bool modal_action_btn(nt_ui_context_t *ctx, uint32_t id, const char *text
 }
 
 /* Tab body: description + the trigger only. The modal is declared at ROOT in render_modal_overlay
- * so its floating panel is never clipped by the stage scissor; this fn must NOT call nt_ui_modal_visible. */
+ * so its floating panel is never clipped by the stage scissor; this fn must NOT call nt_ui_modal_begin. */
 static void render_modals(nt_ui_context_t *ctx, tab_state_t *st) {
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Open a confirm dialog; the properties panel drives the transition + tween live.", g_current->caption);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Esc closes the TOP modal; clicking the backdrop closes; the backdrop blocks click-through.", g_current->caption);
@@ -1723,7 +1723,7 @@ static void render_modal_overlay(nt_ui_context_t *ctx, tab_state_t *st) {
     s_modal_style_runtime.open = modal_param_anim(st->modal.open_type, st->modal.open_edge, st->modal.scale_start, st->modal.slide_offset);
     s_modal_style_runtime.close = modal_param_anim(st->modal.close_type, st->modal.close_edge, st->modal.scale_start, st->modal.slide_offset);
 
-    if (nt_ui_modal_visible(ctx, s_id_modal_confirm, &s_modal_style_runtime, &st->confirm_open)) {
+    if (nt_ui_modal_begin(ctx, s_id_modal_confirm, &s_modal_style_runtime, &st->confirm_open, NULL)) {
         CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(520), CLAY_SIZING_FIT(0)},
                          .padding = CLAY_PADDING_ALL(22),
                          .layoutDirection = CLAY_TOP_TO_BOTTOM,
@@ -1747,7 +1747,7 @@ static void render_modal_overlay(nt_ui_context_t *ctx, tab_state_t *st) {
             }
 
             /* Nested modal (depth 2): proves z-banding + top-only Esc targeting. */
-            if (nt_ui_modal_visible(ctx, s_id_modal_nested, &s_modal_style_runtime, &st->nested_open)) {
+            if (nt_ui_modal_begin(ctx, s_id_modal_nested, &s_modal_style_runtime, &st->nested_open, NULL)) {
                 CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(340), CLAY_SIZING_FIT(0)}, .padding = CLAY_PADDING_ALL(20), .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 14},
                       .backgroundColor = g_current->panel,
                       .cornerRadius = CLAY_CORNER_RADIUS(12)}) {

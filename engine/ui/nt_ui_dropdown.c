@@ -380,8 +380,8 @@ static bool combo_open_list(nt_ui_context_t *ctx, uint8_t fill_layer, uint8_t la
     nt_atlas_resolve_ref(&style->panel_bg);
     const bool panel_art = (style->panel_bg.atlas.id != 0U && style->panel_bg.region != NT_ATLAS_INVALID_REGION);
 
-    if (!nt_ui_popup_visible(ctx, dropdown_popup_id(id), &pst, &anc, open)) {
-        return false; /* popup self-balances when fully closed (no end needed) */
+    if (!nt_ui_popup_begin(ctx, dropdown_popup_id(id), &pst, &anc, open, NULL)) {
+        return false; /* hidden: nothing declared, no end */
     }
     const bool scrolls = (style->max_visible_rows > 0U);
     combo_open_body(ctx, fill_layer, id, style, scrolls, panel_art);

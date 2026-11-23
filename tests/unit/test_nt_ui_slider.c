@@ -974,14 +974,16 @@ static void test_thumb_above_modal_band_first_frame(void) {
     mst.ease_speed = 0.0F; /* snap open: the panel is at full size on frame 1 */
 
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &idle, .pointer_count = 1});
-    (void)nt_ui_modal_begin(s_fx.ctx, 0x5D0001U, &mst, true);
-    CLAY({.id = CLAY_ID("modal_panel"),
-          .layout = {.sizing = {CLAY_SIZING_FIXED(400.0F), CLAY_SIZING_FIXED(200.0F)}},
-          .backgroundColor = {10, 10, 10, 255},
-          .clip = {.horizontal = true, .vertical = true}}) {
-        (void)nt_ui_slider_float(s_fx.ctx, NULL, 0, nt_ui_id("modal_sl"), NULL, &value, 0.0F, 1.0F, 0.0F, &s_style, &s_track_decl, true);
+    bool modal_open = true;
+    if (nt_ui_modal_begin(s_fx.ctx, 0x5D0001U, &mst, &modal_open, NULL)) {
+        CLAY({.id = CLAY_ID("modal_panel"),
+              .layout = {.sizing = {CLAY_SIZING_FIXED(400.0F), CLAY_SIZING_FIXED(200.0F)}},
+              .backgroundColor = {10, 10, 10, 255},
+              .clip = {.horizontal = true, .vertical = true}}) {
+            (void)nt_ui_slider_float(s_fx.ctx, NULL, 0, nt_ui_id("modal_sl"), NULL, &value, 0.0F, 1.0F, 0.0F, &s_style, &s_track_decl, true);
+        }
+        nt_ui_modal_end(s_fx.ctx);
     }
-    nt_ui_modal_end(s_fx.ctx);
     nt_ui_end(s_fx.ctx);
     /* Walks the SCISSOR the thumb's clipTo emits — an empty clip bbox aborts here. */
     nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};

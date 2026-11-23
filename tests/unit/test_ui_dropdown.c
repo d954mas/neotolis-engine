@@ -150,7 +150,7 @@ static void test_dropdown_trigger_toggles_open(void) {
 static void dropdown_key(nt_key_t key) { nt_input_test_key_press(key); }
 
 /* ---- Combo keyboard is INERT: the immediate combo wires NO keyboard nav. combo_open_list routes through
- *      nt_ui_popup_visible (the non-ext popup path), which has esc_close=false and dismisses only on an
+ *      nt_ui_popup_begin (the non-ext popup path), which has esc_close=false and dismisses only on an
  *      OUTSIDE click — never on Esc. Arrows/Enter never move or commit a selection (mouse-only). Locking
  *      that contract: an open list + Esc/arrows/Enter leaves *open and *selected unchanged. ---- */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)

@@ -144,9 +144,10 @@ static nt_ui_transform_t popup_eased_transform(const nt_ui_transform_t *start, f
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-nt_ui_popup_result_t nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t id, const nt_ui_popup_style_t *style, const nt_ui_popup_anchor_t *anchor, bool open, const nt_ui_popup_ext_t *ext,
-                                                nt_ui_popup_close_src_t *out_src) {
+bool nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t id, const nt_ui_popup_style_t *style, const nt_ui_popup_anchor_t *anchor, bool *open_io, const nt_ui_popup_ext_t *ext,
+                                nt_ui_popup_info_t *info, nt_ui_popup_close_src_t *out_src) {
     NT_ASSERT(ctx != NULL && "nt_ui_popup_begin: ctx must be non-NULL");
+    NT_ASSERT(open_io != NULL && "nt_ui_popup_begin: open must be non-NULL");
     NT_ASSERT(ctx->in_frame && ctx == nt_ui_internal_get_inframe_ctx() && "nt_ui_popup_begin: must be called between nt_ui_begin and nt_ui_end on the active ctx");
     NT_ASSERT(id != 0U && "nt_ui_popup_begin: id must be non-zero");
     NT_ASSERT(style != NULL && "nt_ui_popup_begin: style must be non-NULL");
@@ -154,6 +155,10 @@ nt_ui_popup_result_t nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t i
     NT_ASSERT(isfinite(style->ease_speed) && style->ease_speed >= 0.0F && "nt_ui_popup_begin: ease_speed must be finite >= 0");
     NT_ASSERT(anchor->prefer_side <= NT_UI_POPUP_CENTER && "nt_ui_popup_begin: prefer_side out of range");
     NT_ASSERT(isfinite(anchor->x) && isfinite(anchor->y) && isfinite(anchor->w) && isfinite(anchor->h) && "nt_ui_popup_begin: anchor rect must be finite");
+    const bool open = *open_io;
+    if (out_src != NULL) {
+        *out_src = NT_UI_POPUP_CLOSE_SRC_NONE;
+    }
     /* Per-phase panel transform start: ext override (modal recipe) wins, else the style start. */
     const nt_ui_transform_t *xf_start = open ? &style->open_xf_start : &style->close_xf_start;
     if (ext != NULL) {
@@ -232,19 +237,26 @@ nt_ui_popup_result_t nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t i
     if (tw != NULL) {
         tw->was_present = present ? 1U : 0U; /* remember for next frame's open-edge seed gate */
     }
+    if (info != NULL) {
+        *info = (nt_ui_popup_info_t){.t = t, .side = (uint8_t)side};
+    }
+#ifdef NT_TEST_ACCESS
+    s_last_catcher_present = false;
+#endif
+    if (!present) {
+        return false; /* a hidden popup declares nothing: no panel, no band, no end */
+    }
     // #region z-band + stack push (shared depth counter with modal)
-    /* A visible root overlay takes the frame's next root band above the floating that encloses it, so a
-     * later one covers an earlier one with all its nested levels; a nested one sits a band above its parent,
-     * over the parent's widget parts (delta 0). The catcher, declared before its panel on the same band, lies
-     * between them. A hidden popup paints nothing and takes no band. */
+    /* A root overlay takes the frame's next root band above the floating that encloses it, so a later one
+     * covers an earlier one with all its nested levels; a nested one sits a band above its parent, over the
+     * parent's widget parts (delta 0). The catcher, declared before its panel on the same band, lies between
+     * them. */
     int16_t panel_z = 1;
-    if (root_overlay && present) {
+    if (root_overlay) {
         const int32_t band = ctx->modal_zband_stride + ((int32_t)ctx->overlay_root_count * NT_UI_MODAL_MAX_DEPTH);
         NT_ASSERT(band <= INT16_MAX && "nt_ui_popup: too many visible root overlays in one frame for the int16 z-band");
         panel_z = (int16_t)band;
         ++ctx->overlay_root_count;
-    } else if (root_overlay) {
-        panel_z = ctx->modal_zband_stride;
     }
     ++ctx->overlay_depth;
     // #endregion
@@ -333,25 +345,20 @@ nt_ui_popup_result_t nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t i
     }
     // #endregion
 
+    if (close_src != NT_UI_POPUP_CLOSE_SRC_NONE) {
+        *open_io = false; /* a signal for the game's bool; t decays over the next frames */
+    }
     if (out_src != NULL) {
         *out_src = close_src;
     }
-
 #ifdef NT_TEST_ACCESS
     s_last_catcher_present = want_catcher;
 #endif
-
-    return (nt_ui_popup_result_t){
-        .t = t,
-        .close_requested = (close_src != NT_UI_POPUP_CLOSE_SRC_NONE),
-        .visible = present,
-        .fully_closed = (!open && t <= NT_UI_POPUP_EPSILON),
-        .side = (uint8_t)side,
-    };
+    return true;
 }
 
-nt_ui_popup_result_t nt_ui_popup_begin(nt_ui_context_t *ctx, uint32_t id, const nt_ui_popup_style_t *style, const nt_ui_popup_anchor_t *anchor, bool open) {
-    return nt_ui_popup_begin_internal(ctx, id, style, anchor, open, NULL, NULL);
+bool nt_ui_popup_begin(nt_ui_context_t *ctx, uint32_t id, const nt_ui_popup_style_t *style, const nt_ui_popup_anchor_t *anchor, bool *open, nt_ui_popup_info_t *info) {
+    return nt_ui_popup_begin_internal(ctx, id, style, anchor, open, NULL, info, NULL);
 }
 
 void nt_ui_popup_end(nt_ui_context_t *ctx) {
@@ -360,19 +367,6 @@ void nt_ui_popup_end(nt_ui_context_t *ctx) {
     NT_ASSERT(ctx->overlay_depth > 0U && "nt_ui_popup_end: unbalanced begin/end (stack underflow)");
     nt_ui_clay_priv_close_element();
     --ctx->overlay_depth;
-}
-
-bool nt_ui_popup_visible(nt_ui_context_t *ctx, uint32_t id, const nt_ui_popup_style_t *style, const nt_ui_popup_anchor_t *anchor, bool *p_open) {
-    NT_ASSERT(p_open != NULL && "nt_ui_popup_visible: p_open must be non-NULL");
-    const nt_ui_popup_result_t r = nt_ui_popup_begin(ctx, id, style, anchor, *p_open);
-    if (r.close_requested) {
-        *p_open = false; /* signal -> game's bool clears; t decays over the next frames */
-    }
-    if (!r.visible) {
-        nt_ui_popup_end(ctx); /* fully closed: balance the stack, caller skips the body */
-        return false;
-    }
-    return true;
 }
 
 void nt_ui_popup_clear_state(nt_ui_context_t *ctx, uint32_t id) {

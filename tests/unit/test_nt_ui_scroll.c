@@ -2087,9 +2087,11 @@ static void arb_popup_over(void) {
     nt_ui_popup_style_t ps = nt_ui_popup_style_defaults();
     ps.ease_speed = 0.0F;
     const nt_ui_popup_anchor_t anc = {.x = 500.0F, .y = 350.0F, .prefer_side = NT_UI_POPUP_BELOW};
-    (void)nt_ui_popup_begin(s_fx.ctx, ARB_POPUP, &ps, &anc, true);
-    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(60), CLAY_SIZING_FIXED(30)}}}) {}
-    nt_ui_popup_end(s_fx.ctx);
+    bool popup_open = true;
+    if (nt_ui_popup_begin(s_fx.ctx, ARB_POPUP, &ps, &anc, &popup_open, NULL)) {
+        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(60), CLAY_SIZING_FIXED(30)}}}) {}
+        nt_ui_popup_end(s_fx.ctx);
+    }
 }
 
 static void arb_scene_reset(void) {
@@ -2490,9 +2492,11 @@ static void body_real_popup(void) {
     nt_ui_popup_style_t st = nt_ui_popup_style_defaults();
     st.ease_speed = 0.0F;
     const nt_ui_popup_anchor_t anchor = {.x = 40.0F, .y = 20.0F, .w = 80.0F, .h = 30.0F, .prefer_side = NT_UI_POPUP_BELOW};
-    (void)nt_ui_popup_begin(s_fx.ctx, CLAY_ID("arb_real_popup").id, &st, &anchor, true);
-    CLAY({.id = CLAY_ID("arb_popup_btn"), .layout = {.sizing = {CLAY_SIZING_FIXED(80), CLAY_SIZING_FIXED(80)}}}) { s_fg_in = nt_ui_step(s_fx.ctx, CLAY_ID("arb_popup_btn").id, NULL); }
-    nt_ui_popup_end(s_fx.ctx);
+    bool popup_open = true;
+    if (nt_ui_popup_begin(s_fx.ctx, CLAY_ID("arb_real_popup").id, &st, &anchor, &popup_open, NULL)) {
+        CLAY({.id = CLAY_ID("arb_popup_btn"), .layout = {.sizing = {CLAY_SIZING_FIXED(80), CLAY_SIZING_FIXED(80)}}}) { s_fg_in = nt_ui_step(s_fx.ctx, CLAY_ID("arb_popup_btn").id, NULL); }
+        nt_ui_popup_end(s_fx.ctx);
+    }
 }
 
 static void test_arb_popup_in_list_keeps_drag_from_list(void) {
