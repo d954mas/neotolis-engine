@@ -2347,6 +2347,20 @@ static void test_arb_nested_vertical_wheel_passes_to_list(void) {
     TEST_ASSERT_TRUE(arb_list()->pos[1] < before);
 }
 
+/* The top overlay owns the wheel too: a wheel over a list under it scrolls nothing. */
+static void test_arb_overlay_takes_the_wheel(void) {
+    s_scene.style.wheel_ease_speed = 0.0F;
+    s_scene.outside_after = arb_popup_over;
+    nt_pointer_t p = arb_pointer(100.0F, 50.0F);
+    arb_warm(&p);
+    arb_frame(&p, 1);
+    TEST_ASSERT_EQUAL_UINT32(ARB_POPUP, s_fx.ctx->overlay_top_id_prev);
+    const float before = arb_list()->pos[1];
+    p.wheel_dy = 1.0F;
+    arb_frame(&p, 1);
+    TEST_ASSERT_TRUE_MESSAGE(float_near(arb_list()->pos[1], before, 0.001F), "the list under the overlay takes no wheel");
+}
+
 /* A tap below the slop on a row inside a list clicks it and leaves the list at rest. */
 static void test_arb_tap_below_slop_clicks(void) {
     s_scene.body = body_button_row;
@@ -3076,6 +3090,7 @@ int main(void) {
     RUN_TEST(test_hovered_within_follows_capture);
     RUN_TEST(test_arb_equal_crossings_go_to_the_widget_then_the_inner_scroll);
     RUN_TEST(test_arb_overlay_ends_a_pending_scroll);
+    RUN_TEST(test_arb_overlay_takes_the_wheel);
     RUN_TEST(test_arb_vanished_scroll_takes_nothing);
     RUN_TEST(test_arb_tap_gesture_does_not_outlive_its_frame);
     RUN_TEST(test_arb_thumb_over_row_takes_the_thumb);

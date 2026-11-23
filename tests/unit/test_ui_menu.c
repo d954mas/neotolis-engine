@@ -2332,6 +2332,19 @@ static void test_menu_row_popup_closes_the_branch_before_the_rows(void) {
     TEST_ASSERT_FALSE_MESSAGE(menu_level_found(1U), "the sibling's level is not declared over the row's popup");
 }
 
+/* ---- An outside press closes the menu before its rows declare: the press frame declares no level. ---- */
+static void test_menu_outside_press_closes_before_the_rows(void) {
+    nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
+    nt_ui_menu_t st = {0};
+    nt_ui_menu_open(&st, 120.0F, 80.0F);
+    menu_im_frame(&st, &style, 780.0F, 580.0F);
+    menu_im_frame(&st, &style, 780.0F, 580.0F);
+    TEST_ASSERT_TRUE(menu_level_found(0U));
+    menu_im_press(&st, &style, 780.0F, 580.0F, NT_POINTER_MOUSE);
+    TEST_ASSERT_FALSE(st.open);
+    TEST_ASSERT_FALSE_MESSAGE(menu_level_found(0U), "the press frame declares no level");
+}
+
 /* ---- A tap on one parent and Right on a later focused parent in one frame, with a third parent's child
  *      pending: the tap opens its parent. ---- */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -2656,6 +2669,7 @@ int main(void) {
     RUN_TEST(test_menu_returned_row_is_not_focused);
     RUN_TEST(test_menu_row_popup_closes_deeper_levels);
     RUN_TEST(test_menu_row_popup_closes_the_branch_before_the_rows);
+    RUN_TEST(test_menu_outside_press_closes_before_the_rows);
     RUN_TEST(test_menu_click_beats_a_same_frame_key);
     RUN_TEST(test_menu_instant_rows_take_no_anim_slot);
     RUN_TEST(test_menu_keeps_no_state_cells);

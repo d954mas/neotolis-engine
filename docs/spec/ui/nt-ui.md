@@ -298,9 +298,25 @@ In a 2D context it also drops a capture or a pending scroll held under last
 frame's top overlay (below its catcher in the stacking order that paints and
 hit-tests; inspector panes excepted): an overlay that
 opens over a held press ends that gesture, as a modal window cancels its
-owner's capture, so the release clicks nothing and a drag or hold stops. A
-text field under the top overlay loses focus the same way, as a modal
-dialog takes focus, so the overlay's keys are its own.
+owner's capture, so the release clicks nothing, a hold stops and a drag ends
+as if released (a scroll keeps its fling, as a fling started before the
+overlay does). A text field under the top overlay loses focus the same way,
+as a modal dialog takes focus, so the overlay's keys are its own; the wheel
+and new presses go to the front-most record, the overlay's. The top overlay
+owns every input path: the front-most record, a held capture or pending
+scroll, text focus, Tab stops (see "Text input") and keys (popup-core's Esc,
+the menu); a closing overlay owns none (see "Popup-core").
+
+**When a rule runs.** Input is decided from last frame's layout, so a rule
+that needs only last frame's records and this frame's input runs before the
+declarations it governs: `nt_ui_begin` for the context (the front-most
+record, the scroll gestures, the top overlay's hold on gestures and focus)
+and a widget's begin for the widget (popup-core's close-scan; the menu's
+outside press, key, end of keyboard mode and the branch a row's popup
+closes). A widget's end runs only what needs this frame's declarations (the
+menu's Up/Down neighbours, its click, hover and aim corridor, and the rows
+the frame did not declare). A rule run later than it could lets the frame
+declare content the rule already rules out.
 Result: 1-frame IM-lag is intrinsic (current frame reads previous
 frame's bbox); no stuck input on widget disappearance.
 
@@ -773,7 +789,8 @@ A row is hovered by any pointer over it, as every `nt_ui` hover; the primary
 pointer drives the mouse-aim corridor, the end of keyboard mode and the
 outside-press dismiss (a left or right press with the element under the pointer off everything
 declared inside the menu last frame, a popup that a custom row opened included, whatever the
-left button holds). A submenu level is hit from the frame after it first
+left button holds; `nt_ui_menu_begin` closes the menu on it and returns false
+in that frame). A submenu level is hit from the frame after it first
 appears, as every element, so a press on it in its first frame is an outside
 press. The pointer moves focus to the enabled row under it; a disabled row, padding or a separator under
 it takes no focus and starts no switch. A key hands focus and the open
