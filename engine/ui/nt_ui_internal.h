@@ -162,6 +162,7 @@ typedef struct {
 #ifndef NT_UI_MODAL_MAX_DEPTH
 #define NT_UI_MODAL_MAX_DEPTH 16
 #endif
+_Static_assert(NT_UI_MODAL_MAX_DEPTH >= 1 && NT_UI_MODAL_MAX_DEPTH <= UINT8_MAX, "NT_UI_MODAL_MAX_DEPTH must fit the uint8_t overlay_depth counter");
 
 /* Bound the storage and per-row work of NT_UI_CHECKS duplicate detection. */
 #ifndef NT_UI_COMBO_DUP_KEY_WINDOW
@@ -241,11 +242,6 @@ struct nt_ui_context {
     int16_t modal_zband_stride;
     uint8_t overlay_depth;
     uint8_t capture_seen[NT_INPUT_MAX_POINTERS];
-    /* Overlay presence across frames: _cur is set when a catcher-bearing popup (a modal, an open dropdown
-     * or menu) declares this frame; nt_ui_end commits it into _prev, which nt_ui_overlay_active reads (the
-     * live depth is always 0 by nt_ui_end). */
-    bool overlay_present_cur;
-    bool overlay_present_prev;
 
     /* Buttons do not nest (asserted). */
     struct {
@@ -542,6 +538,12 @@ bool nt_ui_internal_declared_within(const nt_ui_context_t *ctx, uint32_t inner, 
  * aliases the panel id in the registry / capture table. */
 #define NT_UI_POPUP_CATCHER_SALT 0x500CA7C0U
 static inline uint32_t nt_ui_internal_popup_catcher_id(uint32_t id) { return nt_ui_derived_id(id, NT_UI_POPUP_CATCHER_SALT); }
+
+/* The zIndex delta of an overlay declared here: a root overlay sits one stride above the floating that
+ * encloses it, a nested one shares its parent's band, so overlays stack in declaration order. A part
+ * that must lie right under an overlay's panel (its catcher, a tooltip's shadow) takes the same delta,
+ * declared before the panel. */
+static inline int16_t nt_ui_internal_overlay_z(const nt_ui_context_t *ctx) { return (ctx->overlay_depth == 0U) ? ctx->modal_zband_stride : 0; }
 
 /* Shared overlay helpers — single source of truth for the Y-flip + per-level accum convention. */
 const nt_ui_debug_zone_t *nt_ui_internal_find_debug_zone(const nt_ui_context_t *ctx, uint32_t id);

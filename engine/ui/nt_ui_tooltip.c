@@ -59,9 +59,9 @@ nt_ui_tooltip_style_t nt_ui_tooltip_style_defaults(void) {
     };
 }
 
-/* The drop-shadow: a translucent rect the panel's size, attached to the panel and pushed +offset, drawn
- * UNDER the panel (declared first inside the panel scope at a child-z below the panel body). Sized from
- * the panel's prev-frame bbox (A3: skipped the first frame until the bbox exists; cosmetic 1-frame lag). */
+/* The drop-shadow: a translucent rect at the panel's prev-frame box pushed +offset, declared BEFORE the
+ * popup on the band the popup takes, so it lies right under the panel and over everything declared
+ * earlier, a parent overlay included. Skipped until the box exists; it does not follow the open tween. */
 static void tooltip_declare_shadow(nt_ui_context_t *ctx, uint8_t fill_layer, uint32_t panel_id, const nt_ui_tooltip_style_t *style) {
     if (style->shadow_offset_px == 0 || style->shadow_color == 0U) {
         return;
@@ -72,10 +72,7 @@ static void tooltip_declare_shadow(nt_ui_context_t *ctx, uint8_t fill_layer, uin
     }
     const float off = (float)style->shadow_offset_px;
     CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(bb.width), CLAY_SIZING_FIXED(bb.height)}},
-          .floating = {.attachTo = CLAY_ATTACH_TO_PARENT,
-                       .zIndex = -1, /* below the panel body so the panel paints over the shadow */
-                       .offset = {.x = off, .y = off},
-                       .attachPoints = {.element = CLAY_ATTACH_POINT_LEFT_TOP, .parent = CLAY_ATTACH_POINT_LEFT_TOP}},
+          .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .zIndex = nt_ui_internal_overlay_z(ctx), .offset = {.x = bb.x + off, .y = bb.y + off}},
           .backgroundColor = nt_ui_unpack_abgr(style->shadow_color),
           .userData = (void *)nt_ui_make_element_data(fill_layer, NULL)}) {}
 }
@@ -158,9 +155,12 @@ bool nt_ui_tooltip(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8
     bool shown = false;
     /* Low-level begin/end (no one-bool wrapper): the open state is engine-derived from the hover timer,
      * not a game bool, and there is no close_requested path to harvest. */
+    const uint32_t panel_id = tooltip_panel_id(target_id);
+    if (open) {
+        tooltip_declare_shadow(ctx, fill_layer, panel_id, style);
+    }
     const nt_ui_popup_result_t r = nt_ui_popup_begin(ctx, tooltip_popup_id(target_id), &pst, &anc, open);
     if (r.visible) {
-        const uint32_t panel_id = tooltip_panel_id(target_id);
         const nt_ui_label_style_t lbl = {.font_id = style->font_id, .font_size = style->font_size, .color = style->text_color};
         Clay_SizingAxis w = (style->max_width > 0U) ? CLAY_SIZING_FIT(.max = (float)style->max_width) : CLAY_SIZING_FIT(0);
 
@@ -185,7 +185,6 @@ bool nt_ui_tooltip(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8
 
         nt_ui_clay_priv_open_element();
         nt_ui_clay_priv_configure_open_element(panel);
-        tooltip_declare_shadow(ctx, fill_layer, panel_id, style); /* first child: drops UNDER the panel body */
         tooltip_declare_caret(fill_layer, style, r.side);
         nt_ui_label(ctx, nt_ui_make_element_data(label_layer, NULL), content, &lbl);
         nt_ui_clay_priv_close_element();

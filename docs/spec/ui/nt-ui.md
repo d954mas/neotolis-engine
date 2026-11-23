@@ -134,15 +134,19 @@ bare delta instead of reading the modal subsystem's depth counter.
 
 A delta of 0 ties with the parent and, since the root sort is stable,
 paints after it with a same-frame bbox. A NEGATIVE delta sorts ahead of
-its parent and reads the parent's PREVIOUS-frame bbox; two parts use
-one — the tooltip drop-shadow, which guards for the first frame, and the
-inspector highlight, which attaches to a base-band element and so is
-unaffected.
+its parent and reads the parent's PREVIOUS-frame bbox; one part uses
+it, the inspector highlight, which attaches to a base-band element. An
+overlay part that must lie right under its panel (the catcher, the tooltip
+drop-shadow) takes the panel's delta and is declared before the panel
+instead: a negative delta would also sink under the overlay the panel is
+nested in.
 
 Bands accumulate with declaration nesting, NOT with attachment:
 `attachTo = ROOT` still stacks where it was declared. A root overlay
 declares one `modal_zband_stride` above its enclosing floating; an overlay
-nested inside another declares delta 0 and shares its band, so overlays
+nested inside another declares delta 0 and shares the band of the floating
+it is declared in (its parent's, unless the game nests it in a floating with
+its own `zIndex`, which moves it with that floating), so overlays
 stack in declaration order, as later-opened overlays in an HTML top layer
 or Dear ImGui's window stack: an overlay declared later covers an earlier
 one together with every level nested in it. A widget's own floating parts declare delta 0 and
@@ -287,8 +291,9 @@ gesture: whatever the pointer still held is dropped. **Orphan cleanup** at
 frame — covers scene switches, conditional disable, and widget hide. It also drops
 `active_id` when a pointer has no release edge and its button is up or newly pressed:
 frames without `nt_ui_begin` swallow edges, and the pointer must not stay bound.
-In a 2D context it also drops a capture held outside last frame's top overlay
-(outside its catcher, its panel and what the panel declares): an overlay that
+In a 2D context it also drops a capture or a pending scroll held outside last
+frame's top overlay (outside its catcher, its panel and what the panel
+declares; inspector panes excepted): an overlay that
 opens over a held press ends that gesture, as a modal window cancels its
 owner's capture, so the release clicks nothing and a drag or hold stops.
 Result: 1-frame IM-lag is intrinsic (current frame reads previous
@@ -727,14 +732,20 @@ binds Esc or Enter elsewhere skips them while a menu is open:
 - Left and Esc close the focused level and focus its parent; at the root they
   close the menu.
 
-A frame activates at most one row, the first declared. A focused row that is
-absent is no focus: Enter does nothing, Down starts at the first enabled row and
-Up at the last. A disabled focused row keeps its place: Enter does nothing and
+A frame activates at most one row, the first declared. Before it reads input,
+`nt_ui_menu_end` reconciles the kept state with the frame: an open parent the
+frame does not declare as an enabled parent closes its branch; a focused row
+its declared level lacks loses focus, so a row that returns later is not
+focused; and a popup a row opened (a dropdown, a confirm) that is on top
+closes the open branch below that row, so each level keeps one open child, as
+the Dear ImGui popup stack does. With no focus, Enter does nothing, Down
+starts at the first enabled row and Up at the last. A disabled focused row keeps its place: Enter does nothing and
 Up/Down step from it. If the focused row's level has closed, keys act on the
-deepest open level, where no row is focused. An open parent that the frame does
-not declare as an enabled parent closes its branch; Up, Down, Left and Esc do
-nothing in a frame that did not declare the focused row's level, or whose Right
-or Enter moved focus into a child.
+deepest open level, where no row is focused. Keys do nothing in a frame that
+did not declare the focused row's level, and then do not end pointer mode; Up,
+Down, Left and Esc also do nothing in a frame whose Right or Enter moved focus
+into a child. A click on a parent wins over a same-frame Right or Enter that
+the frame defers.
 
 A row is hovered by any pointer over it, as every `nt_ui` hover; the primary
 pointer drives the mouse-aim corridor, the end of keyboard mode and the

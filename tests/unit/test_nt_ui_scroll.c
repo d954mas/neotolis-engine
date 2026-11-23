@@ -2081,6 +2081,17 @@ static void arb_frame(const nt_pointer_t *pointers, uint32_t count) {
     nt_ui_end(s_fx.ctx);
 }
 
+#define ARB_POPUP 0x5C0A01U
+/* A catcher-bearing popup away from the list. */
+static void arb_popup_over(void) {
+    nt_ui_popup_style_t ps = nt_ui_popup_style_defaults();
+    ps.ease_speed = 0.0F;
+    const nt_ui_popup_anchor_t anc = {.x = 500.0F, .y = 350.0F, .prefer_side = NT_UI_POPUP_BELOW};
+    (void)nt_ui_popup_begin(s_fx.ctx, ARB_POPUP, &ps, &anc, true);
+    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(60), CLAY_SIZING_FIXED(30)}}}) {}
+    nt_ui_popup_end(s_fx.ctx);
+}
+
 static void arb_scene_reset(void) {
     s_scene = (arb_scene_t){.style = bar_style(NT_UI_SCROLLBAR_ALWAYS), .content_h = 1000.0F}; /* bar art: a bar takes presses only with a thumb */
     s_scene.style.rubber_band_c = 0.0F;                                                        /* raw == the routed drag, easy to read */
@@ -2641,6 +2652,24 @@ static void test_arb_wheel_does_not_move_a_held_thumb(void) {
     TEST_ASSERT_TRUE(float_near(arb_list()->pos[1], held, 0.001F));
 }
 
+/* An overlay that opens over a held press ends its pending scroll: the drag past the slop scrolls nothing. */
+static void test_arb_overlay_ends_a_pending_scroll(void) {
+    nt_pointer_t p = arb_pointer(100.0F, 100.0F);
+    arb_warm(&p);
+    arb_press(&p);
+    arb_frame(&p, 1);
+    TEST_ASSERT_EQUAL_UINT32(SCROLL_ID, s_fx.ctx->captures[0].pending_scroll);
+    arb_hold(&p);
+    s_scene.outside_after = arb_popup_over; /* the game opens it, e.g. from a key */
+    arb_frame(&p, 1);
+    arb_frame(&p, 1);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, s_fx.ctx->captures[0].pending_scroll, "the overlay on top ends the gesture held under it");
+    p.y -= 40.0F;
+    arb_frame(&p, 1);
+    arb_frame(&p, 1);
+    TEST_ASSERT_TRUE_MESSAGE(float_near(arb_list()->raw[1], 0.0F, 0.001F), "the list under the overlay does not scroll");
+}
+
 /* Equal crossings: the pressed widget keeps the drag over a scroll, the inner scroll over the outer. */
 static void test_arb_equal_crossings_go_to_the_widget_then_the_inner_scroll(void) {
     s_scene.body = body_x_draggable_row;
@@ -3046,6 +3075,7 @@ int main(void) {
     RUN_TEST(test_hovered_within_follows_declaration);
     RUN_TEST(test_hovered_within_follows_capture);
     RUN_TEST(test_arb_equal_crossings_go_to_the_widget_then_the_inner_scroll);
+    RUN_TEST(test_arb_overlay_ends_a_pending_scroll);
     RUN_TEST(test_arb_vanished_scroll_takes_nothing);
     RUN_TEST(test_arb_tap_gesture_does_not_outlive_its_frame);
     RUN_TEST(test_arb_thumb_over_row_takes_the_thumb);

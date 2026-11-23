@@ -306,7 +306,7 @@ static uint32_t menu_im_row(nt_ui_menu_t *menu, uint32_t key, const char *label,
 
     const nt_ui_anim_target_t tgt = {.scale_x = 1.0F, .scale_y = 1.0F, .scale_z = 1.0F, .opacity = 1.0F, .value_t = highlit ? 1.0F : 0.0F};
     /* A row's highlight ease outlives its closed level, so a row shown again snaps it. */
-    const bool shown_again = menu->arming || !nt_ui_get_bbox(ctx, row_id).found;
+    const bool shown_again = style->state_speed > 0.0F && (menu->arming || !nt_ui_get_bbox(ctx, row_id).found);
     const nt_ui_anim_interaction_t *a = shown_again ? nt_ui_anim_seed(ctx, row_id, &tgt) : nt_ui_anim(ctx, row_id, &tgt, 0.0F, style->state_speed);
     Clay_Color bg = {0};
     if (style->item_hover_color != 0U) {
@@ -497,7 +497,7 @@ static void menu_key_open(nt_ui_menu_t *menu, uint8_t depth, uint32_t row_id) {
     if (menu->open_path[depth] == 0U || menu->open_path[depth] == row_id) {
         menu_set_open(menu, depth, row_id);
         f->focus_first = true;
-    } else {
+    } else if (f->click_id == 0U) { /* a click this frame wins over the key */
         f->click_id = row_id;
         f->click_depth = depth;
     }
@@ -587,14 +587,32 @@ static void menu_resolve_hover(nt_ui_menu_t *menu, uint8_t d, uint32_t row_id, b
 static bool menu_resolve(nt_ui_menu_t *menu) {
     const nt_ui_menu_frame_t *f = &menu->frame;
     nt_ui_context_t *ctx = f->ui;
+    // #region reconcile the kept state with this frame's declaration, before any input
     if (f->declared_depth < menu_open_depth(menu)) {
         menu_set_open(menu, f->declared_depth, 0U); /* a removed, disabled or leaf parent closes its branch */
     }
+    const bool level_declared = f->declared_depth >= f->nav_depth;
+    if (level_declared && !f->nav_passed) {
+        menu->focus = 0U; /* the focused row is gone from its level; a disabled one still declares and stays */
+    }
+    /* A popup a row opened is that level's child: on top, it closes the open branch below its row, so one
+     * child stays open per level. */
+    const uint32_t root = menu_level_id(f->menu_id, 0U);
+    const uint32_t top = ctx->overlay_top_id_prev;
+    if (top != root && nt_ui_internal_declared_within(ctx, top, root)) {
+        uint8_t level = menu_open_depth(menu);
+        while (level > 0U && !nt_ui_internal_declared_within(ctx, top, menu_level_id(f->menu_id, level))) {
+            --level;
+        }
+        menu_set_open(menu, level, 0U);
+    }
+    // #endregion
     bool close_chain = f->activated;
-    const bool up = menu_key(menu, NT_KEY_ARROW_UP);
-    const bool down = menu_key(menu, NT_KEY_ARROW_DOWN);
-    const bool back = menu_key(menu, NT_KEY_ARROW_LEFT) || menu_key(menu, NT_KEY_ESCAPE);
-    const bool kbd_acted = up || down || back || menu_key(menu, NT_KEY_ARROW_RIGHT) || menu_key(menu, NT_KEY_ENTER);
+    /* Keys act only on a declared focused level; one that did nothing does not take the pointer's place. */
+    const bool up = level_declared && menu_key(menu, NT_KEY_ARROW_UP);
+    const bool down = level_declared && menu_key(menu, NT_KEY_ARROW_DOWN);
+    const bool back = level_declared && (menu_key(menu, NT_KEY_ARROW_LEFT) || menu_key(menu, NT_KEY_ESCAPE));
+    const bool kbd_acted = up || down || back || (level_declared && (menu_key(menu, NT_KEY_ARROW_RIGHT) || menu_key(menu, NT_KEY_ENTER)));
     /* The rows tracked the focused row's level (an undeclared level tracked nothing); a keyboard move into a
      * child this frame ignores Up/Down/Left/Esc. */
     const uint8_t d = f->nav_depth;
@@ -656,7 +674,7 @@ static bool menu_resolve(nt_ui_menu_t *menu) {
      * its levels, even one closed at the end of that frame, and a popup a custom row opened. It reads the
      * element under the pointer, not a capture holder, and not on the frame the menu opened. */
     const bool outside_press = ours && (pp->buttons[NT_BUTTON_LEFT].is_pressed || pp->buttons[NT_BUTTON_RIGHT].is_pressed);
-    if (outside_press && !nt_ui_internal_declared_within(ctx, ctx->pointer_hot[ctx->frame_primary].id, menu_level_id(f->menu_id, 0U))) {
+    if (outside_press && !nt_ui_internal_declared_within(ctx, ctx->pointer_hot[ctx->frame_primary].id, root)) {
         close_chain = true;
     }
     return close_chain;

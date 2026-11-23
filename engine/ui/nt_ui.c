@@ -404,6 +404,11 @@ void nt_ui_set_font(nt_ui_context_t *ctx, uint16_t font_id, nt_font_t font) {
 // #region begin_end
 static void resolve_hot(nt_ui_context_t *ctx);
 
+/* A held id belongs to the top overlay: none, the top's catcher, an inspector pane, or declared inside the top. */
+static bool owned_by_top(nt_ui_context_t *ctx, uint32_t id, uint32_t top) {
+    return id == 0U || id == nt_ui_internal_popup_catcher_id(top) || nt_ui_internal_record_kind(ctx, id) != NT_UI_HIT || nt_ui_internal_declared_within(ctx, id, top);
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_ui_begin(nt_ui_context_t *ctx, const nt_ui_frame_desc_t *frame) {
     NT_ASSERT(ctx != NULL && frame != NULL && "nt_ui_begin: ctx and frame must be non-NULL");
@@ -531,9 +536,6 @@ void nt_ui_begin(nt_ui_context_t *ctx, const nt_ui_frame_desc_t *frame) {
     ctx->overlay_top_id_prev = ctx->overlay_top_id_cur;
     ctx->overlay_top_id_cur = 0U;
     ctx->overlay_top_z_cur = INT32_MIN;
-    /* Reset this frame's modal presence; committed into _prev at nt_ui_end (so a game that polls
-     * nt_ui_overlay_active BEFORE this frame's begin still sees last frame's result). */
-    ctx->overlay_present_cur = false;
     /* Orphan-focus cleanup: a focused field not re-declared last frame would gate global Esc forever,
      * so drop focus before this frame runs (mirrors the capture_seen orphan sweep above). */
     if (ctx->focused_input_id != 0U && ctx->focused_input_seen == 0U) {
@@ -605,14 +607,17 @@ void nt_ui_begin(nt_ui_context_t *ctx, const nt_ui_frame_desc_t *frame) {
      * clip) leaks a slot until the pool (64) overflows -> Clay error type=7 crash. */
     Clay_UpdateScrollContainers(false, (Clay_Vector2){0.0F, 0.0F}, ctx->frame_dt);
 
-    /* The top overlay owns the pointer, held gestures included: a capture outside it (a press under an
-     * overlay that opened mid-gesture) ends without a click, as a modal window cancels its owner's capture.
-     * A 2D property, like the top. */
+    /* The top overlay owns the pointer, held gestures included: a capture or a pending scroll outside it
+     * (a press under an overlay that opened mid-gesture) ends without a click, as a modal window cancels
+     * its owner's capture. A 2D property, like the top. */
     const uint32_t top = ctx->overlay_top_id_prev;
     for (uint32_t i = 0; !ctx->use_raycast_input && top != 0U && i < ctx->frame_pointer_count; ++i) {
-        const uint32_t held = ctx->captures[i].active_id;
-        if (held != 0U && held != nt_ui_internal_popup_catcher_id(top) && nt_ui_internal_record_kind(ctx, held) == NT_UI_HIT && !nt_ui_internal_declared_within(ctx, held, top)) {
-            ctx->captures[i].active_id = 0U;
+        nt_ui_capture_t *cap = &ctx->captures[i];
+        if (!owned_by_top(ctx, cap->active_id, top)) {
+            cap->active_id = 0U;
+        }
+        if (!owned_by_top(ctx, cap->pending_scroll, top)) {
+            cap->pending_scroll = 0U;
         }
     }
 
@@ -658,10 +663,6 @@ void nt_ui_end(nt_ui_context_t *ctx) {
             ctx->captures[i].pending_scroll = 0U;
         }
     }
-
-    /* Publish this frame's modal presence for nt_ui_overlay_active: a game polls it next frame BEFORE
-     * begin (e.g. gating its own hotkeys), so commit at end (not begin) to hold the latest result. */
-    ctx->overlay_present_prev = ctx->overlay_present_cur;
 
     ctx->in_frame = false;
     g_nt_ui_inframe_ctx = NULL;
@@ -2902,7 +2903,8 @@ void nt_ui_debug_record_disabled_zone(nt_ui_context_t *ctx, uint32_t id, const i
 
 bool nt_ui_overlay_active(const nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL && "nt_ui_overlay_active: ctx must be non-NULL");
-    return ctx->overlay_present_prev;
+    /* The latest finished frame's top: _cur between frames (a game polls before nt_ui_begin), _prev inside one. */
+    return (ctx->in_frame ? ctx->overlay_top_id_prev : ctx->overlay_top_id_cur) != 0U;
 }
 
 bool nt_ui_wants_pointer(const nt_ui_context_t *ctx) {

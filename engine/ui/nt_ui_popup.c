@@ -167,11 +167,10 @@ nt_ui_popup_result_t nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t i
     NT_ASSERT(ctx->overlay_depth < NT_UI_MODAL_MAX_DEPTH && "nt_ui_popup_begin: nesting exceeds NT_UI_MODAL_MAX_DEPTH");
 
     // #region stack push + z-band (shared depth counter with modal)
+    /* A later overlay covers an earlier one with all its nested levels; the catcher, declared before its
+     * panel on the same band, lies between them. */
+    const int16_t panel_z = nt_ui_internal_overlay_z(ctx);
     ++ctx->overlay_depth;
-    /* A root overlay sits one band above whatever floating encloses it; a nested one shares its parent's
-     * band (delta 0), so overlays stack in declaration order: a later overlay covers an earlier one with
-     * all its nested levels, and the catcher, declared before its panel, lies between them. */
-    const int16_t panel_z = (ctx->overlay_depth == 1U) ? ctx->modal_zband_stride : 0;
     const uint32_t catcher_id = nt_ui_internal_popup_catcher_id(id);
     // #endregion
     // #region tween-state (non-evicting): was the popup present last frame?
@@ -235,12 +234,9 @@ nt_ui_popup_result_t nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t i
     tw->was_present = present ? 1U : 0U; /* remember for next frame's open-edge seed gate */
     const bool want_catcher = present && (dismiss_on_click || has_backdrop || force_catcher);
     nt_ui_popup_close_src_t close_src = NT_UI_POPUP_CLOSE_SRC_NONE;
-    /* Only a catcher-bearing popup gates base UI, so only it claims present/top-id. A catcher-less popup
-     * (e.g. a tooltip, flags=0) is visible but must NOT make nt_ui_overlay_active() true nor steal the
-     * top-id dismiss slot from a coexisting dropdown. */
-    if (want_catcher) {
-        ctx->overlay_present_cur = true;
-    }
+    /* Only a catcher-bearing popup gates base UI, so only it claims the top (and nt_ui_overlay_active). A
+     * catcher-less popup (e.g. a tooltip, flags=0) is visible but must NOT steal the top from a coexisting
+     * dropdown. */
     if (want_catcher) {
         /* Full-viewport catcher on the panel's band. Transparent for a plain popup; a visible dim rect when a
          * backdrop color is given (alpha rides t*backdrop_alpha exactly once — folding t into element

@@ -3661,8 +3661,8 @@ static void frame(void) {
     }
     nt_arena_reset(&g_nt_mem_scratch);
 
-    /* Gameplay/global hotkeys yield to an open overlay (a modal, a menu, a dropdown) so Esc closes it first
-     * and the palette/inspector keys don't fire underneath it. nt_ui_overlay_active reports last frame's
+    /* Gameplay/global hotkeys yield to an open overlay (a modal, a menu, a dropdown) so Esc never quits from
+     * under it and the palette/inspector keys don't fire underneath it. nt_ui_overlay_active reports last frame's
      * presence (polled here before this frame's nt_ui_begin) -- the inherent IM 1-frame gate. */
     const bool overlay_was_active = nt_ui_overlay_active(s_ctx);
 
