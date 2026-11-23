@@ -47,7 +47,7 @@ _Static_assert(sizeof(nt_ui_popup_info_t) == 8, "nt_ui_popup_info_t stable ABI (
 
 /* Catcher mode: a popup that wants light-dismiss declares a transparent full-viewport catcher under
  * its panel; a tooltip (NO dismiss) declares none. */
-#define NT_UI_POPUP_LIGHT_DISMISS ((uint8_t)(1U << 0)) /* transparent catcher -> outside-click closes */
+#define NT_UI_POPUP_LIGHT_DISMISS ((uint8_t)(1U << 0)) /* transparent catcher -> outside-click or Esc closes */
 
 typedef struct {
     float ease_speed;                 /* value_speed for the open/close tween; >= 0 (0 = instant snap) */

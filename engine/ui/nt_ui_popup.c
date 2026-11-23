@@ -158,14 +158,7 @@ bool nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t id, const nt_ui_p
     if (out_src != NULL) {
         *out_src = NT_UI_POPUP_CLOSE_SRC_NONE;
     }
-    /* Per-phase panel transform start: ext override (modal recipe) wins, else the style start. */
     const nt_ui_transform_t *xf_start = open ? &style->open_xf_start : &style->close_xf_start;
-    if (ext != NULL) {
-        const nt_ui_transform_t *ovr = open ? ext->open_xf : ext->close_xf;
-        if (ovr != NULL) {
-            xf_start = ovr;
-        }
-    }
     /* scale_* must be > 0 (nt_ui_anim asserts it via the eased transform). */
     NT_ASSERT(xf_start->scale_x > 0.0F && xf_start->scale_y > 0.0F && xf_start->scale_z > 0.0F && "nt_ui_popup_begin: transform scale must be > 0");
     /* Assert BEFORE the push — fail-early, no heap growth, no silent fallback. */
@@ -225,11 +218,12 @@ bool nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t id, const nt_ui_p
     const uint32_t backdrop_color = (ext != NULL) ? ext->backdrop_color : 0U;
     const float backdrop_alpha = (ext != NULL) ? ext->backdrop_alpha : 0.0F;
     const int16_t close_pad = (int16_t)((ext != NULL) ? ext->close_pad : 0);
-    const bool esc_close = (ext != NULL) && ext->esc_close;
     const bool has_backdrop = backdrop_color != 0U;
-    /* A plain popup dismisses on the light-dismiss flag; the modal drives dismiss/gate explicitly. */
+    /* A plain popup dismisses on the light-dismiss flag, by an outside click or Esc as a <select>; the modal
+     * drives dismiss/gate explicitly. */
     const bool light_dismiss = (style->flags & NT_UI_POPUP_LIGHT_DISMISS) != 0U;
     const bool dismiss_on_click = (ext != NULL) ? ext->dismiss_on_click : light_dismiss;
+    const bool esc_close = (ext != NULL) ? ext->esc_close : light_dismiss;
     const bool force_catcher = (ext != NULL) && ext->force_catcher;
     /* The catcher carries the dismiss source and/or the visible backdrop and/or an inert input gate. */
     const bool present = open || (t > NT_UI_POPUP_EPSILON);
@@ -246,15 +240,17 @@ bool nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t id, const nt_ui_p
         return false; /* a hidden popup declares nothing: no panel, no band, no end */
     }
     // #region z-band + stack push (shared depth counter with modal)
-    /* A root overlay takes the frame's next root band above the floating that encloses it, so a later one
-     * covers an earlier one with all its nested levels; a nested one sits a band above its parent, over the
-     * parent's widget parts (delta 0). The catcher, declared before its panel on the same band, lies between
-     * them. */
+    /* Root overlays are a top layer: each takes the frame's next absolute root band, whatever game floating
+     * encloses it, so a later one covers an earlier one with all its nested levels; a nested one sits a band
+     * above its parent, over the parent's widget parts (delta 0). The catcher, declared before its panel on
+     * the same band, lies between them. */
     int16_t panel_z = 1;
     if (root_overlay) {
         const int32_t band = ctx->modal_zband_stride + ((int32_t)ctx->overlay_root_count * NT_UI_MODAL_MAX_DEPTH);
+        const int32_t enclosing = nt_ui_clay_priv_open_floating_z(ctx->clay);
         NT_ASSERT(band + NT_UI_MODAL_MAX_DEPTH - 1 <= INT16_MAX && "nt_ui_popup: a root overlay's nested levels would pass the int16 z-band");
-        panel_z = (int16_t)band;
+        NT_ASSERT(enclosing < ctx->modal_zband_stride && "nt_ui_popup: a root overlay's enclosing floating must lie under modal_zband_stride");
+        panel_z = (int16_t)(band - enclosing);
         ++ctx->overlay_root_count;
     }
     ++ctx->overlay_depth;
@@ -267,7 +263,7 @@ bool nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t id, const nt_ui_p
     /* Only a catcher-bearing popup gates base UI, so only it claims the top (and nt_ui_overlay_active). A
      * catcher-less popup (e.g. a tooltip, flags=0) is visible but must NOT steal the top from a coexisting
      * dropdown. */
-    if (want_catcher || (present && has_backdrop)) {
+    if (want_catcher || has_backdrop) {
         /* Full-viewport catcher on the panel's band. Transparent for a plain popup; a visible dim rect when a
          * backdrop color is given (alpha rides t*backdrop_alpha exactly once — folding t into element
          * opacity too would dim t²). It wins next-frame topmost-z, gating click-through to base UI. */

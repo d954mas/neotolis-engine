@@ -99,20 +99,20 @@ typedef struct {
     uint8_t click_depth;
     uint8_t fill_layer;
     uint8_t label_layer;
-    bool nav_passed;       /* the focused row's level has declared it */
-    bool focus_first;      /* a keyboard-opened child gives focus to its first enabled row */
-    bool hover_opens;      /* hover_id is a parent */
-    bool focus_seen;       /* the focused row is declared and enabled this frame */
-    bool focus_opens;      /* the focused row is a parent */
-    bool top;              /* the menu is the top overlay: it reads keys and the outside press */
-    bool activated;        /* a row activated: the chain closes */
-    bool item_enabled;     /* the open custom row is enabled */
-    bool item_activatable; /* the open custom row has an action of its own */
+    bool nav_passed;  /* the focused row's level has declared it */
+    bool focus_first; /* a keyboard-opened child gives focus to its first enabled row */
+    bool hover_opens; /* hover_id is a parent */
+    bool focus_seen;  /* the focused row is declared and enabled this frame */
+    bool focus_opens; /* the focused row is a parent */
+    bool top;         /* the menu is the top overlay: it reads keys and the outside press */
+    bool ours;        /* top, and the primary pointer is the menu's (not the inspector's) */
+    bool activated;   /* a row activated: the chain closes */
+    bool item_steps;  /* the open custom row is enabled and has an action of its own */
 } nt_ui_menu_frame_t;
 
 /* One menu, owned by the game and kept across frames: one per logical menu and UI context. The game opens
- * it with nt_ui_menu_open and may close it by clearing `open`; the menu clears `open` on dismiss and on
- * activation. The other fields are the menu's own; all-zero is the valid closed state. */
+ * it with nt_ui_menu_open and may close it by clearing `open`; the menu clears `open` on dismiss, on
+ * activation and when the game skipped declaring it for a frame. The other fields are the menu's own; all-zero is the valid closed state. */
 typedef struct {
     float anchor_x, anchor_y; /* open point (UI space) — root menu top-left attaches here */
     uint32_t focus;           /* focused row id (0 = none) */

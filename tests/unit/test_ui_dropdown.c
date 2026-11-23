@@ -149,12 +149,10 @@ static void test_dropdown_trigger_toggles_open(void) {
 /* Publish exactly one fresh pressed-key edge for this frame. */
 static void dropdown_key(nt_key_t key) { nt_input_test_key_press(key); }
 
-/* ---- Combo keyboard is INERT: the immediate combo wires NO keyboard nav. combo_open_list routes through
- *      nt_ui_popup_begin (the non-ext popup path), which has esc_close=false and dismisses only on an
- *      OUTSIDE click — never on Esc. Arrows/Enter never move or commit a selection (mouse-only). Locking
- *      that contract: an open list + Esc/arrows/Enter leaves *open and *selected unchanged. ---- */
+/* ---- The combo's keyboard: Esc closes the open list, as a light-dismiss popup's, and arrows/Enter never
+ *      move or commit a selection (mouse-only): they leave *open and *selected unchanged. ---- */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void test_dropdown_combo_keyboard_inert(void) {
+static void test_dropdown_combo_keyboard(void) {
     nt_ui_dropdown_style_t st = nt_ui_dropdown_style_defaults();
     int selected = -1;
     bool open = true; /* list already open */
@@ -164,11 +162,14 @@ static void test_dropdown_combo_keyboard_inert(void) {
     combo_im_frame(&idle, 30.0F, 30.0F, s_short, 3, &selected, &open, &st, NULL);
     combo_im_frame(&idle, 30.0F, 30.0F, s_short, 3, &selected, &open, &st, NULL);
 
-    /* Esc with the list open: the plain combo popup has no esc_close, so the list stays open. */
     dropdown_key(NT_KEY_ESCAPE);
-    TEST_ASSERT_TRUE(nt_input_key_is_pressed(NT_KEY_ESCAPE)); /* the combo really sees the key */
     combo_im_frame(&idle, 30.0F, 30.0F, s_short, 3, &selected, &open, &st, NULL);
-    TEST_ASSERT_TRUE_MESSAGE(open, "Esc must NOT close the immediate combo (no keyboard dismiss wired)");
+    TEST_ASSERT_FALSE_MESSAGE(open, "Esc closes the open combo list");
+
+    open = true;
+    nt_input_init();
+    combo_im_frame(&idle, 30.0F, 30.0F, s_short, 3, &selected, &open, &st, NULL);
+    combo_im_frame(&idle, 30.0F, 30.0F, s_short, 3, &selected, &open, &st, NULL);
 
     /* Arrows + Enter never move focus nor commit a selection (selection is mouse-only). */
     dropdown_key(NT_KEY_ARROW_DOWN);
@@ -819,7 +820,7 @@ int main(void) {
     RUN_TEST(test_dropdown_abi_size);
     RUN_TEST(test_dropdown_defaults_valid);
     RUN_TEST(test_dropdown_trigger_toggles_open);
-    RUN_TEST(test_dropdown_combo_keyboard_inert);
+    RUN_TEST(test_dropdown_combo_keyboard);
     RUN_TEST(test_dropdown_preview_trigger_toggles_open);
     RUN_TEST(test_dropdown_row_select_sets_int_and_closes);
     RUN_TEST(test_dropdown_long_list_scroll_no_leak);

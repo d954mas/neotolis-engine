@@ -1762,7 +1762,7 @@ static void render_modal_overlay(nt_ui_context_t *ctx, tab_state_t *st) {
         }
         nt_ui_modal_end(ctx);
     }
-    /* Outer closed -> the nested child can't be declared; clear its bool so the stack stays balanced. */
+    /* Closing the confirm closes the dialog it opened too, so it does not reopen with it. */
     if (!st->confirm_open) {
         st->nested_open = false;
     }

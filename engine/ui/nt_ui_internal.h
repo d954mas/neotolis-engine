@@ -214,10 +214,9 @@ struct nt_ui_context {
     float pointer_occlusion[NT_INPUT_MAX_POINTERS]; /* max world ray distance; default +inf = no cutoff */
     /* Per pointer and axis (0 = x, 1 = y): the scroll allowed to consume this frame's wheel. */
     uint32_t wheel_owner[NT_INPUT_MAX_POINTERS][2];
-    /* Top-modal targeting with the standard 1-frame IM lag: _cur tracks the DEEPEST modal id seen
-     * this frame; nt_ui_begin commits it into _prev, which the Esc/backdrop close-scan targets so
-     * only the genuinely-topmost modal consumes the event (same-frame nesting can't be known at
-     * the inner begin's return, so we use last frame's resolved top). */
+    /* The top overlay with the 1-frame IM lag: _cur tracks the highest-band live catcher-bearing overlay of
+     * this frame; nt_ui_begin commits it into _prev, which owns the close-scan, the keys and the input
+     * (spec: "Input ownership"). */
     uint32_t overlay_top_id_prev;
     uint32_t overlay_top_id_cur;
     /* Highest band claimed this frame; ties go to the last declared, matching the pointer arbiter that

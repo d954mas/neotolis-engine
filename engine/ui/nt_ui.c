@@ -237,7 +237,8 @@ nt_ui_context_t *nt_ui_create_context(void *arena, size_t arena_size, const nt_u
     ctx->element_depth_bias_ndc = desc->element_depth_bias_ndc;
     /* Used as-is; the default comes solely from nt_ui_create_desc_defaults() (same convention as max_elements). */
     ctx->modal_zband_stride = desc->modal_zband_stride;
-    NT_ASSERT(ctx->modal_zband_stride > 0 && "nt_ui_create_context: modal_zband_stride must be > 0");
+    NT_ASSERT(ctx->modal_zband_stride > 0 && ctx->modal_zband_stride + NT_UI_MODAL_MAX_DEPTH - 1 <= INT16_MAX &&
+              "nt_ui_create_context: modal_zband_stride must be > 0 with room for a root overlay's nested levels");
     /* Touch-friendly baseline, looser than ImGui's mouse 6px/0.3s: the engine targets mobile/WASM. */
     ctx->gesture_dbl_window_secs = 0.50F;
     ctx->gesture_move_radius_dp = 16.0F;
@@ -409,12 +410,18 @@ static void resolve_hot(nt_ui_context_t *ctx);
  * top, and in a 3D ctx, which does not rank overlays by band, every record belongs. */
 bool nt_ui_internal_owned_by_top(nt_ui_context_t *ctx, uint32_t id) {
     const uint32_t top = ctx->overlay_top_id_prev;
-    if (id == 0U || top == 0U || ctx->use_raycast_input || nt_ui_internal_record_kind(ctx, id) == NT_UI_HIT_PANE) {
+    if (id == 0U || top == 0U || ctx->use_raycast_input) {
         return true;
     }
+#if NT_UI_DEBUG_TOOLS
+    if (nt_ui_internal_record_kind(ctx, id) == NT_UI_HIT_PANE) {
+        return true;
+    }
+#endif
     const int32_t slot = nt_ui_internal_live_slot(ctx, id);
     const int32_t catcher = nt_ui_internal_live_slot(ctx, nt_ui_internal_popup_catcher_id(top));
-    return slot >= 0 && catcher >= 0 && ctx->hit_baked[slot].order >= ctx->hit_baked[catcher].order;
+    NT_ASSERT(catcher >= 0 && "nt_ui: the top overlay declared its catcher last frame");
+    return slot >= 0 && ctx->hit_baked[slot].order >= ctx->hit_baked[catcher].order;
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)

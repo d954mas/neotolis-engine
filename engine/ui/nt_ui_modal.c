@@ -104,15 +104,13 @@ bool nt_ui_modal_begin(nt_ui_context_t *ctx, uint32_t id, const nt_ui_modal_styl
     const nt_ui_transform_t start = modal_anim_start(anim);
     nt_ui_popup_style_t pstyle = {
         .ease_speed = style->ease_speed,
-        .open_xf_start = start, /* unused (ext overrides) but kept valid (scale > 0) */
+        .open_xf_start = start, /* the recipe of the phase begin runs in */
         .close_xf_start = start,
         .layer = style->layer,
         .flags = 0U, /* modal drives dismiss/gate via ext, not the light-dismiss flag */
     };
     const nt_ui_popup_anchor_t anchor = {.prefer_side = NT_UI_POPUP_CENTER};
     const nt_ui_popup_ext_t ext = {
-        .open_xf = &start,
-        .close_xf = &start,
         .def = &NT_UI_MODAL_DEF,
         .backdrop_color = style->backdrop_color,
         .backdrop_alpha = style->backdrop_alpha,

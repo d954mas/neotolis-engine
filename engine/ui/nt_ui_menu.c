@@ -267,7 +267,8 @@ static bool menu_key_on(const nt_ui_menu_t *menu, uint32_t row_id, uint8_t key) 
  * declare: the branch a row's popup closes, the outside press, the one key and the end of keyboard mode.
  * Returns false when the menu closes (an outside press, Esc or Left at the root). */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) — flat rule list in frame order
-static bool menu_frame_input(nt_ui_menu_t *menu, nt_ui_context_t *ctx, uint32_t menu_id, uint8_t *out_key) {
+static bool menu_frame_input(nt_ui_menu_t *menu, nt_ui_context_t *ctx, uint32_t menu_id) {
+    nt_ui_menu_frame_t *f = &menu->frame;
     /* A popup a row opened that is on top is that row's level's child: it closes the open branch below the
      * row, so each level keeps one open child and no level lies above the popup. */
     const uint32_t root_id = menu_level_id(menu_id, 0U);
@@ -284,10 +285,10 @@ static bool menu_frame_input(nt_ui_menu_t *menu, nt_ui_context_t *ctx, uint32_t 
         menu->focus = 0U; /* the focused row's level closed: keys act on the deepest open one, unfocused */
         menu->focus_depth = open_depth;
     }
-    /* One owner: an opening menu reads input from its next frame, a menu under another overlay none. */
-    const bool top = !menu->arming && top_id == root_id;
+    const bool top = f->top;
     const nt_pointer_t *pp = &ctx->frame_pointers[ctx->frame_primary];
-    const bool ours = top && pp->active && !nt_ui_inspector_pointer_consumed(ctx);
+    f->ours = top && pp->active && !nt_ui_inspector_pointer_consumed(ctx);
+    const bool ours = f->ours;
     const bool pressed = pp->buttons[NT_BUTTON_LEFT].is_pressed || pp->buttons[NT_BUTTON_RIGHT].is_pressed;
     /* The outside press: a click or a tap off everything declared inside the menu last frame (its levels and a
      * popup a custom row opened), read from the element under the pointer, not a capture holder. */
@@ -296,7 +297,7 @@ static bool menu_frame_input(nt_ui_menu_t *menu, nt_ui_context_t *ctx, uint32_t 
     }
     /* A text field focused inside the menu owns the keys (the top takes the focus of a field under it). */
     const uint8_t key = (top && ctx->focused_input_id == 0U) ? menu_read_key(menu) : MENU_KEY_NONE;
-    *out_key = key;
+    f->key = key;
     const uint8_t d = menu->focus_depth;
     if (key != MENU_KEY_NONE) {
         menu->kbd_mode = true;
@@ -317,6 +318,7 @@ static bool menu_frame_input(nt_ui_menu_t *menu, nt_ui_context_t *ctx, uint32_t 
         menu->focus_depth = (uint8_t)(d - 1U);
         menu_set_open(menu, (uint8_t)(d - 1U), 0U);
     }
+    f->key_row = menu->focus;
     return true;
 }
 
@@ -471,28 +473,32 @@ bool nt_ui_menu_begin(nt_ui_menu_t *menu, nt_ui_context_t *ctx, const nt_ui_elem
     if (!menu->open) {
         return false;
     }
-    /* Its kept navigation is only valid for a menu declared every frame. */
-    NT_ASSERT((menu->arming || nt_ui_get_bbox(ctx, menu_level_id(menu_id, 0U)).found) && "nt_ui_menu_begin: an open menu is declared every frame; clear open to stop declaring it");
-    uint8_t key = MENU_KEY_NONE;
-    if (!menu_frame_input(menu, ctx, menu_id, &key)) {
+    const uint32_t root_id = menu_level_id(menu_id, 0U);
+    /* Its kept navigation is only valid for a menu declared every frame: one skipped (the overlay holding it
+     * hid) closes. */
+    if (!menu->arming && !nt_ui_get_bbox(ctx, root_id).found) {
         menu->open = false;
         return false;
     }
+    /* One owner: an opening menu reads input from its next frame, a menu under another overlay none. */
     menu->frame = (nt_ui_menu_frame_t){
         .ui = ctx,
         .style = style,
         .menu_id = menu_id,
-        .key_row = menu->focus,
-        .key = key,
         .fill_layer = (data != NULL) ? data->layer : 0U,
         .label_layer = label_layer,
-        .top = !menu->arming && ctx->overlay_top_id_prev == menu_level_id(menu_id, 0U),
+        .top = !menu->arming && ctx->overlay_top_id_prev == root_id,
     };
+    if (!menu_frame_input(menu, ctx, menu_id)) {
+        menu->frame.ui = NULL;
+        menu->open = false;
+        return false;
+    }
 
     /* BELOW flips only vertically: shift the root left by last frame's width to stay on screen (unclamped on
      * the first frame). */
     float root_x = menu->anchor_x;
-    const nt_ui_bbox_t root_bb = nt_ui_get_bbox(ctx, menu_level_id(menu_id, 0U));
+    const nt_ui_bbox_t root_bb = nt_ui_get_bbox(ctx, root_id);
     if (root_bb.found) {
         const float screen_w = nt_ui_clay_priv_layout_width(ctx->clay);
         if (root_x + root_bb.width > screen_w) {
@@ -543,8 +549,7 @@ void nt_ui_menu_item_begin(nt_ui_menu_t *menu, uint32_t key, bool enabled, bool 
     NT_ASSERT(menu->frame.ui != NULL && "nt_ui_menu_item_begin: call between nt_ui_menu_begin/end");
     const nt_ui_menu_item_opts_t opts = {.disabled = !enabled};
     menu->frame.item_id = menu_im_row(menu, key, NULL, &opts, false, true);
-    menu->frame.item_enabled = enabled;
-    menu->frame.item_activatable = activatable;
+    menu->frame.item_steps = enabled && activatable;
 }
 
 bool nt_ui_menu_item_end(nt_ui_menu_t *menu) {
@@ -553,14 +558,9 @@ bool nt_ui_menu_item_end(nt_ui_menu_t *menu) {
     NT_ASSERT(row_id != 0U && "nt_ui_menu_item_end without nt_ui_menu_item_begin");
     f->item_id = 0U;
     nt_ui_clay_priv_close_element();
-    /* A disabled row never steps/activates — mirror item_ex's enabled gate (a disabled custom row must not
-     * capture the pointer nor fire on Enter). */
-    if (!f->item_enabled) {
-        return false;
-    }
-    if (!f->item_activatable) {
-        /* No action: block instead of step, so the row is hovered within but a press beside the child never
-         * captures. The child, declared later, still wins its own area. */
+    if (!f->item_steps) {
+        /* Disabled or no action: block instead of step, so a press beside the child never captures and Enter
+         * fires nothing. The child, declared later, still wins its own area. */
         nt_ui_block_pointer(f->ui, row_id, NULL);
         return false;
     }
@@ -675,7 +675,7 @@ static void menu_resolve(nt_ui_menu_t *menu) {
         }
     }
     const nt_pointer_t *pp = &ctx->frame_pointers[ctx->frame_primary];
-    const bool ours = f->top && pp->active && !nt_ui_inspector_pointer_consumed(ctx);
+    const bool ours = f->ours;
     const float mx = pp->x;
     const float my = pp->y;
     if (!menu->kbd_mode && f->hover_id != 0U) {
