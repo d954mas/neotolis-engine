@@ -14,7 +14,9 @@
 #include "test_helpers/ui_walker_fixture.h"
 #include "ui/nt_ui.h"
 #include "ui/nt_ui_internal.h"
+#include "ui/nt_ui_modal.h"
 #include "ui/nt_ui_popup.h"
+#include "ui/nt_ui_popup_internal.h"
 #include "ui/nt_ui_state.h"
 #include "unity.h"
 
@@ -453,22 +455,22 @@ static void test_popup_top_id_follows_band(void) {
 
     /* And the consequence, not just the gate: an outside click must dismiss the popup that owns the slot
      * and leave the other alone (a non-top catcher is an inert pointer gate). */
-    nt_ui_popup_result_t ra = {0};
-    nt_ui_popup_result_t rb = {0};
+    nt_ui_popup_close_src_t src_a = NT_UI_POPUP_CLOSE_SRC_NONE;
+    nt_ui_popup_close_src_t src_b = NT_UI_POPUP_CLOSE_SRC_NONE;
     for (int frame = 0; frame < 2; ++frame) {
         const bool pressing = (frame == 0);
         nt_pointer_t click = pointer_at(700.0F, 500.0F, pressing, pressing, !pressing);
         nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = &click, .pointer_count = 1});
         CLAY({.id = CLAY_ID("game_hud"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .zIndex = 500}}) {
-            ra = nt_ui_popup_begin(s_fx.ctx, POP_A, &st, &anc, true);
+            (void)nt_ui_popup_begin_internal(s_fx.ctx, POP_A, &st, &anc, true, NULL, &src_a);
             nt_ui_popup_end(s_fx.ctx);
         }
-        rb = nt_ui_popup_begin(s_fx.ctx, POP_B, &st, &anc, true);
+        (void)nt_ui_popup_begin_internal(s_fx.ctx, POP_B, &st, &anc, true, NULL, &src_b);
         nt_ui_popup_end(s_fx.ctx);
         nt_ui_end(s_fx.ctx);
     }
-    TEST_ASSERT_TRUE_MESSAGE(ra.close_requested, "the outside click must dismiss the popup painted on top");
-    TEST_ASSERT_FALSE_MESSAGE(rb.close_requested, "the popup underneath must stay an inert gate");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(NT_UI_POPUP_CLOSE_SRC_DISMISS, src_a, "the outside click must dismiss the popup painted on top");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(NT_UI_POPUP_CLOSE_SRC_SUPERSEDED, src_b, "the popup underneath gets no click; the one on top supersedes it");
 
     /* The band claim resets each frame: with the lifted wrapper gone, the root-level popup takes top. */
     for (int frame = 0; frame < 2; ++frame) {
@@ -493,25 +495,88 @@ static void test_popup_dismiss_survives_a_band_tie(void) {
     lo.ease_speed = 0.0F;
     nt_ui_popup_anchor_t anc = {.x = 100.0F, .y = 100.0F, .w = 80.0F, .h = 30.0F, .prefer_side = NT_UI_POPUP_BELOW};
 
-    nt_ui_popup_result_t ra = {0};
-    nt_ui_popup_result_t rb = {0};
+    nt_ui_popup_close_src_t src_a = NT_UI_POPUP_CLOSE_SRC_NONE;
+    nt_ui_popup_close_src_t src_b = NT_UI_POPUP_CLOSE_SRC_NONE;
     for (int frame = 0; frame < 3; ++frame) {
         const bool pressing = (frame == 1);
         const bool releasing = (frame == 2);
         nt_pointer_t p = pointer_at(700.0F, 500.0F, pressing, pressing, releasing);
         nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = &p, .pointer_count = 1});
-        ra = nt_ui_popup_begin(s_fx.ctx, POP_A, &hi, &anc, true);
+        (void)nt_ui_popup_begin_internal(s_fx.ctx, POP_A, &hi, &anc, true, NULL, &src_a);
         /* Sized bodies: with 0x0 panels "the click landed outside" would be true even if the panel
          * vanished, and the test could not tell the two apart. */
         CLAY({.id = CLAY_ID("tie_a"), .layout = {.sizing = {CLAY_SIZING_FIXED(POP_W), CLAY_SIZING_FIXED(POP_H)}}}) {}
         nt_ui_popup_end(s_fx.ctx);
-        rb = nt_ui_popup_begin(s_fx.ctx, POP_B, &lo, &anc, true); /* same band, declared last -> owns the slot */
+        (void)nt_ui_popup_begin_internal(s_fx.ctx, POP_B, &lo, &anc, true, NULL, &src_b); /* same band, declared last -> owns the slot */
         CLAY({.id = CLAY_ID("tie_b"), .layout = {.sizing = {CLAY_SIZING_FIXED(POP_W), CLAY_SIZING_FIXED(POP_H)}}}) {}
         nt_ui_popup_end(s_fx.ctx);
         nt_ui_end(s_fx.ctx);
     }
-    TEST_ASSERT_TRUE_MESSAGE(rb.close_requested, "the popup holding the close-scan slot must receive the outside click");
-    TEST_ASSERT_FALSE_MESSAGE(ra.close_requested, "the other popup stays an inert gate");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(NT_UI_POPUP_CLOSE_SRC_DISMISS, src_b, "the popup holding the close-scan slot must receive the outside click");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(NT_UI_POPUP_CLOSE_SRC_SUPERSEDED, src_a, "the other popup gets no click; the one on top supersedes it");
+}
+
+/* One idle frame: light popup A at the root, then B (at the root after A, or declared inside A) or a modal M
+ * under A; returns A's and B's close sources. */
+typedef enum { POP_PAIR_A_ONLY, POP_PAIR_SIBLING, POP_PAIR_NESTED, POP_PAIR_MODAL_UNDER } pop_pair_t;
+static void popup_pair_frame(pop_pair_t kind, nt_ui_popup_close_src_t *src_a, nt_ui_popup_close_src_t *src_b) {
+    nt_ui_popup_style_t st = nt_ui_popup_style_defaults();
+    st.ease_speed = 0.0F;
+    const nt_ui_popup_anchor_t anc_a = {.x = 100.0F, .y = 100.0F, .prefer_side = NT_UI_POPUP_BELOW};
+    const nt_ui_popup_anchor_t anc_b = {.x = 400.0F, .y = 300.0F, .prefer_side = NT_UI_POPUP_BELOW};
+    nt_pointer_t idle = pointer_at(10.0F, 10.0F, false, false, false);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = &idle, .pointer_count = 1});
+    if (kind == POP_PAIR_MODAL_UNDER) {
+        nt_ui_modal_style_t ms = nt_ui_modal_style_defaults();
+        ms.ease_speed = 0.0F;
+        *src_b = nt_ui_modal_begin(s_fx.ctx, POP_B, &ms, true).close_requested ? NT_UI_POPUP_CLOSE_SRC_SUPERSEDED : NT_UI_POPUP_CLOSE_SRC_NONE;
+        nt_ui_modal_end(s_fx.ctx);
+    }
+    (void)nt_ui_popup_begin_internal(s_fx.ctx, POP_A, &st, &anc_a, true, NULL, src_a);
+    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(POP_W), CLAY_SIZING_FIXED(POP_H)}}}) {}
+    if (kind == POP_PAIR_NESTED) {
+        (void)nt_ui_popup_begin_internal(s_fx.ctx, POP_B, &st, &anc_b, true, NULL, src_b);
+        nt_ui_popup_end(s_fx.ctx);
+    }
+    nt_ui_popup_end(s_fx.ctx);
+    if (kind == POP_PAIR_SIBLING) {
+        (void)nt_ui_popup_begin_internal(s_fx.ctx, POP_B, &st, &anc_b, true, NULL, src_b);
+        nt_ui_popup_end(s_fx.ctx);
+    }
+    nt_ui_end(s_fx.ctx);
+}
+
+/* ---- A foreign overlay on top supersedes a light popup from the next frame; a popup declared inside it,
+ *      and a modal under it, stay. ---- */
+static void test_popup_foreign_top_supersedes(void) {
+    nt_ui_popup_close_src_t a = NT_UI_POPUP_CLOSE_SRC_NONE;
+    nt_ui_popup_close_src_t b = NT_UI_POPUP_CLOSE_SRC_NONE;
+    popup_pair_frame(POP_PAIR_A_ONLY, &a, &b);
+    popup_pair_frame(POP_PAIR_A_ONLY, &a, &b);
+    TEST_ASSERT_EQUAL_UINT32(POP_A, s_fx.ctx->overlay_top_id_prev);
+    popup_pair_frame(POP_PAIR_SIBLING, &a, &b);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(NT_UI_POPUP_CLOSE_SRC_NONE, b, "a popup declared for the first time is the newer one, though A was on top");
+    popup_pair_frame(POP_PAIR_SIBLING, &a, &b);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(NT_UI_POPUP_CLOSE_SRC_SUPERSEDED, a, "a later root popup on top supersedes A");
+    TEST_ASSERT_EQUAL_INT(NT_UI_POPUP_CLOSE_SRC_NONE, b);
+}
+static void test_popup_nested_top_keeps_its_parent(void) {
+    nt_ui_popup_close_src_t a = NT_UI_POPUP_CLOSE_SRC_NONE;
+    nt_ui_popup_close_src_t b = NT_UI_POPUP_CLOSE_SRC_NONE;
+    for (int frame = 0; frame < 3; ++frame) {
+        popup_pair_frame(POP_PAIR_NESTED, &a, &b);
+    }
+    TEST_ASSERT_EQUAL_UINT32(POP_B, s_fx.ctx->overlay_top_id_prev);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(NT_UI_POPUP_CLOSE_SRC_NONE, a, "a popup declared inside A does not supersede A");
+}
+static void test_popup_modal_stacks_under_a_popup(void) {
+    nt_ui_popup_close_src_t a = NT_UI_POPUP_CLOSE_SRC_NONE;
+    nt_ui_popup_close_src_t m = NT_UI_POPUP_CLOSE_SRC_NONE;
+    for (int frame = 0; frame < 3; ++frame) {
+        popup_pair_frame(POP_PAIR_MODAL_UNDER, &a, &m);
+    }
+    TEST_ASSERT_EQUAL_UINT32(POP_A, s_fx.ctx->overlay_top_id_prev);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(NT_UI_POPUP_CLOSE_SRC_NONE, m, "a modal stacks under a foreign overlay");
 }
 
 int main(void) {
@@ -533,5 +598,8 @@ int main(void) {
     RUN_TEST(test_popup_no_dismiss_declares_no_catcher);
     RUN_TEST(test_popup_clear_state_releases_retained_tween_cell);
     RUN_TEST(test_popup_tween_clamp);
+    RUN_TEST(test_popup_foreign_top_supersedes);
+    RUN_TEST(test_popup_nested_top_keeps_its_parent);
+    RUN_TEST(test_popup_modal_stacks_under_a_popup);
     return UNITY_END();
 }

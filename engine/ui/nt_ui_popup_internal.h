@@ -17,8 +17,9 @@ typedef struct nt_ui_context nt_ui_context_t;
 /* Close source raised by the core this frame (mapped by the caller to its own enum). */
 typedef enum {
     NT_UI_POPUP_CLOSE_SRC_NONE = 0,
-    NT_UI_POPUP_CLOSE_SRC_DISMISS, /* outside-click on the catcher (beyond the close-pad) */
-    NT_UI_POPUP_CLOSE_SRC_ESC,     /* Escape on the top popup (esc_close requested) */
+    NT_UI_POPUP_CLOSE_SRC_DISMISS,    /* outside-click on the catcher (beyond the close-pad) */
+    NT_UI_POPUP_CLOSE_SRC_ESC,        /* Escape on the top popup (esc_close requested) */
+    NT_UI_POPUP_CLOSE_SRC_SUPERSEDED, /* a foreign overlay was on top last frame */
 } nt_ui_popup_close_src_t;
 
 /* Extended config layered onto the base popup-core. All zero = the public behavior. */

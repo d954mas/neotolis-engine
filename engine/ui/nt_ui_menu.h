@@ -104,7 +104,7 @@ typedef struct {
     bool focus_seen;       /* the focused row is declared and enabled this frame */
     bool focus_opens;      /* the focused row is a parent */
     bool top;              /* the menu is the top overlay: it reads keys and the outside press */
-    bool activated;        /* a row activated: the chain closes */
+    bool closing;          /* a row activated or a foreign overlay superseded the menu: the chain closes */
     bool item_enabled;     /* the open custom row is enabled */
     bool item_activatable; /* the open custom row has an action of its own */
 } nt_ui_menu_frame_t;
@@ -126,8 +126,9 @@ typedef struct {
 } nt_ui_menu_t;
 
 /* Declare the rows and call nt_ui_menu_end only when begin returns true (the menu is open). Fills, icons and
- * sprite markers draw on data->layer (NULL = layer 0), text on label_layer. Keys must be unique among
- * siblings; navigation rules: spec chapter UI, section "Immediate menu + combo". */
+ * sprite markers draw on data->layer (NULL = layer 0), text on label_layer. `style` is read until
+ * nt_ui_menu_end. Keys must be unique among siblings; navigation rules: spec chapter UI, section
+ * "Immediate menu + combo". */
 bool nt_ui_menu_begin(nt_ui_menu_t *menu, nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t menu_id, nt_ui_menu_style_t *style);
 bool nt_ui_menu_item(nt_ui_menu_t *menu, uint32_t key, const char *label);                                 /* plain item; true when activated (click or Enter) */
 bool nt_ui_menu_item_ex(nt_ui_menu_t *menu, uint32_t key, const char *label, nt_ui_menu_item_opts_t opts); /* rich row; true when activated */

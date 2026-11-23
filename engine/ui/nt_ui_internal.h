@@ -535,6 +535,10 @@ int32_t nt_ui_internal_test_get_tree_root_for_elem(const nt_ui_context_t *ctx, i
 
 /* The hit-snapshot slot of an element declared last frame, else -1 (id 0 included). */
 int32_t nt_ui_internal_live_slot(const nt_ui_context_t *ctx, uint32_t id);
+/* Pointer `pointer`'s target lies inside id's declaration range (last frame), as nt_ui_hovered_within for one pointer. */
+bool nt_ui_internal_pointer_within(const nt_ui_context_t *ctx, uint32_t pointer, uint32_t id);
+/* `inner` was declared inside `outer` last frame. */
+bool nt_ui_internal_declared_within(const nt_ui_context_t *ctx, uint32_t inner, uint32_t outer);
 
 /* Shared overlay helpers — single source of truth for the Y-flip + per-level accum convention. */
 const nt_ui_debug_zone_t *nt_ui_internal_find_debug_zone(const nt_ui_context_t *ctx, uint32_t id);

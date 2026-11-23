@@ -2978,18 +2978,27 @@ bool nt_ui_hovered_within(const nt_ui_context_t *ctx, uint32_t id) {
         return false; /* the sidebar consumes the pointer, as in every query */
     }
 #endif
-    uint32_t first = 0U;
-    uint32_t last = 0U;
-    if (!hit_range(ctx, id, &first, &last)) {
-        return false;
-    }
     for (uint32_t i = 0; i < ctx->frame_pointer_count; ++i) {
-        uint32_t t = 0U;
-        if (pointer_target(ctx, i, &t) && t >= first && t <= last) {
+        if (nt_ui_internal_pointer_within(ctx, i, id)) {
             return true;
         }
     }
     return false;
+}
+
+bool nt_ui_internal_pointer_within(const nt_ui_context_t *ctx, uint32_t pointer, uint32_t id) {
+    uint32_t first = 0U;
+    uint32_t last = 0U;
+    uint32_t t = 0U;
+    return hit_range(ctx, id, &first, &last) && pointer_target(ctx, pointer, &t) && t >= first && t <= last;
+}
+
+bool nt_ui_internal_declared_within(const nt_ui_context_t *ctx, uint32_t inner, uint32_t outer) {
+    uint32_t first = 0U;
+    uint32_t last = 0U;
+    uint32_t inner_first = 0U;
+    uint32_t inner_last = 0U;
+    return hit_range(ctx, outer, &first, &last) && hit_range(ctx, inner, &inner_first, &inner_last) && inner_first >= first && inner_first <= last;
 }
 // #endregion
 

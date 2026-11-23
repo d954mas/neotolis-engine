@@ -616,7 +616,12 @@ click and performs the dismissal. The agreement is a 2D-context property: a 3D
 ctx arbitrates the pointer by ray distance and does not rank overlays by
 band at all. A catcher-less
 overlay (a tooltip, a menu's submenu levels) never claims that slot; a menu's
-root has an inert catcher that claims it, and the menu runs its own dismiss; the
+root has an inert catcher that claims it, and the menu runs its own dismiss.
+A foreign overlay on top last frame (not the popup, not declared inside it nor
+around it) supersedes every catcher-bearing popup except a modal: the popup
+gets `close_requested`, as a new root popup closes open menus and popovers in
+Dear ImGui and HTML. Modals stack instead, and a popup declared for the first
+time is the newer one and stays; the
 text field's Esc-unfocus is independent of both. A fully-closed
 popup declares NO catcher, so the base UI stays clickable; a hover-driven
 overlay (tooltip) can clear the catcher flag entirely. Dismiss is always a
@@ -655,11 +660,14 @@ flips above it when the root does not fit below, and shifts left to stay on scre
 from its second frame. A menu opens only through
 `nt_ui_menu_open`: it starts the navigation fresh, and the first declaration
 after it ignores the press and last frame's hover and clicks, which belong to
-the old place. An open menu is a modal overlay: its root claims the modal top like a
+the old place: its rows register without capturing the press. A control the
+game declares inside a custom row steps as usual, so a game that reopens a
+menu with a press over that control also presses it. An open menu is a modal overlay: its root claims the modal top like a
 popup with a catcher, so the UI under it takes no pointer, `nt_ui_overlay_active`
-reports it, and the keys and the outside press go to whichever of the menu and a modal
-or popup is on top: a menu opened over a modal takes Esc, a modal opened over
-the menu keeps it. Each open panel
+reports it, and the menu reads keys and the outside press only while it was on top last
+frame, or on its opening frame when nothing was: a menu opened over a modal
+takes Esc from its next frame, and a modal or popup opened over the menu
+supersedes it (popup-core), so the menu closes. Each open panel
 blocks the pointer, so nothing under it is hovered or clicked.
 
 A custom-content row (`item_begin..item_end`, `selectable_begin..selectable_end`,

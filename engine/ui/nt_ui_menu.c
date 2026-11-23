@@ -267,14 +267,13 @@ static void menu_nav_track(nt_ui_menu_frame_t *f, uint32_t focus, uint32_t row_i
 /* Declares one row and tracks it for keyboard nav and hover. With open_element the row stays open for
  * item_begin's body. The caller does the row's one nt_ui_step (item_begin defers it to item_end). */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) — icon + eased hover + marker branch, not deep nesting
-static void menu_im_row(nt_ui_menu_t *menu, uint32_t key, const char *label, const nt_ui_menu_item_opts_t *opts, bool has_sub, bool open_element, uint32_t *out_id) {
+static uint32_t menu_im_row(nt_ui_menu_t *menu, uint32_t key, const char *label, const nt_ui_menu_item_opts_t *opts, bool has_sub, bool open_element) {
     nt_ui_menu_frame_t *f = &menu->frame;
     NT_ASSERT(f->item_id == 0U && "nt_ui_menu: a row inside a custom row (missing nt_ui_menu_item_end)");
     nt_ui_context_t *ctx = f->ui;
     const uint8_t depth = f->depth;
     const uint32_t scope = (depth == 0U) ? f->menu_id : menu->open_path[depth - 1U];
     const uint32_t row_id = menu_item_id(scope, key);
-    *out_id = row_id;
     nt_ui_menu_style_t *style = f->style;
     const bool enabled = !opts->disabled;
 
@@ -345,6 +344,7 @@ static void menu_im_row(nt_ui_menu_t *menu, uint32_t key, const char *label, con
         }
         nt_ui_clay_priv_close_element();
     }
+    return row_id;
 }
 
 /* Open a level's PANEL element (art-or-flat slice9) and LEAVE it open for the level's item children. The
@@ -375,13 +375,15 @@ static void menu_open_panel(nt_ui_context_t *ctx, uint8_t fill_layer, uint32_t m
 /* Open a level's popup at `anchor` and its panel. The root's catcher keeps the pointer off the UI under the
  * menu and claims the modal top (nt_ui_overlay_active, Esc); the menu owns its outside-press dismiss. Levels
  * snap open: a closed level declares nothing, so there is no close to tween. */
-static void menu_open_level(const nt_ui_menu_t *menu, uint8_t depth, const nt_ui_popup_anchor_t *anchor) {
-    const nt_ui_menu_frame_t *f = &menu->frame;
+static void menu_open_level(nt_ui_menu_t *menu, uint8_t depth, const nt_ui_popup_anchor_t *anchor) {
+    nt_ui_menu_frame_t *f = &menu->frame;
     nt_ui_popup_style_t pst = nt_ui_popup_style_defaults();
     pst.ease_speed = 0.0F;
     pst.layer = f->fill_layer;
     const nt_ui_popup_ext_t ext = {.def = &NT_UI_MENU_DEF, .force_catcher = (depth == 0U)};
-    (void)nt_ui_popup_begin_internal(f->ui, menu_level_id(f->menu_id, depth), &pst, anchor, true, &ext, NULL);
+    if (nt_ui_popup_begin_internal(f->ui, menu_level_id(f->menu_id, depth), &pst, anchor, true, &ext, NULL).close_requested) {
+        f->closing = true; /* a foreign overlay superseded the menu: no row activates, the chain closes */
+    }
     menu_open_panel(f->ui, f->fill_layer, f->menu_id, depth, f->style); /* LEFT open for the level's rows */
 }
 
@@ -409,7 +411,9 @@ bool nt_ui_menu_begin(nt_ui_menu_t *menu, nt_ui_context_t *ctx, const nt_ui_elem
         .nav_depth = menu->focus_depth,
         .fill_layer = (data != NULL) ? data->layer : 0U,
         .label_layer = label_layer,
-        .top = menu->arming || ctx->overlay_top_id_prev == menu_level_id(menu_id, 0U),
+        /* The menu was on top last frame, or opens this frame with nothing on top: a modal up last frame keeps
+         * its keys, so one Esc never closes both. */
+        .top = ctx->overlay_top_id_prev == menu_level_id(menu_id, 0U) || (menu->arming && ctx->overlay_top_id_prev == 0U),
     };
 
     /* BELOW flips only vertically: shift the root left by last frame's width to stay on screen (unclamped on
@@ -430,23 +434,29 @@ bool nt_ui_menu_begin(nt_ui_menu_t *menu, nt_ui_context_t *ctx, const nt_ui_elem
     return true;
 }
 
-/* The row's one mutating step. The opening frame's click is last frame's, at the old place. */
-static bool menu_step_clicked(const nt_ui_menu_t *menu, uint32_t row_id) { return nt_ui_step(menu->frame.ui, row_id, NULL).clicked && !menu->arming; }
+/* The row's one mutating step. The opening frame's hits are last frame's, at the old place: it only registers
+ * the row, so its press is not captured and its release clicks nothing. */
+static bool menu_step_clicked(const nt_ui_menu_t *menu, uint32_t row_id) {
+    if (menu->arming) {
+        nt_ui_block_pointer(menu->frame.ui, row_id, NULL);
+        return false;
+    }
+    return nt_ui_step(menu->frame.ui, row_id, NULL).clicked;
+}
 
 /* A row activates on its click or on Enter while focused; a frame activates one row, the first declared (a
  * tap and Enter can land on two). */
 static bool menu_activate(nt_ui_menu_t *menu, uint32_t row_id, bool clicked) {
-    if (menu->frame.activated || !(clicked || (menu_key_target(menu, row_id) && menu_key(menu, NT_KEY_ENTER)))) {
+    if (menu->frame.closing || !(clicked || (menu_key_target(menu, row_id) && menu_key(menu, NT_KEY_ENTER)))) {
         return false;
     }
-    menu->frame.activated = true;
+    menu->frame.closing = true;
     return true;
 }
 
 bool nt_ui_menu_item_ex(nt_ui_menu_t *menu, uint32_t key, const char *label, nt_ui_menu_item_opts_t opts) {
     NT_ASSERT(menu->frame.ui != NULL && "nt_ui_menu_item_ex: call between nt_ui_menu_begin/end");
-    uint32_t row_id = 0U;
-    menu_im_row(menu, key, label, &opts, false, false, &row_id);
+    const uint32_t row_id = menu_im_row(menu, key, label, &opts, false, false);
     if (opts.disabled) {
         return false;
     }
@@ -458,7 +468,7 @@ bool nt_ui_menu_item(nt_ui_menu_t *menu, uint32_t key, const char *label) { retu
 void nt_ui_menu_item_begin(nt_ui_menu_t *menu, uint32_t key, bool enabled, bool activatable) {
     NT_ASSERT(menu->frame.ui != NULL && "nt_ui_menu_item_begin: call between nt_ui_menu_begin/end");
     const nt_ui_menu_item_opts_t opts = {.disabled = !enabled};
-    menu_im_row(menu, key, NULL, &opts, false, true, &menu->frame.item_id);
+    menu->frame.item_id = menu_im_row(menu, key, NULL, &opts, false, true);
     menu->frame.item_enabled = enabled;
     menu->frame.item_activatable = activatable;
 }
@@ -504,8 +514,7 @@ bool nt_ui_menu_submenu_begin_ex(nt_ui_menu_t *menu, uint32_t key, const char *l
     const uint8_t depth = f->depth;
     NT_ASSERT((depth + 1U) < NT_UI_MENU_MAX_DEPTH && "nt_ui_menu: submenu nesting exceeds NT_UI_MENU_MAX_DEPTH");
     NT_ASSERT(!opts.selected && "nt_ui_menu_submenu_begin_ex: a parent row has no checkmark");
-    uint32_t row_id = 0U;
-    menu_im_row(menu, key, label, &opts, true, false, &row_id);
+    const uint32_t row_id = menu_im_row(menu, key, label, &opts, true, false);
     if (opts.disabled) {
         return false; /* a disabled parent never steps, never flies out, never opens */
     }
@@ -585,7 +594,7 @@ static bool menu_resolve(nt_ui_menu_t *menu) {
     if (f->declared_depth < menu_open_depth(menu)) {
         menu_set_open(menu, f->declared_depth, 0U); /* a removed, disabled or leaf parent closes its branch */
     }
-    bool close_chain = f->activated;
+    bool close_chain = f->closing;
     const bool up = menu_key(menu, NT_KEY_ARROW_UP);
     const bool down = menu_key(menu, NT_KEY_ARROW_DOWN);
     const bool back = menu_key(menu, NT_KEY_ARROW_LEFT) || menu_key(menu, NT_KEY_ESCAPE);
@@ -651,7 +660,7 @@ static bool menu_resolve(nt_ui_menu_t *menu) {
      * its levels, even one closed at the end of that frame, and a popup a custom row opened. The frame the
      * menu opened skips it so the opening press does not self-dismiss. */
     const bool outside_press = ours && f->top && (pp->buttons[NT_BUTTON_LEFT].is_pressed || pp->buttons[NT_BUTTON_RIGHT].is_pressed);
-    if (outside_press && !menu->arming && !nt_ui_hovered_within(ctx, menu_level_id(f->menu_id, 0U))) {
+    if (outside_press && !menu->arming && !nt_ui_internal_pointer_within(ctx, ctx->frame_primary, menu_level_id(f->menu_id, 0U))) {
         close_chain = true;
     }
     return close_chain;
