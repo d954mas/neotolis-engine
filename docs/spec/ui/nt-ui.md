@@ -171,7 +171,8 @@ Clay's command order (a parent's border after its children); SCISSOR/CUSTOM
 are hard barriers. An accumulated band that would saturate
 `int16` raises a Clay error, which `nt_ui` asserts on rather than
 silently merging two bands, and popup-core asserts that a visible root overlay's
-band fits (a hidden popup takes none). That caps what a game floating may declare: its own `zIndex` plus the
+band fits with all `NT_UI_MODAL_MAX_DEPTH` nested levels (a hidden popup takes
+none), so no nested level can overflow. That caps what a game floating may declare: its own `zIndex` plus the
 last visible root overlay's band must still fit `int16`.
 
 ## Clay private symbols
@@ -294,18 +295,45 @@ gesture: whatever the pointer still held is dropped. **Orphan cleanup** at
 frame — covers scene switches, conditional disable, and widget hide. It also drops
 `active_id` when a pointer has no release edge and its button is up or newly pressed:
 frames without `nt_ui_begin` swallow edges, and the pointer must not stay bound.
-In a 2D context it also drops a capture or a pending scroll held under last
-frame's top overlay (below its catcher in the stacking order that paints and
-hit-tests; inspector panes excepted): an overlay that
-opens over a held press ends that gesture, as a modal window cancels its
-owner's capture, so the release clicks nothing, a hold stops and a drag ends
-as if released (a scroll keeps its fling, as a fling started before the
-overlay does). A text field under the top overlay loses focus the same way,
-as a modal dialog takes focus, so the overlay's keys are its own; the wheel
-and new presses go to the front-most record, the overlay's. The top overlay
-owns every input path: the front-most record, a held capture or pending
-scroll, text focus, Tab stops (see "Text input") and keys (popup-core's Esc,
-the menu); a closing overlay owns none (see "Popup-core").
+It also drops the input the top overlay does not own (see "Input
+ownership").
+
+**Input ownership.** One model decides which element takes input, on every
+path:
+
+- *Records.* A record is the hit entry `nt_ui_step`, `nt_ui_block_pointer` or a
+  scroll surface makes. `nt_ui_begin` gives fresh pointer input (a press,
+  hover, the wheel) to the front-most record of last frame, in the stacking
+  order that paints.
+- *Inert subtree.* A popup that is not open (easing out after the game cleared
+  `open`, or closed by its own Esc or outside click this frame) makes everything
+  declared inside it inert, nested popups included, as HTML `inert` and
+  Flutter's popping route do. An inert element paints but makes no record, so
+  the pointer passes through it to what lies under; its `nt_ui_step` reports
+  nothing and keeps no capture, and a scroll in it drops the gesture it holds,
+  so a press held on it ends without a click; a text field in it loses focus
+  and is no Tab stop; an inert popup has no catcher, claims no top and takes
+  no Esc.
+- *Top overlay.* The top is the front-most open popup with a catcher outside
+  any inert subtree; `nt_ui_overlay_active` reports it. In a 2D context with a
+  top, an id is owned when it was declared last frame at or above the top's
+  catcher in the stacking order (inspector panes excepted); with no top, or in
+  a 3D ctx, which does not rank overlays, every id is. `nt_ui_begin` drops a
+  held capture, a pending scroll and the text focus that are not owned: an
+  overlay that opens over a held press ends that gesture, as a modal window
+  cancels its owner's capture (the release clicks nothing, a hold stops, a drag
+  ends as if released and a scroll keeps its fling), and a text field under it
+  loses focus, as a modal dialog takes focus. A Tab stop is owned and not inert.
+- *Keys.* The focused text field takes the keys; with none, the top overlay
+  does (popup-core's Esc, the menu's keys); with no top, the game does, reading
+  `nt_ui_overlay_active` and `nt_ui_input_any_focused`. Esc in a field inside a
+  modal unfocuses the field, and a second Esc closes the modal.
+- *Order.* Overlays stack in declaration order (see "Floating zIndex is
+  relative"): the game declares overlays in the order they may cover each
+  other, so one opened later but declared earlier lies under.
+- *Illegal states*, asserted: a root overlay whose nested levels could pass
+  `int16` (see "Floating zIndex is relative"); an open menu the game did not
+  declare last frame (the game clears `open` to stop declaring it).
 
 **When a rule runs.** Input is decided from last frame's layout, so a rule
 that needs only last frame's records and this frame's input runs before the
@@ -585,13 +613,14 @@ advance/wrap). A press focuses the field, except an unfocused field whose press 
 for a scroll (`gesture_pending`): it focuses on the tap's release, so a list drag never
 opens the keyboard. A focused field drags its selection along x (`drag_axes`).
 Tab moves focus to the next enabled field declared after the focused one, wrapping
-to the first enabled field, at the next `nt_ui_begin`; only a field the top overlay
-owns is a Tab stop, so Tab wraps inside a modal as in an HTML modal dialog: for the rest of the Tab frame
+to the first enabled field, at the next `nt_ui_begin`; only an owned field outside
+an inert subtree is a Tab stop (see "Input ownership"), so Tab wraps inside a modal
+as in an HTML modal dialog: for the rest of the Tab frame
 the source keeps focus, so the destination never sees that frame's keys. A press
 focuses at once, so a press and a Tab in one frame act as press, then Tab. Esc
 unfocuses and wins over a Tab in the same frame. A focused field loses focus when
 it is declared disabled or not declared for a frame, when an overlay opens
-over it (see "Interaction model"), and when the popup it is in starts closing. While a field is focused, the
+over it or when it turns inert (see "Input ownership"). While a field is focused, the
 game may shorten its buffer but must not rewrite its content. The focused field
 declares its keyboard hint (`nt_window_set_text_input_mode`) every frame. The line
 scrolls horizontally to keep the caret visible and clips to the field's
@@ -649,12 +678,9 @@ parent for a nested one (see "Floating zIndex is relative" above; NT_ASSERT
 before the push so a runaway nesting fails early);
 and an open-only, transparent light-dismiss catcher on the panel's band,
 declared before the panel, so it lies above every earlier overlay and under
-its own panel (outside-click raises a close signal). A closing popup only
-paints while it fades, as Flutter's popping route ignores the pointer: its
-backdrop dims without taking the pointer, it does not claim the top, a
-blocker a band above its content takes the pointer over the panel, a field
-inside it loses focus, and the UI under it takes the pointer and the keys at
-once. Esc and the
+its own panel (an outside click clears the game's `open`). A closing popup
+paints its fade, its backdrop included, and is inert (see "Input ownership").
+Esc and the
 outside-click scan run on ONE CATCHER-BEARING popup per frame: the highest
 effective band, ties to the last declared. That is the panels' tree-root
 order, so the popup that paints on top is the one whose catcher wins the
@@ -667,10 +693,10 @@ The top overlay owns the pointer by stacking alone: its catcher covers every
 earlier overlay and the UI under it, so no press reaches them, and overlays
 below stay open and inert; a gesture held under it ends (see "Interaction
 model"), while one held above it (a catcher-less popup or a game floating
-declared later) goes on. The text field's Esc-unfocus is independent of both. A closed
-popup declares NO catcher, so the base UI stays clickable; a hover-driven
-overlay (tooltip) can clear the catcher flag entirely. Dismiss is always a
-SIGNAL the game acts on (Model D) — popup-core never owns the open bool. The
+declared later) goes on. A hidden popup declares nothing, so the base UI stays
+clickable; a hover-driven overlay (tooltip) can clear the catcher flag
+entirely. The game owns the open bool (Model D): popup-core clears it on a
+close it raises and never sets it. The
 context-menu stacks one popup-core fly-out per submenu level; the only novel
 algorithm is the mouse-aim triangle that keeps a submenu open while the cursor
 travels diagonally toward it (never collapse on raw hover-loss).
@@ -717,8 +743,8 @@ modal or popup opened over the menu takes its
 keys and pointer while the menu stays open under it, its pending switch
 waiting and its rows registering without taking a press or focus. A text field
 focused inside the menu owns the keys: the menu reads none while it holds
-focus. A menu the game stops declaring stays open until the game clears
-`open`. Each open panel
+focus. An open menu is declared every frame (asserted): the game clears
+`open` to stop declaring it. Each open panel
 blocks the pointer, so nothing under it is hovered or clicked.
 
 A custom-content row (`item_begin..item_end`, `selectable_begin..selectable_end`,
