@@ -2416,6 +2416,15 @@ static void test_menu_click_beats_a_deferred_key(void) {
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(b, st.open_path[0], "the tap on B opens B over the deferred Right on A");
 }
 
+/* ---- An open menu with a submenu keeps no state-pool cell: its levels are snap popups. ---- */
+static void test_menu_keeps_no_state_cells(void) {
+    nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
+    nt_ui_menu_t st = {0};
+    nt_ui_menu_open(&st, 120.0F, 80.0F);
+    menu_open_file_open(&st, &style, menu_im_frame2_idle);
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_state_used_slots(s_fx.ctx));
+}
+
 /* ---- Rows with an instant highlight (state_speed 0) take no anim slot, even on the frame they show. ---- */
 static void test_menu_instant_rows_take_no_anim_slot(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
@@ -2464,6 +2473,7 @@ int main(void) {
     RUN_TEST(test_menu_key_on_undeclared_level_keeps_pointer_mode);
     RUN_TEST(test_menu_click_beats_a_deferred_key);
     RUN_TEST(test_menu_instant_rows_take_no_anim_slot);
+    RUN_TEST(test_menu_keeps_no_state_cells);
     RUN_TEST(test_menu_right_and_esc_in_one_frame);
     RUN_TEST(test_menu_is_modal_overlay);
     RUN_TEST(test_menu_resting_pointer_yields_to_keyboard);

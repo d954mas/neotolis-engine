@@ -167,18 +167,23 @@ nt_ui_popup_result_t nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t i
     NT_ASSERT(ctx->overlay_depth < NT_UI_MODAL_MAX_DEPTH && "nt_ui_popup_begin: nesting exceeds NT_UI_MODAL_MAX_DEPTH");
 
     // #region stack push + z-band (shared depth counter with modal)
-    /* A later overlay covers an earlier one with all its nested levels; the catcher, declared before its
-     * panel on the same band, lies between them. */
-    const int16_t panel_z = nt_ui_internal_overlay_z(ctx);
+    /* A root overlay sits one stride above the floating that encloses it, a nested one shares its parent's
+     * band, so a later overlay covers an earlier one with all its nested levels; the catcher, declared
+     * before its panel on the same band, lies between them. */
+    const int16_t panel_z = (ctx->overlay_depth == 0U) ? ctx->modal_zband_stride : 0;
     ++ctx->overlay_depth;
     const uint32_t catcher_id = nt_ui_internal_popup_catcher_id(id);
     // #endregion
     // #region tween-state (non-evicting): was the popup present last frame?
     /* Eviction-proof open-edge memory: the anim slot can be evicted by a busy frame, so we must NOT use
-     * "anim slot absent" to mean "first open" — that re-seeds t=0 every churned frame (flicker). */
-    nt_ui_popup_tween_state_t *tw = (nt_ui_popup_tween_state_t *)nt_ui_state(ctx, popup_tween_id(id), (uint32_t)sizeof *tw, NT_UI_STATE_TAG('p', 'o', 'p', 't'));
-    NT_ASSERT(tw != NULL && "nt_ui_popup_begin: tween-state pool returned NULL");
-    const bool was_present_prev = tw->was_present != 0U;
+     * "anim slot absent" to mean "first open" — that re-seeds t=0 every churned frame (flicker). Only an
+     * eased popup needs it: a snap popup keeps no state, its t is open ? 1 : 0. */
+    nt_ui_popup_tween_state_t *tw = NULL;
+    if (style->ease_speed > 0.0F) {
+        tw = (nt_ui_popup_tween_state_t *)nt_ui_state(ctx, popup_tween_id(id), (uint32_t)sizeof *tw, NT_UI_STATE_TAG('p', 'o', 'p', 't'));
+        NT_ASSERT(tw != NULL && "nt_ui_popup_begin: tween-state pool returned NULL");
+    }
+    const bool was_present_prev = tw != NULL && tw->was_present != 0U;
     // #endregion
     // #region one anim call (value_t eases t toward open?1:0)
     nt_ui_anim_target_t tgt = {
@@ -231,7 +236,9 @@ nt_ui_popup_result_t nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t i
      * whole viewport every frame the helper runs, making base UI unclickable (present-only guard). The
      * catcher carries the dismiss source and/or the visible backdrop and/or an inert input gate. */
     const bool present = open || (t > NT_UI_POPUP_EPSILON);
-    tw->was_present = present ? 1U : 0U; /* remember for next frame's open-edge seed gate */
+    if (tw != NULL) {
+        tw->was_present = present ? 1U : 0U; /* remember for next frame's open-edge seed gate */
+    }
     const bool want_catcher = present && (dismiss_on_click || has_backdrop || force_catcher);
     nt_ui_popup_close_src_t close_src = NT_UI_POPUP_CLOSE_SRC_NONE;
     /* Only a catcher-bearing popup gates base UI, so only it claims the top (and nt_ui_overlay_active). A

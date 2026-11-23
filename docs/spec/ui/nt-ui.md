@@ -136,10 +136,9 @@ A delta of 0 ties with the parent and, since the root sort is stable,
 paints after it with a same-frame bbox. A NEGATIVE delta sorts ahead of
 its parent and reads the parent's PREVIOUS-frame bbox; one part uses
 it, the inspector highlight, which attaches to a base-band element. An
-overlay part that must lie right under its panel (the catcher, the tooltip
-drop-shadow) takes the panel's delta and is declared before the panel
-instead: a negative delta would also sink under the overlay the panel is
-nested in.
+overlay part that must lie right under its panel (the catcher) takes the
+panel's delta and is declared before the panel instead: a negative delta
+would also sink under the overlay the panel is nested in.
 
 Bands accumulate with declaration nesting, NOT with attachment:
 `attachTo = ROOT` still stacks where it was declared. A root overlay
@@ -614,7 +613,8 @@ modal, dropdown, tooltip, and context-menu. It owns: a Clay floating panel
 attached to the ROOT (anchor-derived offset, no trigger-id dependency, so a
 missing trigger element can't trip Clay's parent-not-found); trigger-anchored
 placement with per-side edge-flip (BELOW/ABOVE/RIGHT/LEFT, CENTER for modal)
-read from the panel's previous-frame bbox; a `value_t` open/close tween; a shared
+read from the panel's previous-frame bbox; a `value_t` open/close tween (a snap
+popup, `ease_speed` 0, keeps no retained state: no tween cell, no anim slot); a shared
 z-band one `modal_zband_stride` above the enclosing floating for a root
 overlay and its parent's band for a nested one (see "Floating zIndex is
 relative" above; NT_ASSERT before the push so a runaway nesting fails early);

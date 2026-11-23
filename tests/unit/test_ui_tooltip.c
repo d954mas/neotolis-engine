@@ -22,7 +22,6 @@
 #include "test_helpers/ui_walker_fixture.h"
 #include "ui/nt_ui.h"
 #include "ui/nt_ui_internal.h"
-#include "ui/nt_ui_modal.h"
 #include "ui/nt_ui_popup.h"
 #include "ui/nt_ui_tooltip.h"
 #include "unity.h"
@@ -90,9 +89,9 @@ static bool tooltip_frame_at(const nt_pointer_t *p, nt_ui_tooltip_style_t *st, b
 static bool tooltip_frame(const nt_pointer_t *p, nt_ui_tooltip_style_t *st) { return tooltip_frame_at(p, st, false); }
 
 /* ---- ABI sanity: the _Static_assert compiles; assert the runtime size too. ---- */
-static void test_tooltip_abi_size(void) { TEST_ASSERT_EQUAL_UINT(88U, (unsigned)sizeof(nt_ui_tooltip_style_t)); }
+static void test_tooltip_abi_size(void) { TEST_ASSERT_EQUAL_UINT(80U, (unsigned)sizeof(nt_ui_tooltip_style_t)); }
 
-/* ---- Defaults are a valid (non-zero) style; the flat baseline declares no art/caret/border/shadow. ---- */
+/* ---- Defaults are a valid (non-zero) style; the flat baseline declares no art/caret/border. ---- */
 static void test_tooltip_defaults_valid(void) {
     nt_ui_tooltip_style_t st = nt_ui_tooltip_style_defaults();
     TEST_ASSERT_TRUE(st.delay_secs >= 0.0F);
@@ -102,7 +101,6 @@ static void test_tooltip_defaults_valid(void) {
     TEST_ASSERT_EQUAL_UINT(0U, st.panel_art.atlas.id); /* flat fallback by default (no art) */
     TEST_ASSERT_EQUAL_UINT(0U, st.caret.atlas.id);
     TEST_ASSERT_EQUAL_UINT(0U, st.border_color);
-    TEST_ASSERT_EQUAL_UINT(0U, st.shadow_color);
 }
 
 /* ---- Delayed reveal: the tooltip is NOT declared before delay_secs of accumulated hover and IS
@@ -273,16 +271,15 @@ static void reveal_at(nt_pointer_t *over, nt_ui_tooltip_style_t *st, bool at_bot
     }
 }
 
-/* The tooltip panel is the LAST rectangle of the highest band in the frame: the target and its label sit
- * in the base band, and the panel's own drop-shadow shares its band, declared before it, so "first lifted
- * rectangle" would pick the shadow. Returns false under panel art, where the panel emits an IMAGE and no
+/* The tooltip panel is the HIGHEST-band rectangle in the frame: the target and its label sit in the
+ * base band. Returns false under panel art, where the panel emits an IMAGE and no
  * rectangle exists to carry a cornerRadius. */
 static bool tooltip_panel_rect(Clay_BoundingBox *out_box, float *out_radius) {
     int32_t best = 0;
     bool found = false;
     for (int32_t i = 0; i < s_fx.ctx->frozen_cmds.length; ++i) {
         const Clay_RenderCommand *c = &s_fx.ctx->frozen_cmds.internalArray[i];
-        if (c->commandType == CLAY_RENDER_COMMAND_TYPE_RECTANGLE && c->zIndex > 0 && (!found || c->zIndex >= best)) {
+        if (c->commandType == CLAY_RENDER_COMMAND_TYPE_RECTANGLE && c->zIndex > 0 && (!found || c->zIndex > best)) {
             best = c->zIndex;
             *out_box = c->boundingBox;
             *out_radius = c->renderData.rectangle.cornerRadius.topLeft;
@@ -424,62 +421,8 @@ static void test_tooltip_timer_id_salted(void) {
     TEST_ASSERT_NOT_EQUAL_UINT32(0U, nt_ui_tooltip_test_timer_id(TGT_ID));
 }
 
-#define TIP_MODAL 0x709A01U
-#define SHADOW_COLOR 0x60000000U
-
-/* One frame: an opaque modal holding the target, the tooltip declared inside the modal. */
-static void tooltip_in_modal_frame(const nt_pointer_t *p, nt_ui_tooltip_style_t *st) {
-    nt_ui_modal_style_t ms = nt_ui_modal_style_defaults();
-    ms.ease_speed = 0.0F;
-    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = DT, .pointers = p, .pointer_count = 1});
-    (void)nt_ui_modal_begin(s_fx.ctx, TIP_MODAL, &ms, true);
-    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(300)}}, .backgroundColor = {40, 40, 40, 255}}) {
-        CLAY({.id = (Clay_ElementId){.id = TGT_ID}, .layout = {.sizing = {CLAY_SIZING_FIXED(TGT_W), CLAY_SIZING_FIXED(TGT_H)}}}) { (void)nt_ui_step(s_fx.ctx, TGT_ID, NULL); }
-        (void)nt_ui_tooltip(s_fx.ctx, NT_UI_DATA_LAYER(1), 2U, TGT_ID, "hint text", st);
-    }
-    nt_ui_modal_end(s_fx.ctx);
-    nt_ui_end(s_fx.ctx);
-}
-
-/* ---- A tooltip inside a modal keeps its drop-shadow above the modal's opaque body and under its panel. ---- */
-static void test_tooltip_shadow_over_its_modal(void) {
-    nt_ui_tooltip_style_t st = test_style();
-    st.delay_secs = 0.0F;
-    st.shadow_color = SHADOW_COLOR;
-    st.shadow_offset_px = 4;
-    nt_pointer_t idle = pointer_at(1.0F, 1.0F);
-    tooltip_in_modal_frame(&idle, &st);
-    tooltip_in_modal_frame(&idle, &st);
-    const nt_ui_bbox_t tgt = nt_ui_get_bbox(s_fx.ctx, TGT_ID);
-    TEST_ASSERT_TRUE(tgt.found);
-    nt_pointer_t over = pointer_at(tgt.x + 10.0F, tgt.y + 10.0F);
-    for (int f = 0; f < 4; ++f) {
-        tooltip_in_modal_frame(&over, &st);
-    }
-    const Clay_Color shadow = nt_ui_unpack_abgr(SHADOW_COLOR);
-    int32_t body_at = -1;
-    int32_t shadow_at = -1;
-    for (int32_t i = 0; i < s_fx.ctx->frozen_cmds.length; ++i) {
-        const Clay_RenderCommand *c = &s_fx.ctx->frozen_cmds.internalArray[i];
-        if (c->commandType != CLAY_RENDER_COMMAND_TYPE_RECTANGLE) {
-            continue;
-        }
-        const Clay_Color k = c->renderData.rectangle.backgroundColor;
-        if (float_near(k.r, 40.0F, 0.5F) && float_near(k.a, 255.0F, 0.5F)) {
-            body_at = i;
-        } else if (float_near(k.a, shadow.a, 0.5F) && float_near(k.r, shadow.r, 0.5F)) {
-            shadow_at = i;
-        }
-    }
-    Clay_BoundingBox panel;
-    float radius = 0.0F;
-    TEST_ASSERT_TRUE(tooltip_panel_rect(&panel, &radius));
-    TEST_ASSERT_TRUE_MESSAGE(body_at >= 0 && shadow_at > body_at, "the shadow paints over the modal body");
-}
-
 int main(void) {
     UNITY_BEGIN();
-    RUN_TEST(test_tooltip_shadow_over_its_modal);
     RUN_TEST(test_tooltip_abi_size);
     RUN_TEST(test_tooltip_defaults_valid);
     RUN_TEST(test_tooltip_delayed_reveal);

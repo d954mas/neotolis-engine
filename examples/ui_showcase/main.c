@@ -1047,8 +1047,8 @@ static void init_styles(void) {
     s_dropdown_light.row_selected.fill = 0xFF3C8CC8U; /* warm amber accent for the pale theme */
 
     /* ---- Tooltip: a short reveal delay; dark uses the panel_blue slice9 frame + a caret pointing at the
-     * target (flips ABOVE near the bottom border) + a soft drop-shadow. Light flips to a pale flat panel +
-     * dark text, keeping the caret + a thin border + a subtle shadow. ---- */
+     * target (flips ABOVE near the bottom border). Light flips to a pale flat panel + dark text, keeping
+     * the caret + a thin border. ---- */
     s_tooltip_dark = nt_ui_tooltip_style_defaults();
     s_tooltip_dark.delay_secs = 0.5F;
     s_tooltip_dark.font_size = 16.0F;
@@ -1058,8 +1058,6 @@ static void init_styles(void) {
     s_tooltip_dark.caret = s_caret_ref;
     s_tooltip_dark.caret_tint = 0xFFCFE2FAU; /* pale blue caret matching the panel_blue frame */
     s_tooltip_dark.caret_size = 14U;
-    s_tooltip_dark.shadow_color = 0x60000000U; /* translucent black drop-shadow */
-    s_tooltip_dark.shadow_offset_px = 4;
     s_tooltip_light = s_tooltip_dark;
     s_tooltip_light.panel_art = (nt_atlas_region_ref_t){0}; /* flat pale panel on the light theme (no art) */
     s_tooltip_light.panel_bg = 0xFFF4F4F4U;
@@ -1067,7 +1065,6 @@ static void init_styles(void) {
     s_tooltip_light.caret_tint = 0xFFF4F4F4U;   /* caret matches the pale panel */
     s_tooltip_light.border_color = 0xFFB8C2CCU; /* thin cool-grey border around the pale panel */
     s_tooltip_light.border_px = 1U;
-    s_tooltip_light.shadow_color = 0x30000000U; /* lighter shadow on the pale theme */
 
     /* ---- Context menu (dogfood): panel_blue slice9 frame + arrow_right submenu marker + an icon gutter
      * (bunny on some rows, aligned-empty on the rest). Rows keep the eased flat hover highlight over the

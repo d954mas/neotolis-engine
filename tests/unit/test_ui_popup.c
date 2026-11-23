@@ -362,7 +362,7 @@ static void test_popup_no_dismiss_declares_no_catcher(void) {
 
 static void test_popup_clear_state_releases_retained_tween_cell(void) {
     nt_ui_popup_style_t st = nt_ui_popup_style_defaults();
-    st.ease_speed = 0.0F;
+    st.ease_speed = 8.0F; /* only an eased popup keeps a tween cell */
     nt_ui_popup_anchor_t anc = {.x = 100.0F, .y = 100.0F, .w = 40.0F, .h = 24.0F, .prefer_side = NT_UI_POPUP_BELOW};
 
     TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_state_used_slots(s_fx.ctx));
@@ -371,6 +371,22 @@ static void test_popup_clear_state_releases_retained_tween_cell(void) {
 
     nt_ui_popup_clear_state(s_fx.ctx, POP_A);
     TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_state_used_slots(s_fx.ctx));
+}
+
+/* ---- A snap popup keeps no retained state: opened and closed, it leaves no state cell and no anim slot. ---- */
+static void test_popup_snap_keeps_no_state(void) {
+    nt_ui_popup_style_t st = nt_ui_popup_style_defaults();
+    st.ease_speed = 0.0F;
+    nt_ui_popup_anchor_t anc = {.x = 100.0F, .y = 100.0F, .w = 40.0F, .h = 24.0F, .prefer_side = NT_UI_POPUP_BELOW};
+    nt_ui_popup_result_t r = {0};
+    popup_frame(POP_A, &st, &anc, true, &r);
+    TEST_ASSERT_TRUE(r.visible);
+    popup_frame(POP_A, &st, &anc, false, &r);
+    TEST_ASSERT_FALSE(r.visible);
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_state_used_slots(s_fx.ctx));
+    for (uint32_t i = 0; i < NT_UI_ANIM_SLOTS; ++i) {
+        TEST_ASSERT_TRUE(s_fx.ctx->anim[i].id != POP_A);
+    }
 }
 
 /* ---- Open/close tween clamp: t in [0,1], rises while open, decays after close; visible == (t>eps). ---- */
@@ -665,6 +681,7 @@ int main(void) {
     RUN_TEST(test_popup_wrapper_clears_open);
     RUN_TEST(test_popup_no_dismiss_declares_no_catcher);
     RUN_TEST(test_popup_clear_state_releases_retained_tween_cell);
+    RUN_TEST(test_popup_snap_keeps_no_state);
     RUN_TEST(test_popup_tween_clamp);
     RUN_TEST(test_popup_top_owns_the_pointer);
     RUN_TEST(test_popup_later_overlay_above_nested_level);
