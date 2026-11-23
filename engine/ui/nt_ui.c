@@ -237,10 +237,7 @@ nt_ui_context_t *nt_ui_create_context(void *arena, size_t arena_size, const nt_u
     ctx->element_depth_bias_ndc = desc->element_depth_bias_ndc;
     /* Used as-is; the default comes solely from nt_ui_create_desc_defaults() (same convention as max_elements). */
     ctx->modal_zband_stride = desc->modal_zband_stride;
-    /* > 1, not just > 0: an overlay's catcher sits one band UNDER its panel, so a stride of 1 puts the
-     * catcher on the base band where it stops gating base UI. */
-    NT_ASSERT((int)ctx->modal_zband_stride > 1 && (int)ctx->modal_zband_stride * NT_UI_MODAL_MAX_DEPTH <= INT16_MAX &&
-              "nt_ui_create_context: modal_zband_stride must be > 1 and stride * NT_UI_MODAL_MAX_DEPTH must fit int16");
+    NT_ASSERT(ctx->modal_zband_stride > 0 && "nt_ui_create_context: modal_zband_stride must be > 0");
     /* Touch-friendly baseline, looser than ImGui's mouse 6px/0.3s: the engine targets mobile/WASM. */
     ctx->gesture_dbl_window_secs = 0.50F;
     ctx->gesture_move_radius_dp = 16.0F;
@@ -533,8 +530,6 @@ void nt_ui_begin(nt_ui_context_t *ctx, const nt_ui_frame_desc_t *frame) {
     /* Commit last frame's deepest modal as the close-scan target (1-frame IM lag), then reset. */
     ctx->overlay_top_id_prev = ctx->overlay_top_id_cur;
     ctx->overlay_top_id_cur = 0U;
-    ctx->overlay_top_catcher_prev = ctx->overlay_top_catcher_cur;
-    ctx->overlay_top_catcher_cur = 0U;
     ctx->overlay_top_z_cur = INT32_MIN;
     /* Reset this frame's modal presence; committed into _prev at nt_ui_end (so a game that polls
      * nt_ui_overlay_active BEFORE this frame's begin still sees last frame's result). */
@@ -609,6 +604,17 @@ void nt_ui_begin(nt_ui_context_t *ctx, const nt_ui_frame_desc_t *frame) {
      * reclaims entries on its own -- without this call any CLIP element (e.g. each input field's content
      * clip) leaks a slot until the pool (64) overflows -> Clay error type=7 crash. */
     Clay_UpdateScrollContainers(false, (Clay_Vector2){0.0F, 0.0F}, ctx->frame_dt);
+
+    /* The top overlay owns the pointer, held gestures included: a capture outside it (a press under an
+     * overlay that opened mid-gesture) ends without a click, as a modal window cancels its owner's capture.
+     * A 2D property, like the top. */
+    const uint32_t top = ctx->overlay_top_id_prev;
+    for (uint32_t i = 0; !ctx->use_raycast_input && top != 0U && i < ctx->frame_pointer_count; ++i) {
+        const uint32_t held = ctx->captures[i].active_id;
+        if (held != 0U && held != nt_ui_internal_popup_catcher_id(top) && nt_ui_internal_record_kind(ctx, held) == NT_UI_HIT && !nt_ui_internal_declared_within(ctx, held, top)) {
+            ctx->captures[i].active_id = 0U;
+        }
+    }
 
     /* Input is decided here, from last frame's layout: the front-most record per pointer, then the
      * scroll gestures. Every step and query of the frame reads the result. */
@@ -2665,7 +2671,6 @@ static void resolve_hot(nt_ui_context_t *ctx) {
         const float band = coplanar_band(nearest_t);
         nt_ui_hot_t best = {0};
         uint32_t best_order = 0U;
-        nt_ui_hit_kind_t best_kind = NT_UI_HIT_NONE;
         for (uint32_t k = 0; k < ctx->interactive_prev_count; ++k) {
             const nt_ui_interactive_t *rec = &ctx->interactive_prev[k];
             float t = 0.0F;
@@ -2684,14 +2689,7 @@ static void resolve_hot(nt_ui_context_t *ctx) {
                 best.id = rec->id;
                 best.distance = ctx->use_raycast_input ? t : 0.0F;
                 best_order = order;
-                best_kind = kind;
             }
-        }
-        /* The top overlay owns the pointer: a hit outside it (not its panel, not declared inside it) lands on
-         * its catcher, so no click reaches a lower overlay or the UI under it. A 2D property, like the top. */
-        const uint32_t top = ctx->overlay_top_id_prev;
-        if (!ctx->use_raycast_input && top != 0U && best_kind == NT_UI_HIT && best.id != ctx->overlay_top_catcher_prev && !nt_ui_internal_declared_within(ctx, best.id, top)) {
-            best.id = ctx->overlay_top_catcher_prev;
         }
         /* best stays {0} when nothing was hit OR all hits were occluded — both gate to skip. */
         ctx->pointer_hot[pidx] = best;
@@ -2988,19 +2986,18 @@ bool nt_ui_hovered_within(const nt_ui_context_t *ctx, uint32_t id) {
         return false; /* the sidebar consumes the pointer, as in every query */
     }
 #endif
+    uint32_t first = 0U;
+    uint32_t last = 0U;
+    if (!hit_range(ctx, id, &first, &last)) {
+        return false;
+    }
     for (uint32_t i = 0; i < ctx->frame_pointer_count; ++i) {
-        if (nt_ui_internal_pointer_within(ctx, i, id)) {
+        uint32_t t = 0U;
+        if (pointer_target(ctx, i, &t) && t >= first && t <= last) {
             return true;
         }
     }
     return false;
-}
-
-bool nt_ui_internal_pointer_within(const nt_ui_context_t *ctx, uint32_t pointer, uint32_t id) {
-    uint32_t first = 0U;
-    uint32_t last = 0U;
-    uint32_t t = 0U;
-    return hit_range(ctx, id, &first, &last) && pointer_target(ctx, pointer, &t) && t >= first && t <= last;
 }
 
 bool nt_ui_internal_declared_within(const nt_ui_context_t *ctx, uint32_t inner, uint32_t outer) {

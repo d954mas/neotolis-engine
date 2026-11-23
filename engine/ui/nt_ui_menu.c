@@ -409,7 +409,7 @@ bool nt_ui_menu_begin(nt_ui_menu_t *menu, nt_ui_context_t *ctx, const nt_ui_elem
         .nav_depth = menu->focus_depth,
         .fill_layer = (data != NULL) ? data->layer : 0U,
         .label_layer = label_layer,
-        .top = ctx->overlay_top_id_prev == menu_level_id(menu_id, 0U), /* one owner: an opening menu reads keys from its next frame */
+        .top = !menu->arming && ctx->overlay_top_id_prev == menu_level_id(menu_id, 0U), /* one owner: an opening menu reads input from its next frame */
     };
 
     /* BELOW flips only vertically: shift the root left by last frame's width to stay on screen (unclamped on
@@ -623,13 +623,13 @@ static bool menu_resolve(nt_ui_menu_t *menu) {
      * presses (a tap does not move), so a pointer resting on a row neither steals focus nor reopens what the
      * keyboard closed. */
     const nt_pointer_t *pp = &ctx->frame_pointers[ctx->frame_primary];
-    const bool ours = pp->active && !nt_ui_inspector_pointer_consumed(ctx);
+    const bool ours = f->top && pp->active && !nt_ui_inspector_pointer_consumed(ctx);
     if (kbd_acted) {
         if (!menu->kbd_mode && menu->open_path[menu->focus_depth] != menu->focus) {
             menu_set_open(menu, menu->focus_depth, 0U); /* the keyboard takes no pending switch: a sibling's child closes */
         }
         menu->kbd_mode = true;
-    } else if (menu->kbd_mode && ours && (pp->dx != 0.0F || pp->dy != 0.0F || pp->buttons[NT_BUTTON_LEFT].is_pressed)) {
+    } else if (menu->kbd_mode && ours && (pp->dx != 0.0F || pp->dy != 0.0F || pp->buttons[NT_BUTTON_LEFT].is_pressed || pp->buttons[NT_BUTTON_RIGHT].is_pressed)) {
         menu->kbd_mode = false;
         menu->aim.depth = 0U; /* the corridor primed before the keys is stale */
     }
@@ -647,16 +647,16 @@ static bool menu_resolve(nt_ui_menu_t *menu) {
         menu->focus_depth = f->click_depth;
     } else if (!menu->kbd_mode && f->hover_id != 0U) {
         menu_resolve_hover(menu, f->hover_depth, f->hover_id, f->hover_opens, ours, mx, my, ctx->frame_dt);
-    } else if (!menu->kbd_mode && f->focus_seen && menu->open_path[menu->focus_depth] != 0U && menu->open_path[menu->focus_depth] != menu->focus) {
+    } else if (f->top && !menu->kbd_mode && f->focus_seen && menu->open_path[menu->focus_depth] != 0U && menu->open_path[menu->focus_depth] != menu->focus) {
         /* Off the rows, the switch the pointer left on a sibling keeps running, so the frame never freezes
-         * with a sibling's child open. */
+         * with a sibling's child open; under another overlay it waits, as the pointer is that overlay's. */
         menu_resolve_hover(menu, menu->focus_depth, menu->focus, f->focus_opens, ours, mx, my, ctx->frame_dt);
     }
     /* Menu-owned outside-press dismiss (a click or a tap) off everything declared inside the menu last frame:
-     * its levels, even one closed at the end of that frame, and a popup a custom row opened. The frame the
-     * menu opened skips it so the opening press does not self-dismiss. */
-    const bool outside_press = ours && f->top && (pp->buttons[NT_BUTTON_LEFT].is_pressed || pp->buttons[NT_BUTTON_RIGHT].is_pressed);
-    if (outside_press && !menu->arming && !nt_ui_internal_pointer_within(ctx, ctx->frame_primary, menu_level_id(f->menu_id, 0U))) {
+     * its levels, even one closed at the end of that frame, and a popup a custom row opened. It reads the
+     * element under the pointer, not a capture holder, and not on the frame the menu opened. */
+    const bool outside_press = ours && (pp->buttons[NT_BUTTON_LEFT].is_pressed || pp->buttons[NT_BUTTON_RIGHT].is_pressed);
+    if (outside_press && !nt_ui_internal_declared_within(ctx, ctx->pointer_hot[ctx->frame_primary].id, menu_level_id(f->menu_id, 0U))) {
         close_chain = true;
     }
     return close_chain;

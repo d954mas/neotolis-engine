@@ -156,9 +156,9 @@ typedef struct {
     int16_t pad[4]; /* hit padding L/R/T/B */
 } nt_ui_interactive_t;
 
-/* Nested-modal cap (fail-early assert on overflow; depth is a counter, no heap). Depth is the
- * overflow guard only — bands come from Clay's relative zIndex, top-targeting from overlay_top_z_cur.
- * Build-overridable; raising it requires stride*depth to still fit int16 (see _Static_assert). */
+/* Nested-overlay cap (fail-early assert on overflow; depth is a counter, no heap). Depth is the
+ * overflow guard and tells a root overlay from a nested one; top-targeting comes from overlay_top_z_cur.
+ * Build-overridable. */
 #ifndef NT_UI_MODAL_MAX_DEPTH
 #define NT_UI_MODAL_MAX_DEPTH 16
 #endif
@@ -219,9 +219,6 @@ struct nt_ui_context {
      * the inner begin's return, so we use last frame's resolved top). */
     uint32_t overlay_top_id_prev;
     uint32_t overlay_top_id_cur;
-    /* The top overlay's catcher: a pointer over anything outside that overlay hits it instead. */
-    uint32_t overlay_top_catcher_prev;
-    uint32_t overlay_top_catcher_cur;
     /* Highest band claimed this frame; ties go to the last declared, matching the pointer arbiter that
      * delivers the dismiss click. INT32_MIN until the first claim. */
     int32_t overlay_top_z_cur;
@@ -538,10 +535,13 @@ int32_t nt_ui_internal_test_get_tree_root_for_elem(const nt_ui_context_t *ctx, i
 
 /* The hit-snapshot slot of an element declared last frame, else -1 (id 0 included). */
 int32_t nt_ui_internal_live_slot(const nt_ui_context_t *ctx, uint32_t id);
-/* Pointer `pointer`'s target lies inside id's declaration range (last frame), as nt_ui_hovered_within for one pointer. */
-bool nt_ui_internal_pointer_within(const nt_ui_context_t *ctx, uint32_t pointer, uint32_t id);
 /* `inner` was declared inside `outer` last frame. */
 bool nt_ui_internal_declared_within(const nt_ui_context_t *ctx, uint32_t inner, uint32_t outer);
+
+/* A popup's catcher id derives from the popup id (salted) so the catcher's own interaction cell never
+ * aliases the panel id in the registry / capture table. */
+#define NT_UI_POPUP_CATCHER_SALT 0x500CA7C0U
+static inline uint32_t nt_ui_internal_popup_catcher_id(uint32_t id) { return nt_ui_derived_id(id, NT_UI_POPUP_CATCHER_SALT); }
 
 /* Shared overlay helpers — single source of truth for the Y-flip + per-level accum convention. */
 const nt_ui_debug_zone_t *nt_ui_internal_find_debug_zone(const nt_ui_context_t *ctx, uint32_t id);

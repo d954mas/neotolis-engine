@@ -19,11 +19,6 @@ const nt_ui_widget_def_t NT_UI_POPUP_DEF = {
     ._reserved = 0U,
 };
 
-/* The catcher id derives from the popup id (salted) so the catcher's own interaction cell never
- * aliases the panel id in the registry / capture table. */
-#define NT_UI_POPUP_CATCHER_SALT 0x500CA7C0U
-static inline uint32_t popup_catcher_id(uint32_t id) { return nt_ui_derived_id(id, NT_UI_POPUP_CATCHER_SALT); }
-
 /* The tween-state cell id (salted off the popup id) lives in the NON-evicting nt_ui_state pool, unlike
  * the eviction-prone anim slot. It records whether the popup was present last frame so the entrance
  * re-seed (t=0) fires ONLY on a real closed->open edge — never when a busy frame evicts the anim slot
@@ -173,11 +168,11 @@ nt_ui_popup_result_t nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t i
 
     // #region stack push + z-band (shared depth counter with modal)
     ++ctx->overlay_depth;
-    /* One band ABOVE whatever floating encloses this call; Clay accumulates the nesting, so a popup
-     * opened inside another needs no depth arithmetic here. */
-    const int16_t panel_z = ctx->modal_zband_stride;
-    const int16_t catcher_z = (int16_t)(panel_z - 1);
-    const uint32_t catcher_id = popup_catcher_id(id);
+    /* A root overlay sits one band above whatever floating encloses it; a nested one shares its parent's
+     * band (delta 0), so overlays stack in declaration order: a later overlay covers an earlier one with
+     * all its nested levels, and the catcher, declared before its panel, lies between them. */
+    const int16_t panel_z = (ctx->overlay_depth == 1U) ? ctx->modal_zband_stride : 0;
+    const uint32_t catcher_id = nt_ui_internal_popup_catcher_id(id);
     // #endregion
     // #region tween-state (non-evicting): was the popup present last frame?
     /* Eviction-proof open-edge memory: the anim slot can be evicted by a busy frame, so we must NOT use
@@ -247,7 +242,7 @@ nt_ui_popup_result_t nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t i
         ctx->overlay_present_cur = true;
     }
     if (want_catcher) {
-        /* Full-viewport catcher at catcher_z. Transparent for a plain popup; a visible dim rect when a
+        /* Full-viewport catcher on the panel's band. Transparent for a plain popup; a visible dim rect when a
          * backdrop color is given (alpha rides t*backdrop_alpha exactly once — folding t into element
          * opacity too would dim t²). It wins next-frame topmost-z, gating click-through to base UI. */
         const nt_ui_transform_t id_xf = nt_ui_transform_defaults();
@@ -259,7 +254,7 @@ nt_ui_popup_result_t nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t i
         }
         CLAY({
             .id = (Clay_ElementId){.id = catcher_id},
-            .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .zIndex = catcher_z},
+            .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .zIndex = panel_z},
             .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}},
             .backgroundColor = cc_col,
             .userData = (void *)catcher_data,
@@ -303,13 +298,12 @@ nt_ui_popup_result_t nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t i
      * 2D pointer arbiter's key, so the winner's own catcher runs the close-scan. A 3D ctx arbitrates by
      * ray distance and does not rank overlays by band at all. */
     const int32_t panel_band = nt_ui_clay_priv_open_floating_z(ctx->clay);
-    /* A catcher gates base UI from one band below its panel; at or under the base band it loses the hit
-     * arbitration and silently stops gating while nt_ui_overlay_active() still reports the overlay up. */
-    NT_ASSERT((!want_catcher || panel_band > 1) && "nt_ui_popup: the catcher must sit above the base band (0)");
+    /* A catcher on the base band loses the hit arbitration and silently stops gating while
+     * nt_ui_overlay_active() still reports the overlay up. */
+    NT_ASSERT((!want_catcher || panel_band > 0) && "nt_ui_popup: the catcher must sit above the base band (0)");
     if (want_catcher && panel_band >= ctx->overlay_top_z_cur) {
         ctx->overlay_top_z_cur = panel_band;
         ctx->overlay_top_id_cur = id;
-        ctx->overlay_top_catcher_cur = catcher_id;
     }
     // #endregion
 

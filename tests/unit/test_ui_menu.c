@@ -57,6 +57,7 @@ static void act_capture(uint32_t row_scoped_id, bool clicked) {
 static float s_ptr_x;
 static float s_ptr_y;
 static bool s_ptr_seen;
+static bool s_modal_over; /* menu_im_hover_frame declares a modal after the menu */
 static void menu_frame_begin(const nt_pointer_t *p) {
     nt_pointer_t q = *p;
     q.dx = s_ptr_seen ? q.x - s_ptr_x : 0.0F;
@@ -73,6 +74,7 @@ void setUp(void) {
     nt_input_init();
     ui_walker_fixture_init(&s_fx, s_arena, sizeof s_arena, UI_WALKER_FX_BIND_ALL);
     s_ptr_seen = false;
+    s_modal_over = false;
     s_act_capture_id = 0U;
     s_act_hit = false;
 }
@@ -1378,6 +1380,11 @@ static void menu_im_hover_frame_ptr(nt_ui_menu_t *st, nt_ui_menu_style_t *style,
         (void)nt_ui_menu_item(st, KEY_EDIT, "Edit");
         nt_ui_menu_end(st);
     }
+    if (s_modal_over) {
+        const nt_ui_modal_style_t ms = nt_ui_modal_style_defaults();
+        (void)nt_ui_modal_begin(s_fx.ctx, MODAL_ID, &ms, true);
+        nt_ui_modal_end(s_fx.ctx);
+    }
     nt_ui_end(s_fx.ctx);
 }
 
@@ -2163,8 +2170,8 @@ static void test_menu_right_on_leaf_does_nothing(void) {
     TEST_ASSERT_FALSE(s_act_hit);
 }
 
-/* ---- A press without movement ends keyboard mode: focus returns to the row under the pointer. ---- */
-static void test_menu_still_press_ends_keyboard_mode(void) {
+/* A press of `button` without movement after a key: focus returns to the row under the pointer. */
+static void menu_still_press_ends_keyboard_mode(nt_button_t button) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
     nt_ui_menu_t st = {0};
     nt_ui_menu_open(&st, 120.0F, 80.0F);
@@ -2182,10 +2189,80 @@ static void test_menu_still_press_ends_keyboard_mode(void) {
     menu_im_hover_frame(&st, &style, ex, ey);
     TEST_ASSERT_EQUAL_UINT32(nt_ui_menu_test_item_id(MENU_A, KEY_FILE), st.focus);
     nt_pointer_t p = {.x = ex, .y = ey, .active = true};
-    p.buttons[NT_BUTTON_LEFT].is_down = true;
-    p.buttons[NT_BUTTON_LEFT].is_pressed = true;
+    p.buttons[button].is_down = true;
+    p.buttons[button].is_pressed = true;
     menu_im_hover_frame_ptr(&st, &style, &p);
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(edit, st.focus, "a still press hands focus back to the pointer");
+    TEST_ASSERT_TRUE(st.open);
+}
+
+static void test_menu_still_press_ends_keyboard_mode(void) { menu_still_press_ends_keyboard_mode(NT_BUTTON_LEFT); }
+static void test_menu_still_right_press_ends_keyboard_mode(void) { menu_still_press_ends_keyboard_mode(NT_BUTTON_RIGHT); }
+
+/* ---- Reopening the menu on top starts it fresh: an Esc on the reopening frame has no owner yet. ---- */
+static void test_menu_reopen_on_top_takes_no_same_frame_esc(void) {
+    nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
+    nt_ui_menu_t st = {0};
+    nt_ui_menu_open(&st, 120.0F, 80.0F);
+    menu_im_frame(&st, &style, 0.0F, 0.0F);
+    menu_im_frame(&st, &style, 0.0F, 0.0F);
+    nt_ui_menu_open(&st, 300.0F, 200.0F);
+    menu_key(NT_KEY_ESCAPE);
+    menu_im_frame(&st, &style, 0.0F, 0.0F);
+    TEST_ASSERT_TRUE_MESSAGE(st.open, "the reopened menu reads keys from its next frame");
+    menu_key(NT_KEY_ESCAPE);
+    menu_im_frame(&st, &style, 0.0F, 0.0F);
+    TEST_ASSERT_FALSE(st.open);
+}
+
+/* ---- A modal over the menu stops its pending switch: the sibling the pointer rests on does not take
+ *      the branch while the modal is up. ---- */
+static void test_menu_covered_switch_waits(void) {
+    nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
+    nt_ui_menu_t st = {0};
+    nt_ui_menu_open(&st, 120.0F, 80.0F);
+    menu_im_hover_frame(&st, &style, 0.0F, 0.0F);
+    menu_im_hover_frame(&st, &style, 0.0F, 0.0F);
+    const uint32_t file = nt_ui_menu_test_item_id(MENU_A, KEY_FILE);
+    menu_hover_open(&st, &style, file, 1U, menu_im_hover_frame);
+    float ex = 0.0F;
+    float ey = 0.0F;
+    menu_row_center(nt_ui_menu_test_item_id(MENU_A, KEY_EDIT), &ex, &ey);
+    menu_im_hover_frame(&st, &style, ex, ey); /* the switch to Edit is pending: File's child stays */
+    TEST_ASSERT_EQUAL_UINT32(file, st.open_path[0]);
+    s_modal_over = true;
+    for (int f = 0; f < (int)(4.0F * NT_UI_MENU_AIM_FALLBACK_SECS * 60.0F); ++f) {
+        menu_im_hover_frame(&st, &style, ex, ey);
+    }
+    TEST_ASSERT_TRUE(st.open);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(file, st.open_path[0], "the covered menu's switch waits for the modal");
+}
+
+/* ---- A right press while the left drags across the rows is inside the menu: it stays open. ---- */
+static void test_menu_right_press_during_a_drag_keeps_open(void) {
+    nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
+    nt_ui_menu_t st = {0};
+    nt_ui_menu_open(&st, 120.0F, 80.0F);
+    static const uint32_t l12[] = {KEY_L1, KEY_L2};
+    const menu_dyn_tree_t t = {.keys = l12, .count = 2};
+    menu_dyn_frame(&st, &style, &t);
+    menu_dyn_frame(&st, &style, &t);
+    float x1 = 0.0F;
+    float y1 = 0.0F;
+    float x2 = 0.0F;
+    float y2 = 0.0F;
+    menu_row_center(nt_ui_menu_test_item_id(MENU_A, KEY_L1), &x1, &y1);
+    menu_row_center(nt_ui_menu_test_item_id(MENU_A, KEY_L2), &x2, &y2);
+    nt_pointer_t p = {.x = x1, .y = y1, .active = true};
+    p.buttons[NT_BUTTON_LEFT] = (nt_button_state_t){.is_down = true, .is_pressed = true};
+    menu_dyn_frame_ptr(&st, &style, &t, &p);
+    p.x = x2;
+    p.y = y2;
+    p.buttons[NT_BUTTON_LEFT] = (nt_button_state_t){.is_down = true};
+    menu_dyn_frame_ptr(&st, &style, &t, &p);
+    p.buttons[NT_BUTTON_RIGHT] = (nt_button_state_t){.is_down = true, .is_pressed = true};
+    menu_dyn_frame_ptr(&st, &style, &t, &p);
+    TEST_ASSERT_TRUE_MESSAGE(st.open, "a press over a row is not an outside press, whatever the left holds");
 }
 
 /* ---- Right and Esc in one frame: Right moves focus into the child, so Esc does nothing. ---- */
@@ -2232,6 +2309,10 @@ int main(void) {
     RUN_TEST(test_menu_press_on_row_popup_keeps_open);
     RUN_TEST(test_menu_right_on_leaf_does_nothing);
     RUN_TEST(test_menu_still_press_ends_keyboard_mode);
+    RUN_TEST(test_menu_still_right_press_ends_keyboard_mode);
+    RUN_TEST(test_menu_reopen_on_top_takes_no_same_frame_esc);
+    RUN_TEST(test_menu_covered_switch_waits);
+    RUN_TEST(test_menu_right_press_during_a_drag_keeps_open);
     RUN_TEST(test_menu_right_and_esc_in_one_frame);
     RUN_TEST(test_menu_is_modal_overlay);
     RUN_TEST(test_menu_resting_pointer_yields_to_keyboard);

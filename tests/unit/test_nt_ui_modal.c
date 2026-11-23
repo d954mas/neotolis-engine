@@ -109,7 +109,8 @@ static void test_modal_floating_smoke(void) {
     TEST_ASSERT_EQUAL_UINT8(0U, s_fx.ctx->overlay_depth); /* balanced */
 }
 
-/* ---- z-band: panel = 1000*(depth+1), backdrop = panel-1. Nested = 2000/1999, depth 2. ---- */
+/* ---- z-band: a root modal sits at 1000 with its backdrop; a nested one shares the band (depth 2) and
+ *      stacks above it by declaration. ---- */
 static void test_modal_zband_and_nesting(void) {
     nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
     st.ease_speed = 0.0F;
@@ -127,9 +128,8 @@ static void test_modal_zband_and_nesting(void) {
     nt_ui_end(s_fx.ctx);
 
     TEST_ASSERT_EQUAL_INT32((int32_t)1000, band_of_rect(s_fx.ctx, CLAY_ID("body_a").id));
-    TEST_ASSERT_EQUAL_INT32((int32_t)2000, band_of_rect(s_fx.ctx, CLAY_ID("body_b").id));
-    TEST_ASSERT_TRUE_MESSAGE(band_has_backdrop(s_fx.ctx, 999), "the outer backdrop must paint one band under its panel");
-    TEST_ASSERT_TRUE_MESSAGE(band_has_backdrop(s_fx.ctx, 1999), "the nested backdrop must paint one band under its panel");
+    TEST_ASSERT_EQUAL_INT32_MESSAGE((int32_t)1000, band_of_rect(s_fx.ctx, CLAY_ID("body_b").id), "a nested modal shares its parent's band");
+    TEST_ASSERT_TRUE_MESSAGE(band_has_backdrop(s_fx.ctx, 1000), "the backdrop paints on its panel's band");
 }
 
 /* ---- Stack depth is zero at frame start and after balanced begin/end. ---- */
@@ -616,7 +616,7 @@ static void test_modal_closed_same_depth_does_not_steal_top(void) {
     TEST_ASSERT_EQUAL_INT(NT_UI_MODAL_CLOSE_ESC, b.reason);
 }
 
-/* ---- Per-context modal_zband_stride: a custom stride drives panel_z = stride*(depth+1). The default
+/* ---- Per-context modal_zband_stride: a custom stride drives a root modal's band. The default
  *      fixture ctx uses 1000; a second ctx created with a custom desc reflects the configured value.
  *      Module is already inited by setUp, so a second ctx coexists (mirrors test_nt_ui_multictx). ---- */
 alignas(NT_UI_ARENA_ALIGN) static uint8_t s_custom_arena[NT_UI_TEST_ARENA_SIZE];
@@ -632,18 +632,17 @@ static void test_modal_custom_zband_stride(void) {
     st.ease_speed = 0.0F;
     nt_pointer_t p = {.active = true};
     ui_frame_begin(ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1, 0);
-    nt_ui_modal_begin(ctx, MODAL_A, &st, true); /* depth 0 -> stride*1 */
+    nt_ui_modal_begin(ctx, MODAL_A, &st, true); /* root -> stride */
     CLAY({.id = CLAY_ID("cs_a"), .layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(20)}}, .backgroundColor = {8, 8, 8, 255}}) {}
-    nt_ui_modal_begin(ctx, MODAL_B, &st, true); /* depth 1 -> stride*2 */
+    nt_ui_modal_begin(ctx, MODAL_B, &st, true); /* nested -> the same band */
     CLAY({.id = CLAY_ID("cs_b"), .layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(20)}}, .backgroundColor = {8, 8, 8, 255}}) {}
     nt_ui_modal_end(ctx);
     nt_ui_modal_end(ctx);
     nt_ui_end(ctx);
 
-    TEST_ASSERT_EQUAL_INT32((int32_t)(custom_stride * 1), band_of_rect(ctx, CLAY_ID("cs_a").id));
-    TEST_ASSERT_EQUAL_INT32((int32_t)(custom_stride * 2), band_of_rect(ctx, CLAY_ID("cs_b").id));
-    TEST_ASSERT_TRUE(band_has_backdrop(ctx, (custom_stride * 1) - 1));
-    TEST_ASSERT_TRUE(band_has_backdrop(ctx, (custom_stride * 2) - 1));
+    TEST_ASSERT_EQUAL_INT32((int32_t)custom_stride, band_of_rect(ctx, CLAY_ID("cs_a").id));
+    TEST_ASSERT_EQUAL_INT32((int32_t)custom_stride, band_of_rect(ctx, CLAY_ID("cs_b").id));
+    TEST_ASSERT_TRUE(band_has_backdrop(ctx, custom_stride));
 
     nt_ui_destroy_context(ctx);
 }
@@ -653,22 +652,6 @@ static void test_modal_custom_zband_stride(void) {
 static void test_modal_zero_stride_asserts(void) {
     nt_ui_create_desc_t desc = nt_ui_create_desc_defaults();
     desc.modal_zband_stride = 0;
-    NT_TEST_EXPECT_ASSERT((void)nt_ui_create_context(s_custom_arena, sizeof s_custom_arena, &desc));
-}
-
-/* ---- A stride of 1 leaves no band for the catcher (it sits at panel-1 = the base band, where it stops
- *      gating base UI), so it is rejected at create rather than asserting later inside popup-core. ---- */
-static void test_modal_stride_one_asserts(void) {
-    nt_ui_create_desc_t desc = nt_ui_create_desc_defaults();
-    desc.modal_zband_stride = 1;
-    NT_TEST_EXPECT_ASSERT((void)nt_ui_create_context(s_custom_arena, sizeof s_custom_arena, &desc));
-}
-
-/* ---- An over-large stride (stride*MAX_DEPTH > INT16_MAX) trips the create-time NT_ASSERT
- *      (fail-early, no silent clamp). ---- */
-static void test_modal_oversize_stride_asserts(void) {
-    nt_ui_create_desc_t desc = nt_ui_create_desc_defaults();
-    desc.modal_zband_stride = (int16_t)(INT16_MAX / NT_UI_MODAL_MAX_DEPTH + 1000);
     NT_TEST_EXPECT_ASSERT((void)nt_ui_create_context(s_custom_arena, sizeof s_custom_arena, &desc));
 }
 
@@ -806,7 +789,7 @@ static void test_modal_zband_matches_popup_core(void) {
     nt_ui_end(s_fx.ctx);
     const int32_t modal_z = band_of_rect(s_fx.ctx, CLAY_ID("dele_body").id);
     TEST_ASSERT_TRUE_MESSAGE(modal_z != INT32_MIN, "the modal body must emit a rectangle to measure");
-    const bool modal_backdrop = band_has_backdrop(s_fx.ctx, modal_z - 1);
+    const bool modal_backdrop = band_has_backdrop(s_fx.ctx, modal_z);
 
     /* Popup at depth 0 -> the same panel band (one shared depth counter + stride). */
     ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1, 0);
@@ -818,7 +801,7 @@ static void test_modal_zband_matches_popup_core(void) {
     TEST_ASSERT_TRUE_MESSAGE(popup_z != INT32_MIN, "the popup body must emit a rectangle to measure");
 
     TEST_ASSERT_EQUAL_INT32(popup_z, modal_z);
-    TEST_ASSERT_TRUE_MESSAGE(modal_backdrop, "the modal backdrop paints one band under its panel");
+    TEST_ASSERT_TRUE_MESSAGE(modal_backdrop, "the modal backdrop paints on its panel's band");
 }
 
 int main(void) {
@@ -850,7 +833,5 @@ int main(void) {
     RUN_TEST(test_modal_anim_asserts);
     RUN_TEST(test_modal_custom_zband_stride);
     RUN_TEST(test_modal_zero_stride_asserts);
-    RUN_TEST(test_modal_stride_one_asserts);
-    RUN_TEST(test_modal_oversize_stride_asserts);
     return UNITY_END();
 }

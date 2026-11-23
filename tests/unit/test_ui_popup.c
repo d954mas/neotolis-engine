@@ -84,9 +84,9 @@ static void test_popup_floating_smoke(void) {
     TEST_ASSERT_EQUAL_UINT8(0U, s_fx.ctx->overlay_depth);
 }
 
-/* ---- z-band: each popup declares ONE stride above its enclosing floating, catcher one below its own
- *      panel. A popup nested inside another must therefore reach 2*stride — asserted on the band Clay
- *      stamped on the bodies' render commands, not on the engine's own arithmetic. ---- */
+/* ---- z-band: a root popup declares ONE stride above its enclosing floating; a popup nested inside
+ *      another shares its band and stacks above it by declaration — asserted on the band Clay stamped on
+ *      the bodies' render commands, not on the engine's own arithmetic. ---- */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_popup_zband_and_nesting(void) {
     nt_ui_popup_style_t st = nt_ui_popup_style_defaults();
@@ -108,6 +108,8 @@ static void test_popup_zband_and_nesting(void) {
     const int32_t stride = (int32_t)s_fx.ctx->modal_zband_stride;
     int32_t z_a = INT32_MIN;
     int32_t z_b = INT32_MIN;
+    int32_t at_a = -1;
+    int32_t at_b = -1;
     for (int32_t i = 0; i < s_fx.ctx->frozen_cmds.length; ++i) {
         const Clay_RenderCommand *c = &s_fx.ctx->frozen_cmds.internalArray[i];
         if (c->commandType != CLAY_RENDER_COMMAND_TYPE_RECTANGLE) {
@@ -115,12 +117,15 @@ static void test_popup_zband_and_nesting(void) {
         }
         if (c->id == CLAY_ID("body_a").id) {
             z_a = c->zIndex;
+            at_a = i;
         } else if (c->id == CLAY_ID("body_b").id) {
             z_b = c->zIndex;
+            at_b = i;
         }
     }
     TEST_ASSERT_EQUAL_INT32_MESSAGE(stride, z_a, "outer popup must land one stride above the base band");
-    TEST_ASSERT_EQUAL_INT32_MESSAGE(2 * stride, z_b, "a popup nested inside another must accumulate a second stride");
+    TEST_ASSERT_EQUAL_INT32_MESSAGE(stride, z_b, "a popup nested inside another shares its band");
+    TEST_ASSERT_TRUE_MESSAGE(at_a >= 0 && at_b > at_a, "and paints above it, declared later");
 }
 
 /* ---- Depth overflow fires NT_ASSERT before the push (no silent fallback). ---- */
@@ -553,6 +558,95 @@ static void test_popup_top_owns_the_pointer(void) {
     TEST_ASSERT_EQUAL_INT_MESSAGE(NT_UI_POPUP_CLOSE_SRC_DISMISS, src_b, "the press is the top popup's outside click");
 }
 
+#define POP_A2 0x50A003U
+#define POP_A2_BOX 0x50A0B2U
+#define POP_B_BOX 0x50A0B3U
+
+/* One frame: popup A holding a catcher-less nested popup A2 with a stepped box, then popup B at the root
+ * holding a stepped box at the same place; ORs both boxes' clicks into the outputs. */
+static void nested_under_frame(nt_pointer_t p, bool *a2_clicked, bool *b_clicked) {
+    nt_ui_popup_style_t st = nt_ui_popup_style_defaults();
+    st.ease_speed = 0.0F;
+    nt_ui_popup_style_t level = st;
+    level.flags = 0U; /* catcher-less, like a menu's submenu level */
+    const nt_ui_popup_anchor_t anc_a = {.x = 100.0F, .y = 100.0F, .prefer_side = NT_UI_POPUP_BELOW};
+    const nt_ui_popup_anchor_t anc_box = {.x = 400.0F, .y = 300.0F, .prefer_side = NT_UI_POPUP_BELOW};
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = &p, .pointer_count = 1});
+    (void)nt_ui_popup_begin(s_fx.ctx, POP_A, &st, &anc_a, true);
+    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(POP_W), CLAY_SIZING_FIXED(POP_H)}}}){}(void)nt_ui_popup_begin(s_fx.ctx, POP_A2, &level, &anc_box, true);
+    CLAY({.id = (Clay_ElementId){.id = POP_A2_BOX}, .layout = {.sizing = {CLAY_SIZING_FIXED(POP_W), CLAY_SIZING_FIXED(POP_H)}}, .backgroundColor = {8, 8, 8, 255}}){} *a2_clicked =
+        nt_ui_step(s_fx.ctx, POP_A2_BOX, NULL).clicked || *a2_clicked;
+    nt_ui_popup_end(s_fx.ctx);
+    nt_ui_popup_end(s_fx.ctx);
+    (void)nt_ui_popup_begin(s_fx.ctx, POP_B, &st, &anc_box, true);
+    CLAY({.id = (Clay_ElementId){.id = POP_B_BOX}, .layout = {.sizing = {CLAY_SIZING_FIXED(POP_W), CLAY_SIZING_FIXED(POP_H)}}, .backgroundColor = {8, 8, 8, 255}}){} *b_clicked =
+        nt_ui_step(s_fx.ctx, POP_B_BOX, NULL).clicked || *b_clicked;
+    nt_ui_popup_end(s_fx.ctx);
+    nt_ui_end(s_fx.ctx);
+}
+
+/* ---- An overlay declared later stacks above an earlier overlay's nested level: B paints over A's nested
+ *      popup and its own box takes the click where the two overlap. ---- */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_popup_later_overlay_above_nested_level(void) {
+    bool a2 = false;
+    bool b = false;
+    nested_under_frame(pointer_at(10.0F, 10.0F, false, false, false), &a2, &b);
+    nested_under_frame(pointer_at(10.0F, 10.0F, false, false, false), &a2, &b);
+    TEST_ASSERT_EQUAL_UINT32(POP_B, s_fx.ctx->overlay_top_id_prev);
+    int32_t at_a2 = -1;
+    int32_t at_b = -1;
+    for (int32_t i = 0; i < s_fx.ctx->frozen_cmds.length; ++i) {
+        const Clay_RenderCommand *c = &s_fx.ctx->frozen_cmds.internalArray[i];
+        if (c->commandType == CLAY_RENDER_COMMAND_TYPE_RECTANGLE && c->id == POP_A2_BOX) {
+            at_a2 = i;
+        } else if (c->commandType == CLAY_RENDER_COMMAND_TYPE_RECTANGLE && c->id == POP_B_BOX) {
+            at_b = i;
+        }
+    }
+    TEST_ASSERT_TRUE_MESSAGE(at_a2 >= 0 && at_b > at_a2, "the later overlay paints over the earlier one's nested level");
+    const nt_ui_bbox_t box = nt_ui_get_bbox(s_fx.ctx, POP_B_BOX);
+    TEST_ASSERT_TRUE(box.found);
+    nested_under_frame(pointer_at(box.x + 10.0F, box.y + 10.0F, true, true, false), &a2, &b);
+    nested_under_frame(pointer_at(box.x + 10.0F, box.y + 10.0F, false, false, true), &a2, &b);
+    TEST_ASSERT_TRUE_MESSAGE(b, "the top overlay's own box takes the click");
+    TEST_ASSERT_FALSE_MESSAGE(a2, "the nested level under it clicks nothing");
+}
+
+#define BASE_BTN 0x50A0C1U
+
+/* One frame: a base button at the layout origin, then popup A away from it while `popup_open`; returns
+ * whether the button clicked. */
+static bool base_button_frame(nt_pointer_t p, bool popup_open) {
+    nt_ui_popup_style_t st = nt_ui_popup_style_defaults();
+    st.ease_speed = 0.0F;
+    const nt_ui_popup_anchor_t anc = {.x = 500.0F, .y = 350.0F, .prefer_side = NT_UI_POPUP_BELOW};
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = &p, .pointer_count = 1});
+    CLAY({.id = (Clay_ElementId){.id = BASE_BTN}, .layout = {.sizing = {CLAY_SIZING_FIXED(80), CLAY_SIZING_FIXED(30)}}}) {}
+    const bool clicked = nt_ui_step(s_fx.ctx, BASE_BTN, NULL).clicked;
+    if (popup_open) {
+        (void)nt_ui_popup_begin(s_fx.ctx, POP_A, &st, &anc, true);
+        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(POP_W), CLAY_SIZING_FIXED(POP_H)}}}) {}
+        nt_ui_popup_end(s_fx.ctx);
+    }
+    nt_ui_end(s_fx.ctx);
+    return clicked;
+}
+
+/* ---- An overlay that opens over a held press ends the gesture: the capture drops and the release over
+ *      the button clicks nothing. ---- */
+static void test_popup_opening_over_a_held_press_ends_it(void) {
+    (void)base_button_frame(pointer_at(20.0F, 15.0F, false, false, false), false);
+    (void)base_button_frame(pointer_at(20.0F, 15.0F, false, false, false), false);
+    (void)base_button_frame(pointer_at(20.0F, 15.0F, true, true, false), false);
+    TEST_ASSERT_EQUAL_UINT32(BASE_BTN, nt_ui_test_capture_active_id(s_fx.ctx, 0U));
+    (void)base_button_frame(pointer_at(20.0F, 15.0F, true, false, false), true); /* the game opens the popup, e.g. from a key */
+    bool clicked = base_button_frame(pointer_at(20.0F, 15.0F, true, false, false), true);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, nt_ui_test_capture_active_id(s_fx.ctx, 0U), "the overlay on top ends the gesture held under it");
+    clicked = base_button_frame(pointer_at(20.0F, 15.0F, false, false, true), true) || clicked;
+    TEST_ASSERT_FALSE_MESSAGE(clicked, "the release over the button clicks nothing");
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_popup_abi_sizes);
@@ -573,5 +667,7 @@ int main(void) {
     RUN_TEST(test_popup_clear_state_releases_retained_tween_cell);
     RUN_TEST(test_popup_tween_clamp);
     RUN_TEST(test_popup_top_owns_the_pointer);
+    RUN_TEST(test_popup_later_overlay_above_nested_level);
+    RUN_TEST(test_popup_opening_over_a_held_press_ends_it);
     return UNITY_END();
 }

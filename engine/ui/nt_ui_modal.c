@@ -22,11 +22,6 @@ const nt_ui_widget_def_t NT_UI_MODAL_DEF = {
     ._reserved = 0U,
 };
 
-/* Build-time sanity net on the DEFAULT stride; the configured per-ctx value is validated at runtime
- * in nt_ui_create_context. Each level declares one stride above its enclosing floating (backdrop one
- * below the panel), so lexically nested overlays accumulate one stride per level, themselves included. */
-_Static_assert(NT_UI_MODAL_ZBAND_STRIDE *(NT_UI_MODAL_MAX_DEPTH) <= INT16_MAX, "modal z-band exceeds int16 zIndex");
-
 #ifdef NT_TEST_ACCESS
 static float s_last_panel_off_x;
 static float s_last_panel_off_y;
