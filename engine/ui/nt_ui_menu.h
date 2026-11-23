@@ -89,16 +89,17 @@ typedef struct {
     uint32_t nav_first, nav_last; /* first/last enabled row on the navigated level */
     uint32_t nav_prev, nav_next;  /* enabled rows before/after the focused one there */
     uint32_t hover_id;            /* row under the pointer (0 = none) */
-    uint32_t click_id;            /* parent to open in menu_end: a click, or a key next to a sibling's open child */
+    uint32_t click_id;            /* parent a click opens in menu_end */
     uint32_t item_id;             /* the open custom row (item_begin..item_end); 0 = none */
+    uint32_t key_row;             /* the row focused at begin: Enter and Right act on it */
     uint8_t depth;                /* level being declared */
-    uint8_t nav_depth;            /* the focused row's level at begin: the one keys navigate */
+    uint8_t key;                  /* the frame's one menu key, read at begin (0 = none) */
     uint8_t declared_depth;       /* deepest level declared: open parents past it are gone */
     uint8_t hover_depth;
     uint8_t click_depth;
     uint8_t fill_layer;
     uint8_t label_layer;
-    bool nav_passed;       /* the navigated level has declared the focused row */
+    bool nav_passed;       /* the focused row's level has declared it */
     bool focus_first;      /* a keyboard-opened child gives focus to its first enabled row */
     bool hover_opens;      /* hover_id is a parent */
     bool focus_seen;       /* the focused row is declared and enabled this frame */
@@ -153,9 +154,6 @@ void nt_ui_menu_end(nt_ui_menu_t *menu);
 void nt_ui_menu_open(nt_ui_menu_t *menu, float x, float y);
 
 #ifdef NT_TEST_ACCESS
-/* Pure barycentric point-in-triangle. No GL, no ctx — directly unit-tested. */
-bool nt_ui_menu_test_point_in_tri(float px, float py, float ax, float ay, float bx, float by, float cx, float cy);
-
 /* The x of the submenu edge the corridor aims at: the edge facing the apex. */
 float nt_ui_menu_test_aim_near_x(float sub_x, float sub_w, float apex_x);
 

@@ -650,6 +650,47 @@ static void test_modal_custom_zband_stride(void) {
     nt_ui_destroy_context(ctx);
 }
 
+/* ---- A stride of 1 is valid: the catcher shares the panel's band 1 and still gates the base band. ---- */
+static void test_modal_stride_one_gates_base_ui(void) {
+    nt_ui_create_desc_t desc = nt_ui_create_desc_defaults();
+    desc.modal_zband_stride = 1;
+    nt_ui_context_t *ctx = nt_ui_create_context(s_custom_arena, sizeof s_custom_arena, &desc);
+    TEST_ASSERT_NOT_NULL(ctx);
+    nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
+    st.ease_speed = 0.0F;
+    bool clicked = false;
+    for (int f = 0; f < 4; ++f) {
+        nt_pointer_t p = {.x = 20.0F, .y = 20.0F, .active = true};
+        p.buttons[NT_BUTTON_LEFT] = (nt_button_state_t){.is_down = f == 2, .is_pressed = f == 2, .is_released = f == 3};
+        ui_frame_begin(ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1, 0);
+        nt_ui_modal_begin(ctx, MODAL_A, &st, true);
+        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(20)}}}) {}
+        nt_ui_modal_end(ctx);
+        /* A game floating on the base band declared after the modal: only the catcher's band keeps it under. */
+        CLAY({.id = CLAY_ID("s1_base"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT}, .layout = {.sizing = {CLAY_SIZING_FIXED(80), CLAY_SIZING_FIXED(80)}}}) {}
+        clicked = nt_ui_step(ctx, CLAY_ID("s1_base").id, NULL).clicked || clicked;
+        nt_ui_end(ctx);
+    }
+    TEST_ASSERT_FALSE_MESSAGE(clicked, "the base UI under a stride-1 modal clicks nothing");
+    nt_ui_destroy_context(ctx);
+}
+
+/* ---- A root overlay band past int16 asserts: the second visible root overlay would overflow. ---- */
+static void test_modal_root_band_overflow_asserts(void) {
+    nt_ui_create_desc_t desc = nt_ui_create_desc_defaults();
+    desc.modal_zband_stride = (int16_t)(INT16_MAX - 8);
+    nt_ui_context_t *ctx = nt_ui_create_context(s_custom_arena, sizeof s_custom_arena, &desc);
+    TEST_ASSERT_NOT_NULL(ctx);
+    nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
+    st.ease_speed = 0.0F;
+    ui_frame_begin(ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1, 0);
+    nt_ui_modal_begin(ctx, MODAL_A, &st, true);
+    nt_ui_modal_end(ctx);
+    NT_TEST_EXPECT_ASSERT(nt_ui_modal_begin(ctx, MODAL_B, &st, true)); /* asserts before the push */
+    nt_ui_end(ctx);
+    nt_ui_destroy_context(ctx);
+}
+
 /* ---- No 0->default fallback: the default lives only in nt_ui_create_desc_defaults() (same as
  *      max_elements). A 0 stride is invalid and must fail-early at create. ---- */
 static void test_modal_zero_stride_asserts(void) {
@@ -836,5 +877,7 @@ int main(void) {
     RUN_TEST(test_modal_anim_asserts);
     RUN_TEST(test_modal_custom_zband_stride);
     RUN_TEST(test_modal_zero_stride_asserts);
+    RUN_TEST(test_modal_stride_one_gates_base_ui);
+    RUN_TEST(test_modal_root_band_overflow_asserts);
     return UNITY_END();
 }

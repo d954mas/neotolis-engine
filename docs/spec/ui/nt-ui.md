@@ -150,7 +150,8 @@ later covers an earlier one together with every level nested in it; an
 overlay nested inside another declares delta 1, so it covers its parent and
 the parent's widget parts (delta 0) declared after it. A game floating with
 its own positive `zIndex` inside an overlay can rise over that overlay's
-nested levels, as a positive `z-index` inside a CSS stacking context. A widget's own floating parts declare delta 0 and
+nested levels, as a positive `z-index` inside a CSS stacking context, and
+from `NT_UI_MODAL_MAX_DEPTH` up over every later root overlay too. A widget's own floating parts declare delta 0 and
 paint above their container's content because each is a later tree root
 of the same band, and `layer` never reorders across tree roots. A floating
 declared AFTER one of them in the same band paints over it. There is no way out
@@ -297,7 +298,9 @@ In a 2D context it also drops a capture or a pending scroll held under last
 frame's top overlay (below its catcher in the stacking order that paints and
 hit-tests; inspector panes excepted): an overlay that
 opens over a held press ends that gesture, as a modal window cancels its
-owner's capture, so the release clicks nothing and a drag or hold stops.
+owner's capture, so the release clicks nothing and a drag or hold stops. A
+text field under the top overlay loses focus the same way, as a modal
+dialog takes focus, so the overlay's keys are its own.
 Result: 1-frame IM-lag is intrinsic (current frame reads previous
 frame's bbox); no stuck input on widget disappearance.
 
@@ -353,7 +356,7 @@ nothing, its holder included, and dragging one row's control over another row ho
 container is not inside it, so a container that should hover over its gaps blocks the
 pointer itself (`nt_ui_block_pointer`; its children are declared later and still win).
 Floating children count as inside, overlays too: a combo or menu opened inside a container
-puts its full-viewport catcher or occluder inside that container, so the container reads
+puts its full-viewport catcher inside that container, so the container reads
 hovered within over the whole screen while the overlay is open (as CSS does for a fixed
 overlay inside a hovered element); a tooltip on that container shows over the open overlay. Combo rows, the combo trigger, tabs, menu rows and
 tooltips read hover within; a sidebar-consumed pointer hovers nothing, as in every query.
@@ -570,7 +573,8 @@ to the first enabled field, at the next `nt_ui_begin`: for the rest of the Tab f
 the source keeps focus, so the destination never sees that frame's keys. A press
 focuses at once, so a press and a Tab in one frame act as press, then Tab. Esc
 unfocuses and wins over a Tab in the same frame. A focused field loses focus when
-it is declared disabled or not declared for a frame. While a field is focused, the
+it is declared disabled or not declared for a frame, and when an overlay opens
+over it (see "Interaction model"). While a field is focused, the
 game may shorten its buffer but must not rewrite its content. The focused field
 declares its keyboard hint (`nt_window_set_text_input_mode`) every frame. The line
 scrolls horizontally to keep the caret visible and clips to the field's
@@ -621,9 +625,12 @@ popup, `ease_speed` 0, keeps no retained state: no tween cell, no anim slot); a 
 z-band, the frame's next root band for a root overlay and one band above its
 parent for a nested one (see "Floating zIndex is relative" above; NT_ASSERT
 before the push so a runaway nesting fails early);
-and a present-only, transparent light-dismiss catcher on the panel's band,
+and an open-only, transparent light-dismiss catcher on the panel's band,
 declared before the panel, so it lies above every earlier overlay and under
-its own panel (outside-click raises a close signal). Esc and the
+its own panel (outside-click raises a close signal). A closing popup only
+paints while it fades: its backdrop dims without taking the pointer, it does
+not claim the top, and the UI under it takes the pointer and the keys at
+once, as a closed HTML dialog does. Esc and the
 outside-click scan run on ONE CATCHER-BEARING popup per frame: the highest
 effective band, ties to the last declared. That is the panels' tree-root
 order, so the popup that paints on top is the one whose catcher wins the
@@ -636,7 +643,7 @@ The top overlay owns the pointer by stacking alone: its catcher covers every
 earlier overlay and the UI under it, so no press reaches them, and overlays
 below stay open and inert; a gesture held under it ends (see "Interaction
 model"), while one held above it (a catcher-less popup or a game floating
-declared later) goes on. The text field's Esc-unfocus is independent of both. A fully-closed
+declared later) goes on. The text field's Esc-unfocus is independent of both. A closed
 popup declares NO catcher, so the base UI stays clickable; a hover-driven
 overlay (tooltip) can clear the catcher flag entirely. Dismiss is always a
 SIGNAL the game acts on (Model D) — popup-core never owns the open bool. The
@@ -681,7 +688,8 @@ popup with a catcher, so the UI under it takes no pointer, `nt_ui_overlay_active
 reports it, and the menu reads input (keys, a pending switch, the outside
 press) only while it was on top last frame and not on the frame it opens,
 reopened included: one key has one owner, a menu opened over a modal takes
-Esc from its next frame, and a modal or popup opened over the menu takes its
+Esc from its next frame, a text field under the menu loses focus, and a
+modal or popup opened over the menu takes its
 keys and pointer while the menu stays open under it, its pending switch
 waiting and its rows registering without taking a press or focus, so a
 level still declared above that overlay (a sibling's submenu beside a
@@ -734,15 +742,20 @@ binds Esc or Enter elsewhere skips them while a menu is open:
   on a leaf does nothing.
 - Right or Enter on the focused parent opens it if needed and moves focus to its
   first enabled row in the same frame; an empty child stays open and focus stays
-  on the parent. If a sibling's child is open, the parent opens at the end of the
-  frame and focus stays on it.
+  on the parent.
 - Up and Down step over the enabled rows of the level declared this frame and
   wrap; focus leaving the open parent closes its child.
 - Left and Esc close the focused level and focus its parent; at the root they
-  close the menu.
+  close the menu, and `nt_ui_menu_begin` returns false in that frame.
 
-A frame activates at most one row, the first declared. Enter and Right act in
-the row calls; before it reads the rest of the input, `nt_ui_menu_end` reconciles the kept state with the frame: an open parent the
+A frame acts on one key, the first pressed of Esc or Left, Right, Enter, Up,
+Down. `nt_ui_menu_begin` reads it before the rows declare and applies Left and
+Esc there; Enter and Right act in the call of the row focused at begin, Up and
+Down in `nt_ui_menu_end`. Any key hands focus and the open chain to the
+keyboard, Right on a focused leaf included, so it first ends a pending switch:
+a sibling's child closes before the rows declare. A click is applied after
+the key and wins over it. A frame activates at most one row, the first
+declared. Before it reads the pointer, `nt_ui_menu_end` reconciles the kept state with the frame: an open parent the
 frame does not declare as an enabled parent closes its branch; a focused row
 its declared level lacks loses focus, so a row that returns later is not
 focused; and a popup a row opened (a dropdown, a confirm) that is on top
@@ -750,13 +763,8 @@ closes the open branch below that row, so each level keeps one open child, as
 the Dear ImGui popup stack does. With no focus, Enter does nothing, Down
 starts at the first enabled row and Up at the last. A disabled focused row keeps its place: Enter does nothing and
 Up/Down step from it. If the focused row's level has closed, keys act on the
-deepest open level, where no row is focused. Keys do nothing in a frame that
-did not declare the focused row's level, and Enter and Right nothing without a
-focused row; such a key does not end pointer mode. Any other key, Right on a
-focused leaf included, hands focus and the open chain to the keyboard, so it
-ends a pending switch. Up, Down, Left and Esc also do nothing in a frame whose
-Right or Enter moved focus into a child. A click on a parent wins over a
-same-frame Right or Enter.
+deepest open level, where no row is focused. Enter and Right without a
+focused row are no key and do not end pointer mode.
 
 A row is hovered by any pointer over it, as every `nt_ui` hover; the primary
 pointer drives the mouse-aim corridor, the end of keyboard mode and the

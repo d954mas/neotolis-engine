@@ -614,9 +614,9 @@ void nt_ui_begin(nt_ui_context_t *ctx, const nt_ui_frame_desc_t *frame) {
      * clip) leaks a slot until the pool (64) overflows -> Clay error type=7 crash. */
     Clay_UpdateScrollContainers(false, (Clay_Vector2){0.0F, 0.0F}, ctx->frame_dt);
 
-    /* The top overlay owns the pointer, held gestures included: a capture or a pending scroll under it (a
-     * press under an overlay that opened mid-gesture) ends without a click, as a modal window cancels its
-     * owner's capture. A 2D property, like the top. */
+    /* The top overlay owns the pointer and the keys: a capture or a pending scroll under it (a press under an
+     * overlay that opened mid-gesture) ends without a click, as a modal window cancels its owner's capture,
+     * and a text field under it loses focus, as a modal dialog takes focus. A 2D property, like the top. */
     const uint32_t top = ctx->overlay_top_id_prev;
     for (uint32_t i = 0; !ctx->use_raycast_input && top != 0U && i < ctx->frame_pointer_count; ++i) {
         nt_ui_capture_t *cap = &ctx->captures[i];
@@ -626,6 +626,9 @@ void nt_ui_begin(nt_ui_context_t *ctx, const nt_ui_frame_desc_t *frame) {
         if (!owned_by_top(ctx, cap->pending_scroll, top)) {
             cap->pending_scroll = 0U;
         }
+    }
+    if (!ctx->use_raycast_input && top != 0U && !owned_by_top(ctx, ctx->focused_input_id, top)) {
+        ctx->focused_input_id = 0U;
     }
 
     /* Input is decided here, from last frame's layout: the front-most record per pointer, then the

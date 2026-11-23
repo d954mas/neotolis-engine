@@ -166,8 +166,18 @@ nt_ui_popup_result_t nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t i
     /* Assert BEFORE the push — fail-early, no heap growth, no silent fallback. */
     NT_ASSERT(ctx->overlay_depth < NT_UI_MODAL_MAX_DEPTH && "nt_ui_popup_begin: nesting exceeds NT_UI_MODAL_MAX_DEPTH");
 
-    // #region stack push (shared depth counter with modal)
+    // #region z-band + stack push (shared depth counter with modal)
+    /* A root overlay takes the frame's next root band above the floating that encloses it, so a later one
+     * covers an earlier one with all its nested levels; a nested one sits a band above its parent, over the
+     * parent's widget parts (delta 0). The catcher, declared before its panel on the same band, lies
+     * between them. */
     const bool root_overlay = ctx->overlay_depth == 0U;
+    int16_t panel_z = 1;
+    if (root_overlay) {
+        const int32_t band = ctx->modal_zband_stride + ((int32_t)ctx->overlay_root_count * NT_UI_MODAL_MAX_DEPTH);
+        NT_ASSERT(band <= INT16_MAX && "nt_ui_popup: too many visible root overlays in one frame for the int16 z-band");
+        panel_z = (int16_t)band;
+    }
     ++ctx->overlay_depth;
     const uint32_t catcher_id = nt_ui_internal_popup_catcher_id(id);
     // #endregion
@@ -229,30 +239,22 @@ nt_ui_popup_result_t nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t i
     const bool light_dismiss = (style->flags & NT_UI_POPUP_LIGHT_DISMISS) != 0U;
     const bool dismiss_on_click = (ext != NULL) ? ext->dismiss_on_click : light_dismiss;
     const bool force_catcher = (ext != NULL) && ext->force_catcher;
-    /* A fully-closed popup (!open && settled) declares NO catcher: the occluder would otherwise gate the
-     * whole viewport every frame the helper runs, making base UI unclickable (present-only guard). The
-     * catcher carries the dismiss source and/or the visible backdrop and/or an inert input gate. */
+    /* The catcher carries the dismiss source and/or the visible backdrop and/or an inert input gate. */
     const bool present = open || (t > NT_UI_POPUP_EPSILON);
     if (tw != NULL) {
         tw->was_present = present ? 1U : 0U; /* remember for next frame's open-edge seed gate */
     }
-    /* A root overlay takes the frame's next root band above the floating that encloses it, so a later one
-     * covers an earlier one with all its nested levels; a nested one sits a band above its parent, over the
-     * parent's widget parts (delta 0). The catcher, declared before its panel on the same band, lies
-     * between them. A hidden popup paints nothing and takes no band. */
-    int16_t panel_z = 1;
-    if (root_overlay) {
-        const int32_t band = ctx->modal_zband_stride + ((int32_t)ctx->overlay_root_count * NT_UI_MODAL_MAX_DEPTH);
-        NT_ASSERT(band <= INT16_MAX && "nt_ui_popup: too many visible root overlays in one frame for the int16 z-band");
-        panel_z = (int16_t)band;
-        ctx->overlay_root_count += present ? 1U : 0U;
+    if (root_overlay && present) {
+        ++ctx->overlay_root_count; /* a hidden popup paints nothing and takes no band */
     }
-    const bool want_catcher = present && (dismiss_on_click || has_backdrop || force_catcher);
+    /* An open popup's catcher gates the UI under it and claims the top; a closing one only paints its fading
+     * backdrop, so the UI under it takes the pointer and the keys at once, as a closed HTML dialog does. */
+    const bool want_catcher = open && (dismiss_on_click || has_backdrop || force_catcher);
     nt_ui_popup_close_src_t close_src = NT_UI_POPUP_CLOSE_SRC_NONE;
     /* Only a catcher-bearing popup gates base UI, so only it claims the top (and nt_ui_overlay_active). A
      * catcher-less popup (e.g. a tooltip, flags=0) is visible but must NOT steal the top from a coexisting
      * dropdown. */
-    if (want_catcher) {
+    if (want_catcher || (present && has_backdrop)) {
         /* Full-viewport catcher on the panel's band. Transparent for a plain popup; a visible dim rect when a
          * backdrop color is given (alpha rides t*backdrop_alpha exactly once — folding t into element
          * opacity too would dim t²). It wins next-frame topmost-z, gating click-through to base UI. */
@@ -270,6 +272,8 @@ nt_ui_popup_result_t nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t i
             .backgroundColor = cc_col,
             .userData = (void *)catcher_data,
         }) {}
+    }
+    if (want_catcher) {
         /* Close-scan on the TOP popup only (1-frame IM lag). Esc fires first; otherwise an outside-click
          * beyond the panel grown by close_pad dismisses (a click on the panel body is the body's own).
          * A catcher that neither dismisses nor escapes stays an inert block_pointer input gate. */

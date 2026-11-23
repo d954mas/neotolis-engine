@@ -500,10 +500,12 @@ static void test_popup_top_id_follows_band(void) {
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(POP_B, s_fx.ctx->overlay_top_id_prev, "the top-band claim must reset per frame, not stick to the highest band ever seen");
 }
 
-/* ---- Two catcher-bearing popups on ONE band: whoever owns the close-scan slot must also be the one
- *      the pointer hands the click to. The slot is picked by band with ties to the last declared, which
- *      is the pointer arbiter's own key — ranking the slot by draw layer instead left the scan with a
- *      popup whose catcher never won the click, and NEITHER overlay dismissed. ---- */
+/* ---- Two catcher-bearing popups on ONE band (siblings nested in one parent): whoever owns the close-scan
+ *      slot must also be the one the pointer hands the click to. The slot is picked by band with ties to the
+ *      last declared, which is the pointer arbiter's own key — ranking the slot by draw layer instead left
+ *      the scan with a popup whose catcher never won the click, and NEITHER overlay dismissed. ---- */
+#define POP_TIE_PARENT 0x50A0F0U
+
 static void test_popup_dismiss_survives_a_band_tie(void) {
     nt_ui_popup_style_t hi = nt_ui_popup_style_defaults();
     hi.ease_speed = 0.0F;
@@ -519,6 +521,7 @@ static void test_popup_dismiss_survives_a_band_tie(void) {
         const bool releasing = (frame == 2);
         nt_pointer_t p = pointer_at(700.0F, 500.0F, pressing, pressing, releasing);
         nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = &p, .pointer_count = 1});
+        (void)nt_ui_popup_begin(s_fx.ctx, POP_TIE_PARENT, &lo, &(nt_ui_popup_anchor_t){.x = 20.0F, .y = 20.0F, .prefer_side = NT_UI_POPUP_BELOW}, true);
         (void)nt_ui_popup_begin_internal(s_fx.ctx, POP_A, &hi, &anc, true, NULL, &src_a);
         /* Sized bodies: with 0x0 panels "the click landed outside" would be true even if the panel
          * vanished, and the test could not tell the two apart. */
@@ -527,10 +530,47 @@ static void test_popup_dismiss_survives_a_band_tie(void) {
         (void)nt_ui_popup_begin_internal(s_fx.ctx, POP_B, &lo, &anc, true, NULL, &src_b); /* same band, declared last -> owns the slot */
         CLAY({.id = CLAY_ID("tie_b"), .layout = {.sizing = {CLAY_SIZING_FIXED(POP_W), CLAY_SIZING_FIXED(POP_H)}}}) {}
         nt_ui_popup_end(s_fx.ctx);
+        nt_ui_popup_end(s_fx.ctx);
         nt_ui_end(s_fx.ctx);
     }
     TEST_ASSERT_EQUAL_INT_MESSAGE(NT_UI_POPUP_CLOSE_SRC_DISMISS, src_b, "the popup holding the close-scan slot must receive the outside click");
     TEST_ASSERT_EQUAL_INT_MESSAGE(NT_UI_POPUP_CLOSE_SRC_NONE, src_a, "the other popup stays an inert gate");
+    TEST_ASSERT_EQUAL_UINT32(POP_B, s_fx.ctx->overlay_top_id_prev);
+}
+
+#define POP_BASE_BOX 0x50A0B9U
+
+/* One frame: a stepped box in the base UI, then an eased popup elsewhere; returns the box's click and the
+ * popup's result. */
+static bool closing_popup_frame(nt_pointer_t p, bool open, nt_ui_popup_result_t *r) {
+    nt_ui_popup_style_t st = nt_ui_popup_style_defaults();
+    st.ease_speed = 8.0F;
+    const nt_ui_popup_anchor_t anc = {.x = 500.0F, .y = 350.0F, .prefer_side = NT_UI_POPUP_BELOW};
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = &p, .pointer_count = 1});
+    CLAY({.id = (Clay_ElementId){.id = POP_BASE_BOX}, .layout = {.sizing = {CLAY_SIZING_FIXED(POP_W), CLAY_SIZING_FIXED(POP_H)}}}) {}
+    const bool clicked = nt_ui_step(s_fx.ctx, POP_BASE_BOX, NULL).clicked;
+    *r = nt_ui_popup_begin(s_fx.ctx, POP_A, &st, &anc, open);
+    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(POP_W), CLAY_SIZING_FIXED(POP_H)}}}) {}
+    nt_ui_popup_end(s_fx.ctx);
+    nt_ui_end(s_fx.ctx);
+    return clicked;
+}
+
+/* ---- A closing popup only paints while it fades: it is not the top overlay and the UI under it takes the
+ *      pointer again. ---- */
+static void test_popup_closing_overlay_only_paints(void) {
+    nt_ui_popup_result_t r = {0};
+    const nt_pointer_t idle = pointer_at(POP_W * 0.5F, POP_H * 0.5F, false, false, false);
+    for (int f = 0; f < 3; ++f) {
+        (void)closing_popup_frame(idle, true, &r);
+    }
+    TEST_ASSERT_EQUAL_UINT32(POP_A, s_fx.ctx->overlay_top_id_prev);
+    (void)closing_popup_frame(idle, false, &r);
+    bool clicked = closing_popup_frame(pointer_at(POP_W * 0.5F, POP_H * 0.5F, true, true, false), false, &r);
+    clicked = closing_popup_frame(pointer_at(POP_W * 0.5F, POP_H * 0.5F, false, false, true), false, &r) || clicked;
+    TEST_ASSERT_TRUE_MESSAGE(r.visible, "the popup still fades");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, s_fx.ctx->overlay_top_id_prev, "a closing popup is not the top overlay");
+    TEST_ASSERT_TRUE_MESSAGE(clicked, "the UI under a closing popup takes the pointer");
 }
 
 #define POP_A_BOX 0x50A0B1U
@@ -765,6 +805,7 @@ int main(void) {
     RUN_TEST(test_popup_zband_and_nesting);
     RUN_TEST(test_popup_top_id_follows_band);
     RUN_TEST(test_popup_dismiss_survives_a_band_tie);
+    RUN_TEST(test_popup_closing_overlay_only_paints);
     RUN_TEST(test_popup_depth_overflow_asserts);
     RUN_TEST(test_popup_present_only_catcher);
     RUN_TEST(test_popup_closed_does_not_block_base);

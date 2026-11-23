@@ -21,6 +21,7 @@
 #include "ui/nt_ui.h"
 #include "ui/nt_ui_debug_hit_zones.h"
 #include "ui/nt_ui_internal.h"
+#include "ui/nt_ui_popup.h"
 #include "ui/nt_ui_scroll.h"
 #include "unity.h"
 
@@ -318,6 +319,30 @@ static void test_nearer_panel_beats_later_declared(void) {
 #endif
 }
 
+/* ---- A 3D ctx does not rank overlays by band, so a popup opening over a held press leaves its capture. ---- */
+static void test_popup_over_a_held_press_keeps_the_3d_capture(void) {
+    nt_ui_popup_style_t st = nt_ui_popup_style_defaults();
+    st.ease_speed = 0.0F;
+    const nt_ui_popup_anchor_t anc = {.x = 500.0F, .y = 400.0F, .prefer_side = NT_UI_POPUP_BELOW};
+    float vp[16];
+    make_ortho_clay_y_down(vp);
+    const uint32_t id = nt_ui_id("hit3d");
+    for (int f = 0; f < 5; ++f) {
+        nt_pointer_t p = {.x = BBOX_X + 20.0F, .y = BBOX_Y + 20.0F, .active = true};
+        p.buttons[NT_BUTTON_LEFT] = (nt_button_state_t){.is_down = f >= 2, .is_pressed = f == 2};
+        nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = SCREEN_W, .layout_h = SCREEN_H, .pointers = &p, .pointer_count = 1, .view_proj = vp});
+        CLAY({.id = CLAY_ID("hit3d"),
+              .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = BBOX_X, .y = BBOX_Y}},
+              .layout = {.sizing = {CLAY_SIZING_FIXED(BBOX_W), CLAY_SIZING_FIXED(BBOX_H)}}}){}(void)nt_ui_step(s_fx.ctx, id, NULL);
+        if (f >= 3) {
+            (void)nt_ui_popup_begin(s_fx.ctx, 0x3D0001U, &st, &anc, true);
+            nt_ui_popup_end(s_fx.ctx);
+        }
+        nt_ui_end(s_fx.ctx);
+    }
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(id, s_fx.ctx->captures[0].active_id, "the 3D press under a new overlay keeps its capture");
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_coplanar_row_beats_its_scroll_surface);
@@ -330,5 +355,6 @@ int main(void) {
     RUN_TEST(test_raycast_hit_perspective);
     RUN_TEST(test_occlusion_blocks_widget_beyond_cutoff);
     RUN_TEST(test_occlusion_allows_widget_within_cutoff);
+    RUN_TEST(test_popup_over_a_held_press_keeps_the_3d_capture);
     return UNITY_END();
 }

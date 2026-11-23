@@ -624,8 +624,8 @@ void nt_ui_block_pointer(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lr
 /* True when a pointer of the last frame holds a capture or a pending scroll gesture, or is over a widget. */
 bool nt_ui_wants_pointer(const nt_ui_context_t *ctx);
 
-/* True if an overlay that captures input (a popup with a catcher: a modal, an open menu or dropdown) was up
- * last frame. The game gates its keyboard and gameplay hotkeys on it; the catcher already keeps the pointer
+/* True if an overlay that captures input (a popup with a catcher: a modal, an open menu or dropdown) was open
+ * last frame; one fading out after its close does not count. The game gates its keyboard and gameplay hotkeys on it; the catcher already keeps the pointer
  * off the UI under the overlay. */
 bool nt_ui_overlay_active(const nt_ui_context_t *ctx);
 
