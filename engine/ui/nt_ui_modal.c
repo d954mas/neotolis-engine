@@ -11,7 +11,7 @@
 #include "ui/nt_ui_popup_internal.h"
 
 /* The modal is a thin composition over popup-core: popup-core owns the z-band push, the
- * value_t tween, the present-only catcher/occluder, the close-scan, and the panel floating decl. The
+ * value_t tween, the open-only catcher, the close-scan, and the panel floating decl. The
  * modal adds only the modal-specific surface — the typed anim recipe (scale-pop / slide / fade), the
  * centered placement, the dim backdrop color, and the Esc/backdrop close-reason mapping. The shared
  * depth/z-band machinery lives in exactly one place (no copy-paste of the occluder/z-band). */

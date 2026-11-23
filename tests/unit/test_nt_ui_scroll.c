@@ -2363,6 +2363,47 @@ static void test_arb_overlay_takes_the_wheel(void) {
     TEST_ASSERT_TRUE_MESSAGE(float_near(arb_list()->pos[1], before, 0.001F), "the list under the overlay takes no wheel");
 }
 
+#define INERT_LIST_POPUP 0x5C0A11U
+#define INERT_LIST 0x5C0A12U
+
+/* One frame: an eased popup at (300,100) holding a 200x200 list over 1000 px of content. */
+static void inert_list_frame(const nt_pointer_t *p, bool open) {
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .dt = 1.0F / 60.0F, .pointers = p, .pointer_count = 1});
+    nt_ui_popup_style_t ps = nt_ui_popup_style_defaults();
+    ps.ease_speed = 8.0F;
+    const nt_ui_popup_anchor_t anc = {.x = 300.0F, .y = 100.0F, .prefer_side = NT_UI_POPUP_BELOW};
+    bool o = open;
+    if (nt_ui_popup_begin(s_fx.ctx, INERT_LIST_POPUP, &ps, &anc, &o, NULL)) {
+        nt_ui_scroll_begin(s_fx.ctx, NULL, INERT_LIST, &s_scene.style, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(200)}}});
+        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(1000)}}}) {}
+        nt_ui_scroll_end(s_fx.ctx);
+        nt_ui_popup_end(s_fx.ctx);
+    }
+    nt_ui_end(s_fx.ctx);
+}
+
+/* A scroll inside a popup that starts closing drops the gesture it holds: the list stays where it is. */
+static void test_arb_closing_popup_drops_its_scroll_gesture(void) {
+    nt_pointer_t p = arb_pointer(400.0F, 200.0F);
+    for (int f = 0; f < 90; ++f) {
+        inert_list_frame(&p, true);
+    }
+    arb_press(&p);
+    inert_list_frame(&p, true);
+    TEST_ASSERT_EQUAL_UINT32(INERT_LIST, s_fx.ctx->captures[0].pending_scroll);
+    arb_hold(&p);
+    inert_list_frame(&p, false);
+    const nt_ui_scroll_state_t *s = (const nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, INERT_LIST);
+    const float before = s->raw[1];
+    for (int f = 0; f < 4; ++f) {
+        p.y -= 30.0F;
+        inert_list_frame(&p, false);
+    }
+    TEST_ASSERT_EQUAL_UINT32(0U, s_fx.ctx->captures[0].pending_scroll);
+    TEST_ASSERT_EQUAL_UINT32(0U, s_fx.ctx->captures[0].active_id);
+    TEST_ASSERT_TRUE_MESSAGE(float_near(s->raw[1], before, 0.001F), "the list in a closing popup takes no drag");
+}
+
 /* A tap below the slop on a row inside a list clicks it and leaves the list at rest. */
 static void test_arb_tap_below_slop_clicks(void) {
     s_scene.body = body_button_row;
@@ -3095,6 +3136,7 @@ int main(void) {
     RUN_TEST(test_arb_equal_crossings_go_to_the_widget_then_the_inner_scroll);
     RUN_TEST(test_arb_overlay_ends_a_pending_scroll);
     RUN_TEST(test_arb_overlay_takes_the_wheel);
+    RUN_TEST(test_arb_closing_popup_drops_its_scroll_gesture);
     RUN_TEST(test_arb_vanished_scroll_takes_nothing);
     RUN_TEST(test_arb_tap_gesture_does_not_outlive_its_frame);
     RUN_TEST(test_arb_thumb_over_row_takes_the_thumb);

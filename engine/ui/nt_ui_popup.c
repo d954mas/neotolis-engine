@@ -25,7 +25,6 @@ const nt_ui_widget_def_t NT_UI_POPUP_DEF = {
  * (which would re-seed every frame and flicker the eased open). */
 #define NT_UI_POPUP_TWEEN_SALT 0x500B7E00U
 static inline uint32_t popup_tween_id(uint32_t id) { return nt_ui_derived_id(id, NT_UI_POPUP_TWEEN_SALT); }
-#define NT_UI_POPUP_BLOCKER_SALT 0x500B10C0U /* a closing panel's pointer blocker */
 
 /* Persisted across frames in the state pool (zeroed on create -> was_present starts false). */
 typedef struct {
@@ -217,7 +216,7 @@ bool nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t id, const nt_ui_p
     const nt_ui_anim_interaction_t *a = nt_ui_anim(ctx, id, &tgt, 0.0F, style->ease_speed);
     const float t = a->value_t;
     // #endregion
-    // #region edge-flip side + catcher/backdrop (present-only) + close-scan
+    // #region edge-flip side + catcher/backdrop (open only) + close-scan
     const float screen_w = nt_ui_clay_priv_layout_width(ctx->clay);
     const float screen_h = nt_ui_clay_priv_layout_height(ctx->clay);
     const nt_ui_popup_side_t side = popup_resolve_side(ctx, id, anchor, screen_w, screen_h);
@@ -254,15 +253,16 @@ bool nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t id, const nt_ui_p
     int16_t panel_z = 1;
     if (root_overlay) {
         const int32_t band = ctx->modal_zband_stride + ((int32_t)ctx->overlay_root_count * NT_UI_MODAL_MAX_DEPTH);
-        NT_ASSERT(band <= INT16_MAX && "nt_ui_popup: too many visible root overlays in one frame for the int16 z-band");
+        NT_ASSERT(band + NT_UI_MODAL_MAX_DEPTH - 1 <= INT16_MAX && "nt_ui_popup: a root overlay's nested levels would pass the int16 z-band");
         panel_z = (int16_t)band;
         ++ctx->overlay_root_count;
     }
     ++ctx->overlay_depth;
     // #endregion
-    /* An open popup's catcher gates the UI under it and claims the top; a closing one only paints its fading
-     * backdrop, so the UI under it takes the pointer and the keys at once, as a closed HTML dialog does. */
-    const bool want_catcher = open && (dismiss_on_click || has_backdrop || force_catcher);
+    /* Only an open popup outside an inert subtree gates the UI under it with its catcher and claims the top;
+     * otherwise it is inert and only paints, its backdrop included (spec: "Input ownership"). */
+    const bool inert_parent = ctx->inert_from != 0U;
+    const bool want_catcher = open && !inert_parent && (dismiss_on_click || has_backdrop || force_catcher);
     nt_ui_popup_close_src_t close_src = NT_UI_POPUP_CLOSE_SRC_NONE;
     /* Only a catcher-bearing popup gates base UI, so only it claims the top (and nt_ui_overlay_active). A
      * catcher-less popup (e.g. a tooltip, flags=0) is visible but must NOT steal the top from a coexisting
@@ -291,7 +291,7 @@ bool nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t id, const nt_ui_p
          * beyond the panel grown by close_pad dismisses (a click on the panel body is the body's own).
          * A catcher that neither dismisses nor escapes stays an inert block_pointer input gate. */
         const bool is_top = (ctx->overlay_top_id_prev == id);
-        if (is_top && esc_close && nt_input_key_is_pressed(NT_KEY_ESCAPE)) {
+        if (is_top && esc_close && ctx->focused_input_id == 0U && nt_input_key_is_pressed(NT_KEY_ESCAPE)) { /* a focused field takes Esc first */
             close_src = NT_UI_POPUP_CLOSE_SRC_ESC;
         }
         if (is_top && dismiss_on_click) {
@@ -329,19 +329,13 @@ bool nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t id, const nt_ui_p
     /* A catcher on the base band loses the hit arbitration and silently stops gating while
      * nt_ui_overlay_active() still reports the overlay up. */
     NT_ASSERT((!want_catcher || panel_band > 0) && "nt_ui_popup: the catcher must sit above the base band (0)");
-    if (want_catcher && panel_band >= ctx->overlay_top_z_cur) {
+    const bool live = open && close_src == NT_UI_POPUP_CLOSE_SRC_NONE;
+    if (want_catcher && live && panel_band >= ctx->overlay_top_z_cur) {
         ctx->overlay_top_z_cur = panel_band;
         ctx->overlay_top_id_cur = id;
     }
-    /* A closing popup only paints its fade, as Flutter's popping route ignores the pointer: a blocker a band
-     * above its content takes the pointer, and a field inside it loses focus. */
-    if (!open && present) {
-        const uint32_t blocker_id = nt_ui_derived_id(id, NT_UI_POPUP_BLOCKER_SALT);
-        CLAY({.id = (Clay_ElementId){.id = blocker_id}, .floating = {.attachTo = CLAY_ATTACH_TO_PARENT, .zIndex = 1}, .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}}}) {}
-        nt_ui_block_pointer(ctx, blocker_id, NULL);
-        if (ctx->focused_input_id != 0U && nt_ui_internal_declared_within(ctx, ctx->focused_input_id, id)) {
-            ctx->focused_input_id = 0U;
-        }
+    if (!live && !inert_parent) {
+        ctx->inert_from = ctx->overlay_depth; /* its body, nested popups included, is inert */
     }
     // #endregion
 
@@ -366,6 +360,9 @@ void nt_ui_popup_end(nt_ui_context_t *ctx) {
     NT_ASSERT(ctx->in_frame && ctx == nt_ui_internal_get_inframe_ctx() && "nt_ui_popup_end: must be called between nt_ui_begin and nt_ui_end on the active ctx");
     NT_ASSERT(ctx->overlay_depth > 0U && "nt_ui_popup_end: unbalanced begin/end (stack underflow)");
     nt_ui_clay_priv_close_element();
+    if (ctx->inert_from == ctx->overlay_depth) {
+        ctx->inert_from = 0U; /* the inert popup's subtree ends */
+    }
     --ctx->overlay_depth;
 }
 

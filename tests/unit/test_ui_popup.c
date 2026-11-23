@@ -865,6 +865,98 @@ static void test_popup_closing_content_takes_no_tap(void) {
     TEST_ASSERT_FALSE_MESSAGE(clicked, "a closing popup's content takes no tap");
 }
 
+#define INERT_POPUP 0x50A0C1U
+#define INERT_NESTED 0x50A0C2U
+#define INERT_BUTTON 0x50A0C3U
+#define INERT_BASE 0x50A0C4U
+
+typedef struct {
+    bool visible;        /* the eased popup shows */
+    bool button_clicked; /* the button inside it */
+    bool base_clicked;   /* the base floating under its panel */
+} inert_frame_t;
+
+/* One frame: a base floating on band 0 at the panel's place, then an eased popup holding a stepped button
+ * and, when `nested`, an open snap popup with a catcher inside it. */
+static inert_frame_t inert_frame(nt_pointer_t p, bool open, bool nested) {
+    inert_frame_t out = {0};
+    nt_ui_popup_style_t st = nt_ui_popup_style_defaults();
+    st.ease_speed = 8.0F;
+    const nt_ui_popup_anchor_t anc = {.x = 300.0F, .y = 200.0F, .prefer_side = NT_UI_POPUP_BELOW};
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = &p, .pointer_count = 1});
+    CLAY({.id = (Clay_ElementId){.id = INERT_BASE},
+          .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = 300.0F, .y = 200.0F}},
+          .layout = {.sizing = {CLAY_SIZING_FIXED(POP_W), CLAY_SIZING_FIXED(POP_H)}}}) {}
+    out.base_clicked = nt_ui_step(s_fx.ctx, INERT_BASE, NULL).clicked;
+    bool o = open;
+    out.visible = nt_ui_popup_begin(s_fx.ctx, INERT_POPUP, &st, &anc, &o, NULL);
+    if (out.visible) {
+        nt_ui_block_pointer(s_fx.ctx, INERT_POPUP, NULL); /* the panel blocks the pointer, as a menu level does */
+        CLAY({.id = (Clay_ElementId){.id = INERT_BUTTON}, .layout = {.sizing = {CLAY_SIZING_FIXED(POP_W), CLAY_SIZING_FIXED(POP_H)}}}) {}
+        out.button_clicked = nt_ui_step(s_fx.ctx, INERT_BUTTON, NULL).clicked;
+        if (nested) {
+            nt_ui_popup_style_t ns = nt_ui_popup_style_defaults();
+            ns.ease_speed = 0.0F;
+            const nt_ui_popup_anchor_t na = {.x = 600.0F, .y = 450.0F, .prefer_side = NT_UI_POPUP_BELOW};
+            bool nested_open = true;
+            if (nt_ui_popup_begin(s_fx.ctx, INERT_NESTED, &ns, &na, &nested_open, NULL)) {
+                CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(20)}}}) {}
+                nt_ui_popup_end(s_fx.ctx);
+            }
+        }
+        nt_ui_popup_end(s_fx.ctx);
+    }
+    nt_ui_end(s_fx.ctx);
+    return out;
+}
+
+static void inert_open_fully(bool nested) {
+    for (int f = 0; f < 90; ++f) {
+        (void)inert_frame(pointer_at(5.0F, 5.0F, false, false, false), true, nested);
+    }
+}
+
+/* ---- A press held on a button when its popup starts closing ends without a click. ---- */
+static void test_popup_closing_ends_a_held_press(void) {
+    inert_open_fully(false);
+    const nt_ui_bbox_t bb = nt_ui_get_bbox(s_fx.ctx, INERT_BUTTON);
+    TEST_ASSERT_TRUE(bb.found);
+    const float x = bb.x + 5.0F;
+    const float y = bb.y + 5.0F;
+    (void)inert_frame(pointer_at(x, y, true, true, false), true, false);
+    (void)inert_frame(pointer_at(x, y, true, false, false), true, false);
+    bool clicked = inert_frame(pointer_at(x, y, true, false, false), false, false).button_clicked;
+    const inert_frame_t r = inert_frame(pointer_at(x, y, false, false, true), false, false);
+    TEST_ASSERT_TRUE_MESSAGE(r.visible, "the popup still fades");
+    TEST_ASSERT_FALSE_MESSAGE(clicked || r.button_clicked, "the release over a closing popup's button clicks nothing");
+}
+
+/* ---- The UI under a closing popup's panel takes a new press: the inert panel makes no record. ---- */
+static void test_popup_closing_panel_lets_the_pointer_through(void) {
+    inert_open_fully(false);
+    (void)inert_frame(pointer_at(5.0F, 5.0F, false, false, false), false, false);
+    (void)inert_frame(pointer_at(5.0F, 5.0F, false, false, false), false, false);
+    nt_pointer_t tap = pointer_at(300.0F + 5.0F, 200.0F + 5.0F, false, true, true);
+    tap.type = NT_POINTER_TOUCH;
+    const inert_frame_t r = inert_frame(tap, false, false);
+    TEST_ASSERT_TRUE_MESSAGE(r.visible, "the popup still fades");
+    TEST_ASSERT_TRUE_MESSAGE(r.base_clicked, "the base under the closing panel takes the tap");
+}
+
+/* ---- A popup left open inside a closing one is inert too: no catcher, no top. ---- */
+static void test_popup_nested_in_a_closing_parent_is_inert(void) {
+    inert_open_fully(true);
+    TEST_ASSERT_EQUAL_UINT32(INERT_NESTED, s_fx.ctx->overlay_top_id_prev);
+    (void)inert_frame(pointer_at(5.0F, 5.0F, false, false, false), false, true);
+    (void)inert_frame(pointer_at(5.0F, 5.0F, false, false, false), false, true);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, s_fx.ctx->overlay_top_id_prev, "a nested popup in a closing parent claims no top");
+    nt_pointer_t tap = pointer_at(300.0F + 5.0F, 200.0F + 5.0F, false, true, true);
+    tap.type = NT_POINTER_TOUCH;
+    const inert_frame_t r = inert_frame(tap, false, true);
+    TEST_ASSERT_TRUE(r.visible);
+    TEST_ASSERT_TRUE_MESSAGE(r.base_clicked, "the nested popup's catcher gates nothing");
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_popup_abi_sizes);
@@ -875,6 +967,9 @@ int main(void) {
     RUN_TEST(test_popup_dismiss_survives_a_band_tie);
     RUN_TEST(test_popup_closing_overlay_only_paints);
     RUN_TEST(test_popup_closing_content_takes_no_tap);
+    RUN_TEST(test_popup_closing_ends_a_held_press);
+    RUN_TEST(test_popup_closing_panel_lets_the_pointer_through);
+    RUN_TEST(test_popup_nested_in_a_closing_parent_is_inert);
     RUN_TEST(test_popup_depth_overflow_asserts);
     RUN_TEST(test_popup_present_only_catcher);
     RUN_TEST(test_popup_closed_does_not_block_base);

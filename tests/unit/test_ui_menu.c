@@ -2358,6 +2358,20 @@ static void test_menu_outside_press_closes_before_the_rows(void) {
     TEST_ASSERT_FALSE_MESSAGE(menu_level_found(0U), "the press frame declares no level");
 }
 
+/* ---- An open menu the game skipped for a frame asserts when declared again. ---- */
+static void test_menu_skipped_while_open_asserts(void) {
+    nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
+    nt_ui_menu_t st = {0};
+    nt_ui_menu_open(&st, 120.0F, 80.0F);
+    menu_im_frame(&st, &style, 0.0F, 0.0F);
+    menu_im_frame(&st, &style, 0.0F, 0.0F);
+    menu_frame_begin(&(nt_pointer_t){.active = true}); /* a frame without the menu */
+    nt_ui_end(s_fx.ctx);
+    menu_frame_begin(&(nt_pointer_t){.active = true});
+    NT_TEST_EXPECT_ASSERT((void)nt_ui_menu_begin(&st, s_fx.ctx, NULL, 0U, MENU_A, &style));
+    nt_ui_end(s_fx.ctx);
+}
+
 /* ---- A tap on one parent and Right on a later focused parent in one frame, with a third parent's child
  *      pending: the tap opens its parent. ---- */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -2687,6 +2701,7 @@ int main(void) {
     RUN_TEST(test_menu_row_popup_closes_deeper_levels);
     RUN_TEST(test_menu_row_popup_closes_the_branch_before_the_rows);
     RUN_TEST(test_menu_outside_press_closes_before_the_rows);
+    RUN_TEST(test_menu_skipped_while_open_asserts);
     RUN_TEST(test_menu_click_beats_a_same_frame_key);
     RUN_TEST(test_menu_instant_rows_take_no_anim_slot);
     RUN_TEST(test_menu_keeps_no_state_cells);

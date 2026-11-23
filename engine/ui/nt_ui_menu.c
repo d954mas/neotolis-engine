@@ -471,6 +471,8 @@ bool nt_ui_menu_begin(nt_ui_menu_t *menu, nt_ui_context_t *ctx, const nt_ui_elem
     if (!menu->open) {
         return false;
     }
+    /* Its kept navigation is only valid for a menu declared every frame. */
+    NT_ASSERT((menu->arming || nt_ui_get_bbox(ctx, menu_level_id(menu_id, 0U)).found) && "nt_ui_menu_begin: an open menu is declared every frame; clear open to stop declaring it");
     uint8_t key = MENU_KEY_NONE;
     if (!menu_frame_input(menu, ctx, menu_id, &key)) {
         menu->open = false;

@@ -541,6 +541,7 @@ void nt_ui_begin(nt_ui_context_t *ctx, const nt_ui_frame_desc_t *frame) {
     ctx->last_press_age += dt;
     ctx->overlay_depth = 0U; /* modal begin++/end-- balance across the frame (asserted == 0 at end) */
     ctx->overlay_root_count = 0U;
+    ctx->inert_from = 0U;
     /* Commit last frame's top overlay as the close-scan target (1-frame IM lag), then reset. */
     ctx->overlay_top_id_prev = ctx->overlay_top_id_cur;
     ctx->overlay_top_id_cur = 0U;
@@ -2731,6 +2732,9 @@ nt_ui_interaction_t nt_ui_step(nt_ui_context_t *ctx, uint32_t id, const nt_ui_st
     NT_ASSERT(!nt_ui_state_has_tag(ctx, id, NT_UI_SCROLL_TAG) && "nt_ui_step: a scroll's own id is its surface, not a widget (step a child id)");
 #endif
 
+    if (ctx->inert_from != 0U) {
+        return (nt_ui_interaction_t){0}; /* inert: no capture kept, so a held press ends without a click */
+    }
     bool owner_over = false;
     nt_ui_widget_pidx_state_t s;
     nt_ui_interaction_t out = query_interaction_padded(ctx, id, pad_lrtb, &owner_over, &s);
@@ -2861,6 +2865,9 @@ void nt_ui_block_pointer(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lr
 
 /* One record per declared element at most: a full registry is a widget stepped twice per frame. */
 void nt_ui_internal_register_interactive(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lrtb[4]) {
+    if (ctx->inert_from != 0U) {
+        return; /* inert: no record, the pointer passes through to what lies under */
+    }
     NT_ASSERT(ctx->interactive_cur_count < ctx->max_elements && "nt_ui: interactive registry full (a widget stepped twice per frame?)");
     nt_ui_interactive_t *rec = &ctx->interactive_cur[ctx->interactive_cur_count++];
     rec->id = id;

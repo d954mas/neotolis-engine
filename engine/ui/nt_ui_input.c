@@ -646,6 +646,9 @@ static bool input_focus_edge(nt_ui_input_state_t *st, const nt_ui_interaction_t 
     return in->clicked && st->tap_focus != 0U; /* the tap's release: a scroll that took the press gives no click */
 }
 
+/* A field inside an inert subtree (a closing popup) takes the disabled path for input but keeps its look. */
+static bool input_live(const nt_ui_context_t *ctx, const input_frame_t *f) { return f->enabled && ctx->inert_from == 0U; }
+
 /* focus-order bookkeeping (Tab wrap) + the single mutating interaction step + focus capture / drag.
  * Resolves f->st, f->in, f->bb, f->focused for the rest of the frame. */
 static void focus_step(input_frame_t *f) {
@@ -656,8 +659,9 @@ static void focus_step(input_frame_t *f) {
     const nt_ui_input_style_t *style = f->style;
 
     // #region Tab bookkeeping (wrap + next-field target)
-    /* Only a field the top overlay owns is a Tab stop, so Tab wraps inside a modal, as an HTML modal dialog. */
-    const bool tab_stop = f->enabled && nt_ui_internal_owned_by_top(ctx, id);
+    /* Only an owned live field is a Tab stop, so Tab wraps inside a modal, as an HTML modal dialog. */
+    const bool enabled = input_live(ctx, f);
+    const bool tab_stop = enabled && nt_ui_internal_owned_by_top(ctx, id);
     if (tab_stop && ctx->focus_first_id == 0U) {
         ctx->focus_first_id = id;
     }
@@ -668,7 +672,6 @@ static void focus_step(input_frame_t *f) {
     // #endregion
 
     // #region interaction + focus capture
-    const bool enabled = f->enabled;
     const uint32_t cur_len = f->cur_len;
     nt_font_t font = f->font;
     nt_ui_input_state_t *st = (nt_ui_input_state_t *)nt_ui_state(ctx, input_state_id(id), (uint32_t)sizeof(nt_ui_input_state_t), NT_UI_STATE_TAG('i', 'n', 'p', 't'));

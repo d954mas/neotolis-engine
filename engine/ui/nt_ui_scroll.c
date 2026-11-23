@@ -787,6 +787,15 @@ void nt_ui_scroll_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
         NT_ASSERT(decl->userData == NULL && "nt_ui_scroll_begin: decl->userData must be NULL (data param controls)");
     }
 
+    for (uint32_t i = 0; ctx->inert_from != 0U && i < ctx->frame_pointer_count; ++i) {
+        /* Inert: the scroll drops the gesture it holds; with no record it takes no new one. */
+        if (ctx->captures[i].active_id == id) {
+            ctx->captures[i].active_id = 0U;
+        }
+        if (ctx->captures[i].pending_scroll == id) {
+            ctx->captures[i].pending_scroll = 0U;
+        }
+    }
     const bool fresh_state = nt_ui_state_find(ctx, id) == NULL;
     nt_ui_scroll_state_t *s = nt_ui_state(ctx, id, (uint32_t)sizeof *s, NT_UI_SCROLL_TAG);
     NT_ASSERT(s != NULL && "nt_ui_scroll_begin: state pool returned NULL");

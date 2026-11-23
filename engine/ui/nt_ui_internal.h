@@ -244,6 +244,10 @@ struct nt_ui_context {
      * earlier one with all its nested levels. Reset by nt_ui_begin, like overlay_depth. */
     uint16_t overlay_root_count;
     uint8_t overlay_depth;
+    /* Overlay depth of the popup whose subtree is inert (not open: closing or closed this frame), 0 = none:
+     * everything declared inside it makes no record, steps nothing and owns no focus. Balanced by
+     * nt_ui_popup_end, reset by nt_ui_begin. */
+    uint8_t inert_from;
     uint8_t capture_seen[NT_INPUT_MAX_POINTERS];
 
     /* Buttons do not nest (asserted). */

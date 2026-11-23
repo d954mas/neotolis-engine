@@ -706,7 +706,7 @@ static void test_modal_stride_one_gates_base_ui(void) {
 /* ---- A root overlay band past int16 asserts: the second visible root overlay would overflow. ---- */
 static void test_modal_root_band_overflow_asserts(void) {
     nt_ui_create_desc_t desc = nt_ui_create_desc_defaults();
-    desc.modal_zband_stride = (int16_t)(INT16_MAX - 8);
+    desc.modal_zband_stride = (int16_t)(INT16_MAX - (NT_UI_MODAL_MAX_DEPTH - 1));
     nt_ui_context_t *ctx = nt_ui_create_context(s_custom_arena, sizeof s_custom_arena, &desc);
     TEST_ASSERT_NOT_NULL(ctx);
     nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
@@ -724,7 +724,7 @@ static void test_modal_root_band_overflow_asserts(void) {
  *      assert. ---- */
 static void test_modal_closed_root_takes_no_band(void) {
     nt_ui_create_desc_t desc = nt_ui_create_desc_defaults();
-    desc.modal_zband_stride = (int16_t)(INT16_MAX - 8);
+    desc.modal_zband_stride = (int16_t)(INT16_MAX - (NT_UI_MODAL_MAX_DEPTH - 1));
     nt_ui_context_t *ctx = nt_ui_create_context(s_custom_arena, sizeof s_custom_arena, &desc);
     TEST_ASSERT_NOT_NULL(ctx);
     nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
@@ -733,6 +733,21 @@ static void test_modal_closed_root_takes_no_band(void) {
     (void)modal_begin_open(ctx, MODAL_A, &st);
     nt_ui_modal_end(ctx);
     modal_begin_closed(ctx, MODAL_B, &st);
+    nt_ui_end(ctx);
+    nt_ui_destroy_context(ctx);
+}
+
+/* ---- A root overlay whose nested levels could pass int16 asserts, even alone. ---- */
+static void test_modal_root_band_budget_counts_nested_levels(void) {
+    nt_ui_create_desc_t desc = nt_ui_create_desc_defaults();
+    desc.modal_zband_stride = (int16_t)(INT16_MAX - 8);
+    nt_ui_context_t *ctx = nt_ui_create_context(s_custom_arena, sizeof s_custom_arena, &desc);
+    TEST_ASSERT_NOT_NULL(ctx);
+    nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
+    st.ease_speed = 0.0F;
+    ui_frame_begin(ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1, 0);
+    bool open = true;
+    NT_TEST_EXPECT_ASSERT(nt_ui_modal_begin(ctx, MODAL_A, &st, &open, NULL)); /* asserts before the push */
     nt_ui_end(ctx);
     nt_ui_destroy_context(ctx);
 }
@@ -927,5 +942,6 @@ int main(void) {
     RUN_TEST(test_modal_stride_one_gates_base_ui);
     RUN_TEST(test_modal_root_band_overflow_asserts);
     RUN_TEST(test_modal_closed_root_takes_no_band);
+    RUN_TEST(test_modal_root_band_budget_counts_nested_levels);
     return UNITY_END();
 }
