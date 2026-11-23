@@ -529,14 +529,14 @@ void nt_ui_begin(nt_ui_context_t *ctx, const nt_ui_frame_desc_t *frame) {
         NT_ASSERT(!isnan(ctx->pointer_occlusion[i]) && "nt_ui_begin: occlusion must not be NaN");
     }
     ctx->last_press_age += dt;
-    ctx->active_modal_depth = 0U; /* modal begin++/end-- balance across the frame (asserted == 0 at end) */
+    ctx->overlay_depth = 0U; /* modal begin++/end-- balance across the frame (asserted == 0 at end) */
     /* Commit last frame's deepest modal as the close-scan target (1-frame IM lag), then reset. */
-    ctx->modal_top_id_prev = ctx->modal_top_id_cur;
-    ctx->modal_top_id_cur = 0U;
-    ctx->modal_top_z_cur = INT32_MIN;
+    ctx->overlay_top_id_prev = ctx->overlay_top_id_cur;
+    ctx->overlay_top_id_cur = 0U;
+    ctx->overlay_top_z_cur = INT32_MIN;
     /* Reset this frame's modal presence; committed into _prev at nt_ui_end (so a game that polls
      * nt_ui_overlay_active BEFORE this frame's begin still sees last frame's result). */
-    ctx->modal_present_cur = false;
+    ctx->overlay_present_cur = false;
     /* Orphan-focus cleanup: a focused field not re-declared last frame would gate global Esc forever,
      * so drop focus before this frame runs (mirrors the capture_seen orphan sweep above). */
     if (ctx->focused_input_id != 0U && ctx->focused_input_seen == 0U) {
@@ -621,7 +621,7 @@ void nt_ui_end(nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL && "nt_ui_end: ctx must be non-NULL");
     NT_ASSERT(ctx->in_frame && "nt_ui_end: ctx is not in_frame (begin was not called)");
     NT_ASSERT(ctx == g_nt_ui_inframe_ctx && "nt_ui_end: ctx mismatch with module in-frame ctx");
-    NT_ASSERT(ctx->active_modal_depth == 0U && "nt_ui_end: unbalanced nt_ui_modal_begin/end (missing modal_end)");
+    NT_ASSERT(ctx->overlay_depth == 0U && "nt_ui_end: unbalanced nt_ui_modal_begin/end (missing modal_end)");
 #if NT_UI_DEBUG_TOOLS
     if (ctx->inspector_active) {
         nt_ui_internal_emit_inspector_layout_extern(ctx);
@@ -653,7 +653,7 @@ void nt_ui_end(nt_ui_context_t *ctx) {
 
     /* Publish this frame's modal presence for nt_ui_overlay_active: a game polls it next frame BEFORE
      * begin (e.g. gating its own hotkeys), so commit at end (not begin) to hold the latest result. */
-    ctx->modal_present_prev = ctx->modal_present_cur;
+    ctx->overlay_present_prev = ctx->overlay_present_cur;
 
     ctx->in_frame = false;
     g_nt_ui_inframe_ctx = NULL;
@@ -2892,6 +2892,11 @@ void nt_ui_debug_record_disabled_zone(nt_ui_context_t *ctx, uint32_t id, const i
 }
 #endif /* NT_UI_DEBUG_TOOLS */
 
+bool nt_ui_overlay_active(const nt_ui_context_t *ctx) {
+    NT_ASSERT(ctx != NULL && "nt_ui_overlay_active: ctx must be non-NULL");
+    return ctx->overlay_present_prev;
+}
+
 bool nt_ui_wants_pointer(const nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL && "nt_ui_wants_pointer: ctx must be non-NULL");
 #if NT_UI_DEBUG_TOOLS
@@ -2957,7 +2962,8 @@ static bool pointer_target(const nt_ui_context_t *ctx, uint32_t i, uint32_t *out
 }
 
 void nt_ui_pointer_pos(const nt_ui_context_t *ctx, float *out_x, float *out_y) {
-    NT_ASSERT(ctx != NULL && ctx->in_frame && "nt_ui_pointer_pos: call between nt_ui_begin/end");
+    NT_ASSERT(ctx != NULL && ctx->in_frame && ctx == g_nt_ui_inframe_ctx && "nt_ui_pointer_pos: call between nt_ui_begin/end");
+    NT_ASSERT(!ctx->use_raycast_input && "nt_ui_pointer_pos: a 3D context has no 2D pointer position");
     NT_ASSERT(out_x != NULL && out_y != NULL && "nt_ui_pointer_pos: out_x and out_y must be non-NULL");
     const nt_pointer_t *p = &ctx->frame_pointers[ctx->frame_primary];
     *out_x = p->x;

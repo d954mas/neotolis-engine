@@ -37,7 +37,6 @@
 #include "ui/nt_ui_menu.h"
 #include "ui/nt_ui_modal.h"
 #include "ui/nt_ui_panel.h"
-#include "ui/nt_ui_popup.h"
 #include "ui/nt_ui_progress.h"
 #include "ui/nt_ui_radial.h"
 #include "ui/nt_ui_radial_image.h"
@@ -3205,7 +3204,7 @@ static void render_menu(nt_ui_context_t *ctx, tab_state_t *st) {
     nt_ui_pointer_pos(ctx, &px, &py);
     const nt_ui_bbox_t zone_bb = nt_ui_get_bbox(ctx, s_id_menu_panel);
     const bool over_zone = zone_bb.found && px >= zone_bb.x && px <= zone_bb.x + zone_bb.width && py >= zone_bb.y && py <= zone_bb.y + zone_bb.height;
-    const bool right = nt_input_mouse_is_pressed(NT_BUTTON_RIGHT);
+    const bool right = nt_input_mouse_is_pressed(NT_BUTTON_RIGHT) && !nt_ui_inspector_pointer_consumed(ctx);
     if ((right && over_zone) || nt_ui_hold_crossed(&zone_ev, 0.5F)) {
         nt_ui_menu_open(&st->menu.zone_menu, px, py);
         st->menu.global_menu.open = false;

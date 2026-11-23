@@ -157,7 +157,7 @@ typedef struct {
 } nt_ui_interactive_t;
 
 /* Nested-modal cap (fail-early assert on overflow; depth is a counter, no heap). Depth is the
- * overflow guard only — bands come from Clay's relative zIndex, top-targeting from modal_top_z_cur.
+ * overflow guard only — bands come from Clay's relative zIndex, top-targeting from overlay_top_z_cur.
  * Build-overridable; raising it requires stride*depth to still fit int16 (see _Static_assert). */
 #ifndef NT_UI_MODAL_MAX_DEPTH
 #define NT_UI_MODAL_MAX_DEPTH 16
@@ -217,11 +217,11 @@ struct nt_ui_context {
      * this frame; nt_ui_begin commits it into _prev, which the Esc/backdrop close-scan targets so
      * only the genuinely-topmost modal consumes the event (same-frame nesting can't be known at
      * the inner begin's return, so we use last frame's resolved top). */
-    uint32_t modal_top_id_prev;
-    uint32_t modal_top_id_cur;
+    uint32_t overlay_top_id_prev;
+    uint32_t overlay_top_id_cur;
     /* Highest band claimed this frame; ties go to the last declared, matching the pointer arbiter that
      * delivers the dismiss click. INT32_MIN until the first claim. */
-    int32_t modal_top_z_cur;
+    int32_t overlay_top_z_cur;
     /* Keyboard-focus arbiter (0 = none): a press sets it; Esc or a disabled declaration clears it.
      * Survives frames; begin only drops an orphan and applies a pending Tab. */
     uint32_t focused_input_id;
@@ -239,13 +239,13 @@ struct nt_ui_context {
     uint32_t rich_max_text_bytes;
     /* Band each overlay level declares above the floating enclosing it; validated in create_context (> 1). */
     int16_t modal_zband_stride;
-    uint8_t active_modal_depth;
+    uint8_t overlay_depth;
     uint8_t capture_seen[NT_INPUT_MAX_POINTERS];
-    /* Modal-presence across frames: _cur set when any modal declares a backdrop this frame;
-     * nt_ui_begin commits it into _prev. nt_ui_overlay_active reads _prev so the game can gate its
-     * next-frame hotkeys (the live depth is always 0 by nt_ui_end, can't be queried after). */
-    bool modal_present_cur;
-    bool modal_present_prev;
+    /* Overlay presence across frames: _cur is set when a catcher-bearing popup (a modal, an open dropdown
+     * or menu) declares this frame; nt_ui_end commits it into _prev, which nt_ui_overlay_active reads (the
+     * live depth is always 0 by nt_ui_end). */
+    bool overlay_present_cur;
+    bool overlay_present_prev;
 
     /* Buttons do not nest (asserted). */
     struct {

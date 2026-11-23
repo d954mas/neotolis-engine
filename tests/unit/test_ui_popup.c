@@ -80,7 +80,7 @@ static void test_popup_floating_smoke(void) {
     nt_ui_popup_end(s_fx.ctx);
     nt_ui_end(s_fx.ctx);
     TEST_ASSERT_TRUE(r.visible);
-    TEST_ASSERT_EQUAL_UINT8(0U, s_fx.ctx->active_modal_depth);
+    TEST_ASSERT_EQUAL_UINT8(0U, s_fx.ctx->overlay_depth);
 }
 
 /* ---- z-band: each popup declares ONE stride above its enclosing floating, catcher one below its own
@@ -97,11 +97,11 @@ static void test_popup_zband_and_nesting(void) {
     /* Opaque bodies so each panel subtree emits a RECTANGLE, which Clay stamps with its root's band. */
     CLAY({.id = CLAY_ID("body_a"), .layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(20)}}, .backgroundColor = {8, 8, 8, 255}}) {}
     nt_ui_popup_begin(s_fx.ctx, POP_B, &st, &anc, true);
-    TEST_ASSERT_EQUAL_UINT8(2U, s_fx.ctx->active_modal_depth);
+    TEST_ASSERT_EQUAL_UINT8(2U, s_fx.ctx->overlay_depth);
     CLAY({.id = CLAY_ID("body_b"), .layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(20)}}, .backgroundColor = {8, 8, 8, 255}}) {}
     nt_ui_popup_end(s_fx.ctx);
     nt_ui_popup_end(s_fx.ctx);
-    TEST_ASSERT_EQUAL_UINT8(0U, s_fx.ctx->active_modal_depth);
+    TEST_ASSERT_EQUAL_UINT8(0U, s_fx.ctx->overlay_depth);
     nt_ui_end(s_fx.ctx);
 
     const int32_t stride = (int32_t)s_fx.ctx->modal_zband_stride;
@@ -449,7 +449,7 @@ static void test_popup_top_id_follows_band(void) {
     TEST_ASSERT_TRUE_MESSAGE(at_a >= 0 && at_b >= 0, "both popups must reach the render commands");
     TEST_ASSERT_TRUE_MESSAGE(z_a > z_b, "the popup inside the lifted game floating must land in a higher band");
     TEST_ASSERT_TRUE_MESSAGE(at_a > at_b, "and must therefore paint after the root-level popup");
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(POP_A, s_fx.ctx->modal_top_id_prev, "the higher-band popup must own Esc and the close-scan");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(POP_A, s_fx.ctx->overlay_top_id_prev, "the higher-band popup must own Esc and the close-scan");
 
     /* And the consequence, not just the gate: an outside click must dismiss the popup that owns the slot
      * and leave the other alone (a non-top catcher is an inert pointer gate). */
@@ -478,7 +478,7 @@ static void test_popup_top_id_follows_band(void) {
         nt_ui_popup_end(s_fx.ctx);
         nt_ui_end(s_fx.ctx);
     }
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(POP_B, s_fx.ctx->modal_top_id_prev, "the top-band claim must reset per frame, not stick to the highest band ever seen");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(POP_B, s_fx.ctx->overlay_top_id_prev, "the top-band claim must reset per frame, not stick to the highest band ever seen");
 }
 
 /* ---- Two catcher-bearing popups on ONE band: whoever owns the close-scan slot must also be the one

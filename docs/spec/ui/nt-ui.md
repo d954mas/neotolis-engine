@@ -615,7 +615,8 @@ order, so the popup that paints on top is the one whose catcher wins the
 click and performs the dismissal. The agreement is a 2D-context property: a 3D
 ctx arbitrates the pointer by ray distance and does not rank overlays by
 band at all. A catcher-less
-overlay (menu, tooltip) never claims that slot and runs its own dismiss; the
+overlay (a tooltip, a menu's submenu levels) never claims that slot; a menu's
+root has an inert catcher that claims it, and the menu runs its own dismiss; the
 text field's Esc-unfocus is independent of both. A fully-closed
 popup declares NO catcher, so the base UI stays clickable; a hover-driven
 overlay (tooltip) can clear the catcher flag entirely. Dismiss is always a
@@ -649,13 +650,16 @@ calls the matching end (`if (nt_ui_menu_begin(...)) { ...; nt_ui_menu_end(...);
 widget, a button — and opens it with `nt_ui_menu_open(menu, x, y)` at a point in
 UI space, from anywhere outside `nt_ui_menu_begin..nt_ui_menu_end`, even outside
 a UI frame; `nt_ui_pointer_pos`, called inside a UI frame, gives the primary
-pointer in that space. The root's top-left sits at that point and shifts left to
-stay on screen from its second frame. A menu opens only through
-`nt_ui_menu_open`: it starts the navigation fresh, and the frame after it
-ignores the outside press and last frame's hover and clicks, which belong to the
-old place. An open menu is a modal overlay: its root claims the modal top like a
+pointer in that space of a 2D context. The root's top-left sits at that point,
+flips above it when the root does not fit below, and shifts left to stay on screen
+from its second frame. A menu opens only through
+`nt_ui_menu_open`: it starts the navigation fresh, and the first declaration
+after it ignores the press and last frame's hover and clicks, which belong to
+the old place. An open menu is a modal overlay: its root claims the modal top like a
 popup with a catcher, so the UI under it takes no pointer, `nt_ui_overlay_active`
-reports it, and Esc goes to the menu, not to a modal under it. Each open panel
+reports it, and the keys and the outside press go to whichever of the menu and a modal
+or popup is on top: a menu opened over a modal takes Esc, a modal opened over
+the menu keeps it. Each open panel
 blocks the pointer, so nothing under it is hovered or clicked.
 
 A custom-content row (`item_begin..item_end`, `selectable_begin..selectable_end`,
@@ -719,13 +723,12 @@ or Enter moved focus into a child.
 
 A row is hovered by any pointer over it, as every `nt_ui` hover; the primary
 pointer drives the mouse-aim corridor, the end of keyboard mode and the
-outside-press dismiss (a left or right press outside every panel shown last
-frame). The pointer moves focus to the enabled row under it; a disabled row, padding or a separator under
-it changes neither focus nor the open chain. A key hands focus and the open
+outside-press dismiss (a left or right press off everything declared inside the menu last
+frame, a popup that a custom row opened included). The pointer moves focus to the enabled row under it; a disabled row, padding or a separator under
+it takes no focus and starts no switch. A key hands focus and the open
 chain to the keyboard: a pointer resting on a row neither moves focus nor opens
 or closes a submenu until it moves or presses; clicks always act. A level highlights one
-row: the focused one, or its open parent while focus is inside that parent's
-child. A hovered row switches its level's open child (a parent opens its own, a
+row: the focused row on its level, the open parent on every other level. A hovered row switches its level's open child (a parent opens its own, a
 leaf collapses it): at once when no child is open; otherwise not while the
 pointer is over the child panel, after up to twice
 `NT_UI_MENU_AIM_FALLBACK_SECS` inside the triangle toward the child's near edge,

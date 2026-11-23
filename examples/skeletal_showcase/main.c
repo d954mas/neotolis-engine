@@ -55,8 +55,6 @@
 #include "ui/nt_ui_dropdown.h"
 #include "ui/nt_ui_inspector.h"
 #include "ui/nt_ui_label.h"
-#include "ui/nt_ui_modal.h"
-#include "ui/nt_ui_popup.h"
 #include "ui/nt_ui_scale.h"
 #include "ui/nt_ui_scroll.h"
 #include "ui/nt_ui_slider.h"

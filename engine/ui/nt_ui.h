@@ -624,6 +624,11 @@ void nt_ui_block_pointer(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lr
 /* True when a pointer of the last frame holds a capture or a pending scroll gesture, or is over a widget. */
 bool nt_ui_wants_pointer(const nt_ui_context_t *ctx);
 
+/* True if an overlay that captures input (a popup with a catcher: a modal, an open menu or dropdown) was up
+ * last frame. The game gates its keyboard and gameplay hotkeys on it; the catcher already keeps the pointer
+ * off the UI under the overlay. */
+bool nt_ui_overlay_active(const nt_ui_context_t *ctx);
+
 /* Front-most interactive record under the pointer this frame (3D: nearest within the occlusion
  * cutoff first; then the later tree root — band, then declaration; then the later-declared element
  * in that root). Neither the draw layer nor the nt_ui_step call order is consulted.
@@ -636,7 +641,8 @@ nt_ui_hot_t nt_ui_pointer_hot(const nt_ui_context_t *ctx, uint32_t pointer_index
  * holder instead, and only while it is over it. id need not be interactive. Last frame's layout, like
  * every query. Read-only; `hovered` stays "this record is the target". */
 bool nt_ui_hovered_within(const nt_ui_context_t *ctx, uint32_t id);
-/* The primary pointer's position this frame in UI (layout) space; call between nt_ui_begin and nt_ui_end. */
+/* The primary pointer's position this frame in UI (layout) space of a 2D context; call between nt_ui_begin
+ * and nt_ui_end. */
 void nt_ui_pointer_pos(const nt_ui_context_t *ctx, float *out_x, float *out_y);
 // #endregion
 

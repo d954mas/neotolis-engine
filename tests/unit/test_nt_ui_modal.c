@@ -106,7 +106,7 @@ static void test_modal_floating_smoke(void) {
     nt_ui_end(s_fx.ctx); /* walks: balanced scissor assert + transform compose must not trip */
     TEST_ASSERT_EQUAL_INT32((int32_t)1000, band_of_rect(s_fx.ctx, CLAY_ID("modal_body").id));
     TEST_ASSERT_TRUE(r.visible);
-    TEST_ASSERT_EQUAL_UINT8(0U, s_fx.ctx->active_modal_depth); /* balanced */
+    TEST_ASSERT_EQUAL_UINT8(0U, s_fx.ctx->overlay_depth); /* balanced */
 }
 
 /* ---- z-band: panel = 1000*(depth+1), backdrop = panel-1. Nested = 2000/1999, depth 2. ---- */
@@ -120,10 +120,10 @@ static void test_modal_zband_and_nesting(void) {
     CLAY({.id = CLAY_ID("body_a"), .layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(20)}}, .backgroundColor = {8, 8, 8, 255}}) {}
     nt_ui_modal_begin(s_fx.ctx, MODAL_B, &st, true); /* modal-over-modal */
     CLAY({.id = CLAY_ID("body_b"), .layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(20)}}, .backgroundColor = {8, 8, 8, 255}}) {}
-    TEST_ASSERT_EQUAL_UINT8(2U, s_fx.ctx->active_modal_depth);
+    TEST_ASSERT_EQUAL_UINT8(2U, s_fx.ctx->overlay_depth);
     nt_ui_modal_end(s_fx.ctx);
     nt_ui_modal_end(s_fx.ctx);
-    TEST_ASSERT_EQUAL_UINT8(0U, s_fx.ctx->active_modal_depth);
+    TEST_ASSERT_EQUAL_UINT8(0U, s_fx.ctx->overlay_depth);
     nt_ui_end(s_fx.ctx);
 
     TEST_ASSERT_EQUAL_INT32((int32_t)1000, band_of_rect(s_fx.ctx, CLAY_ID("body_a").id));
@@ -135,12 +135,12 @@ static void test_modal_zband_and_nesting(void) {
 /* ---- Stack depth is zero at frame start and after balanced begin/end. ---- */
 static void test_modal_stack_depth_zero_balanced(void) {
     nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
-    TEST_ASSERT_EQUAL_UINT8(0U, s_fx.ctx->active_modal_depth);
+    TEST_ASSERT_EQUAL_UINT8(0U, s_fx.ctx->overlay_depth);
     ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1, 0);
     nt_ui_modal_begin(s_fx.ctx, MODAL_A, &st, true);
-    TEST_ASSERT_EQUAL_UINT8(1U, s_fx.ctx->active_modal_depth);
+    TEST_ASSERT_EQUAL_UINT8(1U, s_fx.ctx->overlay_depth);
     nt_ui_modal_end(s_fx.ctx);
-    TEST_ASSERT_EQUAL_UINT8(0U, s_fx.ctx->active_modal_depth);
+    TEST_ASSERT_EQUAL_UINT8(0U, s_fx.ctx->overlay_depth);
     nt_ui_end(s_fx.ctx);
 }
 
@@ -152,7 +152,7 @@ static void test_modal_depth_overflow_asserts(void) {
     for (uint32_t i = 0; i < NT_UI_MODAL_MAX_DEPTH; ++i) {
         nt_ui_modal_begin(s_fx.ctx, 0x4D1000U + i, &st, true);
     }
-    TEST_ASSERT_EQUAL_UINT8((uint8_t)NT_UI_MODAL_MAX_DEPTH, s_fx.ctx->active_modal_depth);
+    TEST_ASSERT_EQUAL_UINT8((uint8_t)NT_UI_MODAL_MAX_DEPTH, s_fx.ctx->overlay_depth);
     NT_TEST_EXPECT_ASSERT(nt_ui_modal_begin(s_fx.ctx, 0x4D1FFFU, &st, true));
     for (uint32_t i = 0; i < NT_UI_MODAL_MAX_DEPTH; ++i) {
         nt_ui_modal_end(s_fx.ctx);
@@ -469,7 +469,7 @@ static void test_modal_body_button_clickable(void) {
  *      (F1 establishes top, F2 holds the click). ---- */
 static nt_ui_modal_close_reason_t modal_backdrop_click_reason(const nt_ui_modal_style_t *st, float cx, float cy) {
     nt_pointer_t f1 = modal_pointer_at(cx, cy, false, false, false);
-    modal_button_frame(st, &f1); /* establish top (modal_top_id_prev) */
+    modal_button_frame(st, &f1); /* establish top (overlay_top_id_prev) */
     /* F2: full press+release in one frame at (cx,cy) -> backdrop click fires this frame. */
     nt_pointer_t f2 = modal_pointer_at(cx, cy, false, false, true);
     f2.buttons[NT_BUTTON_LEFT].is_pressed = true;
@@ -547,7 +547,7 @@ static void test_modal_closed_does_not_block_base(void) {
 /* ---- nt_ui_overlay_active reports PREV-FRAME presence (not the live within-frame depth, which is
  *      always 0 once nt_ui_end balanced the stack). A game polls it before its next nt_ui_begin to
  *      gate hotkeys. Frame with a modal up -> active next; frame with no modal -> inactive next. ---- */
-static void test_modal_active_prev_frame(void) {
+static void test_overlay_active_prev_frame(void) {
     nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
     st.ease_speed = 0.0F; /* instant */
 
@@ -559,8 +559,8 @@ static void test_modal_active_prev_frame(void) {
     nt_ui_modal_begin(s_fx.ctx, MODAL_A, &st, true);
     nt_ui_modal_end(s_fx.ctx);
     nt_ui_end(s_fx.ctx);
-    TEST_ASSERT_EQUAL_UINT8(0U, s_fx.ctx->active_modal_depth); /* live depth IS 0 ... */
-    TEST_ASSERT_TRUE(nt_ui_overlay_active(s_fx.ctx));          /* ... yet prev-frame presence is true */
+    TEST_ASSERT_EQUAL_UINT8(0U, s_fx.ctx->overlay_depth); /* live depth IS 0 ... */
+    TEST_ASSERT_TRUE(nt_ui_overlay_active(s_fx.ctx));     /* ... yet prev-frame presence is true */
 
     /* Frame 2: no modal declared at all -> presence falls back to inactive. */
     ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1, 0);
@@ -842,7 +842,7 @@ int main(void) {
     RUN_TEST(test_modal_body_button_clickable);
     RUN_TEST(test_modal_backdrop_close_pad);
     RUN_TEST(test_modal_closed_does_not_block_base);
-    RUN_TEST(test_modal_active_prev_frame);
+    RUN_TEST(test_overlay_active_prev_frame);
     RUN_TEST(test_modal_closed_same_depth_does_not_steal_top);
     RUN_TEST(test_modal_slide_dir);
     RUN_TEST(test_modal_asymmetric_open_close);

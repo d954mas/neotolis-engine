@@ -169,10 +169,10 @@ nt_ui_popup_result_t nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t i
     /* scale_* must be > 0 (nt_ui_anim asserts it via the eased transform). */
     NT_ASSERT(xf_start->scale_x > 0.0F && xf_start->scale_y > 0.0F && xf_start->scale_z > 0.0F && "nt_ui_popup_begin: transform scale must be > 0");
     /* Assert BEFORE the push — fail-early, no heap growth, no silent fallback. */
-    NT_ASSERT(ctx->active_modal_depth < NT_UI_MODAL_MAX_DEPTH && "nt_ui_popup_begin: nesting exceeds NT_UI_MODAL_MAX_DEPTH");
+    NT_ASSERT(ctx->overlay_depth < NT_UI_MODAL_MAX_DEPTH && "nt_ui_popup_begin: nesting exceeds NT_UI_MODAL_MAX_DEPTH");
 
     // #region stack push + z-band (shared depth counter with modal)
-    ++ctx->active_modal_depth;
+    ++ctx->overlay_depth;
     /* One band ABOVE whatever floating encloses this call; Clay accumulates the nesting, so a popup
      * opened inside another needs no depth arithmetic here. */
     const int16_t panel_z = ctx->modal_zband_stride;
@@ -244,7 +244,7 @@ nt_ui_popup_result_t nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t i
      * (e.g. a tooltip, flags=0) is visible but must NOT make nt_ui_overlay_active() true nor steal the
      * top-id dismiss slot from a coexisting dropdown. */
     if (want_catcher) {
-        ctx->modal_present_cur = true;
+        ctx->overlay_present_cur = true;
     }
     if (want_catcher) {
         /* Full-viewport catcher at catcher_z. Transparent for a plain popup; a visible dim rect when a
@@ -267,7 +267,7 @@ nt_ui_popup_result_t nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t i
         /* Close-scan on the TOP popup only (1-frame IM lag). Esc fires first; otherwise an outside-click
          * beyond the panel grown by close_pad dismisses (a click on the panel body is the body's own).
          * A catcher that neither dismisses nor escapes stays an inert block_pointer input gate. */
-        const bool is_top = (ctx->modal_top_id_prev == id);
+        const bool is_top = (ctx->overlay_top_id_prev == id);
         if (is_top && esc_close && nt_input_key_is_pressed(NT_KEY_ESCAPE)) {
             close_src = NT_UI_POPUP_CLOSE_SRC_ESC;
         }
@@ -306,9 +306,9 @@ nt_ui_popup_result_t nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t i
     /* A catcher gates base UI from one band below its panel; at or under the base band it loses the hit
      * arbitration and silently stops gating while nt_ui_overlay_active() still reports the overlay up. */
     NT_ASSERT((!want_catcher || panel_band > 1) && "nt_ui_popup: the catcher must sit above the base band (0)");
-    if (want_catcher && panel_band >= ctx->modal_top_z_cur) {
-        ctx->modal_top_z_cur = panel_band;
-        ctx->modal_top_id_cur = id;
+    if (want_catcher && panel_band >= ctx->overlay_top_z_cur) {
+        ctx->overlay_top_z_cur = panel_band;
+        ctx->overlay_top_id_cur = id;
     }
     // #endregion
 
@@ -336,9 +336,9 @@ nt_ui_popup_result_t nt_ui_popup_begin(nt_ui_context_t *ctx, uint32_t id, const 
 void nt_ui_popup_end(nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL && "nt_ui_popup_end: ctx must be non-NULL");
     NT_ASSERT(ctx->in_frame && ctx == nt_ui_internal_get_inframe_ctx() && "nt_ui_popup_end: must be called between nt_ui_begin and nt_ui_end on the active ctx");
-    NT_ASSERT(ctx->active_modal_depth > 0U && "nt_ui_popup_end: unbalanced begin/end (stack underflow)");
+    NT_ASSERT(ctx->overlay_depth > 0U && "nt_ui_popup_end: unbalanced begin/end (stack underflow)");
     nt_ui_clay_priv_close_element();
-    --ctx->active_modal_depth;
+    --ctx->overlay_depth;
 }
 
 bool nt_ui_popup_visible(nt_ui_context_t *ctx, uint32_t id, const nt_ui_popup_style_t *style, const nt_ui_popup_anchor_t *anchor, bool *p_open) {
@@ -352,11 +352,6 @@ bool nt_ui_popup_visible(nt_ui_context_t *ctx, uint32_t id, const nt_ui_popup_st
         return false;
     }
     return true;
-}
-
-bool nt_ui_overlay_active(const nt_ui_context_t *ctx) {
-    NT_ASSERT(ctx != NULL && "nt_ui_overlay_active: ctx must be non-NULL");
-    return ctx->modal_present_prev;
 }
 
 void nt_ui_popup_clear_state(nt_ui_context_t *ctx, uint32_t id) {

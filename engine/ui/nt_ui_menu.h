@@ -103,6 +103,7 @@ typedef struct {
     bool hover_opens;      /* hover_id is a parent */
     bool focus_seen;       /* the focused row is declared and enabled this frame */
     bool focus_opens;      /* the focused row is a parent */
+    bool top;              /* the menu is the top overlay: it reads keys and the outside press */
     bool activated;        /* a row activated: the chain closes */
     bool item_enabled;     /* the open custom row is enabled */
     bool item_activatable; /* the open custom row has an action of its own */
@@ -119,7 +120,7 @@ typedef struct {
     nt_ui_menu_aim_t aim;
     uint8_t focus_depth; /* the focused row's level */
     bool open;           /* the menu is shown; cleared on dismiss */
-    bool arming;         /* opened since the last end: this frame's press does not dismiss */
+    bool arming;         /* opened since the last end: the next declaration ignores the press and last frame's hits */
     bool kbd_mode;       /* a menu key was pressed: the pointer takes focus back once it moves or presses */
     nt_ui_menu_frame_t frame;
 } nt_ui_menu_t;
