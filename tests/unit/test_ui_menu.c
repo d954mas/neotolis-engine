@@ -2311,6 +2311,27 @@ static void test_menu_row_popup_closes_deeper_levels(void) {
     TEST_ASSERT_FALSE(menu_level_found(1U));
 }
 
+/* ---- The row's popup on top closes the sibling's open level before the rows declare: the frame after the
+ *      popup first claims the top declares no level above it, so no control there takes a press. ---- */
+static void test_menu_row_popup_closes_the_branch_before_the_rows(void) {
+    nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
+    nt_ui_menu_t st = {0};
+    nt_ui_menu_open(&st, 120.0F, 80.0F);
+    menu_row_popup_branch_frame(&st, &style, 0.0F, 0.0F);
+    menu_row_popup_branch_frame(&st, &style, 0.0F, 0.0F);
+    const uint32_t p1 = nt_ui_menu_test_item_id(MENU_A, KEY_P1);
+    menu_hover_open(&st, &style, p1, 1U, menu_row_popup_branch_frame);
+    float px = 0.0F;
+    float py = 0.0F;
+    menu_row_center(p1, &px, &py);
+    s_row_popup = true;
+    menu_row_popup_branch_frame(&st, &style, px, py); /* the popup claims the top */
+    TEST_ASSERT_TRUE(menu_level_found(1U));
+    menu_row_popup_branch_frame(&st, &style, px, py);
+    TEST_ASSERT_EQUAL_UINT32(ROW_POPUP, s_fx.ctx->overlay_top_id_prev);
+    TEST_ASSERT_FALSE_MESSAGE(menu_level_found(1U), "the sibling's level is not declared over the row's popup");
+}
+
 /* ---- A tap on one parent and Right on a later focused parent in one frame, with a third parent's child
  *      pending: the tap opens its parent. ---- */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -2634,6 +2655,7 @@ int main(void) {
     RUN_TEST(test_menu_right_press_during_a_drag_keeps_open);
     RUN_TEST(test_menu_returned_row_is_not_focused);
     RUN_TEST(test_menu_row_popup_closes_deeper_levels);
+    RUN_TEST(test_menu_row_popup_closes_the_branch_before_the_rows);
     RUN_TEST(test_menu_click_beats_a_same_frame_key);
     RUN_TEST(test_menu_instant_rows_take_no_anim_slot);
     RUN_TEST(test_menu_keeps_no_state_cells);

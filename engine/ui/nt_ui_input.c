@@ -656,10 +656,12 @@ static void focus_step(input_frame_t *f) {
     const nt_ui_input_style_t *style = f->style;
 
     // #region Tab bookkeeping (wrap + next-field target)
-    if (f->enabled && ctx->focus_first_id == 0U) {
+    /* Only a field the top overlay owns is a Tab stop, so Tab wraps inside a modal, as an HTML modal dialog. */
+    const bool tab_stop = f->enabled && nt_ui_internal_owned_by_top(ctx, id);
+    if (tab_stop && ctx->focus_first_id == 0U) {
         ctx->focus_first_id = id;
     }
-    if (f->enabled && ctx->focus_tab_seek != 0U) {
+    if (tab_stop && ctx->focus_tab_seek != 0U) {
         ctx->focus_tab_pending = id; /* replaces the wrap fallback */
         ctx->focus_tab_seek = 0U;
     }

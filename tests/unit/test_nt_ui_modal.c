@@ -691,6 +691,24 @@ static void test_modal_root_band_overflow_asserts(void) {
     nt_ui_destroy_context(ctx);
 }
 
+/* ---- A closed root overlay takes no band: next to one visible root at the top of the budget it does not
+ *      assert. ---- */
+static void test_modal_closed_root_takes_no_band(void) {
+    nt_ui_create_desc_t desc = nt_ui_create_desc_defaults();
+    desc.modal_zband_stride = (int16_t)(INT16_MAX - 8);
+    nt_ui_context_t *ctx = nt_ui_create_context(s_custom_arena, sizeof s_custom_arena, &desc);
+    TEST_ASSERT_NOT_NULL(ctx);
+    nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
+    st.ease_speed = 0.0F;
+    ui_frame_begin(ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1, 0);
+    nt_ui_modal_begin(ctx, MODAL_A, &st, true);
+    nt_ui_modal_end(ctx);
+    nt_ui_modal_begin(ctx, MODAL_B, &st, false);
+    nt_ui_modal_end(ctx);
+    nt_ui_end(ctx);
+    nt_ui_destroy_context(ctx);
+}
+
 /* ---- No 0->default fallback: the default lives only in nt_ui_create_desc_defaults() (same as
  *      max_elements). A 0 stride is invalid and must fail-early at create. ---- */
 static void test_modal_zero_stride_asserts(void) {
@@ -879,5 +897,6 @@ int main(void) {
     RUN_TEST(test_modal_zero_stride_asserts);
     RUN_TEST(test_modal_stride_one_gates_base_ui);
     RUN_TEST(test_modal_root_band_overflow_asserts);
+    RUN_TEST(test_modal_closed_root_takes_no_band);
     return UNITY_END();
 }

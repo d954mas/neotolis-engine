@@ -413,6 +413,17 @@ bool nt_ui_menu_begin(nt_ui_menu_t *menu, nt_ui_context_t *ctx, const nt_ui_elem
     if (!menu->open) {
         return false;
     }
+    /* A popup a row opened that is on top is that row's level's child: before the rows declare, it closes the
+     * open branch below the row, so each level keeps one open child and no level lies above the popup. */
+    const uint32_t root_id = menu_level_id(menu_id, 0U);
+    const uint32_t top_id = ctx->overlay_top_id_prev;
+    if (top_id != root_id && nt_ui_internal_declared_within(ctx, top_id, root_id)) {
+        uint8_t level = menu_open_depth(menu);
+        while (level > 0U && !nt_ui_internal_declared_within(ctx, top_id, menu_level_id(menu_id, level))) {
+            --level;
+        }
+        menu_set_open(menu, level, 0U);
+    }
     const uint8_t open_depth = menu_open_depth(menu);
     if (menu->focus_depth > open_depth) {
         menu->focus = 0U; /* the focused row's level closed: keys act on the deepest open one, unfocused */
@@ -421,7 +432,7 @@ bool nt_ui_menu_begin(nt_ui_menu_t *menu, nt_ui_context_t *ctx, const nt_ui_elem
     // #region the frame's one key, before the rows declare
     /* One owner: an opening menu reads input from its next frame, a menu under another overlay none, and a
      * text field focused inside the menu owns the keys (the top takes the focus of a field under it). */
-    const bool top = !menu->arming && ctx->overlay_top_id_prev == menu_level_id(menu_id, 0U);
+    const bool top = !menu->arming && top_id == root_id;
     const uint8_t key = (top && ctx->focused_input_id == 0U) ? menu_read_key(menu) : MENU_KEY_NONE;
     const uint8_t d = menu->focus_depth;
     if (key != MENU_KEY_NONE) {
@@ -621,17 +632,6 @@ static bool menu_resolve(nt_ui_menu_t *menu) {
     if (!f->nav_passed) {
         menu->focus = 0U; /* the focused row is gone from its level; a disabled one still declares and stays */
     }
-    /* A popup a row opened is that level's child: on top, it closes the open branch below its row, so one
-     * child stays open per level. */
-    const uint32_t root = menu_level_id(f->menu_id, 0U);
-    const uint32_t top = ctx->overlay_top_id_prev;
-    if (top != root && nt_ui_internal_declared_within(ctx, top, root)) {
-        uint8_t level = menu_open_depth(menu);
-        while (level > 0U && !nt_ui_internal_declared_within(ctx, top, menu_level_id(f->menu_id, level))) {
-            --level;
-        }
-        menu_set_open(menu, level, 0U);
-    }
     // #endregion
     bool close_chain = f->activated;
     /* Up/Down step over the focused row's level, which the rows tracked. */
@@ -680,7 +680,7 @@ static bool menu_resolve(nt_ui_menu_t *menu) {
      * its levels, even one closed at the end of that frame, and a popup a custom row opened. It reads the
      * element under the pointer, not a capture holder, and not on the frame the menu opened. */
     const bool outside_press = ours && (pp->buttons[NT_BUTTON_LEFT].is_pressed || pp->buttons[NT_BUTTON_RIGHT].is_pressed);
-    if (outside_press && !nt_ui_internal_declared_within(ctx, ctx->pointer_hot[ctx->frame_primary].id, root)) {
+    if (outside_press && !nt_ui_internal_declared_within(ctx, ctx->pointer_hot[ctx->frame_primary].id, menu_level_id(f->menu_id, 0U))) {
         close_chain = true;
     }
     return close_chain;

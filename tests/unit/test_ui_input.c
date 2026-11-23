@@ -1708,6 +1708,73 @@ static void test_field_text_above_modal_band(void) {
     TEST_ASSERT_TRUE_MESSAGE(text_at > panel_at, "field text must paint AFTER the modal panel, not under it");
 }
 
+#define BASE_FIELD 0x1F0101U
+#define MODAL_FIELD 0x1F0102U
+#define FIELD_MODAL 0x1F0103U
+
+/* One frame: a field in the base UI, then a modal (open or closing) holding a second field. */
+static nt_ui_modal_result_t modal_field_frame(const nt_pointer_t *p, bool open, float ease, char *base_buf, char *modal_buf) {
+    ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 0.016F, p, 1, 0);
+    CLAY({.id = CLAY_ID("base_root"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = IN_X, .y = IN_Y}}}) {
+        (void)nt_ui_input_text(s_fx.ctx, NULL, 0, BASE_FIELD, base_buf, 32U, &s_props, &s_style, &s_field_decl, true, NULL);
+    }
+    nt_ui_modal_style_t mst = nt_ui_modal_style_defaults();
+    mst.ease_speed = ease;
+    const nt_ui_modal_result_t r = nt_ui_modal_begin(s_fx.ctx, FIELD_MODAL, &mst, open);
+    if (r.visible) {
+        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(400.0F), CLAY_SIZING_FIXED(200.0F)}}}) {
+            (void)nt_ui_input_text(s_fx.ctx, NULL, 0, MODAL_FIELD, modal_buf, 32U, &s_props, &s_style, &s_field_decl, true, NULL);
+        }
+    }
+    nt_ui_modal_end(s_fx.ctx);
+    nt_ui_end(s_fx.ctx);
+    return r;
+}
+
+/* Taps the modal's field (press and release in one frame). */
+static void tap_modal_field(bool open, float ease, char *a, char *b) {
+    const nt_ui_bbox_t fb = nt_ui_get_bbox(s_fx.ctx, MODAL_FIELD);
+    TEST_ASSERT_TRUE(fb.found);
+    nt_pointer_t tap = make_pointer(fb.x + 10.0F, fb.y + 10.0F, false, true, true);
+    tap.type = NT_POINTER_TOUCH;
+    (void)modal_field_frame(&tap, open, ease, a, b);
+}
+
+/* ---- Tab inside a modal wraps among the modal's fields: a field under the modal is no Tab stop. ---- */
+static void test_tab_stays_in_the_top_overlay(void) {
+    char a[32] = "base";
+    char b[32] = "modal";
+    (void)modal_field_frame(&IDLE_PTR, true, 0.0F, a, b);
+    (void)modal_field_frame(&IDLE_PTR, true, 0.0F, a, b);
+    tap_modal_field(true, 0.0F, a, b);
+    (void)modal_field_frame(&IDLE_PTR, true, 0.0F, a, b);
+    TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, MODAL_FIELD));
+    nt_input_feed(nt_test_key(NT_KEY_TAB, true));
+    (void)modal_field_frame(&IDLE_PTR, true, 0.0F, a, b);
+    nt_input_feed(nt_test_key(NT_KEY_TAB, false));
+    (void)modal_field_frame(&IDLE_PTR, true, 0.0F, a, b);
+    TEST_ASSERT_TRUE_MESSAGE(nt_ui_input_focused(s_fx.ctx, MODAL_FIELD), "Tab wraps to the modal's own field");
+}
+
+/* ---- A closing modal only paints its fade: its field loses focus and takes no tap while it fades. ---- */
+static void test_closing_modal_is_inert(void) {
+    char a[32] = "base";
+    char b[32] = "modal";
+    for (int f = 0; f < 90; ++f) { /* fully open: the eased panel stops moving */
+        (void)modal_field_frame(&IDLE_PTR, true, 8.0F, a, b);
+    }
+    tap_modal_field(true, 8.0F, a, b);
+    (void)modal_field_frame(&IDLE_PTR, true, 8.0F, a, b);
+    TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, MODAL_FIELD));
+    (void)modal_field_frame(&IDLE_PTR, false, 8.0F, a, b);
+    (void)modal_field_frame(&IDLE_PTR, false, 8.0F, a, b);
+    TEST_ASSERT_FALSE_MESSAGE(nt_ui_input_focused(s_fx.ctx, MODAL_FIELD), "a field in a closing modal loses focus");
+    tap_modal_field(false, 8.0F, a, b);
+    const nt_ui_modal_result_t r = modal_field_frame(&IDLE_PTR, false, 8.0F, a, b);
+    TEST_ASSERT_TRUE_MESSAGE(r.visible, "the modal still fades");
+    TEST_ASSERT_FALSE_MESSAGE(nt_ui_input_focused(s_fx.ctx, MODAL_FIELD), "a closing modal's field takes no tap");
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_input_in_scroll_focuses_on_tap_release);
@@ -1772,6 +1839,8 @@ int main(void) {
     RUN_TEST(test_edit_step_backspace_across_multibyte_caret_boundary);
     RUN_TEST(test_scroll_step_caret_follow_fixed_width);
     RUN_TEST(test_field_text_above_modal_band);
+    RUN_TEST(test_tab_stays_in_the_top_overlay);
+    RUN_TEST(test_closing_modal_is_inert);
     RUN_TEST(test_release_and_press_between_frames_reach_widgets_in_order);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_assert_null_buffer);

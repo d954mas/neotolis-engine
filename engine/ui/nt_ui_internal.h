@@ -584,6 +584,10 @@ void nt_ui_internal_scroll_arbitrate(nt_ui_context_t *ctx);
 /* How a hit on record `id` counts in the front-most resolve: a scroll's own id is its surface. */
 nt_ui_hit_kind_t nt_ui_internal_record_kind(nt_ui_context_t *ctx, uint32_t id);
 
+/* True when `id` lies at or above last frame's top overlay catcher in the stacking order (no top, a 3D ctx,
+ * an inspector pane and id 0 always belong): the top overlay owns gestures, text focus and Tab stops. */
+bool nt_ui_internal_owned_by_top(nt_ui_context_t *ctx, uint32_t id);
+
 /* Adds a registry record for the front-most resolve. */
 void nt_ui_internal_register_interactive(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lrtb[4]);
 

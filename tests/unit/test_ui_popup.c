@@ -797,6 +797,44 @@ static void test_popup_press_above_the_top_completes(void) {
     TEST_ASSERT_EQUAL_INT(NT_UI_POPUP_CLOSE_SRC_NONE, src_a);
 }
 
+#define POP_CONTENT_BOX 0x50A0BAU
+
+/* One frame: an eased popup holding a stepped box; returns the box's click. */
+static bool closing_content_frame(nt_pointer_t p, bool open, nt_ui_popup_result_t *r) {
+    nt_ui_popup_style_t st = nt_ui_popup_style_defaults();
+    st.ease_speed = 8.0F;
+    const nt_ui_popup_anchor_t anc = {.x = 300.0F, .y = 200.0F, .prefer_side = NT_UI_POPUP_BELOW};
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = &p, .pointer_count = 1});
+    *r = nt_ui_popup_begin(s_fx.ctx, POP_A, &st, &anc, open);
+    bool clicked = false;
+    if (r->visible) {
+        CLAY({.id = (Clay_ElementId){.id = POP_CONTENT_BOX}, .layout = {.sizing = {CLAY_SIZING_FIXED(POP_W), CLAY_SIZING_FIXED(POP_H)}}}) {}
+        clicked = nt_ui_step(s_fx.ctx, POP_CONTENT_BOX, NULL).clicked;
+    }
+    nt_ui_popup_end(s_fx.ctx);
+    nt_ui_end(s_fx.ctx);
+    return clicked;
+}
+
+/* ---- A closing popup's content takes no tap while it fades: a second tap on a button in a closing confirm
+ *      does not act twice. ---- */
+static void test_popup_closing_content_takes_no_tap(void) {
+    nt_ui_popup_result_t r = {0};
+    const nt_pointer_t idle = pointer_at(5.0F, 5.0F, false, false, false);
+    for (int f = 0; f < 90; ++f) {
+        (void)closing_content_frame(idle, true, &r);
+    }
+    (void)closing_content_frame(idle, false, &r);
+    (void)closing_content_frame(idle, false, &r);
+    const nt_ui_bbox_t bb = nt_ui_get_bbox(s_fx.ctx, POP_CONTENT_BOX);
+    TEST_ASSERT_TRUE(bb.found);
+    nt_pointer_t tap = pointer_at(bb.x + 5.0F, bb.y + 5.0F, false, true, true);
+    tap.type = NT_POINTER_TOUCH;
+    const bool clicked = closing_content_frame(tap, false, &r);
+    TEST_ASSERT_TRUE_MESSAGE(r.visible, "the popup still fades");
+    TEST_ASSERT_FALSE_MESSAGE(clicked, "a closing popup's content takes no tap");
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_popup_abi_sizes);
@@ -806,6 +844,7 @@ int main(void) {
     RUN_TEST(test_popup_top_id_follows_band);
     RUN_TEST(test_popup_dismiss_survives_a_band_tie);
     RUN_TEST(test_popup_closing_overlay_only_paints);
+    RUN_TEST(test_popup_closing_content_takes_no_tap);
     RUN_TEST(test_popup_depth_overflow_asserts);
     RUN_TEST(test_popup_present_only_catcher);
     RUN_TEST(test_popup_closed_does_not_block_base);

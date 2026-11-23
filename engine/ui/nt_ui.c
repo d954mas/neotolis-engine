@@ -404,10 +404,12 @@ void nt_ui_set_font(nt_ui_context_t *ctx, uint16_t font_id, nt_font_t font) {
 // #region begin_end
 static void resolve_hot(nt_ui_context_t *ctx);
 
-/* A held id belongs to the top overlay when it lies at or above the top's catcher in last frame's stacking
- * order, the order that paints and hit-tests; an inspector pane floats above every overlay. */
-static bool owned_by_top(nt_ui_context_t *ctx, uint32_t id, uint32_t top) {
-    if (id == 0U || nt_ui_internal_record_kind(ctx, id) == NT_UI_HIT_PANE) {
+/* A record belongs to last frame's top overlay when it lies at or above the top's catcher in that frame's
+ * stacking order, the order that paints and hit-tests; an inspector pane floats above every overlay. With no
+ * top, and in a 3D ctx, which does not rank overlays by band, every record belongs. */
+bool nt_ui_internal_owned_by_top(nt_ui_context_t *ctx, uint32_t id) {
+    const uint32_t top = ctx->overlay_top_id_prev;
+    if (id == 0U || top == 0U || ctx->use_raycast_input || nt_ui_internal_record_kind(ctx, id) == NT_UI_HIT_PANE) {
         return true;
     }
     const int32_t slot = nt_ui_internal_live_slot(ctx, id);
@@ -617,17 +619,16 @@ void nt_ui_begin(nt_ui_context_t *ctx, const nt_ui_frame_desc_t *frame) {
     /* The top overlay owns the pointer and the keys: a capture or a pending scroll under it (a press under an
      * overlay that opened mid-gesture) ends without a click, as a modal window cancels its owner's capture,
      * and a text field under it loses focus, as a modal dialog takes focus. A 2D property, like the top. */
-    const uint32_t top = ctx->overlay_top_id_prev;
-    for (uint32_t i = 0; !ctx->use_raycast_input && top != 0U && i < ctx->frame_pointer_count; ++i) {
+    for (uint32_t i = 0; i < ctx->frame_pointer_count; ++i) {
         nt_ui_capture_t *cap = &ctx->captures[i];
-        if (!owned_by_top(ctx, cap->active_id, top)) {
+        if (!nt_ui_internal_owned_by_top(ctx, cap->active_id)) {
             cap->active_id = 0U;
         }
-        if (!owned_by_top(ctx, cap->pending_scroll, top)) {
+        if (!nt_ui_internal_owned_by_top(ctx, cap->pending_scroll)) {
             cap->pending_scroll = 0U;
         }
     }
-    if (!ctx->use_raycast_input && top != 0U && !owned_by_top(ctx, ctx->focused_input_id, top)) {
+    if (!nt_ui_internal_owned_by_top(ctx, ctx->focused_input_id)) {
         ctx->focused_input_id = 0U;
     }
 

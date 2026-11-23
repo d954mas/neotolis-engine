@@ -25,6 +25,7 @@ const nt_ui_widget_def_t NT_UI_POPUP_DEF = {
  * (which would re-seed every frame and flicker the eased open). */
 #define NT_UI_POPUP_TWEEN_SALT 0x500B7E00U
 static inline uint32_t popup_tween_id(uint32_t id) { return nt_ui_derived_id(id, NT_UI_POPUP_TWEEN_SALT); }
+#define NT_UI_POPUP_BLOCKER_SALT 0x500B10C0U /* a closing panel's pointer blocker */
 
 /* Persisted across frames in the state pool (zeroed on create -> was_present starts false). */
 typedef struct {
@@ -166,21 +167,8 @@ nt_ui_popup_result_t nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t i
     /* Assert BEFORE the push — fail-early, no heap growth, no silent fallback. */
     NT_ASSERT(ctx->overlay_depth < NT_UI_MODAL_MAX_DEPTH && "nt_ui_popup_begin: nesting exceeds NT_UI_MODAL_MAX_DEPTH");
 
-    // #region z-band + stack push (shared depth counter with modal)
-    /* A root overlay takes the frame's next root band above the floating that encloses it, so a later one
-     * covers an earlier one with all its nested levels; a nested one sits a band above its parent, over the
-     * parent's widget parts (delta 0). The catcher, declared before its panel on the same band, lies
-     * between them. */
     const bool root_overlay = ctx->overlay_depth == 0U;
-    int16_t panel_z = 1;
-    if (root_overlay) {
-        const int32_t band = ctx->modal_zband_stride + ((int32_t)ctx->overlay_root_count * NT_UI_MODAL_MAX_DEPTH);
-        NT_ASSERT(band <= INT16_MAX && "nt_ui_popup: too many visible root overlays in one frame for the int16 z-band");
-        panel_z = (int16_t)band;
-    }
-    ++ctx->overlay_depth;
     const uint32_t catcher_id = nt_ui_internal_popup_catcher_id(id);
-    // #endregion
     // #region tween-state (non-evicting): was the popup present last frame?
     /* Eviction-proof open-edge memory: the anim slot can be evicted by a busy frame, so we must NOT use
      * "anim slot absent" to mean "first open" — that re-seeds t=0 every churned frame (flicker). Only an
@@ -244,9 +232,22 @@ nt_ui_popup_result_t nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t i
     if (tw != NULL) {
         tw->was_present = present ? 1U : 0U; /* remember for next frame's open-edge seed gate */
     }
+    // #region z-band + stack push (shared depth counter with modal)
+    /* A visible root overlay takes the frame's next root band above the floating that encloses it, so a
+     * later one covers an earlier one with all its nested levels; a nested one sits a band above its parent,
+     * over the parent's widget parts (delta 0). The catcher, declared before its panel on the same band, lies
+     * between them. A hidden popup paints nothing and takes no band. */
+    int16_t panel_z = 1;
     if (root_overlay && present) {
-        ++ctx->overlay_root_count; /* a hidden popup paints nothing and takes no band */
+        const int32_t band = ctx->modal_zband_stride + ((int32_t)ctx->overlay_root_count * NT_UI_MODAL_MAX_DEPTH);
+        NT_ASSERT(band <= INT16_MAX && "nt_ui_popup: too many visible root overlays in one frame for the int16 z-band");
+        panel_z = (int16_t)band;
+        ++ctx->overlay_root_count;
+    } else if (root_overlay) {
+        panel_z = ctx->modal_zband_stride;
     }
+    ++ctx->overlay_depth;
+    // #endregion
     /* An open popup's catcher gates the UI under it and claims the top; a closing one only paints its fading
      * backdrop, so the UI under it takes the pointer and the keys at once, as a closed HTML dialog does. */
     const bool want_catcher = open && (dismiss_on_click || has_backdrop || force_catcher);
@@ -319,6 +320,16 @@ nt_ui_popup_result_t nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t i
     if (want_catcher && panel_band >= ctx->overlay_top_z_cur) {
         ctx->overlay_top_z_cur = panel_band;
         ctx->overlay_top_id_cur = id;
+    }
+    /* A closing popup only paints its fade, as Flutter's popping route ignores the pointer: a blocker a band
+     * above its content takes the pointer, and a field inside it loses focus. */
+    if (!open && present) {
+        const uint32_t blocker_id = nt_ui_derived_id(id, NT_UI_POPUP_BLOCKER_SALT);
+        CLAY({.id = (Clay_ElementId){.id = blocker_id}, .floating = {.attachTo = CLAY_ATTACH_TO_PARENT, .zIndex = 1}, .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}}}) {}
+        nt_ui_block_pointer(ctx, blocker_id, NULL);
+        if (ctx->focused_input_id != 0U && nt_ui_internal_declared_within(ctx, ctx->focused_input_id, id)) {
+            ctx->focused_input_id = 0U;
+        }
     }
     // #endregion
 

@@ -170,8 +170,8 @@ root, then `layer` asc within each barrier-delimited run of one root, then
 Clay's command order (a parent's border after its children); SCISSOR/CUSTOM
 are hard barriers. An accumulated band that would saturate
 `int16` raises a Clay error, which `nt_ui` asserts on rather than
-silently merging two bands, and popup-core asserts that a root overlay's band
-fits. That caps what a game floating may declare: its own `zIndex` plus the
+silently merging two bands, and popup-core asserts that a visible root overlay's
+band fits (a hidden popup takes none). That caps what a game floating may declare: its own `zIndex` plus the
 last visible root overlay's band must still fit `int16`.
 
 ## Clay private symbols
@@ -569,12 +569,13 @@ advance/wrap). A press focuses the field, except an unfocused field whose press 
 for a scroll (`gesture_pending`): it focuses on the tap's release, so a list drag never
 opens the keyboard. A focused field drags its selection along x (`drag_axes`).
 Tab moves focus to the next enabled field declared after the focused one, wrapping
-to the first enabled field, at the next `nt_ui_begin`: for the rest of the Tab frame
+to the first enabled field, at the next `nt_ui_begin`; only a field the top overlay
+owns is a Tab stop, so Tab wraps inside a modal as in an HTML modal dialog: for the rest of the Tab frame
 the source keeps focus, so the destination never sees that frame's keys. A press
 focuses at once, so a press and a Tab in one frame act as press, then Tab. Esc
 unfocuses and wins over a Tab in the same frame. A focused field loses focus when
-it is declared disabled or not declared for a frame, and when an overlay opens
-over it (see "Interaction model"). While a field is focused, the
+it is declared disabled or not declared for a frame, when an overlay opens
+over it (see "Interaction model"), and when the popup it is in starts closing. While a field is focused, the
 game may shorten its buffer but must not rewrite its content. The focused field
 declares its keyboard hint (`nt_window_set_text_input_mode`) every frame. The line
 scrolls horizontally to keep the caret visible and clips to the field's
@@ -628,9 +629,11 @@ before the push so a runaway nesting fails early);
 and an open-only, transparent light-dismiss catcher on the panel's band,
 declared before the panel, so it lies above every earlier overlay and under
 its own panel (outside-click raises a close signal). A closing popup only
-paints while it fades: its backdrop dims without taking the pointer, it does
-not claim the top, and the UI under it takes the pointer and the keys at
-once, as a closed HTML dialog does. Esc and the
+paints while it fades, as Flutter's popping route ignores the pointer: its
+backdrop dims without taking the pointer, it does not claim the top, a
+blocker a band above its content takes the pointer over the panel, a field
+inside it loses focus, and the UI under it takes the pointer and the keys at
+once. Esc and the
 outside-click scan run on ONE CATCHER-BEARING popup per frame: the highest
 effective band, ties to the last declared. That is the panels' tree-root
 order, so the popup that paints on top is the one whose catcher wins the
@@ -691,9 +694,7 @@ reopened included: one key has one owner, a menu opened over a modal takes
 Esc from its next frame, a text field under the menu loses focus, and a
 modal or popup opened over the menu takes its
 keys and pointer while the menu stays open under it, its pending switch
-waiting and its rows registering without taking a press or focus, so a
-level still declared above that overlay (a sibling's submenu beside a
-popup a row opened) is inert until the menu closes it. A text field
+waiting and its rows registering without taking a press or focus. A text field
 focused inside the menu owns the keys: the menu reads none while it holds
 focus. A menu the game stops declaring stays open until the game clears
 `open`. Each open panel
@@ -753,14 +754,16 @@ Down. `nt_ui_menu_begin` reads it before the rows declare and applies Left and
 Esc there; Enter and Right act in the call of the row focused at begin, Up and
 Down in `nt_ui_menu_end`. Any key hands focus and the open chain to the
 keyboard, Right on a focused leaf included, so it first ends a pending switch:
-a sibling's child closes before the rows declare. A click is applied after
-the key and wins over it. A frame activates at most one row, the first
-declared. Before it reads the pointer, `nt_ui_menu_end` reconciles the kept state with the frame: an open parent the
-frame does not declare as an enabled parent closes its branch; a focused row
+a sibling's child closes before the rows declare. A click opens its parent
+after the key acts, so it wins over Right; an activation, by Enter or a
+click, closes the menu, and a frame activates at most one row, the first
+declared. Before the rows declare, a popup a row opened (a dropdown, a
+confirm) that is on top closes the open branch below that row, so each level
+keeps one open child, as the Dear ImGui popup stack does, and no level lies
+above that popup. Before it reads the pointer, `nt_ui_menu_end` reconciles the kept state with the frame: an open parent the
+frame does not declare as an enabled parent closes its branch, and a focused row
 its declared level lacks loses focus, so a row that returns later is not
-focused; and a popup a row opened (a dropdown, a confirm) that is on top
-closes the open branch below that row, so each level keeps one open child, as
-the Dear ImGui popup stack does. With no focus, Enter does nothing, Down
+focused. With no focus, Enter does nothing, Down
 starts at the first enabled row and Up at the last. A disabled focused row keeps its place: Enter does nothing and
 Up/Down step from it. If the focused row's level has closed, keys act on the
 deepest open level, where no row is focused. Enter and Right without a
