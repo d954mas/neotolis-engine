@@ -86,7 +86,6 @@ static nt_ui_modal_close_reason_t modal_reason_from_src(nt_ui_popup_close_src_t 
         return NT_UI_MODAL_CLOSE_ESC;
     case NT_UI_POPUP_CLOSE_SRC_DISMISS:
         return NT_UI_MODAL_CLOSE_BACKDROP;
-    case NT_UI_POPUP_CLOSE_SRC_SUPERSEDED: /* modals stack: a foreign overlay on top leaves one open */
     case NT_UI_POPUP_CLOSE_SRC_NONE:
     default:
         return NT_UI_MODAL_CLOSE_NONE;

@@ -240,14 +240,6 @@ nt_ui_popup_result_t nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t i
     tw->was_present = present ? 1U : 0U; /* remember for next frame's open-edge seed gate */
     const bool want_catcher = present && (dismiss_on_click || has_backdrop || force_catcher);
     nt_ui_popup_close_src_t close_src = NT_UI_POPUP_CLOSE_SRC_NONE;
-    /* A foreign overlay on top last frame (not this popup, not declared inside it nor around it) supersedes the
-     * popup, as a new root popup closes open menus and popovers in Dear ImGui and HTML; the modal ignores this
-     * source, so modals stack. A popup not declared last frame is the newer one and stays. */
-    const uint32_t top_prev = ctx->overlay_top_id_prev;
-    if (want_catcher && top_prev != 0U && top_prev != id && nt_ui_internal_live_slot(ctx, id) >= 0 && !nt_ui_internal_declared_within(ctx, top_prev, id) &&
-        !nt_ui_internal_declared_within(ctx, id, top_prev)) {
-        close_src = NT_UI_POPUP_CLOSE_SRC_SUPERSEDED;
-    }
     /* Only a catcher-bearing popup gates base UI, so only it claims present/top-id. A catcher-less popup
      * (e.g. a tooltip, flags=0) is visible but must NOT make nt_ui_overlay_active() true nor steal the
      * top-id dismiss slot from a coexisting dropdown. */
@@ -317,6 +309,7 @@ nt_ui_popup_result_t nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t i
     if (want_catcher && panel_band >= ctx->overlay_top_z_cur) {
         ctx->overlay_top_z_cur = panel_band;
         ctx->overlay_top_id_cur = id;
+        ctx->overlay_top_catcher_cur = catcher_id;
     }
     // #endregion
 

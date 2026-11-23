@@ -533,6 +533,8 @@ void nt_ui_begin(nt_ui_context_t *ctx, const nt_ui_frame_desc_t *frame) {
     /* Commit last frame's deepest modal as the close-scan target (1-frame IM lag), then reset. */
     ctx->overlay_top_id_prev = ctx->overlay_top_id_cur;
     ctx->overlay_top_id_cur = 0U;
+    ctx->overlay_top_catcher_prev = ctx->overlay_top_catcher_cur;
+    ctx->overlay_top_catcher_cur = 0U;
     ctx->overlay_top_z_cur = INT32_MIN;
     /* Reset this frame's modal presence; committed into _prev at nt_ui_end (so a game that polls
      * nt_ui_overlay_active BEFORE this frame's begin still sees last frame's result). */
@@ -2663,6 +2665,7 @@ static void resolve_hot(nt_ui_context_t *ctx) {
         const float band = coplanar_band(nearest_t);
         nt_ui_hot_t best = {0};
         uint32_t best_order = 0U;
+        nt_ui_hit_kind_t best_kind = NT_UI_HIT_NONE;
         for (uint32_t k = 0; k < ctx->interactive_prev_count; ++k) {
             const nt_ui_interactive_t *rec = &ctx->interactive_prev[k];
             float t = 0.0F;
@@ -2681,7 +2684,14 @@ static void resolve_hot(nt_ui_context_t *ctx) {
                 best.id = rec->id;
                 best.distance = ctx->use_raycast_input ? t : 0.0F;
                 best_order = order;
+                best_kind = kind;
             }
+        }
+        /* The top overlay owns the pointer: a hit outside it (not its panel, not declared inside it) lands on
+         * its catcher, so no click reaches a lower overlay or the UI under it. A 2D property, like the top. */
+        const uint32_t top = ctx->overlay_top_id_prev;
+        if (!ctx->use_raycast_input && top != 0U && best_kind == NT_UI_HIT && best.id != ctx->overlay_top_catcher_prev && !nt_ui_internal_declared_within(ctx, best.id, top)) {
+            best.id = ctx->overlay_top_catcher_prev;
         }
         /* best stays {0} when nothing was hit OR all hits were occluded — both gate to skip. */
         ctx->pointer_hot[pidx] = best;

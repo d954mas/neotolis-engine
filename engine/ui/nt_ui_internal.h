@@ -219,6 +219,9 @@ struct nt_ui_context {
      * the inner begin's return, so we use last frame's resolved top). */
     uint32_t overlay_top_id_prev;
     uint32_t overlay_top_id_cur;
+    /* The top overlay's catcher: a pointer over anything outside that overlay hits it instead. */
+    uint32_t overlay_top_catcher_prev;
+    uint32_t overlay_top_catcher_cur;
     /* Highest band claimed this frame; ties go to the last declared, matching the pointer arbiter that
      * delivers the dismiss click. INT32_MIN until the first claim. */
     int32_t overlay_top_z_cur;

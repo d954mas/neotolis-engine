@@ -375,15 +375,13 @@ static void menu_open_panel(nt_ui_context_t *ctx, uint8_t fill_layer, uint32_t m
 /* Open a level's popup at `anchor` and its panel. The root's catcher keeps the pointer off the UI under the
  * menu and claims the modal top (nt_ui_overlay_active, Esc); the menu owns its outside-press dismiss. Levels
  * snap open: a closed level declares nothing, so there is no close to tween. */
-static void menu_open_level(nt_ui_menu_t *menu, uint8_t depth, const nt_ui_popup_anchor_t *anchor) {
-    nt_ui_menu_frame_t *f = &menu->frame;
+static void menu_open_level(const nt_ui_menu_t *menu, uint8_t depth, const nt_ui_popup_anchor_t *anchor) {
+    const nt_ui_menu_frame_t *f = &menu->frame;
     nt_ui_popup_style_t pst = nt_ui_popup_style_defaults();
     pst.ease_speed = 0.0F;
     pst.layer = f->fill_layer;
     const nt_ui_popup_ext_t ext = {.def = &NT_UI_MENU_DEF, .force_catcher = (depth == 0U)};
-    if (nt_ui_popup_begin_internal(f->ui, menu_level_id(f->menu_id, depth), &pst, anchor, true, &ext, NULL).close_requested) {
-        f->closing = true; /* a foreign overlay superseded the menu: no row activates, the chain closes */
-    }
+    (void)nt_ui_popup_begin_internal(f->ui, menu_level_id(f->menu_id, depth), &pst, anchor, true, &ext, NULL);
     menu_open_panel(f->ui, f->fill_layer, f->menu_id, depth, f->style); /* LEFT open for the level's rows */
 }
 
@@ -411,9 +409,7 @@ bool nt_ui_menu_begin(nt_ui_menu_t *menu, nt_ui_context_t *ctx, const nt_ui_elem
         .nav_depth = menu->focus_depth,
         .fill_layer = (data != NULL) ? data->layer : 0U,
         .label_layer = label_layer,
-        /* The menu was on top last frame, or opens this frame with nothing on top: a modal up last frame keeps
-         * its keys, so one Esc never closes both. */
-        .top = ctx->overlay_top_id_prev == menu_level_id(menu_id, 0U) || (menu->arming && ctx->overlay_top_id_prev == 0U),
+        .top = ctx->overlay_top_id_prev == menu_level_id(menu_id, 0U), /* one owner: an opening menu reads keys from its next frame */
     };
 
     /* BELOW flips only vertically: shift the root left by last frame's width to stay on screen (unclamped on
@@ -447,10 +443,10 @@ static bool menu_step_clicked(const nt_ui_menu_t *menu, uint32_t row_id) {
 /* A row activates on its click or on Enter while focused; a frame activates one row, the first declared (a
  * tap and Enter can land on two). */
 static bool menu_activate(nt_ui_menu_t *menu, uint32_t row_id, bool clicked) {
-    if (menu->frame.closing || !(clicked || (menu_key_target(menu, row_id) && menu_key(menu, NT_KEY_ENTER)))) {
+    if (menu->frame.activated || !(clicked || (menu_key_target(menu, row_id) && menu_key(menu, NT_KEY_ENTER)))) {
         return false;
     }
-    menu->frame.closing = true;
+    menu->frame.activated = true;
     return true;
 }
 
@@ -594,7 +590,7 @@ static bool menu_resolve(nt_ui_menu_t *menu) {
     if (f->declared_depth < menu_open_depth(menu)) {
         menu_set_open(menu, f->declared_depth, 0U); /* a removed, disabled or leaf parent closes its branch */
     }
-    bool close_chain = f->closing;
+    bool close_chain = f->activated;
     const bool up = menu_key(menu, NT_KEY_ARROW_UP);
     const bool down = menu_key(menu, NT_KEY_ARROW_DOWN);
     const bool back = menu_key(menu, NT_KEY_ARROW_LEFT) || menu_key(menu, NT_KEY_ESCAPE);

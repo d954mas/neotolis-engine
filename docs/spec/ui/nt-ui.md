@@ -617,11 +617,10 @@ ctx arbitrates the pointer by ray distance and does not rank overlays by
 band at all. A catcher-less
 overlay (a tooltip, a menu's submenu levels) never claims that slot; a menu's
 root has an inert catcher that claims it, and the menu runs its own dismiss.
-A foreign overlay on top last frame (not the popup, not declared inside it nor
-around it) supersedes every catcher-bearing popup except a modal: the popup
-gets `close_requested`, as a new root popup closes open menus and popovers in
-Dear ImGui and HTML. Modals stack instead, and a popup declared for the first
-time is the newer one and stays; the
+In a 2D context the top overlay owns the pointer: a pointer over anything
+declared outside it (outside its panel and what the panel declares) hits its
+catcher instead, so no press reaches a lower overlay or the UI under it;
+overlays below stay open and inert; the
 text field's Esc-unfocus is independent of both. A fully-closed
 popup declares NO catcher, so the base UI stays clickable; a hover-driven
 overlay (tooltip) can clear the catcher flag entirely. Dismiss is always a
@@ -665,9 +664,10 @@ game declares inside a custom row steps as usual, so a game that reopens a
 menu with a press over that control also presses it. An open menu is a modal overlay: its root claims the modal top like a
 popup with a catcher, so the UI under it takes no pointer, `nt_ui_overlay_active`
 reports it, and the menu reads keys and the outside press only while it was on top last
-frame, or on its opening frame when nothing was: a menu opened over a modal
-takes Esc from its next frame, and a modal or popup opened over the menu
-supersedes it (popup-core), so the menu closes. Each open panel
+frame, so it reads them from the frame after it opens: one key has one owner,
+a menu opened over a modal takes Esc from its next frame, and a modal or
+popup opened over the menu takes its keys and pointer while the menu stays
+open under it. Each open panel
 blocks the pointer, so nothing under it is hovered or clicked.
 
 A custom-content row (`item_begin..item_end`, `selectable_begin..selectable_end`,

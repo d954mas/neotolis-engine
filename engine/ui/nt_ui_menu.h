@@ -104,7 +104,7 @@ typedef struct {
     bool focus_seen;       /* the focused row is declared and enabled this frame */
     bool focus_opens;      /* the focused row is a parent */
     bool top;              /* the menu is the top overlay: it reads keys and the outside press */
-    bool closing;          /* a row activated or a foreign overlay superseded the menu: the chain closes */
+    bool activated;        /* a row activated: the chain closes */
     bool item_enabled;     /* the open custom row is enabled */
     bool item_activatable; /* the open custom row has an action of its own */
 } nt_ui_menu_frame_t;
