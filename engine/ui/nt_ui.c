@@ -404,9 +404,15 @@ void nt_ui_set_font(nt_ui_context_t *ctx, uint16_t font_id, nt_font_t font) {
 // #region begin_end
 static void resolve_hot(nt_ui_context_t *ctx);
 
-/* A held id belongs to the top overlay: none, the top's catcher, an inspector pane, or declared inside the top. */
+/* A held id belongs to the top overlay when it lies at or above the top's catcher in last frame's stacking
+ * order, the order that paints and hit-tests; an inspector pane floats above every overlay. */
 static bool owned_by_top(nt_ui_context_t *ctx, uint32_t id, uint32_t top) {
-    return id == 0U || id == nt_ui_internal_popup_catcher_id(top) || nt_ui_internal_record_kind(ctx, id) != NT_UI_HIT || nt_ui_internal_declared_within(ctx, id, top);
+    if (id == 0U || nt_ui_internal_record_kind(ctx, id) == NT_UI_HIT_PANE) {
+        return true;
+    }
+    const int32_t slot = nt_ui_internal_live_slot(ctx, id);
+    const int32_t catcher = nt_ui_internal_live_slot(ctx, nt_ui_internal_popup_catcher_id(top));
+    return slot >= 0 && catcher >= 0 && ctx->hit_baked[slot].order >= ctx->hit_baked[catcher].order;
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -532,7 +538,8 @@ void nt_ui_begin(nt_ui_context_t *ctx, const nt_ui_frame_desc_t *frame) {
     }
     ctx->last_press_age += dt;
     ctx->overlay_depth = 0U; /* modal begin++/end-- balance across the frame (asserted == 0 at end) */
-    /* Commit last frame's deepest modal as the close-scan target (1-frame IM lag), then reset. */
+    ctx->overlay_root_count = 0U;
+    /* Commit last frame's top overlay as the close-scan target (1-frame IM lag), then reset. */
     ctx->overlay_top_id_prev = ctx->overlay_top_id_cur;
     ctx->overlay_top_id_cur = 0U;
     ctx->overlay_top_z_cur = INT32_MIN;
@@ -607,9 +614,9 @@ void nt_ui_begin(nt_ui_context_t *ctx, const nt_ui_frame_desc_t *frame) {
      * clip) leaks a slot until the pool (64) overflows -> Clay error type=7 crash. */
     Clay_UpdateScrollContainers(false, (Clay_Vector2){0.0F, 0.0F}, ctx->frame_dt);
 
-    /* The top overlay owns the pointer, held gestures included: a capture or a pending scroll outside it
-     * (a press under an overlay that opened mid-gesture) ends without a click, as a modal window cancels
-     * its owner's capture. A 2D property, like the top. */
+    /* The top overlay owns the pointer, held gestures included: a capture or a pending scroll under it (a
+     * press under an overlay that opened mid-gesture) ends without a click, as a modal window cancels its
+     * owner's capture. A 2D property, like the top. */
     const uint32_t top = ctx->overlay_top_id_prev;
     for (uint32_t i = 0; !ctx->use_raycast_input && top != 0U && i < ctx->frame_pointer_count; ++i) {
         nt_ui_capture_t *cap = &ctx->captures[i];

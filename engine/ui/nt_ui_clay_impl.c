@@ -1470,7 +1470,7 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
 
     // #region viewport-hover-scan
     /* No sidebar row picked → scan viewport for a user element under the cursor. Zones, not the pointer's
-     * hot: only stepped widgets record one, so the pick sees through block-only gates (menu occluder, a
+     * hot: only stepped widgets record one, so the pick sees through block-only gates (an inert catcher, a
      * non-top popup's catcher) and scroll surfaces to the element under them. */
     if (highlightedElementId == 0U && !ctx->inspector_pointer_consumed) {
         const float panel_left_x = context->layoutDimensions.width - ctx->inspector_metrics.panel_width;

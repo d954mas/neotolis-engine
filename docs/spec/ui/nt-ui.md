@@ -141,14 +141,16 @@ panel's delta and is declared before the panel instead: a negative delta
 would also sink under the overlay the panel is nested in.
 
 Bands accumulate with declaration nesting, NOT with attachment:
-`attachTo = ROOT` still stacks where it was declared. A root overlay
-declares one `modal_zband_stride` above its enclosing floating; an overlay
-nested inside another declares delta 0 and shares the band of the floating
-it is declared in (its parent's, unless the game nests it in a floating with
-its own `zIndex`, which moves it with that floating), so overlays
-stack in declaration order, as later-opened overlays in an HTML top layer
-or Dear ImGui's window stack: an overlay declared later covers an earlier
-one together with every level nested in it. A widget's own floating parts declare delta 0 and
+`attachTo = ROOT` still stacks where it was declared. Overlays stack as
+in an HTML top layer or Dear ImGui's window stack, with declaration order
+in place of open order: the first visible root overlay of a frame declares
+one `modal_zband_stride` above its enclosing floating and each later visible
+root overlay `NT_UI_MODAL_MAX_DEPTH` bands higher, so an overlay declared
+later covers an earlier one together with every level nested in it; an
+overlay nested inside another declares delta 1, so it covers its parent and
+the parent's widget parts (delta 0) declared after it. A game floating with
+its own positive `zIndex` inside an overlay can rise over that overlay's
+nested levels, as a positive `z-index` inside a CSS stacking context. A widget's own floating parts declare delta 0 and
 paint above their container's content because each is a later tree root
 of the same band, and `layer` never reorders across tree roots. A floating
 declared AFTER one of them in the same band paints over it. There is no way out
@@ -167,8 +169,9 @@ root, then `layer` asc within each barrier-delimited run of one root, then
 Clay's command order (a parent's border after its children); SCISSOR/CUSTOM
 are hard barriers. An accumulated band that would saturate
 `int16` raises a Clay error, which `nt_ui` asserts on rather than
-silently merging two bands. That caps what a game floating may declare: its own
-`zIndex` plus one stride must still fit `int16`.
+silently merging two bands, and popup-core asserts that a root overlay's band
+fits. That caps what a game floating may declare: its own `zIndex` plus the
+last visible root overlay's band must still fit `int16`.
 
 ## Clay private symbols
 
@@ -290,9 +293,9 @@ gesture: whatever the pointer still held is dropped. **Orphan cleanup** at
 frame — covers scene switches, conditional disable, and widget hide. It also drops
 `active_id` when a pointer has no release edge and its button is up or newly pressed:
 frames without `nt_ui_begin` swallow edges, and the pointer must not stay bound.
-In a 2D context it also drops a capture or a pending scroll held outside last
-frame's top overlay (outside its catcher, its panel and what the panel
-declares; inspector panes excepted): an overlay that
+In a 2D context it also drops a capture or a pending scroll held under last
+frame's top overlay (below its catcher in the stacking order that paints and
+hit-tests; inspector panes excepted): an overlay that
 opens over a held press ends that gesture, as a modal window cancels its
 owner's capture, so the release clicks nothing and a drag or hold stops.
 Result: 1-frame IM-lag is intrinsic (current frame reads previous
@@ -615,9 +618,9 @@ missing trigger element can't trip Clay's parent-not-found); trigger-anchored
 placement with per-side edge-flip (BELOW/ABOVE/RIGHT/LEFT, CENTER for modal)
 read from the panel's previous-frame bbox; a `value_t` open/close tween (a snap
 popup, `ease_speed` 0, keeps no retained state: no tween cell, no anim slot); a shared
-z-band one `modal_zband_stride` above the enclosing floating for a root
-overlay and its parent's band for a nested one (see "Floating zIndex is
-relative" above; NT_ASSERT before the push so a runaway nesting fails early);
+z-band, the frame's next root band for a root overlay and one band above its
+parent for a nested one (see "Floating zIndex is relative" above; NT_ASSERT
+before the push so a runaway nesting fails early);
 and a present-only, transparent light-dismiss catcher on the panel's band,
 declared before the panel, so it lies above every earlier overlay and under
 its own panel (outside-click raises a close signal). Esc and the
@@ -632,7 +635,8 @@ root has an inert catcher that claims it, and the menu runs its own dismiss.
 The top overlay owns the pointer by stacking alone: its catcher covers every
 earlier overlay and the UI under it, so no press reaches them, and overlays
 below stay open and inert; a gesture held under it ends (see "Interaction
-model"). The text field's Esc-unfocus is independent of both. A fully-closed
+model"), while one held above it (a catcher-less popup or a game floating
+declared later) goes on. The text field's Esc-unfocus is independent of both. A fully-closed
 popup declares NO catcher, so the base UI stays clickable; a hover-driven
 overlay (tooltip) can clear the catcher flag entirely. Dismiss is always a
 SIGNAL the game acts on (Model D) — popup-core never owns the open bool. The
@@ -679,7 +683,12 @@ press) only while it was on top last frame and not on the frame it opens,
 reopened included: one key has one owner, a menu opened over a modal takes
 Esc from its next frame, and a modal or popup opened over the menu takes its
 keys and pointer while the menu stays open under it, its pending switch
-waiting. Each open panel
+waiting and its rows registering without taking a press or focus, so a
+level still declared above that overlay (a sibling's submenu beside a
+popup a row opened) is inert until the menu closes it. A text field
+focused inside the menu owns the keys: the menu reads none while it holds
+focus. A menu the game stops declaring stays open until the game clears
+`open`. Each open panel
 blocks the pointer, so nothing under it is hovered or clicked.
 
 A custom-content row (`item_begin..item_end`, `selectable_begin..selectable_end`,
@@ -732,8 +741,8 @@ binds Esc or Enter elsewhere skips them while a menu is open:
 - Left and Esc close the focused level and focus its parent; at the root they
   close the menu.
 
-A frame activates at most one row, the first declared. Before it reads input,
-`nt_ui_menu_end` reconciles the kept state with the frame: an open parent the
+A frame activates at most one row, the first declared. Enter and Right act in
+the row calls; before it reads the rest of the input, `nt_ui_menu_end` reconciles the kept state with the frame: an open parent the
 frame does not declare as an enabled parent closes its branch; a focused row
 its declared level lacks loses focus, so a row that returns later is not
 focused; and a popup a row opened (a dropdown, a confirm) that is on top
@@ -742,20 +751,25 @@ the Dear ImGui popup stack does. With no focus, Enter does nothing, Down
 starts at the first enabled row and Up at the last. A disabled focused row keeps its place: Enter does nothing and
 Up/Down step from it. If the focused row's level has closed, keys act on the
 deepest open level, where no row is focused. Keys do nothing in a frame that
-did not declare the focused row's level, and then do not end pointer mode; Up,
-Down, Left and Esc also do nothing in a frame whose Right or Enter moved focus
-into a child. A click on a parent wins over a same-frame Right or Enter that
-the frame defers.
+did not declare the focused row's level, and Enter and Right nothing without a
+focused row; such a key does not end pointer mode. Any other key, Right on a
+focused leaf included, hands focus and the open chain to the keyboard, so it
+ends a pending switch. Up, Down, Left and Esc also do nothing in a frame whose
+Right or Enter moved focus into a child. A click on a parent wins over a
+same-frame Right or Enter.
 
 A row is hovered by any pointer over it, as every `nt_ui` hover; the primary
 pointer drives the mouse-aim corridor, the end of keyboard mode and the
 outside-press dismiss (a left or right press with the element under the pointer off everything
 declared inside the menu last frame, a popup that a custom row opened included, whatever the
-left button holds). The pointer moves focus to the enabled row under it; a disabled row, padding or a separator under
+left button holds). A submenu level is hit from the frame after it first
+appears, as every element, so a press on it in its first frame is an outside
+press. The pointer moves focus to the enabled row under it; a disabled row, padding or a separator under
 it takes no focus and starts no switch. A key hands focus and the open
 chain to the keyboard: a pointer resting on a row neither moves focus nor opens
 or closes a submenu until it moves or presses either button; clicks always act. A level highlights one
-row: the focused row on its level, the open parent on every other level. A hovered row switches its level's open child (a parent opens its own, a
+row: the focused row on its level, the open parent on every other level and
+on a level without focus. A hovered row switches its level's open child (a parent opens its own, a
 leaf collapses it): at once when no child is open; otherwise not while the
 pointer is over the child panel, after up to twice
 `NT_UI_MENU_AIM_FALLBACK_SECS` inside the triangle toward the child's near edge,

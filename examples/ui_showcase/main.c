@@ -3195,7 +3195,7 @@ static void render_menu(nt_ui_context_t *ctx, tab_state_t *st) {
 
     /* A right-click opens the zone menu over the panel and the global one anywhere else; opening one closes
      * the other. The panel test is geometric (prev-frame bbox), so a right-click re-opens the zone menu
-     * through the open menu's occluder. */
+     * through the open menu's catcher. */
     float px = 0.0F;
     float py = 0.0F;
     nt_ui_pointer_pos(ctx, &px, &py);

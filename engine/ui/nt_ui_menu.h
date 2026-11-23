@@ -18,8 +18,8 @@ extern const nt_ui_widget_def_t NT_UI_MENU_DEF;
 #define NT_UI_MENU_AIM_FALLBACK_SECS 0.12F
 
 /* Submenu nesting cap: a parent row declared on the deepest level asserts (fail-early, no fallback), so a
- * runaway tree never exhausts the popup z-band / stack. Build-overridable for parity with every other cap
- * in the subsystem. */
+ * runaway tree never exhausts the popup stack (NT_UI_MODAL_MAX_DEPTH, asserted at build time).
+ * Build-overridable for parity with every other cap in the subsystem. */
 #ifndef NT_UI_MENU_MAX_DEPTH
 #define NT_UI_MENU_MAX_DEPTH 8
 #endif

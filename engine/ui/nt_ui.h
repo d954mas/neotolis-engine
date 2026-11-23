@@ -72,11 +72,11 @@
 #endif
 
 /* Default modal z-band stride. A floating's zIndex is RELATIVE to the floating it is declared inside
- * (docs/spec/ui/nt-ui.md, "Floating zIndex is relative"), so a root overlay sits one stride above
- * whatever encloses it — including a game floating's own zIndex, and there is no way out of that
- * context: a game floating that must stay under all UI belongs at the root level. An overlay nested in
- * another shares its band. Budget: that game zIndex plus one stride must fit int16, or Clay clamps and
- * reports it (nt_ui asserts).
+ * (docs/spec/ui/nt-ui.md, "Floating zIndex is relative"), so the first root overlay of a frame sits one
+ * stride above whatever encloses it — including a game floating's own zIndex, and there is no way out
+ * of that context: a game floating that must stay under all UI belongs at the root level. Each later
+ * visible root overlay sits NT_UI_MODAL_MAX_DEPTH bands higher; a nested overlay one band above its
+ * parent. Budget: that game zIndex plus the last root overlay's band must fit int16 (nt_ui asserts).
  * Per-context override via nt_ui_create_desc_t.modal_zband_stride (seeded from this in
  * nt_ui_create_desc_defaults; must be > 0). */
 #define NT_UI_MODAL_ZBAND_STRIDE 1000

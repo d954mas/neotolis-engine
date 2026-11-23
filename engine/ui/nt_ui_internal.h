@@ -238,8 +238,11 @@ struct nt_ui_context {
     uint32_t rich_max_runs;
     uint32_t rich_max_styles;
     uint32_t rich_max_text_bytes;
-    /* Band each overlay level declares above the floating enclosing it; validated in create_context (> 1). */
+    /* Band of the first root overlay above the floating enclosing it; validated in create_context (> 0). */
     int16_t modal_zband_stride;
+    /* Visible root overlays declared so far this frame: each takes the next band, so a later one covers an
+     * earlier one with all its nested levels. Reset by nt_ui_begin, like overlay_depth. */
+    uint16_t overlay_root_count;
     uint8_t overlay_depth;
     uint8_t capture_seen[NT_INPUT_MAX_POINTERS];
 

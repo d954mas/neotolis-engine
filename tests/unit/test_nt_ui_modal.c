@@ -109,8 +109,7 @@ static void test_modal_floating_smoke(void) {
     TEST_ASSERT_EQUAL_UINT8(0U, s_fx.ctx->overlay_depth); /* balanced */
 }
 
-/* ---- z-band: a root modal sits at 1000 with its backdrop; a nested one shares the band (depth 2) and
- *      stacks above it by declaration. ---- */
+/* ---- z-band: a root modal sits at 1000 with its backdrop; a nested one (depth 2) sits one band above. ---- */
 static void test_modal_zband_and_nesting(void) {
     nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
     st.ease_speed = 0.0F;
@@ -128,8 +127,9 @@ static void test_modal_zband_and_nesting(void) {
     nt_ui_end(s_fx.ctx);
 
     TEST_ASSERT_EQUAL_INT32((int32_t)1000, band_of_rect(s_fx.ctx, CLAY_ID("body_a").id));
-    TEST_ASSERT_EQUAL_INT32_MESSAGE((int32_t)1000, band_of_rect(s_fx.ctx, CLAY_ID("body_b").id), "a nested modal shares its parent's band");
-    TEST_ASSERT_TRUE_MESSAGE(band_has_backdrop(s_fx.ctx, 1000), "the backdrop paints on its panel's band");
+    TEST_ASSERT_EQUAL_INT32_MESSAGE((int32_t)1001, band_of_rect(s_fx.ctx, CLAY_ID("body_b").id), "a nested modal sits one band above its parent");
+    TEST_ASSERT_TRUE_MESSAGE(band_has_backdrop(s_fx.ctx, 1000), "the outer backdrop paints on its panel's band");
+    TEST_ASSERT_TRUE_MESSAGE(band_has_backdrop(s_fx.ctx, 1001), "the nested backdrop paints on its own panel's band");
 }
 
 /* ---- Stack depth is zero at frame start and after balanced begin/end. ---- */
@@ -562,8 +562,10 @@ static void test_overlay_active_prev_frame(void) {
     TEST_ASSERT_EQUAL_UINT8(0U, s_fx.ctx->overlay_depth); /* live depth IS 0 ... */
     TEST_ASSERT_TRUE(nt_ui_overlay_active(s_fx.ctx));     /* ... yet prev-frame presence is true */
 
-    /* Frame 2: no modal declared at all -> presence falls back to inactive. */
+    /* Frame 2: no modal declared at all -> presence falls back to inactive. Inside the frame it still reads
+     * the last finished frame. */
     ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1, 0);
+    TEST_ASSERT_TRUE(nt_ui_overlay_active(s_fx.ctx));
     CLAY({.id = CLAY_ID("base2"), .layout = {.sizing = {CLAY_SIZING_FIXED(100), CLAY_SIZING_FIXED(100)}}}) {}
     nt_ui_end(s_fx.ctx);
     TEST_ASSERT_FALSE(nt_ui_overlay_active(s_fx.ctx));
@@ -634,15 +636,16 @@ static void test_modal_custom_zband_stride(void) {
     ui_frame_begin(ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1, 0);
     nt_ui_modal_begin(ctx, MODAL_A, &st, true); /* root -> stride */
     CLAY({.id = CLAY_ID("cs_a"), .layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(20)}}, .backgroundColor = {8, 8, 8, 255}}) {}
-    nt_ui_modal_begin(ctx, MODAL_B, &st, true); /* nested -> the same band */
+    nt_ui_modal_begin(ctx, MODAL_B, &st, true); /* nested -> one band above */
     CLAY({.id = CLAY_ID("cs_b"), .layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(20)}}, .backgroundColor = {8, 8, 8, 255}}) {}
     nt_ui_modal_end(ctx);
     nt_ui_modal_end(ctx);
     nt_ui_end(ctx);
 
     TEST_ASSERT_EQUAL_INT32((int32_t)custom_stride, band_of_rect(ctx, CLAY_ID("cs_a").id));
-    TEST_ASSERT_EQUAL_INT32((int32_t)custom_stride, band_of_rect(ctx, CLAY_ID("cs_b").id));
+    TEST_ASSERT_EQUAL_INT32((int32_t)custom_stride + 1, band_of_rect(ctx, CLAY_ID("cs_b").id));
     TEST_ASSERT_TRUE(band_has_backdrop(ctx, custom_stride));
+    TEST_ASSERT_TRUE(band_has_backdrop(ctx, custom_stride + 1));
 
     nt_ui_destroy_context(ctx);
 }

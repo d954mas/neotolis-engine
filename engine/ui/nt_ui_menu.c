@@ -17,6 +17,8 @@
 #include "ui/nt_ui_popup.h"
 #include "ui/nt_ui_popup_internal.h"
 
+_Static_assert(NT_UI_MENU_MAX_DEPTH <= NT_UI_MODAL_MAX_DEPTH, "a menu level is a popup: its depth must fit the overlay stack");
+
 const nt_ui_widget_def_t NT_UI_MENU_DEF = {
     .name = "nt_menu",
     .pill_color = 0xFF40C080U,
@@ -241,8 +243,13 @@ static nt_ui_popup_anchor_t menu_submenu_anchor(const nt_ui_context_t *ctx, uint
  * focused row's neighbours, the pointer records one hover and one click candidate; menu_end resolves the
  * rest. */
 
-/* The menu reads keys only while it is the top overlay: a modal or a popup opened over it takes them. */
-static bool menu_key(const nt_ui_menu_t *menu, nt_key_t key) { return menu->frame.top && nt_input_key_is_pressed(key); }
+/* The menu reads keys only while it is the top overlay (a modal or a popup opened over it takes them) and
+ * no text field declared inside it holds focus: the field owns its caret keys. */
+static bool menu_key(const nt_ui_menu_t *menu, nt_key_t key) {
+    const nt_ui_context_t *ctx = menu->frame.ui;
+    const bool field_inside = ctx->focused_input_id != 0U && nt_ui_internal_declared_within(ctx, ctx->focused_input_id, menu_level_id(menu->frame.menu_id, 0U));
+    return menu->frame.top && !field_inside && nt_input_key_is_pressed(key);
+}
 
 /* Enter, or Right on a parent, acts on the focused row; the navigated level is the focused row's level. */
 static bool menu_key_target(const nt_ui_menu_t *menu, uint32_t row_id) { return menu->frame.depth == menu->frame.nav_depth && row_id == menu->focus; }
@@ -280,7 +287,7 @@ static uint32_t menu_im_row(nt_ui_menu_t *menu, uint32_t key, const char *label,
     /* A custom row stays under the pointer over its own interactive child (hot, declared later), so
      * focus, highlight and the leaf collapse follow the row the pointer is in. The opening frame's hits are
      * last frame's, at the old place. */
-    const bool pointed = enabled && !menu->arming && nt_ui_hovered_within(ctx, row_id);
+    const bool pointed = enabled && menu->frame.top && nt_ui_hovered_within(ctx, row_id);
     if (enabled && f->focus_first && depth == f->nav_depth + 1U) {
         menu->focus = row_id;
         menu->focus_depth = depth;
@@ -302,7 +309,7 @@ static uint32_t menu_im_row(nt_ui_menu_t *menu, uint32_t key, const char *label,
         menu_nav_track(f, menu->focus, row_id, enabled);
     }
     /* One row per level: the focused one on its level, the open parent on every other level. */
-    const bool highlit = enabled && (row_id == menu->focus || (has_sub && row_id == menu->open_path[depth] && depth != menu->focus_depth));
+    const bool highlit = enabled && (row_id == menu->focus || (has_sub && row_id == menu->open_path[depth] && (depth != menu->focus_depth || menu->focus == 0U)));
 
     const nt_ui_anim_target_t tgt = {.scale_x = 1.0F, .scale_y = 1.0F, .scale_z = 1.0F, .opacity = 1.0F, .value_t = highlit ? 1.0F : 0.0F};
     /* A row's highlight ease outlives its closed level, so a row shown again snaps it. */
@@ -430,10 +437,11 @@ bool nt_ui_menu_begin(nt_ui_menu_t *menu, nt_ui_context_t *ctx, const nt_ui_elem
     return true;
 }
 
-/* The row's one mutating step. The opening frame's hits are last frame's, at the old place: it only registers
- * the row, so its press is not captured and its release clicks nothing. */
+/* The row's one mutating step. A menu that is not on top (its opening frame, whose hits are last frame's at
+ * the old place, or under another overlay) only registers the row: its press is not captured and its
+ * release clicks nothing. */
 static bool menu_step_clicked(const nt_ui_menu_t *menu, uint32_t row_id) {
-    if (menu->arming) {
+    if (!menu->frame.top) {
         nt_ui_block_pointer(menu->frame.ui, row_id, NULL);
         return false;
     }
@@ -494,10 +502,13 @@ bool nt_ui_menu_item_end(nt_ui_menu_t *menu) {
  * focus stays on it. */
 static void menu_key_open(nt_ui_menu_t *menu, uint8_t depth, uint32_t row_id) {
     nt_ui_menu_frame_t *f = &menu->frame;
+    if (f->click_id != 0U) {
+        return; /* a click this frame wins over the key */
+    }
     if (menu->open_path[depth] == 0U || menu->open_path[depth] == row_id) {
         menu_set_open(menu, depth, row_id);
         f->focus_first = true;
-    } else if (f->click_id == 0U) { /* a click this frame wins over the key */
+    } else {
         f->click_id = row_id;
         f->click_depth = depth;
     }
@@ -608,11 +619,12 @@ static bool menu_resolve(nt_ui_menu_t *menu) {
     }
     // #endregion
     bool close_chain = f->activated;
-    /* Keys act only on a declared focused level; one that did nothing does not take the pointer's place. */
+    /* Keys act only on a declared focused level, Right and Enter only with a focused row; a key that had
+     * nothing to act on does not take the pointer's place. */
     const bool up = level_declared && menu_key(menu, NT_KEY_ARROW_UP);
     const bool down = level_declared && menu_key(menu, NT_KEY_ARROW_DOWN);
     const bool back = level_declared && (menu_key(menu, NT_KEY_ARROW_LEFT) || menu_key(menu, NT_KEY_ESCAPE));
-    const bool kbd_acted = up || down || back || (level_declared && (menu_key(menu, NT_KEY_ARROW_RIGHT) || menu_key(menu, NT_KEY_ENTER)));
+    const bool kbd_acted = up || down || back || (level_declared && f->focus_seen && (menu_key(menu, NT_KEY_ARROW_RIGHT) || menu_key(menu, NT_KEY_ENTER)));
     /* The rows tracked the focused row's level (an undeclared level tracked nothing); a keyboard move into a
      * child this frame ignores Up/Down/Left/Esc. */
     const uint8_t d = f->nav_depth;

@@ -166,11 +166,8 @@ nt_ui_popup_result_t nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t i
     /* Assert BEFORE the push — fail-early, no heap growth, no silent fallback. */
     NT_ASSERT(ctx->overlay_depth < NT_UI_MODAL_MAX_DEPTH && "nt_ui_popup_begin: nesting exceeds NT_UI_MODAL_MAX_DEPTH");
 
-    // #region stack push + z-band (shared depth counter with modal)
-    /* A root overlay sits one stride above the floating that encloses it, a nested one shares its parent's
-     * band, so a later overlay covers an earlier one with all its nested levels; the catcher, declared
-     * before its panel on the same band, lies between them. */
-    const int16_t panel_z = (ctx->overlay_depth == 0U) ? ctx->modal_zband_stride : 0;
+    // #region stack push (shared depth counter with modal)
+    const bool root_overlay = ctx->overlay_depth == 0U;
     ++ctx->overlay_depth;
     const uint32_t catcher_id = nt_ui_internal_popup_catcher_id(id);
     // #endregion
@@ -204,8 +201,8 @@ nt_ui_popup_result_t nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t i
      * at t=0 first (no-flash), then the real call eases up. Gated on the non-evicting tween-state, NOT
      * the anim slot — an evicted slot must NOT re-seed (that flickers the eased open under churn). The
      * anim-slot-absent check still guards the very first ever touch (state cell fresh, slot truly new).
-     * NOTE: gated on was_present_prev, so flipping ease_speed mid-open (theme hot-swap) won't re-animate
-     * an already-open popup — only a closed->open edge seeds. */
+     * A snap popup keeps no tween cell, so switching an open one to eased replays its entrance once, and a
+     * cell left from an earlier eased period may skip one; a theme hot-swap is the only trigger. */
     if (open && style->ease_speed > 0.0F && !was_present_prev && popup_anim_slot_absent(ctx, id)) {
         nt_ui_anim_target_t seed = tgt;
         seed.value_t = 0.0F;
@@ -238,6 +235,17 @@ nt_ui_popup_result_t nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t i
     const bool present = open || (t > NT_UI_POPUP_EPSILON);
     if (tw != NULL) {
         tw->was_present = present ? 1U : 0U; /* remember for next frame's open-edge seed gate */
+    }
+    /* A root overlay takes the frame's next root band above the floating that encloses it, so a later one
+     * covers an earlier one with all its nested levels; a nested one sits a band above its parent, over the
+     * parent's widget parts (delta 0). The catcher, declared before its panel on the same band, lies
+     * between them. A hidden popup paints nothing and takes no band. */
+    int16_t panel_z = 1;
+    if (root_overlay) {
+        const int32_t band = ctx->modal_zband_stride + ((int32_t)ctx->overlay_root_count * NT_UI_MODAL_MAX_DEPTH);
+        NT_ASSERT(band <= INT16_MAX && "nt_ui_popup: too many visible root overlays in one frame for the int16 z-band");
+        panel_z = (int16_t)band;
+        ctx->overlay_root_count += present ? 1U : 0U;
     }
     const bool want_catcher = present && (dismiss_on_click || has_backdrop || force_catcher);
     nt_ui_popup_close_src_t close_src = NT_UI_POPUP_CLOSE_SRC_NONE;
