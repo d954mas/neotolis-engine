@@ -1,10 +1,10 @@
 #ifndef NT_UI_POPUP_INTERNAL_H
 #define NT_UI_POPUP_INTERNAL_H
 
-/* Module-internal extended popup-core entry. The modal (nt_ui_modal.c) re-expresses itself on top of
- * this: it supplies a visible dim backdrop color, an Esc-close opt-in, and a close-pad, and reads back
- * the close source so it can map it to its own close-reason enum. The public nt_ui_popup_begin is a
- * thin wrapper over nt_ui_popup_begin_internal with no backdrop / no Esc / zero pad. NOT a public API. */
+/* Module-internal extended popup-core entry. The modal (nt_ui_modal.c) and the menu re-express
+ * themselves on top of this: a visible dim backdrop color, the catcher, Esc and outside-press opt-ins, a
+ * close-pad, a widget def. The public nt_ui_popup_begin is nt_ui_popup_begin_internal without ext. NOT a
+ * public API. */
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -14,13 +14,6 @@
 
 typedef struct nt_ui_context nt_ui_context_t;
 
-/* Close source raised by the core this frame (mapped by the caller to its own enum). */
-typedef enum {
-    NT_UI_POPUP_CLOSE_SRC_NONE = 0,
-    NT_UI_POPUP_CLOSE_SRC_DISMISS, /* a press outside the panel (beyond the close-pad) */
-    NT_UI_POPUP_CLOSE_SRC_ESC,     /* Escape on the top popup (esc_close requested) */
-} nt_ui_popup_close_src_t;
-
 /* Extended config layered onto the base popup-core. All zero = the public behavior. */
 typedef struct {
     const nt_ui_widget_def_t *def; /* widget_register def; NULL = NT_UI_POPUP_DEF */
@@ -28,14 +21,13 @@ typedef struct {
     float backdrop_alpha;          /* peak backdrop opacity at t==1 (0..1); multiplied into the color alpha */
     int16_t close_pad;             /* px margin around the panel; an outside press within it does NOT dismiss */
     bool catcher;                  /* an open popup gates the UI under it and claims the top; dismiss needs it */
-    bool esc_close;                /* Escape on the top popup raises NT_UI_POPUP_CLOSE_SRC_ESC */
-    bool dismiss_on_click;         /* an outside press beyond the panel+pad raises NT_UI_POPUP_CLOSE_SRC_DISMISS */
+    bool esc_close;                /* Escape on the top popup raises NT_UI_POPUP_CLOSE_ESC */
+    bool dismiss_on_click;         /* an outside press beyond the panel+pad raises NT_UI_POPUP_CLOSE_OUTSIDE */
 } nt_ui_popup_ext_t;
 
 /* The shared core: tween + z-band push + catcher/backdrop + close-scan + panel decl, only for a shown popup.
- * A raised close clears *open; out_src (nullable) receives its source. ext (nullable) layers
- * backdrop/esc/pad/def on top. */
+ * A raised close clears *open and lands in info->reason. ext (nullable) layers backdrop/esc/pad/def on top. */
 bool nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t id, const nt_ui_popup_style_t *style, const nt_ui_popup_anchor_t *anchor, bool *open, const nt_ui_popup_ext_t *ext,
-                                nt_ui_popup_info_t *info, nt_ui_popup_close_src_t *out_src);
+                                nt_ui_popup_info_t *info);
 
 #endif /* NT_UI_POPUP_INTERNAL_H */

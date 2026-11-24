@@ -38,13 +38,21 @@ typedef struct {
 } nt_ui_popup_anchor_t;
 _Static_assert(sizeof(nt_ui_popup_anchor_t) == 20, "nt_ui_popup_anchor_t stable ABI (4 float + 1 u8 + 3 pad)");
 
-/* Per-frame info, for a game that draws with the tween or the chosen side (nullable out of begin). */
+/* What closed an overlay this frame; begin clears *open on it. */
+typedef enum {
+    NT_UI_POPUP_CLOSE_NONE = 0,
+    NT_UI_POPUP_CLOSE_ESC,
+    NT_UI_POPUP_CLOSE_OUTSIDE, /* a press outside the panel: on its catcher (a modal's backdrop) or on no record */
+} nt_ui_popup_close_t;
+
+/* Per-frame info of a popup or a modal (nullable out of begin): the tween, the chosen side, the close. */
 typedef struct {
-    float t;      /* eased 0..1 open amount */
-    uint8_t side; /* nt_ui_popup_side_t actually chosen (post edge-flip) */
-    uint8_t _pad[3];
+    float t;        /* eased 0..1 open amount */
+    uint8_t side;   /* nt_ui_popup_side_t actually chosen (post edge-flip) */
+    uint8_t reason; /* nt_ui_popup_close_t raised this frame */
+    uint8_t _pad[2];
 } nt_ui_popup_info_t;
-_Static_assert(sizeof(nt_ui_popup_info_t) == 8, "nt_ui_popup_info_t stable ABI (1 float + 1 u8 + 3 pad)");
+_Static_assert(sizeof(nt_ui_popup_info_t) == 8, "nt_ui_popup_info_t stable ABI (1 float + 2 u8 + 2 pad)");
 
 /* Catcher mode: a popup that wants light-dismiss declares a transparent full-viewport catcher under
  * its panel; a tooltip (NO dismiss) declares none. */
@@ -68,7 +76,8 @@ nt_ui_popup_style_t nt_ui_popup_style_defaults(void);
  * Only then it opens the catcher (light-dismiss) + panel floating elements (a root popup on the frame's
  * next root band, a nested one a band above its parent) eased toward open?1:0, placed at the anchor with
  * edge-flip (or centered for a CENTER anchor); the game declares the body and calls nt_ui_popup_end. A
- * hidden popup declares nothing. An outside press or Esc clears *open. The game owns *open:
+ * hidden popup declares nothing. An outside press or Esc clears *open; info->reason says which. The game
+ * owns *open:
  *
  *   if (clicked_trigger) open = true;
  *   if (nt_ui_popup_begin(ctx, ID, &style, &anchor, &open, NULL)) {

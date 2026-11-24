@@ -645,14 +645,15 @@ void nt_ui_begin(nt_ui_context_t *ctx, const nt_ui_frame_desc_t *frame) {
      * scroll gestures. Every step and query of the frame reads the result. */
     resolve_hot(ctx);
     /* A press on a record, or anywhere while an overlay held the pointer, makes the whole gesture the UI's
-     * (Dear ImGui's MouseDownOwned): the game sees none of it, even after the record goes away. */
+     * (Dear ImGui's MouseDownOwned): the game sees none of it, even after the record goes away. A press while
+     * the other button is held since an earlier frame joins that gesture. */
     for (uint32_t i = 0; i < ctx->frame_pointer_count; ++i) {
-        const nt_button_state_t *b = ctx->frame_pointers[i].buttons;
-        const bool pressed = b[NT_BUTTON_LEFT].is_pressed || b[NT_BUTTON_RIGHT].is_pressed;
-        const bool held = b[NT_BUTTON_LEFT].is_down || b[NT_BUTTON_LEFT].is_released || b[NT_BUTTON_RIGHT].is_down || b[NT_BUTTON_RIGHT].is_released;
-        if (pressed) {
-            ctx->captures[i].ui_gesture = ctx->pointer_hot[i].id != 0U || ctx->overlay_top_id_prev != 0U;
-        } else if (!held) {
+        const nt_button_state_t *l = &ctx->frame_pointers[i].buttons[NT_BUTTON_LEFT];
+        const nt_button_state_t *r = &ctx->frame_pointers[i].buttons[NT_BUTTON_RIGHT];
+        const bool joins = (l->is_down && !l->is_pressed) || (r->is_down && !r->is_pressed);
+        if (l->is_pressed || r->is_pressed) {
+            ctx->captures[i].ui_gesture = (joins && ctx->captures[i].ui_gesture) || ctx->pointer_hot[i].id != 0U || ctx->overlay_top_id_prev != 0U;
+        } else if (!l->is_down && !l->is_released && !r->is_down && !r->is_released) {
             ctx->captures[i].ui_gesture = false;
         }
     }

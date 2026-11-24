@@ -115,7 +115,7 @@ static nt_ui_transform_t popup_eased_transform(const nt_ui_transform_t *start, f
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 bool nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t id, const nt_ui_popup_style_t *style, const nt_ui_popup_anchor_t *anchor, bool *open_io, const nt_ui_popup_ext_t *ext,
-                                nt_ui_popup_info_t *info, nt_ui_popup_close_src_t *out_src) {
+                                nt_ui_popup_info_t *info) {
     NT_ASSERT(ctx != NULL && "nt_ui_popup_begin: ctx must be non-NULL");
     NT_ASSERT(open_io != NULL && "nt_ui_popup_begin: open must be non-NULL");
     NT_ASSERT(ctx->in_frame && ctx == nt_ui_internal_get_inframe_ctx() && "nt_ui_popup_begin: must be called between nt_ui_begin and nt_ui_end on the active ctx");
@@ -143,23 +143,20 @@ bool nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t id, const nt_ui_p
      * its catcher or on no record at all (a letterbox bar, a ray past the UI plane), as Dear ImGui closes a
      * popup on the press. The frame it closes is inert from the start and registers no catcher, so the next
      * press reaches what lies under. */
-    nt_ui_popup_close_src_t close_src = NT_UI_POPUP_CLOSE_SRC_NONE;
+    nt_ui_popup_close_t close_src = NT_UI_POPUP_CLOSE_NONE;
     if (*open_io && ctx->inert_from == 0U && ctx->overlay_top_id_prev == id) {
         const nt_pointer_t *pp = &ctx->frame_pointers[ctx->frame_primary];
         const bool pressed = pp->buttons[NT_BUTTON_LEFT].is_pressed || pp->buttons[NT_BUTTON_RIGHT].is_pressed;
         const int16_t pad_lrtb[4] = {close_pad, close_pad, close_pad, close_pad};
         const uint32_t hot = ctx->pointer_hot[ctx->frame_primary].id;
         if (esc_close && !ctx->field_owns_keys && nt_input_key_is_pressed(NT_KEY_ESCAPE)) {
-            close_src = NT_UI_POPUP_CLOSE_SRC_ESC;
+            close_src = NT_UI_POPUP_CLOSE_ESC;
         } else if (dismiss_on_click && pressed && (hot == catcher_id || hot == 0U) && !nt_ui_inspector_pointer_consumed(ctx) && !nt_ui_internal_hit_test_padded(ctx, id, pp->x, pp->y, pad_lrtb)) {
-            close_src = NT_UI_POPUP_CLOSE_SRC_DISMISS;
+            close_src = NT_UI_POPUP_CLOSE_OUTSIDE;
         }
-        if (close_src != NT_UI_POPUP_CLOSE_SRC_NONE) {
+        if (close_src != NT_UI_POPUP_CLOSE_NONE) {
             *open_io = false; /* a signal for the game's bool; t decays over the next frames */
         }
-    }
-    if (out_src != NULL) {
-        *out_src = close_src;
     }
     const bool open = *open_io;
     // #endregion
@@ -197,7 +194,7 @@ bool nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t id, const nt_ui_p
     const nt_ui_popup_side_t side = popup_resolve_side(ctx, id, anchor, screen_w, screen_h);
     const bool present = open || (t > NT_UI_POPUP_EPSILON);
     if (info != NULL) {
-        *info = (nt_ui_popup_info_t){.t = t, .side = (uint8_t)side};
+        *info = (nt_ui_popup_info_t){.t = t, .side = (uint8_t)side, .reason = (uint8_t)close_src};
     }
     if (!present) {
         return false; /* a hidden popup declares nothing: no panel, no band, no end */
@@ -285,7 +282,7 @@ bool nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t id, const nt_ui_p
 }
 
 bool nt_ui_popup_begin(nt_ui_context_t *ctx, uint32_t id, const nt_ui_popup_style_t *style, const nt_ui_popup_anchor_t *anchor, bool *open, nt_ui_popup_info_t *info) {
-    return nt_ui_popup_begin_internal(ctx, id, style, anchor, open, NULL, info, NULL);
+    return nt_ui_popup_begin_internal(ctx, id, style, anchor, open, NULL, info);
 }
 
 void nt_ui_popup_end(nt_ui_context_t *ctx) {

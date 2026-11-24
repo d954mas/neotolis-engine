@@ -644,8 +644,8 @@ static void test_menu_down_skips_disabled(void) {
     TEST_ASSERT_TRUE_MESSAGE(menu_dyn_enter_activates(&st, &style, &first_off, nt_ui_menu_test_item_id(MENU_A, KEY_L2)), "Down from no focus starts at the first enabled row");
 }
 
-/* ---- Removing the open parent, disabling it or turning it into a leaf closes its submenu; keys in that
- *      frame do nothing, and the keyboard then navigates the root. ---- */
+/* ---- Removing the open parent, disabling it or turning it into a leaf closes its submenu by itself, and the
+ *      keyboard then navigates the root; Esc in that frame closes the submenu level only. ---- */
 static void test_menu_lost_open_parent_closes_branch(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
     static const uint32_t p12[] = {KEY_P1, KEY_P2};
@@ -659,17 +659,19 @@ static void test_menu_lost_open_parent_closes_branch(void) {
     const nt_key_t open_p2[] = {NT_KEY_ARROW_DOWN, NT_KEY_ARROW_DOWN, NT_KEY_ARROW_RIGHT};
     const nt_key_t open_first[] = {NT_KEY_ARROW_DOWN, NT_KEY_ARROW_RIGHT};
     const uint32_t p1_opt = nt_ui_menu_test_item_id(nt_ui_menu_test_item_id(MENU_A, KEY_P1), KEY_OPT);
-    for (int c = 0; c < 3; ++c) {
+    for (int c = 0; c < 6; ++c) {
         nt_ui_menu_t st = {0};
         nt_ui_menu_open(&st, 120.0F, 80.0F);
         menu_dyn_keys(&st, &style, &open_tree, open_p2, 3);
         TEST_ASSERT_TRUE(menu_level_found(1U));
-        menu_key(NT_KEY_ESCAPE);
-        menu_dyn_frame(&st, &style, &lost[c]);
-        TEST_ASSERT_TRUE_MESSAGE(st.open, "Esc in the frame that loses the open parent does nothing");
+        if (c >= 3) {
+            menu_key(NT_KEY_ESCAPE);
+        }
+        menu_dyn_frame(&st, &style, &lost[c % 3]);
+        TEST_ASSERT_TRUE_MESSAGE(st.open, "the menu stays open");
         TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, st.open_path[0], "a lost open parent closes its branch");
-        menu_dyn_keys(&st, &style, &lost[c], open_first, 2);
-        TEST_ASSERT_TRUE_MESSAGE(menu_dyn_enter_activates(&st, &style, &lost[c], p1_opt), "the keyboard must open P1 and activate P1 > Opt");
+        menu_dyn_keys(&st, &style, &lost[c % 3], open_first, 2);
+        TEST_ASSERT_TRUE_MESSAGE(menu_dyn_enter_activates(&st, &style, &lost[c % 3], p1_opt), "the keyboard must open P1 and activate P1 > Opt");
     }
 }
 

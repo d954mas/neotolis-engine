@@ -1546,11 +1546,11 @@ static void build_ui(void) {
             }
             if (narrow) {
                 const bool was_open = s_ui_panel_open;
-                nt_ui_modal_info_t modal = {0};
+                nt_ui_popup_info_t modal = {0};
                 const bool shown = nt_ui_modal_begin(s_ui, CLAY_ID("asteroids.compact_modal").id, &s_ui_modal, &s_ui_panel_open, &modal);
                 s_ui_keyboard_blocked = shown || was_open;
-                if (modal.reason != NT_UI_MODAL_CLOSE_NONE) {
-                    s_ui_escape_consumed = modal.reason == NT_UI_MODAL_CLOSE_ESC;
+                if (modal.reason != NT_UI_POPUP_CLOSE_NONE) {
+                    s_ui_escape_consumed = modal.reason == NT_UI_POPUP_CLOSE_ESC;
                 }
                 if (shown) {
                     if (height > 180) {

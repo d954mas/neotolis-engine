@@ -9,26 +9,12 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "ui/nt_ui.h" /* nt_ui_layer_t, nt_ui_widget_def_t */
+#include "ui/nt_ui.h"       /* nt_ui_layer_t, nt_ui_widget_def_t */
+#include "ui/nt_ui_popup.h" /* nt_ui_popup_info_t, nt_ui_popup_close_t */
 
 typedef struct nt_ui_context nt_ui_context_t;
 
 extern const nt_ui_widget_def_t NT_UI_MODAL_DEF;
-
-/* Source that raised a close; the game decides what to do. */
-typedef enum {
-    NT_UI_MODAL_CLOSE_NONE = 0,
-    NT_UI_MODAL_CLOSE_ESC,
-    NT_UI_MODAL_CLOSE_BACKDROP,
-    NT_UI_MODAL_CLOSE_BACK, /* reserved; no platform back event yet */
-} nt_ui_modal_close_reason_t;
-
-/* Per-frame info (nullable out of begin): the tween, and the source that closed the modal this frame. */
-typedef struct {
-    float t;                           /* eased 0..1 open amount */
-    nt_ui_modal_close_reason_t reason; /* NONE unless a source cleared *open this frame */
-} nt_ui_modal_info_t;
-_Static_assert(sizeof(nt_ui_modal_info_t) == 8, "nt_ui_modal_info_t stable ABI (1 float + 1 enum[4])");
 
 /* Style flags — only gate close SOURCES (Esc / backdrop click): a flagged source clears the game's open bool. */
 #define NT_UI_MODAL_LISTEN_ESC ((uint8_t)(1U << 0))
@@ -75,7 +61,7 @@ nt_ui_modal_style_t nt_ui_modal_style_defaults(void);
 /* Returns whether the modal shows this frame: open, or still easing closed after *open was cleared. Only
  * then it opens the backdrop + panel floating elements (a root modal on the frame's next root band, a
  * nested one a band above its parent); the game declares the body and calls nt_ui_modal_end. Esc and a
- * backdrop click (per style flags) clear *open; info->reason says which. The game owns *open:
+ * backdrop press (per style flags) clear *open; info->reason says which (NT_UI_POPUP_CLOSE_ESC or _OUTSIDE). The game owns *open:
  *
  *   if (clicked_show) open = true;                            // open from any site: set your bool
  *   if (nt_ui_modal_begin(ctx, ID, &style, &open, NULL)) {    // declare once per frame, stable place
@@ -86,11 +72,7 @@ nt_ui_modal_style_t nt_ui_modal_style_defaults(void);
  * One window, many open sites = ONE bool + ONE id; call this from the active container's body so
  * nesting/z follow context. id non-zero, style and open non-NULL, info nullable. Asserts depth <
  * NT_UI_MODAL_MAX_DEPTH. */
-bool nt_ui_modal_begin(nt_ui_context_t *ctx, uint32_t id, const nt_ui_modal_style_t *style, bool *open, nt_ui_modal_info_t *info);
+bool nt_ui_modal_begin(nt_ui_context_t *ctx, uint32_t id, const nt_ui_modal_style_t *style, bool *open, nt_ui_popup_info_t *info);
 void nt_ui_modal_end(nt_ui_context_t *ctx);
-
-#ifdef NT_TEST_ACCESS
-void nt_ui_modal_test_last_panel_offset(float *ox, float *oy); /* panel transform offset of the last begin */
-#endif
 
 #endif /* NT_UI_MODAL_H */

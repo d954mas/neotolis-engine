@@ -453,7 +453,7 @@ static bool menu_open_level(const nt_ui_menu_t *menu, uint8_t depth, const nt_ui
     pst.layer = f->fill_layer;
     const nt_ui_popup_ext_t ext = {.def = &NT_UI_MENU_DEF, .catcher = (depth == 0U), .dismiss_on_click = (depth == 0U && !menu->arming)};
     bool level_open = true;
-    if (!nt_ui_popup_begin_internal(f->ui, menu_level_id(f->menu_id, depth), &pst, anchor, &level_open, &ext, NULL, NULL)) {
+    if (!nt_ui_popup_begin_internal(f->ui, menu_level_id(f->menu_id, depth), &pst, anchor, &level_open, &ext, NULL)) {
         return false; /* a snap level that closed declares nothing */
     }
     menu_open_panel(f->ui, f->fill_layer, f->menu_id, depth, f->style); /* LEFT open for the level's rows */

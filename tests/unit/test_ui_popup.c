@@ -15,7 +15,6 @@
 #include "ui/nt_ui.h"
 #include "ui/nt_ui_internal.h"
 #include "ui/nt_ui_popup.h"
-#include "ui/nt_ui_popup_internal.h"
 #include "ui/nt_ui_state.h"
 #include "unity.h"
 
@@ -66,14 +65,12 @@ static nt_ui_popup_info_t popup_begin_open(uint32_t id, const nt_ui_popup_style_
     return info;
 }
 
-/* popup_begin_open through the internal entry, keeping the close source it raises across frames. The
- * popup must still show in the frame it closes itself (an eased style), as the caller ends it. */
-static void popup_begin_open_src(uint32_t id, const nt_ui_popup_style_t *st, const nt_ui_popup_anchor_t *anc, nt_ui_popup_close_src_t *src) {
-    bool open = true;
-    nt_ui_popup_close_src_t raised = NT_UI_POPUP_CLOSE_SRC_NONE;
-    TEST_ASSERT_TRUE(nt_ui_popup_begin_internal(s_fx.ctx, id, st, anc, &open, NULL, NULL, &raised));
-    if (raised != NT_UI_POPUP_CLOSE_SRC_NONE) {
-        *src = raised;
+/* popup_begin_open keeping the close it raises across frames. The popup must still show in the frame it
+ * closes itself (an eased style), as the caller ends it. */
+static void popup_begin_open_src(uint32_t id, const nt_ui_popup_style_t *st, const nt_ui_popup_anchor_t *anc, nt_ui_popup_close_t *src) {
+    const nt_ui_popup_info_t info = popup_begin_open(id, st, anc);
+    if (info.reason != NT_UI_POPUP_CLOSE_NONE) {
+        *src = (nt_ui_popup_close_t)info.reason;
     }
 }
 
@@ -434,8 +431,8 @@ static void test_popup_top_id_follows_band(void) {
 
     /* And the consequence, not just the gate: an outside click must dismiss the popup that owns the slot
      * and leave the other alone (a non-top catcher is an inert pointer gate). */
-    nt_ui_popup_close_src_t src_a = NT_UI_POPUP_CLOSE_SRC_NONE;
-    nt_ui_popup_close_src_t src_b = NT_UI_POPUP_CLOSE_SRC_NONE;
+    nt_ui_popup_close_t src_a = NT_UI_POPUP_CLOSE_NONE;
+    nt_ui_popup_close_t src_b = NT_UI_POPUP_CLOSE_NONE;
     for (int frame = 0; frame < 2; ++frame) {
         const bool pressing = (frame == 0);
         nt_pointer_t click = pointer_at(700.0F, 500.0F, pressing, pressing, !pressing);
@@ -450,8 +447,8 @@ static void test_popup_top_id_follows_band(void) {
         nt_ui_popup_end(s_fx.ctx);
         nt_ui_end(s_fx.ctx);
     }
-    TEST_ASSERT_EQUAL_INT_MESSAGE(NT_UI_POPUP_CLOSE_SRC_DISMISS, src_a, "the outside click must dismiss the popup painted on top");
-    TEST_ASSERT_EQUAL_INT_MESSAGE(NT_UI_POPUP_CLOSE_SRC_NONE, src_b, "the popup underneath must stay an inert gate");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(NT_UI_POPUP_CLOSE_OUTSIDE, src_a, "the outside click must dismiss the popup painted on top");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(NT_UI_POPUP_CLOSE_NONE, src_b, "the popup underneath must stay an inert gate");
 
     /* The band claim resets each frame: with the lifted wrapper gone, the root-level popup takes top. */
     for (int frame = 0; frame < 2; ++frame) {
@@ -478,8 +475,8 @@ static void test_popup_dismiss_survives_a_band_tie(void) {
     lo.ease_speed = 8.0F;
     nt_ui_popup_anchor_t anc = {.x = 100.0F, .y = 100.0F, .w = 80.0F, .h = 30.0F, .prefer_side = NT_UI_POPUP_BELOW};
 
-    nt_ui_popup_close_src_t src_a = NT_UI_POPUP_CLOSE_SRC_NONE;
-    nt_ui_popup_close_src_t src_b = NT_UI_POPUP_CLOSE_SRC_NONE;
+    nt_ui_popup_close_t src_a = NT_UI_POPUP_CLOSE_NONE;
+    nt_ui_popup_close_t src_b = NT_UI_POPUP_CLOSE_NONE;
     for (int frame = 0; frame < 4; ++frame) { /* the last frame commits the reopened B as the top */
         const bool pressing = (frame == 1);
         const bool releasing = (frame == 2);
@@ -497,8 +494,8 @@ static void test_popup_dismiss_survives_a_band_tie(void) {
         nt_ui_popup_end(s_fx.ctx);
         nt_ui_end(s_fx.ctx);
     }
-    TEST_ASSERT_EQUAL_INT_MESSAGE(NT_UI_POPUP_CLOSE_SRC_DISMISS, src_b, "the popup holding the close-scan slot must receive the outside click");
-    TEST_ASSERT_EQUAL_INT_MESSAGE(NT_UI_POPUP_CLOSE_SRC_NONE, src_a, "the other popup stays an inert gate");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(NT_UI_POPUP_CLOSE_OUTSIDE, src_b, "the popup holding the close-scan slot must receive the outside click");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(NT_UI_POPUP_CLOSE_NONE, src_a, "the other popup stays an inert gate");
     TEST_ASSERT_EQUAL_UINT32(POP_B, s_fx.ctx->overlay_top_id_prev);
 }
 
@@ -506,7 +503,7 @@ static void test_popup_dismiss_survives_a_band_tie(void) {
 
 /* One frame: popup A at the root holding a stepped box, then popup B at the root (B on top); returns
  * whether A's box clicked and B's close source. */
-static bool popup_under_frame(nt_pointer_t p, nt_ui_popup_close_src_t *src_b) {
+static bool popup_under_frame(nt_pointer_t p, nt_ui_popup_close_t *src_b) {
     nt_ui_popup_style_t st = nt_ui_popup_style_defaults();
     st.ease_speed = 8.0F; /* eased: the frame it closes itself still shows, so the test ends it */
     const nt_ui_popup_anchor_t anc_a = {.x = 100.0F, .y = 100.0F, .prefer_side = NT_UI_POPUP_BELOW};
@@ -526,7 +523,7 @@ static bool popup_under_frame(nt_pointer_t p, nt_ui_popup_close_src_t *src_b) {
 /* ---- The top overlay owns the pointer: a full press and release on the lower popup's control outside the
  *      top popup clicks nothing there; the press is the top popup's outside click. ---- */
 static void test_popup_top_owns_the_pointer(void) {
-    nt_ui_popup_close_src_t src_b = NT_UI_POPUP_CLOSE_SRC_NONE;
+    nt_ui_popup_close_t src_b = NT_UI_POPUP_CLOSE_NONE;
     (void)popup_under_frame(pointer_at(10.0F, 10.0F, false, false, false), &src_b);
     (void)popup_under_frame(pointer_at(10.0F, 10.0F, false, false, false), &src_b);
     TEST_ASSERT_EQUAL_UINT32(POP_B, s_fx.ctx->overlay_top_id_prev);
@@ -537,7 +534,7 @@ static void test_popup_top_owns_the_pointer(void) {
     bool clicked = popup_under_frame(pointer_at(x, y, true, true, false), &src_b);
     clicked = popup_under_frame(pointer_at(x, y, false, false, true), &src_b) || clicked;
     TEST_ASSERT_FALSE_MESSAGE(clicked, "the lower popup's control under the top overlay's catcher clicks nothing");
-    TEST_ASSERT_EQUAL_INT_MESSAGE(NT_UI_POPUP_CLOSE_SRC_DISMISS, src_b, "the press is the top popup's outside click");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(NT_UI_POPUP_CLOSE_OUTSIDE, src_b, "the press is the top popup's outside click");
 }
 
 #define POP_A2 0x50A003U
@@ -688,7 +685,7 @@ static void test_popup_nested_above_parent_parts(void) {
 
 /* One frame: catcher-bearing popup A, then a catcher-less popup (a toast) declared after it with a button;
  * returns whether the button clicked and reports A's close source. */
-static bool toast_frame(nt_pointer_t p, nt_ui_popup_close_src_t *src_a) {
+static bool toast_frame(nt_pointer_t p, nt_ui_popup_close_t *src_a) {
     nt_ui_popup_style_t st = nt_ui_popup_style_defaults();
     st.ease_speed = 0.0F;
     nt_ui_popup_style_t toast = st;
@@ -710,7 +707,7 @@ static bool toast_frame(nt_pointer_t p, nt_ui_popup_close_src_t *src_a) {
 /* ---- Input follows stacking alone: a catcher-less popup declared after the top one lies above it, so its
  *      button keeps the press through to the click and the top popup is not dismissed. ---- */
 static void test_popup_press_above_the_top_completes(void) {
-    nt_ui_popup_close_src_t src_a = NT_UI_POPUP_CLOSE_SRC_NONE;
+    nt_ui_popup_close_t src_a = NT_UI_POPUP_CLOSE_NONE;
     (void)toast_frame(pointer_at(10.0F, 10.0F, false, false, false), &src_a);
     (void)toast_frame(pointer_at(10.0F, 10.0F, false, false, false), &src_a);
     TEST_ASSERT_EQUAL_UINT32(POP_A, s_fx.ctx->overlay_top_id_prev);
@@ -723,7 +720,7 @@ static void test_popup_press_above_the_top_completes(void) {
     clicked = toast_frame(pointer_at(x, y, true, false, false), &src_a) || clicked;
     clicked = toast_frame(pointer_at(x, y, false, false, true), &src_a) || clicked;
     TEST_ASSERT_TRUE_MESSAGE(clicked, "a held press above the top overlay is not dropped");
-    TEST_ASSERT_EQUAL_INT(NT_UI_POPUP_CLOSE_SRC_NONE, src_a);
+    TEST_ASSERT_EQUAL_INT(NT_UI_POPUP_CLOSE_NONE, src_a);
 }
 
 #define NESTED_NONE 0U

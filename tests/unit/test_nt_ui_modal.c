@@ -31,10 +31,10 @@ static void ui_frame_begin(nt_ui_context_t *ctx, float w, float h, float dt, con
     nt_ui_begin(ctx, &(nt_ui_frame_desc_t){.layout_w = w, .layout_h = h, .dt = dt, .pointers = p, .pointer_count = count, .primary = primary});
 }
 
-static nt_ui_modal_close_reason_t s_frame_close_reason; /* reason from the last modal_button_frame; reset in setUp */
+static nt_ui_popup_close_t s_frame_close_reason; /* reason from the last modal_button_frame; reset in setUp */
 
 void setUp(void) {
-    s_frame_close_reason = NT_UI_MODAL_CLOSE_NONE;
+    s_frame_close_reason = NT_UI_POPUP_CLOSE_NONE;
     nt_test_assert_install();
     nt_input_init();
     ui_walker_fixture_init(&s_fx, s_arena, sizeof s_arena, UI_WALKER_FX_BIND_ALL);
@@ -49,9 +49,9 @@ static bool float_near(float a, float b, float eps) { return fabsf(a - b) <= eps
 
 /* Begins a modal the test holds open: a fresh `true` per call, so a raised close never sticks across
  * frames. An open modal always shows, so the caller declares the body and ends it unconditionally. */
-static nt_ui_modal_info_t modal_begin_open(nt_ui_context_t *ctx, uint32_t id, const nt_ui_modal_style_t *st) {
+static nt_ui_popup_info_t modal_begin_open(nt_ui_context_t *ctx, uint32_t id, const nt_ui_modal_style_t *st) {
     bool open = true;
-    nt_ui_modal_info_t info = {0};
+    nt_ui_popup_info_t info = {0};
     TEST_ASSERT_TRUE(nt_ui_modal_begin(ctx, id, st, &open, &info));
     return info;
 }
@@ -66,7 +66,6 @@ static void modal_begin_closed(nt_ui_context_t *ctx, uint32_t id, const nt_ui_mo
 
 /* ---- ABI sanity: the _Static_asserts compile; assert the runtime sizes match too. ---- */
 static void test_modal_abi_sizes(void) {
-    TEST_ASSERT_EQUAL_UINT(8U, (unsigned)sizeof(nt_ui_modal_info_t));
     TEST_ASSERT_EQUAL_UINT(12U, (unsigned)sizeof(nt_ui_modal_anim_t));
     TEST_ASSERT_EQUAL_UINT(40U, (unsigned)sizeof(nt_ui_modal_style_t));
 }
@@ -148,14 +147,14 @@ static void test_modal_esc_top_only(void) {
     /* Frame 2: Esc held. Only B (last frame's deepest = top) consumes it; A stays silent. */
     nt_input_feed(nt_test_key(NT_KEY_ESCAPE, true));
     ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1, 0);
-    const nt_ui_modal_info_t outer = modal_begin_open(s_fx.ctx, MODAL_A, &st); /* NOT top */
-    const nt_ui_modal_info_t inner = modal_begin_open(s_fx.ctx, MODAL_B, &st); /* TOP */
+    const nt_ui_popup_info_t outer = modal_begin_open(s_fx.ctx, MODAL_A, &st); /* NOT top */
+    const nt_ui_popup_info_t inner = modal_begin_open(s_fx.ctx, MODAL_B, &st); /* TOP */
     nt_ui_modal_end(s_fx.ctx);
     nt_ui_modal_end(s_fx.ctx);
     nt_ui_end(s_fx.ctx);
-    TEST_ASSERT_FALSE(outer.reason != NT_UI_MODAL_CLOSE_NONE); /* non-top never consumes Esc */
-    TEST_ASSERT_TRUE(inner.reason != NT_UI_MODAL_CLOSE_NONE);
-    TEST_ASSERT_EQUAL_INT(NT_UI_MODAL_CLOSE_ESC, inner.reason);
+    TEST_ASSERT_FALSE(outer.reason != NT_UI_POPUP_CLOSE_NONE); /* non-top never consumes Esc */
+    TEST_ASSERT_TRUE(inner.reason != NT_UI_POPUP_CLOSE_NONE);
+    TEST_ASSERT_EQUAL_INT(NT_UI_POPUP_CLOSE_ESC, inner.reason);
 }
 
 /* ---- LISTEN_ESC off: Esc raises nothing even on the top modal (flag gates the source). ---- */
@@ -169,15 +168,15 @@ static void test_modal_esc_requires_flag(void) {
     nt_ui_end(s_fx.ctx);
     nt_input_feed(nt_test_key(NT_KEY_ESCAPE, true));
     ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1, 0);
-    const nt_ui_modal_info_t r = modal_begin_open(s_fx.ctx, MODAL_A, &st);
+    const nt_ui_popup_info_t r = modal_begin_open(s_fx.ctx, MODAL_A, &st);
     nt_ui_modal_end(s_fx.ctx);
     nt_ui_end(s_fx.ctx);
-    TEST_ASSERT_FALSE(r.reason != NT_UI_MODAL_CLOSE_NONE);
+    TEST_ASSERT_FALSE(r.reason != NT_UI_POPUP_CLOSE_NONE);
 }
 
 /* What one modal frame reported: the info and whether begin showed the modal. */
 typedef struct {
-    nt_ui_modal_info_t info;
+    nt_ui_popup_info_t info;
     bool visible;
 } modal_frame_t;
 
@@ -346,7 +345,7 @@ static void test_modal_closing_backdrop_lets_the_pointer_through(void) {
 static nt_ui_interaction_t modal_button_frame(const nt_ui_modal_style_t *st, const nt_pointer_t *p) {
     ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, p, 1, 0);
     bool open = true;
-    nt_ui_modal_info_t info = {0};
+    nt_ui_popup_info_t info = {0};
     nt_ui_interaction_t in = {0};
     if (nt_ui_modal_begin(s_fx.ctx, MODAL_A, st, &open, &info)) { /* a snap modal that closed itself shows nothing */
         CLAY({.id = (Clay_ElementId){.id = nt_ui_id("modal_btn")}, .layout = {.sizing = {CLAY_SIZING_FIXED(MODAL_BTN_W), CLAY_SIZING_FIXED(MODAL_BTN_H)}}}) {
@@ -383,7 +382,7 @@ static void test_modal_body_button_clickable(void) {
  *      close; a click well beyond panel+pad DOES raise CLOSE_BACKDROP. The panel (= MODAL_A) is the
  *      shrink-wrapped 200x120 box at (0,0); is_top needs the 1-frame IM lag so each probe runs 2 frames
  *      (F1 establishes top, F2 holds the click). ---- */
-static nt_ui_modal_close_reason_t modal_backdrop_click_reason(const nt_ui_modal_style_t *st, float cx, float cy) {
+static nt_ui_popup_close_t modal_backdrop_click_reason(const nt_ui_modal_style_t *st, float cx, float cy) {
     nt_pointer_t f1 = modal_pointer_at(cx, cy, false, false, false);
     modal_button_frame(st, &f1); /* establish top (overlay_top_id_prev) */
     /* F2: full press+release in one frame at (cx,cy) -> backdrop click fires this frame. */
@@ -401,10 +400,10 @@ static void test_modal_backdrop_close_pad(void) {
 
     /* Click 8px to the right of the (centered) panel's right edge: outside the bbox but inside the 16px
      * pad -> close suppressed. */
-    TEST_ASSERT_EQUAL_INT(NT_UI_MODAL_CLOSE_NONE, (int)modal_backdrop_click_reason(&st, MODAL_BTN_X0 + MODAL_BTN_W + 8.0F, MODAL_BTN_CY));
+    TEST_ASSERT_EQUAL_INT(NT_UI_POPUP_CLOSE_NONE, (int)modal_backdrop_click_reason(&st, MODAL_BTN_X0 + MODAL_BTN_W + 8.0F, MODAL_BTN_CY));
 
     /* Click in a far corner (40, 40): clearly off panel+pad -> CLOSE_BACKDROP. */
-    TEST_ASSERT_EQUAL_INT(NT_UI_MODAL_CLOSE_BACKDROP, (int)modal_backdrop_click_reason(&st, 40.0F, 40.0F));
+    TEST_ASSERT_EQUAL_INT(NT_UI_POPUP_CLOSE_OUTSIDE, (int)modal_backdrop_click_reason(&st, 40.0F, 40.0F));
 }
 
 /* ---- nt_ui_overlay_active reports PREV-FRAME presence (not the live within-frame depth, which is
@@ -553,6 +552,14 @@ static void test_modal_zero_stride_asserts(void) {
 /* ---- SLIDE edge: each edge drives the panel offset on the right axis + sign. A finite ease keeps the
  *      first frame's t well below 1, so offset ~= anim.offset on the active axis and ~0 on the other.
  *      +x = right, +y = down; the panel starts displaced toward `edge`. ---- */
+/* The panel's eased offset, read from the transform the walker baked for it in the last frame. */
+static void panel_offset(uint32_t id, float *ox, float *oy) {
+    const int32_t slot = nt_ui_internal_live_slot(s_fx.ctx, id);
+    TEST_ASSERT_TRUE_MESSAGE(slot >= 0, "the panel was laid out");
+    *ox = s_fx.ctx->hit_baked[slot].m[12];
+    *oy = s_fx.ctx->hit_baked[slot].m[13];
+}
+
 static void modal_slide_offset_frame(nt_ui_modal_edge_t edge, float *ox, float *oy) {
     nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
     st.ease_speed = 8.0F; /* finite: first frame t << 1 -> offset near anim.offset */
@@ -561,7 +568,7 @@ static void modal_slide_offset_frame(nt_ui_modal_edge_t edge, float *ox, float *
     (void)modal_begin_open(s_fx.ctx, MODAL_A + (uint32_t)edge, &st); /* distinct id per edge -> each eases from a fresh slot */
     nt_ui_modal_end(s_fx.ctx);
     nt_ui_end(s_fx.ctx);
-    nt_ui_modal_test_last_panel_offset(ox, oy);
+    panel_offset(MODAL_A + (uint32_t)edge, ox, oy);
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -601,14 +608,14 @@ static void test_modal_asymmetric_open_close(void) {
     (void)modal_begin_open(s_fx.ctx, MODAL_B, &st);
     nt_ui_modal_end(s_fx.ctx);
     nt_ui_end(s_fx.ctx);
-    nt_ui_modal_test_last_panel_offset(&ox, &oy);
+    panel_offset(MODAL_B, &ox, &oy);
     TEST_ASSERT_TRUE(oy > 0.0F); /* slide-from-bottom while opening */
 
     /* Closing (open=false): fade recipe -> identity, no offset regardless of t. */
     ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1, 0);
     modal_begin_closed(s_fx.ctx, MODAL_B, &st);
     nt_ui_end(s_fx.ctx);
-    nt_ui_modal_test_last_panel_offset(&ox, &oy);
+    panel_offset(MODAL_B, &ox, &oy);
     TEST_ASSERT_TRUE(float_near(ox, 0.0F, 0.0001F)); /* fade close -> no offset */
     TEST_ASSERT_TRUE(float_near(oy, 0.0F, 0.0001F));
 }
@@ -654,13 +661,13 @@ static void test_modal_close_uses_close_recipe(void) {
     (void)modal_begin_open(s_fx.ctx, MODAL_B, &st);
     nt_ui_modal_end(s_fx.ctx);
     nt_ui_end(s_fx.ctx);
-    nt_ui_modal_test_last_panel_offset(&ox, &oy);
+    panel_offset(MODAL_B, &ox, &oy);
     TEST_ASSERT_TRUE(ox < 0.0F); /* open recipe = LEFT */
 
     ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1, 0);
     modal_begin_closed(s_fx.ctx, MODAL_B, &st);
     nt_ui_end(s_fx.ctx);
-    nt_ui_modal_test_last_panel_offset(&ox, &oy);
+    panel_offset(MODAL_B, &ox, &oy);
     TEST_ASSERT_TRUE(ox > 0.0F); /* close recipe = RIGHT (from style.close) */
 
     /* The frame the modal closes itself on Esc eases by the close recipe too. */
@@ -671,13 +678,13 @@ static void test_modal_close_uses_close_recipe(void) {
         }
         ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1, 0);
         bool open = true;
-        nt_ui_modal_info_t info = {0};
+        nt_ui_popup_info_t info = {0};
         TEST_ASSERT_TRUE(nt_ui_modal_begin(s_fx.ctx, MODAL_A, &st, &open, &info));
         nt_ui_modal_end(s_fx.ctx);
         nt_ui_end(s_fx.ctx);
-        TEST_ASSERT_EQUAL_INT(f == 1 ? NT_UI_MODAL_CLOSE_ESC : NT_UI_MODAL_CLOSE_NONE, info.reason);
+        TEST_ASSERT_EQUAL_INT(f == 1 ? NT_UI_POPUP_CLOSE_ESC : NT_UI_POPUP_CLOSE_NONE, info.reason);
     }
-    nt_ui_modal_test_last_panel_offset(&ox, &oy);
+    panel_offset(MODAL_A, &ox, &oy);
     TEST_ASSERT_TRUE_MESSAGE(ox > 0.0F, "a self-close eases by the close recipe from its first frame");
 }
 

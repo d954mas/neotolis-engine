@@ -698,7 +698,7 @@ nt_ui_popup_end(ctx); }` (`nt_ui_modal_begin/end` the same). Begin returns
 whether the popup shows (open, or easing closed after the game cleared
 `open`); a hidden popup declares nothing. The game owns `open`: a close the
 popup raises (an outside press, the modal's Esc or backdrop) clears it, and
-the modal's `info.reason` says which. It owns: a Clay floating panel
+`info.reason` (`nt_ui_popup_info_t`, shared by the popup and the modal) says which. It owns: a Clay floating panel
 attached to the ROOT (anchor-derived offset, no trigger-id dependency, so a
 missing trigger element can't trip Clay's parent-not-found); trigger-anchored
 placement with per-side edge-flip (BELOW/ABOVE/RIGHT/LEFT, CENTER for modal)

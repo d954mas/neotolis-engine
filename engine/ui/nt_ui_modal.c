@@ -23,11 +23,6 @@ const nt_ui_widget_def_t NT_UI_MODAL_DEF = {
     ._reserved = 0U,
 };
 
-#ifdef NT_TEST_ACCESS
-static float s_last_panel_off_x;
-static float s_last_panel_off_y;
-#endif
-
 nt_ui_modal_style_t nt_ui_modal_style_defaults(void) {
     const nt_ui_modal_anim_t scale_pop = {.type = NT_UI_MODAL_ANIM_SCALE_POP, .scale_start = 0.92F}; /* Material/iOS default */
     return (nt_ui_modal_style_t){
@@ -81,20 +76,8 @@ static NT_NOINLINE nt_ui_transform_t modal_anim_start(const nt_ui_modal_anim_t *
     return xf;
 }
 
-static nt_ui_modal_close_reason_t modal_reason_from_src(nt_ui_popup_close_src_t src) {
-    switch (src) {
-    case NT_UI_POPUP_CLOSE_SRC_ESC:
-        return NT_UI_MODAL_CLOSE_ESC;
-    case NT_UI_POPUP_CLOSE_SRC_DISMISS:
-        return NT_UI_MODAL_CLOSE_BACKDROP;
-    case NT_UI_POPUP_CLOSE_SRC_NONE:
-    default:
-        return NT_UI_MODAL_CLOSE_NONE;
-    }
-}
-
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-bool nt_ui_modal_begin(nt_ui_context_t *ctx, uint32_t id, const nt_ui_modal_style_t *style, bool *open, nt_ui_modal_info_t *info) {
+bool nt_ui_modal_begin(nt_ui_context_t *ctx, uint32_t id, const nt_ui_modal_style_t *style, bool *open, nt_ui_popup_info_t *info) {
     NT_ASSERT(style != NULL && "nt_ui_modal_begin: style must be non-NULL");
     NT_ASSERT(isfinite(style->ease_speed) && style->ease_speed >= 0.0F && "nt_ui_modal_begin: ease_speed must be finite >= 0");
     NT_ASSERT(isfinite(style->backdrop_alpha) && style->backdrop_alpha >= 0.0F && style->backdrop_alpha <= 1.0F && "nt_ui_modal_begin: backdrop_alpha must be in [0,1]");
@@ -120,32 +103,7 @@ bool nt_ui_modal_begin(nt_ui_context_t *ctx, uint32_t id, const nt_ui_modal_styl
         .esc_close = (style->flags & NT_UI_MODAL_LISTEN_ESC) != 0U,
         .dismiss_on_click = (style->flags & NT_UI_MODAL_CLOSE_ON_BACKDROP) != 0U,
     };
-    nt_ui_popup_close_src_t src = NT_UI_POPUP_CLOSE_SRC_NONE;
-    nt_ui_popup_info_t pi = {0};
-    const bool shown = nt_ui_popup_begin_internal(ctx, id, &pstyle, &anchor, open, &ext, &pi, &src);
-
-#ifdef NT_TEST_ACCESS
-    /* Panel offset = the start offset of the phase popup-core ran in, eased by (1-t). */
-    const nt_ui_transform_t *start = *open ? &pstyle.open_xf_start : &pstyle.close_xf_start;
-    s_last_panel_off_x = start->offset_x * (1.0F - pi.t);
-    s_last_panel_off_y = start->offset_y * (1.0F - pi.t);
-#endif
-
-    if (info != NULL) {
-        *info = (nt_ui_modal_info_t){.t = pi.t, .reason = modal_reason_from_src(src)};
-    }
-    return shown;
+    return nt_ui_popup_begin_internal(ctx, id, &pstyle, &anchor, open, &ext, info);
 }
 
 void nt_ui_modal_end(nt_ui_context_t *ctx) { nt_ui_popup_end(ctx); }
-
-#ifdef NT_TEST_ACCESS
-void nt_ui_modal_test_last_panel_offset(float *ox, float *oy) {
-    if (ox != NULL) {
-        *ox = s_last_panel_off_x;
-    }
-    if (oy != NULL) {
-        *oy = s_last_panel_off_y;
-    }
-}
-#endif

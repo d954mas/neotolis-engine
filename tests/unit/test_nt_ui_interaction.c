@@ -291,6 +291,27 @@ static void test_interaction_wants_pointer(void) {
     TEST_ASSERT_FALSE(nt_ui_wants_pointer(s_fx.ctx));
 }
 
+/* ---- A second button joining a gesture that began on the UI keeps it the UI's: the right press off the UI
+ *      while the left still holds the button does not hand the rest to the game. A new press after both are
+ *      up decides again. ---- */
+static void test_interaction_second_button_keeps_the_gesture(void) {
+    nt_pointer_t p = make_pointer(BTN_CX, BTN_CY, false, false, false);
+    warm_btn_frame(&p);
+    p = make_pointer(BTN_CX, BTN_CY, true, true, false);
+    (void)query_btn_frame(&p);
+    p = make_pointer(600.0F, 500.0F, true, false, false);
+    (void)query_btn_frame(&p);
+    p.buttons[NT_BUTTON_RIGHT] = (nt_button_state_t){.is_down = true, .is_pressed = true};
+    (void)query_btn_frame(&p);
+    TEST_ASSERT_TRUE_MESSAGE(nt_ui_wants_pointer(s_fx.ctx), "the right press joins the left's gesture");
+    p = make_pointer(600.0F, 500.0F, false, false, true);
+    p.buttons[NT_BUTTON_RIGHT] = (nt_button_state_t){.is_released = true};
+    (void)query_btn_frame(&p);
+    p = make_pointer(600.0F, 500.0F, true, true, false);
+    (void)query_btn_frame(&p);
+    TEST_ASSERT_FALSE_MESSAGE(nt_ui_wants_pointer(s_fx.ctx), "a press of its own off the UI is the game's");
+}
+
 /* ---- Test 8: exclusive capture — while A owns capture, B sees zero ----
  * Standard UI semantics: one widget per pointer captures, others get nothing. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -778,6 +799,7 @@ int main(void) {
     RUN_TEST(test_interaction_release_outside_cancels);
     RUN_TEST(test_interaction_disabled_skips);
     RUN_TEST(test_interaction_wants_pointer);
+    RUN_TEST(test_interaction_second_button_keeps_the_gesture);
     RUN_TEST(test_interaction_padded_hover_and_capture);
     RUN_TEST(test_interaction_disabled_with_padding_stays_disabled);
     RUN_TEST(test_interaction_capture_excludes_other_widgets);
