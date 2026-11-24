@@ -648,12 +648,8 @@ void nt_ui_begin(nt_ui_context_t *ctx, const nt_ui_frame_desc_t *frame) {
      * (Dear ImGui's MouseDownOwned): the game sees none of it, even after the record goes away. */
     for (uint32_t i = 0; i < ctx->frame_pointer_count; ++i) {
         const nt_button_state_t *b = ctx->frame_pointers[i].buttons;
-        bool pressed = false;
-        bool held = false;
-        for (uint32_t k = 0; k < NT_BUTTON_MAX; ++k) {
-            pressed = pressed || b[k].is_pressed;
-            held = held || b[k].is_down || b[k].is_released;
-        }
+        const bool pressed = b[NT_BUTTON_LEFT].is_pressed || b[NT_BUTTON_RIGHT].is_pressed;
+        const bool held = b[NT_BUTTON_LEFT].is_down || b[NT_BUTTON_LEFT].is_released || b[NT_BUTTON_RIGHT].is_down || b[NT_BUTTON_RIGHT].is_released;
         if (pressed) {
             ctx->captures[i].ui_gesture = ctx->pointer_hot[i].id != 0U || ctx->overlay_top_id_prev != 0U;
         } else if (!held) {

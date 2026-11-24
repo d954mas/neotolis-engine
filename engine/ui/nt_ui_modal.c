@@ -5,6 +5,7 @@
 #include <stdint.h>
 
 #include "core/nt_assert.h"
+#include "core/nt_builtins.h"
 #include "ui/nt_ui_anim.h"
 #include "ui/nt_ui_internal.h"
 #include "ui/nt_ui_popup.h"
@@ -44,8 +45,9 @@ nt_ui_modal_style_t nt_ui_modal_style_defaults(void) {
 /* Per-phase t=0 transform recipe (the popup-core start transform; popup eases it to identity at t=1).
  * +x = right, +y = down. SCALE_POP starts at scale_start; SLIDE starts displaced toward `edge`; FADE
  * starts at identity (the always-on opacity carries the fade). */
+/* Out of line: begin calls it for both phases, and two inlined copies cost ~0.3 KB of wasm. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static nt_ui_transform_t modal_anim_start(const nt_ui_modal_anim_t *a) {
+static NT_NOINLINE nt_ui_transform_t modal_anim_start(const nt_ui_modal_anim_t *a) {
     NT_ASSERT(a->type <= NT_UI_MODAL_ANIM_SLIDE && "nt_ui_modal_begin: anim.type out of range");
     NT_ASSERT((a->type != NT_UI_MODAL_ANIM_SCALE_POP || (isfinite(a->scale_start) && a->scale_start > 0.0F)) && "nt_ui_modal_begin: SCALE_POP scale_start must be finite > 0");
     NT_ASSERT((a->type != NT_UI_MODAL_ANIM_SLIDE || (isfinite(a->offset) && a->edge <= NT_UI_MODAL_RIGHT)) && "nt_ui_modal_begin: SLIDE offset finite + edge in range");

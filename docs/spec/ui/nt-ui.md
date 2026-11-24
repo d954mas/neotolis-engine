@@ -333,8 +333,8 @@ path:
   cancels its owner's capture (the release clicks nothing, a hold stops, a drag
   ends as if released and a scroll keeps its fling), and a text field under it
   loses focus, as a modal dialog takes focus. A Tab stop is owned and not inert.
-- *Gestures.* A press on a record, or anywhere while a top overlay was up last
-  frame, makes the gesture the UI's until every button of that pointer is up,
+- *Gestures.* A left or right press on a record, or anywhere while a top overlay was up last
+  frame, makes the gesture the UI's until both buttons of that pointer are up,
   as Dear ImGui's `MouseDownOwned`: `nt_ui_wants_pointer` stays true through
   its release even when the record it landed on goes away (the press that
   dismisses an overlay, a button hidden under a held press, a vanished scroll),

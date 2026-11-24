@@ -616,7 +616,7 @@ void nt_ui_set_gesture_constants(nt_ui_context_t *ctx, float dbl_window_secs, fl
  * underneath. pad_lrtb inflates the block area (NULL = none, asserts >= 0). */
 void nt_ui_block_pointer(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lrtb[4]);
 
-/* True while a pointer's gesture began on the UI (a press on a widget, or anywhere while an overlay is up), up
+/* True while a pointer's gesture began on the UI (a left or right press on a widget, or anywhere while an overlay is up), up
  * to its release, or a pointer is over a widget declared again this frame. */
 bool nt_ui_wants_pointer(const nt_ui_context_t *ctx);
 

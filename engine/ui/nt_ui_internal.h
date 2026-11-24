@@ -180,7 +180,7 @@ typedef struct {
      * has none). */
     uint32_t pending_scroll;
     bool hold_live;    /* false once the pointer left the hitbox; only a new press restarts the hold */
-    bool ui_gesture;   /* the press landed on the UI: the gesture is the UI's until every button is up */
+    bool ui_gesture;   /* the press landed on the UI: the gesture is the UI's until left and right are up */
     uint8_t drag_axes; /* NT_UI_DRAG_* the capturing widget drags along itself (from its step desc) */
 } nt_ui_capture_t;
 
