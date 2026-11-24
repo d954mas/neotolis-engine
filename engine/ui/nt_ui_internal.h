@@ -180,6 +180,7 @@ typedef struct {
      * has none). */
     uint32_t pending_scroll;
     bool hold_live;    /* false once the pointer left the hitbox; only a new press restarts the hold */
+    bool ui_gesture;   /* the press landed on the UI: the gesture is the UI's until every button is up */
     uint8_t drag_axes; /* NT_UI_DRAG_* the capturing widget drags along itself (from its step desc) */
 } nt_ui_capture_t;
 
@@ -237,7 +238,8 @@ struct nt_ui_context {
     uint32_t rich_max_runs;
     uint32_t rich_max_styles;
     uint32_t rich_max_text_bytes;
-    /* Band of the first root overlay above the floating enclosing it; validated in create_context (> 0). */
+    /* Absolute band of the first root overlay; root k takes stride + k * NT_UI_MODAL_MAX_DEPTH. Validated in
+     * create_context. */
     int16_t modal_zband_stride;
     /* Visible root overlays declared so far this frame: each takes the next band, so a later one covers an
      * earlier one with all its nested levels. Reset by nt_ui_begin, like overlay_depth. */

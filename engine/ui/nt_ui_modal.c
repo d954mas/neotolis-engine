@@ -44,7 +44,11 @@ nt_ui_modal_style_t nt_ui_modal_style_defaults(void) {
 /* Per-phase t=0 transform recipe (the popup-core start transform; popup eases it to identity at t=1).
  * +x = right, +y = down. SCALE_POP starts at scale_start; SLIDE starts displaced toward `edge`; FADE
  * starts at identity (the always-on opacity carries the fade). */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static nt_ui_transform_t modal_anim_start(const nt_ui_modal_anim_t *a) {
+    NT_ASSERT(a->type <= NT_UI_MODAL_ANIM_SLIDE && "nt_ui_modal_begin: anim.type out of range");
+    NT_ASSERT((a->type != NT_UI_MODAL_ANIM_SCALE_POP || (isfinite(a->scale_start) && a->scale_start > 0.0F)) && "nt_ui_modal_begin: SCALE_POP scale_start must be finite > 0");
+    NT_ASSERT((a->type != NT_UI_MODAL_ANIM_SLIDE || (isfinite(a->offset) && a->edge <= NT_UI_MODAL_RIGHT)) && "nt_ui_modal_begin: SLIDE offset finite + edge in range");
     nt_ui_transform_t xf = nt_ui_transform_defaults();
     switch ((nt_ui_modal_anim_type_t)a->type) {
     case NT_UI_MODAL_ANIM_FADE:
@@ -93,19 +97,14 @@ bool nt_ui_modal_begin(nt_ui_context_t *ctx, uint32_t id, const nt_ui_modal_styl
     NT_ASSERT(isfinite(style->ease_speed) && style->ease_speed >= 0.0F && "nt_ui_modal_begin: ease_speed must be finite >= 0");
     NT_ASSERT(isfinite(style->backdrop_alpha) && style->backdrop_alpha >= 0.0F && style->backdrop_alpha <= 1.0F && "nt_ui_modal_begin: backdrop_alpha must be in [0,1]");
     NT_ASSERT(style->backdrop_close_pad >= 0 && "nt_ui_modal_begin: backdrop_close_pad must be >= 0");
-    /* Validate the active recipe before any push so a bad recipe fails early. */
     NT_ASSERT(open != NULL && "nt_ui_modal_begin: open must be non-NULL");
-    const nt_ui_modal_anim_t *anim = *open ? &style->open : &style->close;
-    NT_ASSERT(anim->type <= NT_UI_MODAL_ANIM_SLIDE && "nt_ui_modal_begin: anim.type out of range");
-    NT_ASSERT((anim->type != NT_UI_MODAL_ANIM_SCALE_POP || (isfinite(anim->scale_start) && anim->scale_start > 0.0F)) && "nt_ui_modal_begin: SCALE_POP scale_start must be finite > 0");
-    NT_ASSERT((anim->type != NT_UI_MODAL_ANIM_SLIDE || (isfinite(anim->offset) && anim->edge <= NT_UI_MODAL_RIGHT)) && "nt_ui_modal_begin: SLIDE offset finite + edge in range");
 
-    /* Map the modal recipe onto popup-core: centered placement + dim backdrop + Esc/backdrop close. */
-    const nt_ui_transform_t start = modal_anim_start(anim);
+    /* Map the modal onto popup-core: centered placement + dim backdrop + Esc/backdrop close. Both recipes,
+     * validated before any push: the core picks one after its own close-scan. */
     nt_ui_popup_style_t pstyle = {
         .ease_speed = style->ease_speed,
-        .open_xf_start = start, /* the recipe of the phase begin runs in */
-        .close_xf_start = start,
+        .open_xf_start = modal_anim_start(&style->open),
+        .close_xf_start = modal_anim_start(&style->close),
         .layer = style->layer,
         .flags = 0U, /* modal drives dismiss/gate via ext, not the light-dismiss flag */
     };
@@ -115,18 +114,19 @@ bool nt_ui_modal_begin(nt_ui_context_t *ctx, uint32_t id, const nt_ui_modal_styl
         .backdrop_color = style->backdrop_color,
         .backdrop_alpha = style->backdrop_alpha,
         .close_pad = style->backdrop_close_pad,
+        .catcher = true, /* a modal ALWAYS gates click-through, a backdrop close or not */
         .esc_close = (style->flags & NT_UI_MODAL_LISTEN_ESC) != 0U,
         .dismiss_on_click = (style->flags & NT_UI_MODAL_CLOSE_ON_BACKDROP) != 0U,
-        .force_catcher = true, /* a modal ALWAYS gates click-through (inert occluder when no backdrop-close) */
     };
     nt_ui_popup_close_src_t src = NT_UI_POPUP_CLOSE_SRC_NONE;
     nt_ui_popup_info_t pi = {0};
     const bool shown = nt_ui_popup_begin_internal(ctx, id, &pstyle, &anchor, open, &ext, &pi, &src);
 
 #ifdef NT_TEST_ACCESS
-    /* Panel offset = start offset eased by (1-t); matches popup-core's panel transform exactly. */
-    s_last_panel_off_x = start.offset_x * (1.0F - pi.t);
-    s_last_panel_off_y = start.offset_y * (1.0F - pi.t);
+    /* Panel offset = the start offset of the phase popup-core ran in, eased by (1-t). */
+    const nt_ui_transform_t *start = *open ? &pstyle.open_xf_start : &pstyle.close_xf_start;
+    s_last_panel_off_x = start->offset_x * (1.0F - pi.t);
+    s_last_panel_off_y = start->offset_y * (1.0F - pi.t);
 #endif
 
     if (info != NULL) {

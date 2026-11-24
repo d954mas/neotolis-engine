@@ -644,6 +644,22 @@ void nt_ui_begin(nt_ui_context_t *ctx, const nt_ui_frame_desc_t *frame) {
     /* Input is decided here, from last frame's layout: the front-most record per pointer, then the
      * scroll gestures. Every step and query of the frame reads the result. */
     resolve_hot(ctx);
+    /* A press on a record, or anywhere while an overlay held the pointer, makes the whole gesture the UI's
+     * (Dear ImGui's MouseDownOwned): the game sees none of it, even after the record goes away. */
+    for (uint32_t i = 0; i < ctx->frame_pointer_count; ++i) {
+        const nt_button_state_t *b = ctx->frame_pointers[i].buttons;
+        bool pressed = false;
+        bool held = false;
+        for (uint32_t k = 0; k < NT_BUTTON_MAX; ++k) {
+            pressed = pressed || b[k].is_pressed;
+            held = held || b[k].is_down || b[k].is_released;
+        }
+        if (pressed) {
+            ctx->captures[i].ui_gesture = ctx->pointer_hot[i].id != 0U || ctx->overlay_top_id_prev != 0U;
+        } else if (!held) {
+            ctx->captures[i].ui_gesture = false;
+        }
+    }
     nt_ui_internal_scroll_arbitrate(ctx);
 
     Clay_BeginLayout();
@@ -2945,8 +2961,8 @@ bool nt_ui_wants_pointer(const nt_ui_context_t *ctx) {
     }
 #endif
     for (uint32_t i = 0; i < ctx->frame_pointer_count; ++i) {
-        if (ctx->captures[i].active_id != 0U || ctx->captures[i].pending_scroll != 0U) {
-            return true; /* a pending press may still become a scroll */
+        if (ctx->captures[i].ui_gesture) {
+            return true; /* a capture and a pending scroll start from such a press too */
         }
         /* Over a widget: the front-most record under the pointer was declared again this frame. */
         for (uint32_t k = 0; ctx->pointer_hot[i].id != 0U && k < ctx->interactive_cur_count; ++k) {

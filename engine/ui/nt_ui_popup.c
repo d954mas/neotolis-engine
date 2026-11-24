@@ -22,11 +22,6 @@ const nt_ui_widget_def_t NT_UI_POPUP_DEF = {
 /* Below this eased t the popup's alpha rounds to 0 (8-bit) — treat as fully closed. */
 #define NT_UI_POPUP_EPSILON (1.0F / 256.0F)
 
-#ifdef NT_TEST_ACCESS
-static bool s_last_catcher_present;
-static uint32_t s_entrance_seed_count; /* # of entrance t=0 re-seeds; must fire once per open-edge, not per frame */
-#endif
-
 nt_ui_popup_style_t nt_ui_popup_style_defaults(void) {
     return (nt_ui_popup_style_t){
         .ease_speed = 14.0F,
@@ -136,26 +131,27 @@ bool nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t id, const nt_ui_p
     const float backdrop_alpha = (ext != NULL) ? ext->backdrop_alpha : 0.0F;
     const int16_t close_pad = (int16_t)((ext != NULL) ? ext->close_pad : 0);
     const bool has_backdrop = backdrop_color != 0U;
-    /* A plain popup dismisses on the light-dismiss flag, by an outside press or Esc as a <select>; the modal
-     * drives dismiss/gate explicitly. */
+    /* A plain popup gates and dismisses on the light-dismiss flag, by an outside press or Esc as a <select>;
+     * the modal and the menu drive each part explicitly. */
     const bool light_dismiss = (style->flags & NT_UI_POPUP_LIGHT_DISMISS) != 0U;
+    const bool catcher = (ext != NULL) ? ext->catcher : light_dismiss;
     const bool dismiss_on_click = (ext != NULL) ? ext->dismiss_on_click : light_dismiss;
     const bool esc_close = (ext != NULL) ? ext->esc_close : light_dismiss;
-    const bool force_catcher = (ext != NULL) && ext->force_catcher;
     // #region close-scan: the top popup's own close, before anything of it is declared
     /* Decided from last frame's records and this frame's input (spec: "When a rule runs"): Esc when no field
-     * held the keys at nt_ui_begin, or a press of the primary pointer on its catcher beyond the panel grown by
-     * close_pad, as Dear ImGui closes a popup on the press. The frame it closes is inert from the start and
-     * registers no catcher, so the next press reaches what lies under. */
+     * held the keys at nt_ui_begin, or a press of the primary pointer beyond the panel grown by close_pad on
+     * its catcher or on no record at all (a letterbox bar, a ray past the UI plane), as Dear ImGui closes a
+     * popup on the press. The frame it closes is inert from the start and registers no catcher, so the next
+     * press reaches what lies under. */
     nt_ui_popup_close_src_t close_src = NT_UI_POPUP_CLOSE_SRC_NONE;
     if (*open_io && ctx->inert_from == 0U && ctx->overlay_top_id_prev == id) {
         const nt_pointer_t *pp = &ctx->frame_pointers[ctx->frame_primary];
         const bool pressed = pp->buttons[NT_BUTTON_LEFT].is_pressed || pp->buttons[NT_BUTTON_RIGHT].is_pressed;
         const int16_t pad_lrtb[4] = {close_pad, close_pad, close_pad, close_pad};
+        const uint32_t hot = ctx->pointer_hot[ctx->frame_primary].id;
         if (esc_close && !ctx->field_owns_keys && nt_input_key_is_pressed(NT_KEY_ESCAPE)) {
             close_src = NT_UI_POPUP_CLOSE_SRC_ESC;
-        } else if (dismiss_on_click && pressed && ctx->pointer_hot[ctx->frame_primary].id == catcher_id && !nt_ui_inspector_pointer_consumed(ctx) &&
-                   !nt_ui_internal_hit_test_padded(ctx, id, pp->x, pp->y, pad_lrtb)) {
+        } else if (dismiss_on_click && pressed && (hot == catcher_id || hot == 0U) && !nt_ui_inspector_pointer_consumed(ctx) && !nt_ui_internal_hit_test_padded(ctx, id, pp->x, pp->y, pad_lrtb)) {
             close_src = NT_UI_POPUP_CLOSE_SRC_DISMISS;
         }
         if (close_src != NT_UI_POPUP_CLOSE_SRC_NONE) {
@@ -192,9 +188,6 @@ bool nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t id, const nt_ui_p
         nt_ui_anim_target_t seed = tgt;
         seed.value_t = 0.0F;
         nt_ui_anim_seed(ctx, id, &seed); /* WRITE the pool slot at t=0; the eased call below ramps from it */
-#ifdef NT_TEST_ACCESS
-        s_entrance_seed_count++;
-#endif
     }
     const nt_ui_anim_interaction_t *a = nt_ui_anim(ctx, id, &tgt, 0.0F, style->ease_speed);
     const float t = a->value_t;
@@ -206,9 +199,6 @@ bool nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t id, const nt_ui_p
     if (info != NULL) {
         *info = (nt_ui_popup_info_t){.t = t, .side = (uint8_t)side};
     }
-#ifdef NT_TEST_ACCESS
-    s_last_catcher_present = false;
-#endif
     if (!present) {
         return false; /* a hidden popup declares nothing: no panel, no band, no end */
     }
@@ -237,7 +227,7 @@ bool nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t id, const nt_ui_p
      * catcher-bearing popup claims the top (and nt_ui_overlay_active): a catcher-less one (a tooltip) must
      * not steal it from a coexisting dropdown. */
     const bool inert_parent = ctx->inert_from != 0U;
-    const bool want_catcher = open && !inert_parent && (dismiss_on_click || has_backdrop || force_catcher);
+    const bool want_catcher = open && !inert_parent && catcher;
     if (want_catcher || has_backdrop) {
         /* Full-viewport catcher on the panel's band. Transparent for a plain popup; a visible dim rect when a
          * backdrop color is given (alpha rides t*backdrop_alpha exactly once — folding t into element
@@ -291,9 +281,6 @@ bool nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t id, const nt_ui_p
         ctx->inert_from = ctx->overlay_depth; /* its body, nested popups included, is inert */
     }
     // #endregion
-#ifdef NT_TEST_ACCESS
-    s_last_catcher_present = want_catcher;
-#endif
     return true;
 }
 
@@ -311,9 +298,3 @@ void nt_ui_popup_end(nt_ui_context_t *ctx) {
     }
     --ctx->overlay_depth;
 }
-
-#ifdef NT_TEST_ACCESS
-bool nt_ui_popup_test_last_catcher_present(void) { return s_last_catcher_present; }
-uint32_t nt_ui_popup_test_entrance_seed_count(void) { return s_entrance_seed_count; }
-void nt_ui_popup_test_entrance_seed_reset(void) { s_entrance_seed_count = 0U; }
-#endif

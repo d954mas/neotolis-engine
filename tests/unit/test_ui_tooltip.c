@@ -205,7 +205,7 @@ static void test_tooltip_declares_no_catcher(void) {
         }
     }
     TEST_ASSERT_TRUE(shown);
-    TEST_ASSERT_FALSE(nt_ui_popup_test_last_catcher_present());
+    TEST_ASSERT_FALSE_MESSAGE(nt_ui_overlay_active(s_fx.ctx), "a catcher-less tooltip claims no top");
 }
 
 /* ---- No double-mutation: the tooltip reads the target via an IDEMPOTENT query, so the game's own

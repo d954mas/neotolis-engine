@@ -17,7 +17,7 @@ typedef struct nt_ui_context nt_ui_context_t;
 /* Close source raised by the core this frame (mapped by the caller to its own enum). */
 typedef enum {
     NT_UI_POPUP_CLOSE_SRC_NONE = 0,
-    NT_UI_POPUP_CLOSE_SRC_DISMISS, /* outside-click on the catcher (beyond the close-pad) */
+    NT_UI_POPUP_CLOSE_SRC_DISMISS, /* a press outside the panel (beyond the close-pad) */
     NT_UI_POPUP_CLOSE_SRC_ESC,     /* Escape on the top popup (esc_close requested) */
 } nt_ui_popup_close_src_t;
 
@@ -26,10 +26,10 @@ typedef struct {
     const nt_ui_widget_def_t *def; /* widget_register def; NULL = NT_UI_POPUP_DEF */
     uint32_t backdrop_color;       /* 0xAABBGGRR; 0 = no visible backdrop (transparent catcher) */
     float backdrop_alpha;          /* peak backdrop opacity at t==1 (0..1); multiplied into the color alpha */
-    int16_t close_pad;             /* px margin around the panel; an outside-click within it does NOT dismiss */
+    int16_t close_pad;             /* px margin around the panel; an outside press within it does NOT dismiss */
+    bool catcher;                  /* an open popup gates the UI under it and claims the top; dismiss needs it */
     bool esc_close;                /* Escape on the top popup raises NT_UI_POPUP_CLOSE_SRC_ESC */
-    bool dismiss_on_click;         /* an outside-click beyond the panel+pad raises NT_UI_POPUP_CLOSE_SRC_DISMISS */
-    bool force_catcher;            /* declare the catcher even with no backdrop + no dismiss (inert input gate) */
+    bool dismiss_on_click;         /* an outside press beyond the panel+pad raises NT_UI_POPUP_CLOSE_SRC_DISMISS */
 } nt_ui_popup_ext_t;
 
 /* The shared core: tween + z-band push + catcher/backdrop + close-scan + panel decl, only for a shown popup.

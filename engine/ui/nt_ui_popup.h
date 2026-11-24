@@ -3,7 +3,8 @@
 
 /* Popup-core: the shared floating-overlay primitive. One panel floating element + a
  * transparent light-dismiss catcher (block_pointer occluder) + an open/close value_t tween + a
- * one-stride-per-level z-band + trigger-anchoring with per-side edge-flip. The game owns the `bool open`;
+ * top-layer z-band (a root overlay over every game floating, a nested one a band above its parent) +
+ * trigger-anchoring with per-side edge-flip. The game owns the `bool open`;
  * the core clears it on an outside press or Esc (light-dismiss) and never opens it.
  * Conditional begin/end like the menu: end only after begin returned true. The modal is re-expressed on top of this
  * core (modal = popup-core centered + dim backdrop). Dropdown / tooltip / context-menu reuse it. */
@@ -78,11 +79,5 @@ nt_ui_popup_style_t nt_ui_popup_style_defaults(void);
  * id non-zero, style, anchor and open non-NULL; info nullable. Asserts depth < NT_UI_MODAL_MAX_DEPTH. */
 bool nt_ui_popup_begin(nt_ui_context_t *ctx, uint32_t id, const nt_ui_popup_style_t *style, const nt_ui_popup_anchor_t *anchor, bool *open, nt_ui_popup_info_t *info);
 void nt_ui_popup_end(nt_ui_context_t *ctx);
-
-#ifdef NT_TEST_ACCESS
-bool nt_ui_popup_test_last_catcher_present(void);    /* did the last begin declare a catcher? */
-uint32_t nt_ui_popup_test_entrance_seed_count(void); /* cumulative entrance t=0 re-seeds (once per open-edge) */
-void nt_ui_popup_test_entrance_seed_reset(void);     /* zero the entrance-seed counter */
-#endif
 
 #endif /* NT_UI_POPUP_H */

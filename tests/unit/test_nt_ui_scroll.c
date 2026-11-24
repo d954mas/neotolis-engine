@@ -2759,7 +2759,8 @@ static void test_arb_equal_crossings_go_to_the_widget_then_the_inner_scroll(void
     TEST_ASSERT_EQUAL_UINT32(SCROLL_ID + 1U, s_fx.ctx->captures[0].active_id);
 }
 
-/* A scroll that stops being declared takes nothing: the press pending on it ends. */
+/* A scroll that stops being declared takes nothing: the press pending on it ends, and the rest of the gesture
+ * stays the UI's, not the game's. */
 static void test_arb_vanished_scroll_takes_nothing(void) {
     nt_pointer_t p = arb_pointer(100.0F, 150.0F);
     arb_warm(&p);
@@ -2773,7 +2774,7 @@ static void test_arb_vanished_scroll_takes_nothing(void) {
     arb_frame(&p, 1);
     TEST_ASSERT_EQUAL_UINT32(0U, s_fx.ctx->captures[0].active_id);
     TEST_ASSERT_EQUAL_UINT32(0U, s_fx.ctx->captures[0].pending_scroll);
-    TEST_ASSERT_FALSE(nt_ui_wants_pointer(s_fx.ctx));
+    TEST_ASSERT_TRUE(nt_ui_wants_pointer(s_fx.ctx));
 }
 
 /* The front-most rule is structural: a floating element is over the content of its band, and the draw

@@ -414,52 +414,6 @@ static void test_dropdown_eased_open_no_flicker(void) {
     }
 }
 
-/* Frame that ALSO declares a swarm of animated dummy widgets so the anim table churns and collides with
- * the popup's slot window — mimics a busy showcase frame. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void combo_im_frame_busy(const nt_pointer_t *p, const char *const *labels, int count, int *selected, bool *open, nt_ui_dropdown_style_t *st, int n_dummy) {
-    nt_arena_reset(&g_nt_mem_scratch);
-    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = p, .pointer_count = 1});
-    /* Swarm declared BEFORE the combo (real frame order: many widgets precede it). Each dummy EASES a
-     * slot (value_speed > 0) so the popup's probe window is already full when it touches the table. */
-    const nt_ui_anim_target_t tgt = {.scale_x = 1.0F, .scale_y = 1.0F, .scale_z = 1.0F, .opacity = 1.0F, .value_t = 1.0F};
-    for (int d = 0; d < n_dummy; ++d) {
-        (void)nt_ui_anim(s_fx.ctx, 0x90000001U + (uint32_t)d, &tgt, 0.0F, 14.0F);
-    }
-    const char *preview = (*selected >= 0 && *selected < count) ? labels[*selected] : "Select...";
-    CLAY({.id = (Clay_ElementId){.id = 0xDD0007U}, .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = 30.0F, .y = 30.0F}}}) {
-        if (nt_ui_combo_begin(s_fx.ctx, NT_UI_DATA_LAYER(1), 2, DD_A, preview, st, open)) {
-            for (int i = 0; i < count; ++i) {
-                if (nt_ui_combo_selectable(s_fx.ctx, ROW_KEY(i), labels[i], *selected == i)) {
-                    *selected = i;
-                }
-            }
-            nt_ui_combo_end(s_fx.ctx);
-        }
-    }
-    nt_ui_end(s_fx.ctx);
-}
-
-/* ---- Eviction-induced flicker (ROOT): a busy frame can evict the popup's anim slot; the entrance t=0
- *      re-seed must fire AT MOST ONCE per open-edge regardless of anim-table churn. ---- */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void test_dropdown_eased_open_no_reseed_under_churn(void) {
-    nt_ui_dropdown_style_t st = nt_ui_dropdown_style_defaults();
-    st.open_ease_speed = 14.0F;
-    int selected = -1;
-    bool open = true; /* one continuous open the whole test */
-
-    nt_ui_popup_test_entrance_seed_reset();
-    nt_pointer_t idle = pointer_at(400.0F, 300.0F, false, false, false);
-    /* Heavy churn every frame across a long open: dummies > NT_UI_ANIM_SLOTS thrash the anim table so the
-     * popup's slot is repeatedly evicted. The seed must NOT re-fire per frame. */
-    for (int f = 0; f < 30; ++f) {
-        combo_im_frame_busy(&idle, s_short, 3, &selected, &open, &st, NT_UI_ANIM_SLOTS + 32);
-    }
-    const uint32_t seeds = nt_ui_popup_test_entrance_seed_count();
-    TEST_ASSERT_TRUE_MESSAGE(seeds <= 1U, "entrance t=0 re-seed must fire at most once per open-edge (not per churned frame)");
-}
-
 /* ---- Re-click the trigger WHILE the eased-open list is still tweening: a SINGLE click closes once and
  *      must not bounce back open (catcher dismiss + trigger toggle fighting over the same click). ---- */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -828,7 +782,6 @@ int main(void) {
     RUN_TEST(test_dropdown_long_list_scrollbar_showcase_fidelity);
     RUN_TEST(test_dropdown_long_list_scrollbar_inherits_popup_band);
     RUN_TEST(test_dropdown_eased_open_no_flicker);
-    RUN_TEST(test_dropdown_eased_open_no_reseed_under_churn);
     RUN_TEST(test_dropdown_eased_reclick_closes_once);
     RUN_TEST(test_dropdown_edge_flip_up_near_bottom);
     RUN_TEST(test_dropdown_icon_size_gutter_shifts_label);

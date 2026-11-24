@@ -219,7 +219,7 @@ static void test_interaction_disabled_skips(void) {
     TEST_ASSERT_FALSE(in.pressed_now);
     TEST_ASSERT_FALSE(in.clicked);
     TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_test_capture_active_id(s_fx.ctx, 0));
-    TEST_ASSERT_FALSE(nt_ui_wants_pointer(s_fx.ctx));
+    TEST_ASSERT_TRUE_MESSAGE(nt_ui_wants_pointer(s_fx.ctx), "the press landed on last frame's button: the gesture stays the UI's");
 }
 
 /* ---- Test 6: padded interaction inflates bbox before inverse-affine ---- */
@@ -272,7 +272,7 @@ static void test_interaction_disabled_with_padding_stays_disabled(void) {
     TEST_ASSERT_FALSE(in.pressed_now);
     TEST_ASSERT_FALSE(in.clicked);
     TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_test_capture_active_id(s_fx.ctx, 0));
-    TEST_ASSERT_FALSE(nt_ui_wants_pointer(s_fx.ctx));
+    TEST_ASSERT_TRUE_MESSAGE(nt_ui_wants_pointer(s_fx.ctx), "the press landed on last frame's button: the gesture stays the UI's");
 }
 
 /* ---- Test 5: wants_pointer true on hover and while captured ---- */

@@ -319,31 +319,46 @@ path:
   drops the gesture it holds, so a press held on it ends without a click; a
   text field in it loses focus and is no Tab stop; an inert popup has no
   catcher record, claims no top and takes no Esc (a closing modal's catcher
-  only paints its backdrop).
+  only paints its backdrop). A read is inert when it is made inside the inert
+  subtree, whatever id it names. The wheel `nt_ui_begin` gave a scroll inside
+  an overlay that closes itself still scrolls it in that frame.
 - *Top overlay.* The top is the front-most open popup with a catcher outside
   any inert subtree; `nt_ui_overlay_active` reports it. In a 2D context with a
   top, an id is owned when it was declared last frame at or above the top's
   catcher in the stacking order (inspector panes excepted); with no top, or in
-  a 3D ctx, which does not rank overlays, every id is. `nt_ui_begin` drops a
+  a 3D ctx, which does not rank overlays, every id is (a 3D ctx still picks
+  the close target by band, see "Popup"). `nt_ui_begin` drops a
   held capture, a pending scroll and the text focus that are not owned: an
   overlay that opens over a held press ends that gesture, as a modal window
   cancels its owner's capture (the release clicks nothing, a hold stops, a drag
   ends as if released and a scroll keeps its fling), and a text field under it
   loses focus, as a modal dialog takes focus. A Tab stop is owned and not inert.
+- *Gestures.* A press on a record, or anywhere while a top overlay was up last
+  frame, makes the gesture the UI's until every button of that pointer is up,
+  as Dear ImGui's `MouseDownOwned`: `nt_ui_wants_pointer` stays true through
+  its release even when the record it landed on goes away (the press that
+  dismisses an overlay, a button hidden under a held press, a vanished scroll),
+  so the game never sees the rest of it.
 - *Keys.* A text field focused at `nt_ui_begin` takes the frame's keys, decided
   once there whatever the declaration order; with none, the top overlay
   does (popup-core's Esc for a modal with `NT_UI_MODAL_LISTEN_ESC` and for a
   light-dismiss popup such as a combo list, the menu's keys); with no top, the
   game does, reading
   `nt_ui_overlay_active` and `nt_ui_input_any_focused`. Esc in a field inside a
-  modal unfocuses the field, and a second Esc closes the modal.
+  modal unfocuses the field, and a second Esc closes the modal. The choice is
+  between a field and the overlays, not between two fields, whose focus moves
+  as they are declared (see "Text input"). A nested popup that
+  closes itself does not hand the keys to the overlay under it in that frame;
+  that one is the top from the next frame.
 - *Order.* Root overlays stack in declaration order, whatever encloses them
   (see "Floating zIndex is relative"): the game declares overlays in the order
   they may cover each other, so one opened later but declared earlier lies
   under.
 - *Illegal states*, asserted: a stride or a root overlay whose nested levels
-  could pass `int16`, and a root overlay inside a game floating at or above
-  `modal_zband_stride` (see "Floating zIndex is relative").
+  could pass `int16`, a root overlay inside a game floating at or above
+  `modal_zband_stride` (see "Floating zIndex is relative"), and a catcher on
+  or under the base band (a popup nested inside a game floating with a large
+  negative zIndex).
 
 **When a rule runs.** Input is decided from last frame's layout, so a rule
 that needs only last frame's records and this frame's input runs before the
@@ -386,7 +401,7 @@ after the children), paints over the child while the child gets the pointer, so 
 interactive child's layer at or above its parent's. Siblings of one root overlap only
 through a transform, overflow without a clip, or hit padding; put such interactive parts on
 one layer or make the upper one floating. `nt_ui_wants_pointer` is true
-while a pointer of the current frame holds a capture or a pending scroll gesture, or its front-most record is declared again this frame (a
+while a pointer of the current frame is in a gesture that began on the UI (see "Input ownership"), or its front-most record is declared again this frame (a
 record that vanished this frame is not UI under the pointer). A free pointer drives a
 widget only if it is the resolved hot
 widget or already holds capture; `nt_ui_pointer_hot` exposes the resolved id.
@@ -695,9 +710,10 @@ parent for a nested one (see "Floating zIndex is relative" above; NT_ASSERT
 before the push so a runaway nesting fails early, for a shown popup only);
 and an open-only, transparent light-dismiss catcher on the panel's band,
 declared before the panel, so it lies above every earlier overlay and under
-its own panel. A press of the primary pointer, either button, on the top
-popup's catcher beyond its panel grown by `close_pad` closes it on the press,
-as Dear ImGui, and the catcher swallows that press. A closing popup
+its own panel. A press of the primary pointer, either button, outside the top
+popup's panel grown by `close_pad`, on its catcher or on no record at all (a
+letterbox bar, a 3D ray past the UI plane), closes it on the press, as Dear
+ImGui, and the UI keeps that gesture (see "Input ownership"). A closing popup
 paints its fade, its backdrop included, and is inert (see "Input ownership").
 A light-dismiss popup also closes on Esc, as an HTML `<select>`. Esc and the
 outside press close ONE CATCHER-BEARING popup per frame, last frame's top: the
@@ -715,7 +731,8 @@ model"), while one held above it (a catcher-less popup or a game floating
 declared later) goes on. A hidden popup declares nothing, so the base UI stays
 clickable; a hover-driven overlay (tooltip) can clear the catcher flag
 entirely. The game owns the open bool (Model D): popup-core clears it on a
-close it raises and never sets it. The
+close it raises and never sets it, so a combo left open inside a modal the
+game closed opens again with the modal unless the game clears it too. The
 context-menu stacks one popup-core fly-out per submenu level; the only novel
 algorithm is the mouse-aim triangle that keeps a submenu open while the cursor
 travels diagonally toward it (never collapse on raw hover-loss).
@@ -755,8 +772,8 @@ the old place: its rows register without capturing the press. A control the
 game declares inside a custom row steps as usual, so a game that reopens a
 menu with a press over that control also presses it. An open menu is a modal overlay: its root claims the modal top like a
 popup with a catcher, so the UI under it takes no pointer, `nt_ui_overlay_active`
-reports it, and the menu reads input (keys, a pending switch, the outside
-press) only while it was on top last frame and not on the frame it opens,
+reports it, and the menu reads input (keys, a pending switch) only while it
+was on top last frame and not on the frame it opens,
 reopened included: one key has one owner, a menu opened over a modal takes
 Esc from its next frame, a text field under the menu loses focus, and a
 modal or popup opened over the menu takes its
@@ -839,10 +856,12 @@ focused row are no key and do not end pointer mode.
 
 A row is hovered by any pointer over it, as every `nt_ui` hover; the primary
 pointer drives the mouse-aim corridor, the end of keyboard mode and the
-outside-press dismiss (a left or right press with the element under the pointer off everything
-declared inside the menu last frame, a popup that a custom row opened included, whatever the
-left button holds; `nt_ui_menu_begin` closes the menu on it and returns false
-in that frame). A submenu level is hit from the frame after it first
+outside-press dismiss: the root level's light dismiss (see "Popup") closes the
+menu on a left or right press that lands on its catcher or on no record, and
+`nt_ui_menu_begin` returns false in that frame. A press on a deeper level, or on
+a popup a custom row opened, lands on that element and does not close it; one
+on an element declared above the menu without a catcher (a toast) does not
+either. A submenu level is hit from the frame after it first
 appears, as every element, so a press on it in its first frame is an outside
 press. The pointer moves focus to the enabled row under it; a disabled row, padding or a separator under
 it takes no focus and starts no switch. A key hands focus and the open
