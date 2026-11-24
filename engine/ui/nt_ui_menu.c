@@ -264,8 +264,8 @@ static uint8_t menu_read_key(const nt_ui_menu_t *menu) {
 static bool menu_key_on(const nt_ui_menu_t *menu, uint32_t row_id, uint8_t key) { return menu->frame.key == key && row_id == menu->frame.key_row; }
 
 /* Everything the frame decides from last frame's records and this frame's input runs here, before the rows
- * declare: the branch a row's popup closes, the outside press, the one key and the end of keyboard mode.
- * Returns false when the menu closes (an outside press, Esc or Left at the root). */
+ * declare: the branch a row's popup closes, the one key and the end of keyboard mode. Returns false when the
+ * menu closes (Esc or Left at the root); the outside press is the root popup's own close. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) — flat rule list in frame order
 static bool menu_frame_input(nt_ui_menu_t *menu, nt_ui_context_t *ctx, uint32_t menu_id) {
     nt_ui_menu_frame_t *f = &menu->frame;
@@ -290,13 +290,8 @@ static bool menu_frame_input(nt_ui_menu_t *menu, nt_ui_context_t *ctx, uint32_t 
     f->ours = top && pp->active && !nt_ui_inspector_pointer_consumed(ctx);
     const bool ours = f->ours;
     const bool pressed = pp->buttons[NT_BUTTON_LEFT].is_pressed || pp->buttons[NT_BUTTON_RIGHT].is_pressed;
-    /* The outside press: a click or a tap off everything declared inside the menu last frame (its levels and a
-     * popup a custom row opened), read from the element under the pointer, not a capture holder. */
-    if (ours && pressed && !nt_ui_internal_declared_within(ctx, ctx->pointer_hot[ctx->frame_primary].id, root_id)) {
-        return false;
-    }
     /* A text field focused inside the menu owns the keys (the top takes the focus of a field under it). */
-    const uint8_t key = (top && ctx->focused_input_id == 0U) ? menu_read_key(menu) : MENU_KEY_NONE;
+    const uint8_t key = (top && !ctx->field_owns_keys) ? menu_read_key(menu) : MENU_KEY_NONE;
     f->key = key;
     const uint8_t d = menu->focus_depth;
     if (key != MENU_KEY_NONE) {
@@ -381,7 +376,7 @@ static uint32_t menu_im_row(nt_ui_menu_t *menu, uint32_t key, const char *label,
 
     const nt_ui_anim_target_t tgt = {.scale_x = 1.0F, .scale_y = 1.0F, .scale_z = 1.0F, .opacity = 1.0F, .value_t = highlit ? 1.0F : 0.0F};
     /* A row's highlight ease outlives its closed level, so a row shown again snaps it. */
-    const bool shown_again = style->state_speed > 0.0F && (menu->arming || !nt_ui_get_bbox(ctx, row_id).found);
+    const bool shown_again = style->state_speed > 0.0F && (menu->arming || nt_ui_internal_live_slot(ctx, row_id) < 0);
     const nt_ui_anim_interaction_t *a = shown_again ? nt_ui_anim_seed(ctx, row_id, &tgt) : nt_ui_anim(ctx, row_id, &tgt, 0.0F, style->state_speed);
     Clay_Color bg = {0};
     if (style->item_hover_color != 0U) {
@@ -448,17 +443,21 @@ static void menu_open_panel(nt_ui_context_t *ctx, uint8_t fill_layer, uint32_t m
 }
 
 /* Open a level's popup at `anchor` and its panel. The root's catcher keeps the pointer off the UI under the
- * menu and claims the modal top (nt_ui_overlay_active, Esc); the menu owns its outside-press dismiss. Levels
- * snap open: a closed level declares nothing, so there is no close to tween. */
-static void menu_open_level(const nt_ui_menu_t *menu, uint8_t depth, const nt_ui_popup_anchor_t *anchor) {
+ * menu, claims the top (nt_ui_overlay_active) and closes the menu on a press outside everything declared in
+ * it, as any light-dismiss popup, except on the frame the menu opens. Levels snap open: a closed level
+ * declares nothing, so there is no close to tween. Returns false when the root closed. */
+static bool menu_open_level(const nt_ui_menu_t *menu, uint8_t depth, const nt_ui_popup_anchor_t *anchor) {
     const nt_ui_menu_frame_t *f = &menu->frame;
     nt_ui_popup_style_t pst = nt_ui_popup_style_defaults();
     pst.ease_speed = 0.0F;
     pst.layer = f->fill_layer;
-    const nt_ui_popup_ext_t ext = {.def = &NT_UI_MENU_DEF, .force_catcher = (depth == 0U)};
-    bool level_open = true; /* a declared level is open: the menu closes by not declaring it */
-    (void)nt_ui_popup_begin_internal(f->ui, menu_level_id(f->menu_id, depth), &pst, anchor, &level_open, &ext, NULL, NULL);
+    const nt_ui_popup_ext_t ext = {.def = &NT_UI_MENU_DEF, .force_catcher = (depth == 0U), .dismiss_on_click = (depth == 0U && !menu->arming)};
+    bool level_open = true;
+    if (!nt_ui_popup_begin_internal(f->ui, menu_level_id(f->menu_id, depth), &pst, anchor, &level_open, &ext, NULL, NULL)) {
+        return false; /* a snap level that closed declares nothing */
+    }
     menu_open_panel(f->ui, f->fill_layer, f->menu_id, depth, f->style); /* LEFT open for the level's rows */
+    return true;
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity): the leading validation assert chain inflates the count; control flow is flat (one open/closed branch)
@@ -474,20 +473,22 @@ bool nt_ui_menu_begin(nt_ui_menu_t *menu, nt_ui_context_t *ctx, const nt_ui_elem
         return false;
     }
     const uint32_t root_id = menu_level_id(menu_id, 0U);
+    const nt_ui_bbox_t root_bb = nt_ui_get_bbox(ctx, root_id);
     /* Its kept navigation is only valid for a menu declared every frame: one skipped (the overlay holding it
      * hid) closes. */
-    if (!menu->arming && !nt_ui_get_bbox(ctx, root_id).found) {
+    if (!menu->arming && !root_bb.found) {
         menu->open = false;
         return false;
     }
-    /* One owner: an opening menu reads input from its next frame, a menu under another overlay none. */
+    /* One owner: an opening menu reads input from its next frame, a menu under another overlay or inside a
+     * closing one none. */
     menu->frame = (nt_ui_menu_frame_t){
         .ui = ctx,
         .style = style,
         .menu_id = menu_id,
         .fill_layer = (data != NULL) ? data->layer : 0U,
         .label_layer = label_layer,
-        .top = !menu->arming && ctx->overlay_top_id_prev == root_id,
+        .top = !menu->arming && ctx->overlay_top_id_prev == root_id && ctx->inert_from == 0U,
     };
     if (!menu_frame_input(menu, ctx, menu_id)) {
         menu->frame.ui = NULL;
@@ -498,7 +499,6 @@ bool nt_ui_menu_begin(nt_ui_menu_t *menu, nt_ui_context_t *ctx, const nt_ui_elem
     /* BELOW flips only vertically: shift the root left by last frame's width to stay on screen (unclamped on
      * the first frame). */
     float root_x = menu->anchor_x;
-    const nt_ui_bbox_t root_bb = nt_ui_get_bbox(ctx, root_id);
     if (root_bb.found) {
         const float screen_w = nt_ui_clay_priv_layout_width(ctx->clay);
         if (root_x + root_bb.width > screen_w) {
@@ -509,8 +509,12 @@ bool nt_ui_menu_begin(nt_ui_menu_t *menu, nt_ui_context_t *ctx, const nt_ui_elem
         }
     }
     const nt_ui_popup_anchor_t root_anchor = {.x = root_x, .y = menu->anchor_y, .w = 0.0F, .h = 0.0F, .prefer_side = NT_UI_POPUP_BELOW};
-    menu_open_level(menu, 0U, &root_anchor); /* the root panel stays open until menu_end */
-    return true;
+    if (!menu_open_level(menu, 0U, &root_anchor)) { /* the outside press closed it */
+        menu->frame.ui = NULL;
+        menu->open = false;
+        return false;
+    }
+    return true; /* the root panel stays open until menu_end */
 }
 
 /* The row's one mutating step. A menu that is not on top (its opening frame, whose hits are last frame's at
@@ -595,7 +599,7 @@ bool nt_ui_menu_submenu_begin_ex(nt_ui_menu_t *menu, uint32_t key, const char *l
     f->depth = child;
     f->declared_depth = child;
     const nt_ui_popup_anchor_t sub_anchor = menu_submenu_anchor(f->ui, row_id);
-    menu_open_level(menu, child, &sub_anchor); /* closed in submenu_end */
+    (void)menu_open_level(menu, child, &sub_anchor); /* a submenu level never closes itself; closed in submenu_end */
     return true;
 }
 

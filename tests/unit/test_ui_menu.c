@@ -2380,6 +2380,45 @@ static void test_menu_instant_rows_take_no_anim_slot(void) {
     }
 }
 
+#define MODAL_HOLDER 0x40DA3U
+
+/* One frame: an eased modal holding the menu (one leaf, New) while the game's `modal_open`. */
+static void menu_in_modal_frame(nt_ui_menu_t *st, nt_ui_menu_style_t *style, bool modal_open) {
+    nt_ui_modal_style_t ms = nt_ui_modal_style_defaults();
+    ms.ease_speed = 8.0F;
+    menu_frame_begin(&(nt_pointer_t){.active = true});
+    bool o = modal_open;
+    if (nt_ui_modal_begin(s_fx.ctx, MODAL_HOLDER, &ms, &o, NULL)) {
+        if (nt_ui_menu_begin(st, s_fx.ctx, NULL, 0U, MENU_A, style)) {
+            act_capture(nt_ui_menu_test_item_id(MENU_A, KEY_NEW), nt_ui_menu_item(st, KEY_NEW, "New"));
+            nt_ui_menu_end(st);
+        }
+        nt_ui_modal_end(s_fx.ctx);
+    }
+    nt_ui_end(s_fx.ctx);
+}
+
+/* ---- A menu in a modal the game closes is inert in that frame: Enter on its focused leaf activates
+ *      nothing. ---- */
+static void test_menu_in_a_closing_modal_takes_no_key(void) {
+    nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
+    nt_ui_menu_t st = {0};
+    menu_in_modal_frame(&st, &style, true);
+    nt_ui_menu_open(&st, 120.0F, 80.0F);
+    for (int f = 0; f < 3; ++f) {
+        menu_in_modal_frame(&st, &style, true);
+    }
+    menu_key(NT_KEY_ARROW_DOWN);
+    menu_in_modal_frame(&st, &style, true);
+    const uint32_t row = nt_ui_menu_test_item_id(MENU_A, KEY_NEW);
+    TEST_ASSERT_EQUAL_UINT32(row, st.focus);
+    s_act_capture_id = row;
+    s_act_hit = false;
+    menu_key(NT_KEY_ENTER);
+    menu_in_modal_frame(&st, &style, false); /* the game closes the modal in the Enter frame */
+    TEST_ASSERT_FALSE_MESSAGE(s_act_hit, "a menu in a closing modal activates nothing");
+}
+
 #define MENU_FIELD 0x4E50F1U
 static char s_field_buf[16];
 
@@ -2608,6 +2647,7 @@ int main(void) {
     RUN_TEST(test_menu_returned_row_is_not_focused);
     RUN_TEST(test_menu_row_popup_closes_the_branch_before_the_rows);
     RUN_TEST(test_menu_skipped_while_open_closes);
+    RUN_TEST(test_menu_in_a_closing_modal_takes_no_key);
     RUN_TEST(test_menu_click_beats_a_same_frame_key);
     RUN_TEST(test_menu_instant_rows_take_no_anim_slot);
     RUN_TEST(test_menu_keeps_no_state_cells);

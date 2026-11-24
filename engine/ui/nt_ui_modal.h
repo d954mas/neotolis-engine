@@ -89,11 +89,6 @@ nt_ui_modal_style_t nt_ui_modal_style_defaults(void);
 bool nt_ui_modal_begin(nt_ui_context_t *ctx, uint32_t id, const nt_ui_modal_style_t *style, bool *open, nt_ui_modal_info_t *info);
 void nt_ui_modal_end(nt_ui_context_t *ctx);
 
-/* Drop modal-owned retained view state for `id` after a transient modal/sheet has closed. Child
- * scroll/input/slider state inside the modal body remains caller-owned and should be cleared by id
- * when it should not survive close/reopen. */
-void nt_ui_modal_clear_state(nt_ui_context_t *ctx, uint32_t id);
-
 #ifdef NT_TEST_ACCESS
 void nt_ui_modal_test_last_panel_offset(float *ox, float *oy); /* panel transform offset of the last begin */
 #endif

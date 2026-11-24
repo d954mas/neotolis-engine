@@ -310,11 +310,12 @@ path:
   hover, the wheel) to the front-most record of last frame, in the stacking
   order that paints.
 - *Inert subtree.* A popup that is not open (easing out after the game cleared
-  `open`, or closed by its own Esc or outside click this frame) makes everything
+  `open`, or closed by its own Esc or outside press this frame) makes everything
   declared inside it inert, nested popups included, as HTML `inert` and
   Flutter's popping route do. An inert element paints but makes no record, so
-  the pointer passes through it to what lies under; its `nt_ui_step` reports
-  nothing and holds no capture past the next `nt_ui_begin`, and a scroll in it
+  the pointer passes through it to what lies under; `nt_ui_step` and
+  `nt_ui_query_interaction` report nothing for it and `nt_ui_hovered_within`
+  is false, the menu in it reads no key, and holds no capture past the next `nt_ui_begin`, and a scroll in it
   drops the gesture it holds, so a press held on it ends without a click; a
   text field in it loses focus and is no Tab stop; an inert popup has no
   catcher record, claims no top and takes no Esc (a closing modal's catcher
@@ -329,7 +330,8 @@ path:
   cancels its owner's capture (the release clicks nothing, a hold stops, a drag
   ends as if released and a scroll keeps its fling), and a text field under it
   loses focus, as a modal dialog takes focus. A Tab stop is owned and not inert.
-- *Keys.* The focused text field takes the keys; with none, the top overlay
+- *Keys.* A text field focused at `nt_ui_begin` takes the frame's keys, decided
+  once there whatever the declaration order; with none, the top overlay
   does (popup-core's Esc for a modal with `NT_UI_MODAL_LISTEN_ESC` and for a
   light-dismiss popup such as a combo list, the menu's keys); with no top, the
   game does, reading
@@ -347,15 +349,18 @@ path:
 that needs only last frame's records and this frame's input runs before the
 declarations it governs: `nt_ui_begin` for the context (the front-most
 record, the scroll gestures, the top overlay's hold on gestures and focus)
-and a widget's begin for the widget (popup-core's close-scan; the menu's
-outside press, key, end of keyboard mode and the branch a row's popup
-closes). A widget's end runs only what needs this frame's declarations (the
+and a widget's begin for the widget (popup-core's close-scan, the outside
+press included; the menu's key, end of keyboard mode and the branch a row's
+popup closes). A widget's end runs only what needs this frame's declarations (the
 menu's Up/Down neighbours, its click, hover and aim corridor, and the rows
 the frame did not declare). A rule run later than it could lets the frame
-declare content the rule already rules out. The other side of deciding from
-last frame is one frame of lag at a close: in the frame an overlay closes or
-turns inert, the front-most record, the wheel owner, the top and a held
-capture are still last frame's, and they update at the next `nt_ui_begin`.
+declare content the rule already rules out. An overlay's own close (Esc, an
+outside press) is decided at its begin, before anything of it is declared, so
+it is inert that whole frame and registers no catcher: the next press reaches
+what lies under. A close the game makes mid-frame acts from where the game
+makes it, as in Dear ImGui: what was declared earlier in that frame already
+read its input, and the top and a held capture are last frame's until the
+next `nt_ui_begin`.
 Result: 1-frame IM-lag is intrinsic (current frame reads previous
 frame's bbox); no stuck input on widget disappearance.
 
@@ -677,29 +682,32 @@ menu's: `if (nt_ui_popup_begin(ctx, id, &style, &anchor, &open, &info)) { body;
 nt_ui_popup_end(ctx); }` (`nt_ui_modal_begin/end` the same). Begin returns
 whether the popup shows (open, or easing closed after the game cleared
 `open`); a hidden popup declares nothing. The game owns `open`: a close the
-popup raises (an outside click, the modal's Esc or backdrop) clears it, and
+popup raises (an outside press, the modal's Esc or backdrop) clears it, and
 the modal's `info.reason` says which. It owns: a Clay floating panel
 attached to the ROOT (anchor-derived offset, no trigger-id dependency, so a
 missing trigger element can't trip Clay's parent-not-found); trigger-anchored
 placement with per-side edge-flip (BELOW/ABOVE/RIGHT/LEFT, CENTER for modal)
-read from the panel's previous-frame bbox; a `value_t` open/close tween (a snap
-popup, `ease_speed` 0, keeps no retained state: no tween cell, no anim slot); a shared
+read from the panel's previous-frame bbox; a `value_t` open/close tween whose
+entrance starts from 0 when the panel was not declared last frame (a popup keeps
+no state cell; a snap one, `ease_speed` 0, no anim slot either); a shared
 z-band, the frame's next root band for a root overlay and one band above its
 parent for a nested one (see "Floating zIndex is relative" above; NT_ASSERT
-before the push so a runaway nesting fails early);
+before the push so a runaway nesting fails early, for a shown popup only);
 and an open-only, transparent light-dismiss catcher on the panel's band,
 declared before the panel, so it lies above every earlier overlay and under
-its own panel (an outside click clears the game's `open`). A closing popup
+its own panel. A press of the primary pointer, either button, on the top
+popup's catcher beyond its panel grown by `close_pad` closes it on the press,
+as Dear ImGui, and the catcher swallows that press. A closing popup
 paints its fade, its backdrop included, and is inert (see "Input ownership").
 A light-dismiss popup also closes on Esc, as an HTML `<select>`. Esc and the
-outside-click scan run on ONE CATCHER-BEARING popup per frame: the highest
-effective band, ties to the last declared. That is the panels' tree-root
-order, so the popup that paints on top is the one whose catcher wins the
-click and performs the dismissal. The agreement is a 2D-context property: a 3D
+outside press close ONE CATCHER-BEARING popup per frame, last frame's top: the
+highest effective band, ties to the last declared. That is the panels'
+tree-root order, so the popup that paints on top is the one whose catcher
+takes the press. The agreement is a 2D-context property: a 3D
 ctx arbitrates the pointer by ray distance and does not rank overlays by
 band at all. A catcher-less
 overlay (a tooltip, a menu's submenu levels) never claims that slot; a menu's
-root has an inert catcher that claims it, and the menu runs its own dismiss.
+root is a light-dismiss level, except on the frame the menu opens.
 The top overlay owns the pointer by stacking alone: its catcher covers every
 earlier overlay and the UI under it, so no press reaches them, and overlays
 below stay open and inert; a gesture held under it ends (see "Interaction
@@ -728,7 +736,7 @@ state (`nt_ui_menu_t` / `bool *open`) and, for the combo, the `int`
 selection (Model D, same as popup-core). The menu clears `open` on an
 activation, an outside press, Left/Esc at the root, or a skipped frame; the
 combo toggles `*open` on a trigger click and clears it on a pick, an outside
-click or Esc. Both build on the kept popup-core (+ the scroll wrapper for a
+press or Esc. Both build on the kept popup-core (+ the scroll wrapper for a
 long combo list). There is no data-array form — immediate-only.
 `nt_ui_menu_begin`, `nt_ui_combo_begin` and the custom trigger's
 `nt_ui_combo_preview_end` return whether the body is declared this frame (a

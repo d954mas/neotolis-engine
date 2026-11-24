@@ -639,6 +639,7 @@ void nt_ui_begin(nt_ui_context_t *ctx, const nt_ui_frame_desc_t *frame) {
     if (!nt_ui_internal_owned_by_top(ctx, ctx->focused_input_id)) {
         ctx->focused_input_id = 0U;
     }
+    ctx->field_owns_keys = ctx->focused_input_id != 0U;
 
     /* Input is decided here, from last frame's layout: the front-most record per pointer, then the
      * scroll gestures. Every step and query of the frame reads the result. */
@@ -2649,6 +2650,9 @@ static nt_ui_interaction_t query_interaction_padded(nt_ui_context_t *ctx, uint32
 }
 
 nt_ui_interaction_t nt_ui_query_interaction(nt_ui_context_t *ctx, uint32_t id) {
+    if (ctx->inert_from != 0U) {
+        return (nt_ui_interaction_t){0}; /* inert: every read, not only the step */
+    }
     bool owner_over = false;
     nt_ui_widget_pidx_state_t s;
     return query_interaction_padded(ctx, id, NULL, &owner_over, &s);
@@ -3008,6 +3012,9 @@ void nt_ui_pointer_pos(const nt_ui_context_t *ctx, float *out_x, float *out_y) {
 bool nt_ui_hovered_within(const nt_ui_context_t *ctx, uint32_t id) {
     NT_ASSERT(ctx != NULL && "nt_ui_hovered_within: ctx must be non-NULL");
     NT_ASSERT(id != 0U && "nt_ui_hovered_within: id must be non-zero (0 = no widget)");
+    if (ctx->inert_from != 0U) {
+        return false;
+    }
 #if NT_UI_DEBUG_TOOLS
     if (ctx->inspector_active && ctx->inspector_pointer_consumed) {
         return false; /* the sidebar consumes the pointer, as in every query */

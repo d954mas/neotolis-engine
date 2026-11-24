@@ -184,7 +184,7 @@ static void test_modal_depth_overflow_asserts(void) {
  *      is "top"), so frame 1 establishes the nesting and frame 2 holds Esc. ---- */
 static void test_modal_esc_top_only(void) {
     nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
-    st.ease_speed = 0.0F;
+    st.ease_speed = 8.0F; /* eased: the frame it closes itself still shows, so the test ends it */
     st.flags = NT_UI_MODAL_LISTEN_ESC;
 
     /* Frame 1: establish A (outer) then B (inner, deepest) — no Esc yet. */
@@ -461,12 +461,16 @@ static void test_modal_no_backdrop_close_still_gates(void) {
 
 static nt_ui_interaction_t modal_button_frame(const nt_ui_modal_style_t *st, const nt_pointer_t *p) {
     ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, p, 1, 0);
-    s_frame_close_reason = modal_begin_open(s_fx.ctx, MODAL_A, st).reason;
-    nt_ui_interaction_t in;
-    CLAY({.id = (Clay_ElementId){.id = nt_ui_id("modal_btn")}, .layout = {.sizing = {CLAY_SIZING_FIXED(MODAL_BTN_W), CLAY_SIZING_FIXED(MODAL_BTN_H)}}}) {
-        in = nt_ui_step(s_fx.ctx, nt_ui_id("modal_btn"), NULL);
+    bool open = true;
+    nt_ui_modal_info_t info = {0};
+    nt_ui_interaction_t in = {0};
+    if (nt_ui_modal_begin(s_fx.ctx, MODAL_A, st, &open, &info)) { /* a snap modal that closed itself shows nothing */
+        CLAY({.id = (Clay_ElementId){.id = nt_ui_id("modal_btn")}, .layout = {.sizing = {CLAY_SIZING_FIXED(MODAL_BTN_W), CLAY_SIZING_FIXED(MODAL_BTN_H)}}}) {
+            in = nt_ui_step(s_fx.ctx, nt_ui_id("modal_btn"), NULL);
+        }
+        nt_ui_modal_end(s_fx.ctx);
     }
-    nt_ui_modal_end(s_fx.ctx);
+    s_frame_close_reason = info.reason;
     nt_ui_end(s_fx.ctx);
     return in;
 }
@@ -615,7 +619,7 @@ static void test_overlay_active_prev_frame(void) {
  *      frame the second (open) modal's Esc fires and the first (closed) stays silent. ---- */
 static void test_modal_closed_same_depth_does_not_steal_top(void) {
     nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
-    st.ease_speed = 0.0F; /* instant: open -> t=1, closed -> t=0 fully closed */
+    st.ease_speed = 8.0F; /* eased: the frame it closes itself still shows, so the test ends it */ /* instant: open -> t=1, closed -> t=0 fully closed */
     st.flags = NT_UI_MODAL_LISTEN_ESC;
 
     /* Frame 1: establish top. A declared first but CLOSED (no backdrop), B declared second and OPEN.
@@ -685,7 +689,7 @@ static void test_modal_stride_one_gates_base_ui(void) {
     nt_ui_context_t *ctx = nt_ui_create_context(s_custom_arena, sizeof s_custom_arena, &desc);
     TEST_ASSERT_NOT_NULL(ctx);
     nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
-    st.ease_speed = 0.0F;
+    st.ease_speed = 8.0F; /* eased: the frame it closes itself still shows, so the test ends it */
     bool clicked = false;
     for (int f = 0; f < 4; ++f) {
         nt_pointer_t p = {.x = 20.0F, .y = 20.0F, .active = true};

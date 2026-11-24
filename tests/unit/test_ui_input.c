@@ -109,7 +109,10 @@ static void init_style(void) {
     memset(&s_props, 0, sizeof s_props); /* zero-init = plain text field (no filter/mask, default keyboard) */
 }
 
+static int16_t s_base_z; /* modal_field_frame_io: the base field's floating zIndex */
+
 void setUp(void) {
+    s_base_z = 0;
     nt_test_assert_install();
     nt_input_init(); /* clean input state per test */
     ui_walker_fixture_init(&s_fx, s_arena, sizeof s_arena, UI_WALKER_FX_BIND_ALL);
@@ -1724,7 +1727,7 @@ static bool modal_field_frame(const nt_pointer_t *p, bool open, float ease, char
 /* As modal_field_frame, with the game's open bool (a modal Esc clears it). */
 static bool modal_field_frame_io(const nt_pointer_t *p, bool *open, float ease, char *base_buf, char *modal_buf) {
     ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 0.016F, p, 1, 0);
-    CLAY({.id = CLAY_ID("base_root"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = IN_X, .y = IN_Y}}}) {
+    CLAY({.id = CLAY_ID("base_root"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = IN_X, .y = IN_Y}, .zIndex = s_base_z}}) {
         (void)nt_ui_input_text(s_fx.ctx, NULL, 0, BASE_FIELD, base_buf, 32U, &s_props, &s_style, &s_field_decl, true, NULL);
     }
     nt_ui_modal_style_t mst = nt_ui_modal_style_defaults();
@@ -1832,6 +1835,29 @@ static void test_esc_unfocuses_a_field_before_its_modal(void) {
     TEST_ASSERT_FALSE_MESSAGE(open, "the second Esc closes the modal");
 }
 
+/* ---- Esc has one owner per frame, chosen at nt_ui_begin: a field declared before the modal but floating
+ *      above it unfocuses on Esc, and the same Esc does not also close the modal. ---- */
+static void test_esc_owner_is_decided_once(void) {
+    char a[32] = "base";
+    char b[32] = "modal";
+    bool open = true;
+    s_base_z = 1100; /* over the modal's band 1000: owned by the top, declared first */
+    (void)modal_field_frame_io(&IDLE_PTR, &open, 0.0F, a, b);
+    (void)modal_field_frame_io(&IDLE_PTR, &open, 0.0F, a, b);
+    const nt_ui_bbox_t fb = nt_ui_get_bbox(s_fx.ctx, BASE_FIELD);
+    TEST_ASSERT_TRUE(fb.found);
+    nt_pointer_t tap = make_pointer(fb.x + 10.0F, fb.y + 10.0F, false, true, true);
+    tap.type = NT_POINTER_TOUCH;
+    (void)modal_field_frame_io(&tap, &open, 0.0F, a, b);
+    (void)modal_field_frame_io(&IDLE_PTR, &open, 0.0F, a, b);
+    TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, BASE_FIELD));
+    nt_input_feed(nt_test_key(NT_KEY_ESCAPE, true));
+    (void)modal_field_frame_io(&IDLE_PTR, &open, 0.0F, a, b);
+    nt_input_feed(nt_test_key(NT_KEY_ESCAPE, false));
+    TEST_ASSERT_FALSE(nt_ui_input_focused(s_fx.ctx, BASE_FIELD));
+    TEST_ASSERT_TRUE_MESSAGE(open, "the Esc the field took does not close the modal");
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_input_in_scroll_focuses_on_tap_release);
@@ -1900,6 +1926,7 @@ int main(void) {
     RUN_TEST(test_closing_modal_is_inert);
     RUN_TEST(test_tab_skips_a_closing_modal);
     RUN_TEST(test_esc_unfocuses_a_field_before_its_modal);
+    RUN_TEST(test_esc_owner_is_decided_once);
     RUN_TEST(test_release_and_press_between_frames_reach_widgets_in_order);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_assert_null_buffer);

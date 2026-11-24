@@ -4,7 +4,7 @@
 /* Popup-core: the shared floating-overlay primitive. One panel floating element + a
  * transparent light-dismiss catcher (block_pointer occluder) + an open/close value_t tween + a
  * one-stride-per-level z-band + trigger-anchoring with per-side edge-flip. The game owns the `bool open`;
- * the core clears it on an outside click (light-dismiss) and never opens it.
+ * the core clears it on an outside press or Esc (light-dismiss) and never opens it.
  * Conditional begin/end like the menu: end only after begin returned true. The modal is re-expressed on top of this
  * core (modal = popup-core centered + dim backdrop). Dropdown / tooltip / context-menu reuse it. */
 
@@ -47,7 +47,7 @@ _Static_assert(sizeof(nt_ui_popup_info_t) == 8, "nt_ui_popup_info_t stable ABI (
 
 /* Catcher mode: a popup that wants light-dismiss declares a transparent full-viewport catcher under
  * its panel; a tooltip (NO dismiss) declares none. */
-#define NT_UI_POPUP_LIGHT_DISMISS ((uint8_t)(1U << 0)) /* transparent catcher -> outside-click or Esc closes */
+#define NT_UI_POPUP_LIGHT_DISMISS ((uint8_t)(1U << 0)) /* transparent catcher -> an outside press or Esc closes */
 
 typedef struct {
     float ease_speed;                 /* value_speed for the open/close tween; >= 0 (0 = instant snap) */
@@ -67,7 +67,7 @@ nt_ui_popup_style_t nt_ui_popup_style_defaults(void);
  * Only then it opens the catcher (light-dismiss) + panel floating elements (a root popup on the frame's
  * next root band, a nested one a band above its parent) eased toward open?1:0, placed at the anchor with
  * edge-flip (or centered for a CENTER anchor); the game declares the body and calls nt_ui_popup_end. A
- * hidden popup declares nothing. An outside click clears *open. The game owns *open:
+ * hidden popup declares nothing. An outside press or Esc clears *open. The game owns *open:
  *
  *   if (clicked_trigger) open = true;
  *   if (nt_ui_popup_begin(ctx, ID, &style, &anchor, &open, NULL)) {
@@ -78,11 +78,6 @@ nt_ui_popup_style_t nt_ui_popup_style_defaults(void);
  * id non-zero, style, anchor and open non-NULL; info nullable. Asserts depth < NT_UI_MODAL_MAX_DEPTH. */
 bool nt_ui_popup_begin(nt_ui_context_t *ctx, uint32_t id, const nt_ui_popup_style_t *style, const nt_ui_popup_anchor_t *anchor, bool *open, nt_ui_popup_info_t *info);
 void nt_ui_popup_end(nt_ui_context_t *ctx);
-
-/* Drop popup-owned retained view state for `id` after the game has closed a transient popup/sheet.
- * This clears only popup-core state, not game-owned data or child widget state such as scroll/input
- * cells inside the popup body. */
-void nt_ui_popup_clear_state(nt_ui_context_t *ctx, uint32_t id);
 
 #ifdef NT_TEST_ACCESS
 bool nt_ui_popup_test_last_catcher_present(void);    /* did the last begin declare a catcher? */

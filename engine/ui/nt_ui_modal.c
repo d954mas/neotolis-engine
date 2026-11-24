@@ -137,8 +137,6 @@ bool nt_ui_modal_begin(nt_ui_context_t *ctx, uint32_t id, const nt_ui_modal_styl
 
 void nt_ui_modal_end(nt_ui_context_t *ctx) { nt_ui_popup_end(ctx); }
 
-void nt_ui_modal_clear_state(nt_ui_context_t *ctx, uint32_t id) { nt_ui_popup_clear_state(ctx, id); }
-
 #ifdef NT_TEST_ACCESS
 void nt_ui_modal_test_last_panel_offset(float *ox, float *oy) {
     if (ox != NULL) {

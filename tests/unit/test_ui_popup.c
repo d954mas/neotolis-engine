@@ -67,10 +67,15 @@ static nt_ui_popup_info_t popup_begin_open(uint32_t id, const nt_ui_popup_style_
     return info;
 }
 
-/* popup_begin_open through the internal entry, reporting the close source. */
+/* popup_begin_open through the internal entry, keeping the close source it raises across frames. The
+ * popup must still show in the frame it closes itself (an eased style), as the caller ends it. */
 static void popup_begin_open_src(uint32_t id, const nt_ui_popup_style_t *st, const nt_ui_popup_anchor_t *anc, nt_ui_popup_close_src_t *src) {
     bool open = true;
-    TEST_ASSERT_TRUE(nt_ui_popup_begin_internal(s_fx.ctx, id, st, anc, &open, NULL, NULL, src));
+    nt_ui_popup_close_src_t raised = NT_UI_POPUP_CLOSE_SRC_NONE;
+    TEST_ASSERT_TRUE(nt_ui_popup_begin_internal(s_fx.ctx, id, st, anc, &open, NULL, NULL, &raised));
+    if (raised != NT_UI_POPUP_CLOSE_SRC_NONE) {
+        *src = raised;
+    }
 }
 
 /* ---- ABI sanity: the _Static_asserts compile; assert the runtime sizes match too. ---- */
@@ -304,10 +309,9 @@ static void test_popup_outside_click_dismiss(void) {
     nt_ui_popup_end(s_fx.ctx);
     nt_ui_end(s_fx.ctx);
 
-    /* Frame 2: full press+release in the far corner (over the catcher, outside the popup body) ->
-     * the catcher wins the prev-frame topmost-z and reports a click -> open cleared. */
-    nt_pointer_t f2 = pointer_at(700.0F, 500.0F, false, false, true);
-    f2.buttons[NT_BUTTON_LEFT].is_pressed = true;
+    /* Frame 2: a press in the far corner (on the catcher, outside the popup body) closes it, as Dear ImGui
+     * closes a popup on the press. */
+    const nt_pointer_t f2 = pointer_at(700.0F, 500.0F, true, true, false);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = &f2, .pointer_count = 1});
     bool open = true;
     if (nt_ui_popup_begin(s_fx.ctx, POP_A, &st, &anc, &open, NULL)) {
@@ -384,17 +388,42 @@ static void test_popup_no_dismiss_declares_no_catcher(void) {
     TEST_ASSERT_FALSE(nt_ui_popup_test_last_catcher_present());
 }
 
-static void test_popup_clear_state_releases_retained_tween_cell(void) {
+static void test_popup_eased_keeps_no_state(void) {
     nt_ui_popup_style_t st = nt_ui_popup_style_defaults();
-    st.ease_speed = 8.0F; /* only an eased popup keeps a tween cell */
+    st.ease_speed = 8.0F;
     nt_ui_popup_anchor_t anc = {.x = 100.0F, .y = 100.0F, .w = 40.0F, .h = 24.0F, .prefer_side = NT_UI_POPUP_BELOW};
-
-    TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_state_used_slots(s_fx.ctx));
     popup_frame(POP_A, &st, &anc, true, &(popup_frame_t){0});
-    TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_state_used_slots(s_fx.ctx));
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, nt_ui_state_used_slots(s_fx.ctx), "an eased popup keeps no state cell either");
+}
 
-    nt_ui_popup_clear_state(s_fx.ctx, POP_A);
-    TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_state_used_slots(s_fx.ctx));
+/* ---- An open popup switched from snap to eased replays no entrance: it was shown last frame. ---- */
+static void test_popup_snap_to_eased_stays_open(void) {
+    nt_ui_popup_style_t st = nt_ui_popup_style_defaults();
+    st.ease_speed = 0.0F;
+    nt_ui_popup_anchor_t anc = {.x = 100.0F, .y = 100.0F, .w = 40.0F, .h = 24.0F, .prefer_side = NT_UI_POPUP_BELOW};
+    popup_frame_t r = {0};
+    popup_frame(POP_A, &st, &anc, true, &r);
+    popup_frame(POP_A, &st, &anc, true, &r);
+    st.ease_speed = 8.0F;
+    popup_frame(POP_A, &st, &anc, true, &r);
+    TEST_ASSERT_TRUE_MESSAGE(r.info.t > 0.99F, "the open popup stays fully open");
+}
+
+/* ---- A hidden popup at the nesting cap declares nothing, so it does not assert. ---- */
+static void test_popup_hidden_at_the_depth_cap_does_not_assert(void) {
+    nt_ui_popup_style_t st = nt_ui_popup_style_defaults();
+    st.ease_speed = 0.0F;
+    nt_ui_popup_anchor_t anc = {.x = 0.0F, .y = 0.0F, .w = 10.0F, .h = 10.0F, .prefer_side = NT_UI_POPUP_BELOW};
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = &(nt_pointer_t){.active = true}, .pointer_count = 1});
+    for (uint32_t i = 0; i < NT_UI_MODAL_MAX_DEPTH; ++i) {
+        (void)popup_begin_open(0x50B000U + i, &st, &anc);
+    }
+    bool open = false;
+    TEST_ASSERT_FALSE(nt_ui_popup_begin(s_fx.ctx, 0x50BFFFU, &st, &anc, &open, NULL));
+    for (uint32_t i = 0; i < NT_UI_MODAL_MAX_DEPTH; ++i) {
+        nt_ui_popup_end(s_fx.ctx);
+    }
+    nt_ui_end(s_fx.ctx);
 }
 
 /* ---- A snap popup keeps no retained state: opened and closed, it leaves no state cell. ---- */
@@ -461,7 +490,7 @@ static void test_popup_tween_clamp(void) {
 static void test_popup_top_id_follows_band(void) {
     const nt_ui_popup_anchor_t anc_c = {.x = 400.0F, .y = 50.0F, .prefer_side = NT_UI_POPUP_BELOW};
     nt_ui_popup_style_t st = nt_ui_popup_style_defaults();
-    st.ease_speed = 0.0F;
+    st.ease_speed = 8.0F; /* eased: the frame it closes itself still shows, so the test ends it */
     nt_ui_popup_anchor_t anc = {.x = 100.0F, .y = 100.0F, .w = 80.0F, .h = 30.0F, .prefer_side = NT_UI_POPUP_BELOW};
     nt_pointer_t p = {.active = true};
     /* Two frames: the close-scan target is committed at the next nt_ui_begin (1-frame IM lag). */
@@ -543,15 +572,15 @@ static void test_popup_top_id_follows_band(void) {
 
 static void test_popup_dismiss_survives_a_band_tie(void) {
     nt_ui_popup_style_t hi = nt_ui_popup_style_defaults();
-    hi.ease_speed = 0.0F;
-    hi.layer = 2U; /* a draw layer that does NOT move the close-scan slot */
+    hi.ease_speed = 8.0F; /* eased: the frame it closes itself still shows, so the test ends it */
+    hi.layer = 2U;        /* a draw layer that does NOT move the close-scan slot */
     nt_ui_popup_style_t lo = nt_ui_popup_style_defaults();
-    lo.ease_speed = 0.0F;
+    lo.ease_speed = 8.0F;
     nt_ui_popup_anchor_t anc = {.x = 100.0F, .y = 100.0F, .w = 80.0F, .h = 30.0F, .prefer_side = NT_UI_POPUP_BELOW};
 
     nt_ui_popup_close_src_t src_a = NT_UI_POPUP_CLOSE_SRC_NONE;
     nt_ui_popup_close_src_t src_b = NT_UI_POPUP_CLOSE_SRC_NONE;
-    for (int frame = 0; frame < 3; ++frame) {
+    for (int frame = 0; frame < 4; ++frame) { /* the last frame commits the reopened B as the top */
         const bool pressing = (frame == 1);
         const bool releasing = (frame == 2);
         nt_pointer_t p = pointer_at(700.0F, 500.0F, pressing, pressing, releasing);
@@ -579,7 +608,7 @@ static void test_popup_dismiss_survives_a_band_tie(void) {
  * whether A's box clicked and B's close source. */
 static bool popup_under_frame(nt_pointer_t p, nt_ui_popup_close_src_t *src_b) {
     nt_ui_popup_style_t st = nt_ui_popup_style_defaults();
-    st.ease_speed = 0.0F;
+    st.ease_speed = 8.0F; /* eased: the frame it closes itself still shows, so the test ends it */
     const nt_ui_popup_anchor_t anc_a = {.x = 100.0F, .y = 100.0F, .prefer_side = NT_UI_POPUP_BELOW};
     const nt_ui_popup_anchor_t anc_b = {.x = 500.0F, .y = 350.0F, .prefer_side = NT_UI_POPUP_BELOW};
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = &p, .pointer_count = 1});
@@ -806,6 +835,8 @@ typedef struct {
     bool visible;        /* the eased popup shows */
     bool open;           /* the game's bool after begin */
     bool button_clicked; /* the button inside it */
+    bool button_queried; /* nt_ui_query_interaction's click on that button */
+    bool button_hovered; /* nt_ui_hovered_within on that button */
     bool base_clicked;   /* the base floating under its panel */
 } inert_frame_t;
 
@@ -827,6 +858,8 @@ static inert_frame_t inert_frame(nt_pointer_t p, bool open, bool nested) {
     if (out.visible) {
         nt_ui_block_pointer(s_fx.ctx, INERT_POPUP, NULL); /* the panel blocks the pointer, as a menu level does */
         CLAY({.id = (Clay_ElementId){.id = INERT_BUTTON}, .layout = {.sizing = {CLAY_SIZING_FIXED(POP_W), CLAY_SIZING_FIXED(POP_H)}}}) {}
+        out.button_queried = nt_ui_query_interaction(s_fx.ctx, INERT_BUTTON).clicked;
+        out.button_hovered = nt_ui_hovered_within(s_fx.ctx, INERT_BUTTON);
         out.button_clicked = nt_ui_step(s_fx.ctx, INERT_BUTTON, NULL).clicked;
         if (nested) {
             nt_ui_popup_style_t ns = nt_ui_popup_style_defaults();
@@ -863,6 +896,35 @@ static void test_popup_closing_ends_a_held_press(void) {
     const inert_frame_t r = inert_frame(pointer_at(x, y, false, false, true), false, false);
     TEST_ASSERT_TRUE_MESSAGE(r.visible, "the popup still fades");
     TEST_ASSERT_FALSE_MESSAGE(clicked || r.button_clicked, "the release over a closing popup's button clicks nothing");
+}
+
+/* ---- Every read inside a closing popup is inert: the release of a press held on its button, in the frame
+ *      the game closes it, is no click for nt_ui_query_interaction either, and the button is not hovered. ---- */
+static void test_popup_closing_content_reads_no_click(void) {
+    inert_open_fully(false);
+    const nt_ui_bbox_t bb = nt_ui_get_bbox(s_fx.ctx, INERT_BUTTON);
+    TEST_ASSERT_TRUE(bb.found);
+    const float x = bb.x + 5.0F;
+    const float y = bb.y + 5.0F;
+    (void)inert_frame(pointer_at(x, y, true, true, false), true, false);
+    (void)inert_frame(pointer_at(x, y, true, false, false), true, false);
+    const inert_frame_t r = inert_frame(pointer_at(x, y, false, false, true), false, false);
+    TEST_ASSERT_FALSE_MESSAGE(r.button_queried, "a query in a closing popup reads no click");
+    TEST_ASSERT_FALSE_MESSAGE(r.button_hovered, "nor a hover");
+}
+
+/* ---- A popup that closes itself (Esc) decides it before declaring anything, so it registers no catcher:
+ *      the next press reaches the UI under it at once. ---- */
+static void test_popup_self_close_leaves_no_catcher(void) {
+    inert_open_fully(false);
+    nt_input_test_key_press(NT_KEY_ESCAPE);
+    const inert_frame_t closing = inert_frame(pointer_at(5.0F, 5.0F, false, false, false), true, false);
+    nt_input_init();
+    TEST_ASSERT_FALSE(closing.open);
+    nt_pointer_t tap = pointer_at(300.0F + 5.0F, 200.0F + 5.0F, false, true, true);
+    tap.type = NT_POINTER_TOUCH;
+    const inert_frame_t r = inert_frame(tap, false, false);
+    TEST_ASSERT_TRUE_MESSAGE(r.base_clicked, "the first tap after the close reaches the base");
 }
 
 /* ---- A closing popup only paints while it fades: it is not the top overlay and the UI under its panel
@@ -949,19 +1011,22 @@ static void test_popup_root_overlay_is_a_top_layer(void) {
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(POP_B, s_fx.ctx->overlay_top_id_prev, "the later root overlay covers the earlier one");
 }
 
-/* ---- A root overlay inside a game floating at or above the overlay bands asserts. ---- */
-static void test_popup_root_overlay_over_the_bands_asserts(void) {
+/* ---- A root overlay inside a game floating at or above the overlay bands, or so far below them that its
+ *      delta passes int16, asserts. ---- */
+static void test_popup_root_overlay_out_of_the_bands_asserts(void) {
     nt_ui_popup_style_t st = nt_ui_popup_style_defaults();
     const nt_ui_popup_anchor_t anc = {.x = 100.0F, .y = 100.0F, .prefer_side = NT_UI_POPUP_BELOW};
     const nt_pointer_t idle = pointer_at(5.0F, 5.0F, false, false, false);
-    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = &idle, .pointer_count = 1});
-    CLAY({.id = (Clay_ElementId){.id = GAME_WINDOW},
-          .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .zIndex = NT_UI_MODAL_ZBAND_STRIDE},
-          .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(200)}}}) {
-        bool open = true;
-        NT_TEST_EXPECT_ASSERT((void)nt_ui_popup_begin(s_fx.ctx, POP_A, &st, &anc, &open, NULL)); /* asserts before the push */
+    const int16_t window_z[] = {NT_UI_MODAL_ZBAND_STRIDE, -32000};
+    for (int i = 0; i < 2; ++i) {
+        nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = &idle, .pointer_count = 1});
+        CLAY(
+            {.id = (Clay_ElementId){.id = GAME_WINDOW}, .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .zIndex = window_z[i]}, .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(200)}}}) {
+            bool open = true;
+            NT_TEST_EXPECT_ASSERT((void)nt_ui_popup_begin(s_fx.ctx, POP_A, &st, &anc, &open, NULL)); /* asserts before the push */
+        }
+        nt_ui_end(s_fx.ctx);
     }
-    nt_ui_end(s_fx.ctx);
 }
 
 int main(void) {
@@ -973,12 +1038,14 @@ int main(void) {
     RUN_TEST(test_popup_top_id_follows_band);
     RUN_TEST(test_popup_dismiss_survives_a_band_tie);
     RUN_TEST(test_popup_closing_content_takes_no_tap);
+    RUN_TEST(test_popup_closing_content_reads_no_click);
+    RUN_TEST(test_popup_self_close_leaves_no_catcher);
     RUN_TEST(test_popup_esc_closes_the_top_and_its_body);
     RUN_TEST(test_popup_closing_ends_a_held_press);
     RUN_TEST(test_popup_closing_panel_lets_the_pointer_through);
     RUN_TEST(test_popup_nested_in_a_closing_parent_is_inert);
     RUN_TEST(test_popup_root_overlay_is_a_top_layer);
-    RUN_TEST(test_popup_root_overlay_over_the_bands_asserts);
+    RUN_TEST(test_popup_root_overlay_out_of_the_bands_asserts);
     RUN_TEST(test_popup_depth_overflow_asserts);
     RUN_TEST(test_popup_present_only_catcher);
     RUN_TEST(test_popup_closed_does_not_block_base);
@@ -988,7 +1055,9 @@ int main(void) {
     RUN_TEST(test_popup_outside_click_dismiss);
     RUN_TEST(test_popup_wrapper_clears_open);
     RUN_TEST(test_popup_no_dismiss_declares_no_catcher);
-    RUN_TEST(test_popup_clear_state_releases_retained_tween_cell);
+    RUN_TEST(test_popup_eased_keeps_no_state);
+    RUN_TEST(test_popup_snap_to_eased_stays_open);
+    RUN_TEST(test_popup_hidden_at_the_depth_cap_does_not_assert);
     RUN_TEST(test_popup_snap_keeps_no_state);
     RUN_TEST(test_popup_tween_clamp);
     RUN_TEST(test_popup_top_owns_the_pointer);

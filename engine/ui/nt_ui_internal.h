@@ -247,6 +247,9 @@ struct nt_ui_context {
      * everything declared inside it makes no record, steps nothing and owns no focus. Balanced by
      * nt_ui_popup_end, reset by nt_ui_begin. */
     uint8_t inert_from;
+    /* A text field held focus at nt_ui_begin, after the top took the focus under it: the keys are the
+     * field's for the whole frame, so one Esc has one owner whatever the declaration order. */
+    bool field_owns_keys;
     uint8_t capture_seen[NT_INPUT_MAX_POINTERS];
 
     /* Buttons do not nest (asserted). */
