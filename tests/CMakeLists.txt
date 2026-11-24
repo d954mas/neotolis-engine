@@ -1590,6 +1590,7 @@ if(NOT EMSCRIPTEN)
         test_nt_ui_progress
         test_ui_gestures
         test_ui_popup
+        test_ui_scenarios
         test_ui_menu
         test_ui_dropdown
         test_ui_tabbar

@@ -2769,9 +2769,6 @@ nt_ui_interaction_t nt_ui_step(nt_ui_context_t *ctx, uint32_t id, const nt_ui_st
     NT_ASSERT(!nt_ui_state_has_tag(ctx, id, NT_UI_SCROLL_TAG) && "nt_ui_step: a scroll's own id is its surface, not a widget (step a child id)");
 #endif
 
-    if (ctx->inert_from != 0U) {
-        return (nt_ui_interaction_t){0}; /* inert: no capture kept, so a held press ends without a click */
-    }
     bool owner_over = false;
     nt_ui_widget_pidx_state_t s;
     nt_ui_interaction_t out = query_interaction_padded(ctx, id, pad_lrtb, &owner_over, &s);

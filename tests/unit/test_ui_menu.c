@@ -235,73 +235,6 @@ static void menu_im_press(nt_ui_menu_t *st, nt_ui_menu_style_t *style, float px,
     (void)menu_im_frame_ptr(st, style, &p);
 }
 
-/* ---- Keyboard-nav reaches a nested leaf: Down focuses File, Right opens its submenu, Down to Open,
- *      Enter opens the grandchild, Down to File2, Enter activates -> File2's INLINE return fires on the
- *      Enter frame, like a click, and the chain closes. ---- */
-static void test_menu_kbd_nav_activates_nested_leaf(void) {
-    nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
-    nt_ui_menu_t st = {0};
-    nt_ui_menu_open(&st, 120.0F, 80.0F);
-    menu_im_frame(&st, &style, 0.0F, 0.0F); /* the menu reads keys from the frame after it opens */
-
-    /* Watch File2's inline return: keyboard Enter must fire it. */
-    const uint32_t file_scope0 = nt_ui_menu_test_item_id(MENU_A, KEY_FILE);
-    const uint32_t open_scope0 = nt_ui_menu_test_item_id(file_scope0, KEY_OPEN);
-    s_act_capture_id = nt_ui_menu_test_item_id(open_scope0, KEY_FILE2);
-    s_act_hit = false;
-
-    /* Frame 1: focus root item 0 (File) via Down. */
-    menu_key(NT_KEY_ARROW_DOWN);
-    menu_im_frame(&st, &style, 0.0F, 0.0F);
-    /* Frame 2: Right opens File's submenu (depth 1) in this frame. */
-    menu_key(NT_KEY_ARROW_RIGHT);
-    menu_im_frame(&st, &style, 0.0F, 0.0F);
-    TEST_ASSERT_TRUE_MESSAGE(menu_level_found(1U), "Right opens the submenu in its own frame");
-    /* Frame 3: Down moves focus within submenu to Open. */
-    menu_key(NT_KEY_ARROW_DOWN);
-    menu_im_frame(&st, &style, 0.0F, 0.0F);
-    /* Frame 4: Enter on the Open parent opens its grandchild (depth 2) in this frame, focus Project. */
-    menu_key(NT_KEY_ENTER);
-    menu_im_frame(&st, &style, 0.0F, 0.0F);
-    TEST_ASSERT_TRUE_MESSAGE(menu_level_found(2U), "Enter on a parent opens it in its own frame");
-    /* Frame 5: Down to File2. */
-    menu_key(NT_KEY_ARROW_DOWN);
-    menu_im_frame(&st, &style, 0.0F, 0.0F);
-    /* Frame 6: Enter on File2 fires its inline return and closes the chain. */
-    menu_key(NT_KEY_ENTER);
-    menu_im_frame(&st, &style, 0.0F, 0.0F);
-    TEST_ASSERT_TRUE_MESSAGE(s_act_hit, "keyboard Enter must fire the leaf's INLINE return on the Enter frame");
-    TEST_ASSERT_FALSE(st.open);
-}
-
-/* ---- Nested dismiss: Esc on the deepest level closes it first (root stays open); a second Esc closes
- *      the root chain entirely. ---- */
-static void test_menu_nested_dismiss_esc_deepest_first(void) {
-    nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
-    nt_ui_menu_t st = {0};
-    nt_ui_menu_open(&st, 120.0F, 80.0F);
-    menu_im_frame(&st, &style, 0.0F, 0.0F); /* the menu reads keys from the frame after it opens */
-
-    /* open root->File submenu */
-    menu_key(NT_KEY_ARROW_DOWN);
-    menu_im_frame(&st, &style, 0.0F, 0.0F);
-    menu_key(NT_KEY_ARROW_RIGHT);
-    menu_im_frame(&st, &style, 0.0F, 0.0F);
-    TEST_ASSERT_TRUE(st.open);
-
-    /* Esc #1: close the deepest level (the File submenu) and focus File — root stays open. */
-    menu_key(NT_KEY_ESCAPE);
-    menu_im_frame(&st, &style, 0.0F, 0.0F);
-    TEST_ASSERT_TRUE_MESSAGE(st.open, "first Esc closes only the deepest submenu, root stays open");
-    TEST_ASSERT_EQUAL_UINT32(0U, st.open_path[0]);
-    TEST_ASSERT_EQUAL_UINT32(nt_ui_menu_test_item_id(MENU_A, KEY_FILE), st.focus);
-
-    /* Esc #2: close the root chain. */
-    menu_key(NT_KEY_ESCAPE);
-    menu_im_frame(&st, &style, 0.0F, 0.0F);
-    TEST_ASSERT_FALSE_MESSAGE(st.open, "second Esc closes the root chain");
-}
-
 /* ---- Outside press: a left click, a tap or a right click far outside every open panel closes the whole
  *      chain before the rows declare, so the press frame declares no level. ---- */
 static void test_menu_outside_press_dismisses_chain(void) {
@@ -2421,8 +2354,6 @@ int main(void) {
     RUN_TEST(test_menu_aim_near_edge_faces_apex);
     RUN_TEST(test_menu_aim_keeps_submenu_open_on_diagonal);
     RUN_TEST(test_menu_aim_switch_after_fallback);
-    RUN_TEST(test_menu_kbd_nav_activates_nested_leaf);
-    RUN_TEST(test_menu_nested_dismiss_esc_deepest_first);
     RUN_TEST(test_menu_click_root_parent_switches_branch);
     RUN_TEST(test_menu_hover_root_parent_switches_branch);
     RUN_TEST(test_menu_hover_collapse_reopen_forgets_descendants);

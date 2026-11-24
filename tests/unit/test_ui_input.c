@@ -1785,22 +1785,6 @@ static void tap_modal_field(bool open, float ease, char *a, char *b) {
     (void)modal_field_frame(&tap, open, ease, a, b);
 }
 
-/* ---- Tab inside a modal wraps among the modal's fields: a field under the modal is no Tab stop. ---- */
-static void test_tab_stays_in_the_top_overlay(void) {
-    char a[32] = "base";
-    char b[32] = "modal";
-    (void)modal_field_frame(&IDLE_PTR, true, 0.0F, a, b);
-    (void)modal_field_frame(&IDLE_PTR, true, 0.0F, a, b);
-    tap_modal_field(true, 0.0F, a, b);
-    (void)modal_field_frame(&IDLE_PTR, true, 0.0F, a, b);
-    TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, MODAL_FIELD));
-    nt_input_feed(nt_test_key(NT_KEY_TAB, true));
-    (void)modal_field_frame(&IDLE_PTR, true, 0.0F, a, b);
-    nt_input_feed(nt_test_key(NT_KEY_TAB, false));
-    (void)modal_field_frame(&IDLE_PTR, true, 0.0F, a, b);
-    TEST_ASSERT_TRUE_MESSAGE(nt_ui_input_focused(s_fx.ctx, MODAL_FIELD), "Tab wraps to the modal's own field");
-}
-
 /* ---- A closing modal only paints its fade: its field loses focus and takes no tap while it fades. ---- */
 static void test_closing_modal_is_inert(void) {
     char a[32] = "base";
@@ -1952,7 +1936,6 @@ int main(void) {
     RUN_TEST(test_edit_step_backspace_across_multibyte_caret_boundary);
     RUN_TEST(test_scroll_step_caret_follow_fixed_width);
     RUN_TEST(test_field_text_above_modal_band);
-    RUN_TEST(test_tab_stays_in_the_top_overlay);
     RUN_TEST(test_closing_modal_is_inert);
     RUN_TEST(test_tab_skips_a_closing_modal);
     RUN_TEST(test_esc_owner_is_decided_once);

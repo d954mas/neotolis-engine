@@ -546,24 +546,6 @@ static sibling_info_t sibling_frame(bool *a_open, int other, bool *other_open) {
     return out;
 }
 
-/* ---- One transient child per parent: a light-dismiss popup opening at the base replaces the open one there,
- *      which closes at its next begin with NT_UI_POPUP_CLOSE_REPLACED; the new one stays open and is the top. ---- */
-static void test_popup_light_dismiss_replaces_its_sibling(void) {
-    bool a = true;
-    bool b = false;
-    (void)sibling_frame(&a, SIB_OTHER_POPUP, &b);
-    (void)sibling_frame(&a, SIB_OTHER_POPUP, &b);
-    b = true;
-    (void)sibling_frame(&a, SIB_OTHER_POPUP, &b);
-    TEST_ASSERT_TRUE_MESSAGE(a, "A, declared before B opened, is still open in that frame");
-    const sibling_info_t r = sibling_frame(&a, SIB_OTHER_POPUP, &b);
-    TEST_ASSERT_EQUAL_INT(NT_UI_POPUP_CLOSE_REPLACED, r.combo.reason);
-    TEST_ASSERT_FALSE(a);
-    (void)sibling_frame(&a, SIB_OTHER_POPUP, &b);
-    TEST_ASSERT_TRUE(b);
-    TEST_ASSERT_EQUAL_UINT32(POP_B, s_fx.ctx->overlay_top);
-}
-
 /* ---- A tooltip or a modal is not transient: opening next to an open combo, it leaves the combo open. ---- */
 static void test_popup_tooltip_and_modal_do_not_replace(void) {
     const int others[2] = {SIB_OTHER_TOOLTIP, SIB_OTHER_MODAL};
@@ -670,40 +652,6 @@ static void test_popup_later_overlay_above_nested_level(void) {
     nested_under_frame(ui_fx_pointer(box.x + 10.0F, box.y + 10.0F, false, false, true), &a2, &b);
     TEST_ASSERT_TRUE_MESSAGE(b, "the top overlay's own box takes the click");
     TEST_ASSERT_FALSE_MESSAGE(a2, "the nested level under it clicks nothing");
-}
-
-#define BASE_BTN 0x50A0C1U
-
-/* One frame: a base button at the layout origin, then popup A away from it while `popup_open`; returns
- * whether the button clicked. */
-static bool base_button_frame(nt_pointer_t p, bool popup_open) {
-    nt_ui_popup_style_t st = nt_ui_popup_style_defaults();
-    st.ease_speed = 0.0F;
-    const nt_ui_popup_anchor_t anc = {.x = 500.0F, .y = 350.0F, .prefer_side = NT_UI_POPUP_BELOW};
-    ui_fx_frame_begin(s_fx.ctx, &p);
-    CLAY({.id = (Clay_ElementId){.id = BASE_BTN}, .layout = {.sizing = {CLAY_SIZING_FIXED(80), CLAY_SIZING_FIXED(30)}}}) {}
-    const bool clicked = nt_ui_step(s_fx.ctx, BASE_BTN, NULL).clicked;
-    if (popup_open) {
-        (void)popup_begin_open(POP_A, &st, &anc);
-        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(POP_W), CLAY_SIZING_FIXED(POP_H)}}}) {}
-        nt_ui_popup_end(s_fx.ctx);
-    }
-    nt_ui_end(s_fx.ctx);
-    return clicked;
-}
-
-/* ---- An overlay that opens over a held press ends the gesture: the capture drops and the release over
- *      the button clicks nothing. ---- */
-static void test_popup_opening_over_a_held_press_ends_it(void) {
-    (void)base_button_frame(ui_fx_pointer(20.0F, 15.0F, false, false, false), false);
-    (void)base_button_frame(ui_fx_pointer(20.0F, 15.0F, false, false, false), false);
-    (void)base_button_frame(ui_fx_pointer(20.0F, 15.0F, true, true, false), false);
-    TEST_ASSERT_EQUAL_UINT32(BASE_BTN, nt_ui_test_capture_active_id(s_fx.ctx, 0U));
-    (void)base_button_frame(ui_fx_pointer(20.0F, 15.0F, true, false, false), true); /* the game opens the popup, e.g. from a key */
-    bool clicked = base_button_frame(ui_fx_pointer(20.0F, 15.0F, true, false, false), true);
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, nt_ui_test_capture_active_id(s_fx.ctx, 0U), "the overlay on top ends the gesture held under it");
-    clicked = base_button_frame(ui_fx_pointer(20.0F, 15.0F, false, false, true), true) || clicked;
-    TEST_ASSERT_FALSE_MESSAGE(clicked, "the release over the button clicks nothing");
 }
 
 #define POP_B2 0x50A004U
@@ -889,21 +837,6 @@ static void test_popup_closing_content_reads_no_click(void) {
     TEST_ASSERT_FALSE_MESSAGE(r.button_hovered, "nor a hover");
 }
 
-/* ---- A closing popup only paints while it fades: it is not the top overlay and the UI under its panel
- *      takes a new press, as the inert panel makes no record. ---- */
-static void test_popup_closing_panel_lets_the_pointer_through(void) {
-    inert_open_fully(NESTED_NONE);
-    TEST_ASSERT_EQUAL_UINT32(INERT_POPUP, s_fx.ctx->overlay_top);
-    (void)inert_frame(ui_fx_pointer(5.0F, 5.0F, false, false, false), false, NESTED_NONE);
-    (void)inert_frame(ui_fx_pointer(5.0F, 5.0F, false, false, false), false, NESTED_NONE);
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, s_fx.ctx->overlay_top, "a closing popup is not the top overlay");
-    nt_pointer_t tap = ui_fx_pointer(300.0F + 5.0F, 200.0F + 5.0F, false, true, true);
-    tap.type = NT_POINTER_TOUCH;
-    const inert_frame_t r = inert_frame(tap, false, NESTED_NONE);
-    TEST_ASSERT_TRUE_MESSAGE(r.visible, "the popup still fades");
-    TEST_ASSERT_TRUE_MESSAGE(r.base_clicked, "the base under the closing panel takes the tap");
-}
-
 /* ---- Esc closes the top light-dismiss popup (a combo), and its body is inert in the frame it closes: the
  *      release of a press held on its button clicks nothing. It decides that before declaring anything, so it
  *      registers no catcher and the next press reaches the UI under it at once. ---- */
@@ -951,20 +884,6 @@ static void test_popup_closing_nested_keeps_the_parent_inert(void) {
     bool clicked = inert_frame(ui_fx_pointer(x, y, true, false, false), false, NESTED_LEVEL_CLOSED).button_clicked;
     clicked = inert_frame(ui_fx_pointer(x, y, false, false, true), false, NESTED_LEVEL_CLOSED).button_clicked || clicked;
     TEST_ASSERT_FALSE(clicked);
-}
-
-/* ---- The press that dismisses the top overlay is the UI's whole gesture: nt_ui_wants_pointer holds from the
- *      press to its release although the catcher it landed on is gone, so the game never sees it. ---- */
-static void test_popup_dismissing_gesture_is_the_ui_s(void) {
-    inert_open_fully(NESTED_NONE);
-    TEST_ASSERT_FALSE_MESSAGE(inert_frame(ui_fx_pointer(700.0F, 500.0F, true, true, false), true, NESTED_NONE).open, "the press on the catcher dismisses");
-    TEST_ASSERT_TRUE(nt_ui_wants_pointer(s_fx.ctx));
-    (void)inert_frame(ui_fx_pointer(700.0F, 500.0F, true, false, false), false, NESTED_NONE);
-    TEST_ASSERT_TRUE(nt_ui_wants_pointer(s_fx.ctx));
-    (void)inert_frame(ui_fx_pointer(700.0F, 500.0F, false, false, true), false, NESTED_NONE);
-    TEST_ASSERT_TRUE(nt_ui_wants_pointer(s_fx.ctx));
-    (void)inert_frame(ui_fx_pointer(700.0F, 500.0F, false, false, false), false, NESTED_NONE);
-    TEST_ASSERT_FALSE_MESSAGE(nt_ui_wants_pointer(s_fx.ctx), "the gesture ends with its release");
 }
 
 /* ---- A press off every record (a letterbox bar, a 3D ray past the UI plane) is outside the top overlay too:
@@ -1032,15 +951,12 @@ int main(void) {
     RUN_TEST(test_popup_band_ignores_the_enclosing_floating);
     RUN_TEST(test_popup_open_order_beats_declaration_order);
     RUN_TEST(test_popup_undeclared_overlay_reenters_on_top);
-    RUN_TEST(test_popup_light_dismiss_replaces_its_sibling);
     RUN_TEST(test_popup_tooltip_and_modal_do_not_replace);
     RUN_TEST(test_popup_esc_closes_the_top_and_its_body);
     RUN_TEST(test_popup_closing_ends_a_held_press);
     RUN_TEST(test_popup_closing_content_reads_no_click);
-    RUN_TEST(test_popup_closing_panel_lets_the_pointer_through);
     RUN_TEST(test_popup_nested_in_a_closing_parent_is_inert);
     RUN_TEST(test_popup_closing_nested_keeps_the_parent_inert);
-    RUN_TEST(test_popup_dismissing_gesture_is_the_ui_s);
     RUN_TEST(test_popup_press_off_every_record_dismisses);
     RUN_TEST(test_popup_root_overlay_is_a_top_layer);
     RUN_TEST(test_popup_root_overlay_out_of_the_bands_asserts);
@@ -1058,7 +974,6 @@ int main(void) {
     RUN_TEST(test_popup_tween_clamp);
     RUN_TEST(test_popup_top_owns_the_pointer);
     RUN_TEST(test_popup_later_overlay_above_nested_level);
-    RUN_TEST(test_popup_opening_over_a_held_press_ends_it);
     RUN_TEST(test_popup_nested_above_parent_parts);
     RUN_TEST(test_popup_press_above_the_top_completes);
     return UNITY_END();
