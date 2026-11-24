@@ -2950,6 +2950,31 @@ bool nt_ui_wants_keyboard(const nt_ui_context_t *ctx) {
     return ctx->keys_owner != 0U;
 }
 
+bool nt_ui_key_pressed(const nt_ui_context_t *ctx, uint32_t id, nt_key_t key) {
+    NT_ASSERT(ctx != NULL && id != 0U && "nt_ui_key_pressed: ctx non-NULL, id non-zero");
+    return nt_ui_internal_owns_keys(ctx, id) && nt_input_key_is_pressed(key);
+}
+
+bool nt_ui_key_down(const nt_ui_context_t *ctx, uint32_t id, nt_key_t key) {
+    NT_ASSERT(ctx != NULL && id != 0U && "nt_ui_key_down: ctx non-NULL, id non-zero");
+    return nt_ui_internal_owns_keys(ctx, id) && nt_input_key_is_down(key);
+}
+
+bool nt_ui_pop_char(const nt_ui_context_t *ctx, uint32_t id, uint32_t *out_codepoint) {
+    NT_ASSERT(ctx != NULL && id != 0U && out_codepoint != NULL && "nt_ui_pop_char: ctx, out non-NULL, id non-zero");
+    return nt_ui_internal_owns_keys(ctx, id) && nt_input_pop_char(out_codepoint);
+}
+
+const nt_pointer_t *nt_ui_internal_top_pointer(const nt_ui_context_t *ctx, uint32_t id) {
+    static const nt_pointer_t idle = {0};
+#if NT_UI_DEBUG_TOOLS
+    if (ctx->inspector_active && ctx->inspector_pointer_consumed) {
+        return &idle; /* the sidebar holds the pointer, as in every query */
+    }
+#endif
+    return nt_ui_internal_is_top(ctx, id) ? &ctx->frame_pointers[ctx->frame_primary] : &idle;
+}
+
 bool nt_ui_wants_pointer(const nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL && "nt_ui_wants_pointer: ctx must be non-NULL");
 #if NT_UI_DEBUG_TOOLS

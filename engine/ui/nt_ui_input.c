@@ -242,9 +242,11 @@ bool nt_ui_filter_url(uint32_t cp) {
 static bool allow_printable(uint32_t cp) { return cp >= 0x20U && cp != 0x7FU && !(cp >= 0x80U && cp <= 0x9FU); }
 // #endregion
 
-static inline bool shift_held(void) { return nt_input_key_is_down(NT_KEY_LSHIFT) || nt_input_key_is_down(NT_KEY_RSHIFT); }
+static inline bool shift_held(const nt_ui_context_t *ctx, uint32_t id) { return nt_ui_key_down(ctx, id, NT_KEY_LSHIFT) || nt_ui_key_down(ctx, id, NT_KEY_RSHIFT); }
 /* Ctrl, or Cmd on macOS. */
-static inline bool shortcut_held(void) { return nt_input_key_is_down(NT_KEY_LCTRL) || nt_input_key_is_down(NT_KEY_RCTRL) || nt_input_key_is_down(NT_KEY_LMETA) || nt_input_key_is_down(NT_KEY_RMETA); }
+static inline bool shortcut_held(const nt_ui_context_t *ctx, uint32_t id) {
+    return nt_ui_key_down(ctx, id, NT_KEY_LCTRL) || nt_ui_key_down(ctx, id, NT_KEY_RCTRL) || nt_ui_key_down(ctx, id, NT_KEY_LMETA) || nt_ui_key_down(ctx, id, NT_KEY_RMETA);
+}
 
 /* PC-style auto-repeat core; last-pressed wins (a newer repeatable key re-arms to it). */
 #ifdef NT_TEST_ACCESS
@@ -277,7 +279,9 @@ static bool key_repeat_step(uint16_t *repeat_key, float *repeat_t, nt_key_t k, b
 #endif
 
 /* Field-side wrapper: reads the live input edges for `k` and steps the per-field accumulator. */
-static bool key_repeat_fires(nt_ui_input_state_t *st, nt_key_t k, float dt) { return key_repeat_step(&st->repeat_key, &st->repeat_t, k, nt_input_key_is_pressed(k), nt_input_key_is_down(k), dt); }
+static bool key_repeat_fires(const nt_ui_context_t *ctx, uint32_t id, nt_ui_input_state_t *st, nt_key_t k, float dt) {
+    return key_repeat_step(&st->repeat_key, &st->repeat_t, k, nt_ui_key_pressed(ctx, id, k), nt_ui_key_down(ctx, id, k), dt);
+}
 
 bool nt_ui_input_focused(const nt_ui_context_t *ctx, uint32_t id) {
     NT_ASSERT(ctx != NULL && "nt_ui_input_focused: ctx must be non-NULL");
@@ -761,7 +765,7 @@ static void focus_step(input_frame_t *f) {
  * f->cur_len. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void edit_step(input_frame_t *f, bool *changed, bool *submitted) {
-    if (f->ctx->keys_owner != f->id || !input_live(f->ctx, f)) {
+    if (!input_live(f->ctx, f) || !nt_ui_internal_owns_keys(f->ctx, f->id)) {
         return;
     }
     nt_ui_context_t *ctx = f->ctx;
@@ -774,7 +778,7 @@ static void edit_step(input_frame_t *f, bool *changed, bool *submitted) {
     {
         // #region drain typed chars (FIFO, this frame's)
         uint32_t cp = 0U;
-        while (nt_input_pop_char(&cp)) {
+        while (nt_ui_pop_char(ctx, id, &cp)) {
             const bool ok = (props->allow != NULL) ? props->allow(cp) : allow_printable(cp);
             if (!ok) {
                 continue;
@@ -797,9 +801,9 @@ static void edit_step(input_frame_t *f, bool *changed, bool *submitted) {
 
         // #region physical editing keys
         const bool sel = (st->anchor != st->caret);
-        const bool shift = shift_held();
+        const bool shift = shift_held(ctx, id);
         const float dt = ctx->frame_dt;
-        if (key_repeat_fires(st, NT_KEY_BACKSPACE, dt)) {
+        if (key_repeat_fires(ctx, id, st, NT_KEY_BACKSPACE, dt)) {
             if (sel) {
                 uint32_t lo = 0U;
                 uint32_t hi = 0U;
@@ -813,7 +817,7 @@ static void edit_step(input_frame_t *f, bool *changed, bool *submitted) {
             cur_len = (uint32_t)strlen(buffer);
             st->blink = 0.0F;
         }
-        if (key_repeat_fires(st, NT_KEY_DELETE, dt)) {
+        if (key_repeat_fires(ctx, id, st, NT_KEY_DELETE, dt)) {
             if (sel) {
                 uint32_t lo = 0U;
                 uint32_t hi = 0U;
@@ -826,7 +830,7 @@ static void edit_step(input_frame_t *f, bool *changed, bool *submitted) {
             cur_len = (uint32_t)strlen(buffer);
             st->blink = 0.0F;
         }
-        if (key_repeat_fires(st, NT_KEY_ARROW_LEFT, dt)) {
+        if (key_repeat_fires(ctx, id, st, NT_KEY_ARROW_LEFT, dt)) {
             /* Shift extends (move only the caret); a plain arrow with a selection collapses to its
              * left edge, otherwise steps one codepoint left. */
             if (!shift && sel) {
@@ -842,7 +846,7 @@ static void edit_step(input_frame_t *f, bool *changed, bool *submitted) {
             }
             st->blink = 0.0F;
         }
-        if (key_repeat_fires(st, NT_KEY_ARROW_RIGHT, dt)) {
+        if (key_repeat_fires(ctx, id, st, NT_KEY_ARROW_RIGHT, dt)) {
             if (!shift && sel) {
                 uint32_t lo = 0U;
                 uint32_t hi = 0U;
@@ -856,30 +860,30 @@ static void edit_step(input_frame_t *f, bool *changed, bool *submitted) {
             }
             st->blink = 0.0F;
         }
-        if (key_repeat_fires(st, NT_KEY_HOME, dt)) {
+        if (key_repeat_fires(ctx, id, st, NT_KEY_HOME, dt)) {
             st->caret = 0U;
             if (!shift) {
                 st->anchor = st->caret;
             }
             st->blink = 0.0F;
         }
-        if (key_repeat_fires(st, NT_KEY_END, dt)) {
+        if (key_repeat_fires(ctx, id, st, NT_KEY_END, dt)) {
             st->caret = cur_len;
             if (!shift) {
                 st->anchor = st->caret;
             }
             st->blink = 0.0F;
         }
-        if (shortcut_held() && nt_input_key_is_pressed(NT_KEY_A)) {
+        if (shortcut_held(ctx, id) && nt_ui_key_pressed(ctx, id, NT_KEY_A)) {
             st->anchor = 0U; /* Ctrl+A selects the whole buffer */
             st->caret = cur_len;
             st->blink = 0.0F;
         }
         // #region clipboard chords (Ctrl+C/X/V)
-        if (shortcut_held() && nt_input_key_is_pressed(NT_KEY_C)) {
+        if (shortcut_held(ctx, id) && nt_ui_key_pressed(ctx, id, NT_KEY_C)) {
             clipboard_copy_selection(buffer, st); /* copy selection; no-op if empty */
         }
-        if (shortcut_held() && nt_input_key_is_pressed(NT_KEY_X) && nt_clipboard_available()) {
+        if (shortcut_held(ctx, id) && nt_ui_key_pressed(ctx, id, NT_KEY_X) && nt_clipboard_available()) {
             /* No-op cut when the clipboard is unavailable: deleting locally without a store is data loss. */
             clipboard_copy_selection(buffer, st);
             if (st->anchor != st->caret) {
@@ -892,20 +896,20 @@ static void edit_step(input_frame_t *f, bool *changed, bool *submitted) {
                 st->blink = 0.0F;
             }
         }
-        if (shortcut_held() && nt_input_key_is_pressed(NT_KEY_V)) {
+        if (shortcut_held(ctx, id) && nt_ui_key_pressed(ctx, id, NT_KEY_V)) {
             st->caret = clipboard_paste(buffer, buffer_size, props, st, cur_len, changed);
             cur_len = (uint32_t)strlen(buffer);
             st->blink = 0.0F;
         }
         // #endregion
-        if (nt_input_key_is_pressed(NT_KEY_ENTER)) {
+        if (nt_ui_key_pressed(ctx, id, NT_KEY_ENTER)) {
             *submitted = true;
         }
-        if (nt_input_key_is_pressed(NT_KEY_ESCAPE)) {
+        if (nt_ui_key_pressed(ctx, id, NT_KEY_ESCAPE)) {
             if (ctx->focused_input_id == id) {
                 ctx->focused_input_id = 0U; /* a press elsewhere this frame keeps the focus it took */
             }
-        } else if (nt_input_key_is_pressed(NT_KEY_TAB)) {
+        } else if (nt_ui_key_pressed(ctx, id, NT_KEY_TAB)) {
             ctx->focus_tab_seek = id;
             ctx->focus_tab_pending = ctx->focus_first_id;
         }

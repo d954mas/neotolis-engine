@@ -624,6 +624,12 @@ bool nt_ui_wants_pointer(const nt_ui_context_t *ctx);
  * a menu, a combo list). Fixed at nt_ui_begin, so read it after begin; the game gates its hotkeys on it. */
 bool nt_ui_wants_keyboard(const nt_ui_context_t *ctx);
 
+/* The keys and typed chars of this frame, read by the widget `id`: answered only while `id` owns the keys
+ * (the focused field, else the top overlay) and is live, so a widget never reads another's key. */
+bool nt_ui_key_pressed(const nt_ui_context_t *ctx, uint32_t id, nt_key_t key);
+bool nt_ui_key_down(const nt_ui_context_t *ctx, uint32_t id, nt_key_t key);
+bool nt_ui_pop_char(const nt_ui_context_t *ctx, uint32_t id, uint32_t *out_codepoint);
+
 /* Front-most interactive record under the pointer this frame (3D: nearest within the occlusion
  * cutoff first; then the later tree root — band, then declaration; then the later-declared element
  * in that root). Neither the draw layer nor the nt_ui_step call order is consulted.

@@ -141,14 +141,14 @@ bool nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t id, const nt_ui_p
     /* Before anything of it is declared (spec: "When a rule runs"): Esc it owns, or a primary press beyond the
      * panel + close_pad on its catcher or on no record, as Dear ImGui closes a popup on the press. */
     nt_ui_popup_close_t close_src = NT_UI_POPUP_CLOSE_NONE;
-    if (*open_io && ctx->inert_from == 0U && ctx->overlay_top_id_prev == id) {
-        const nt_pointer_t *pp = &ctx->frame_pointers[ctx->frame_primary];
+    if (*open_io) {
+        const nt_pointer_t *pp = nt_ui_internal_top_pointer(ctx, id); /* idle unless this popup is the live top */
         const bool pressed = pp->buttons[NT_BUTTON_LEFT].is_pressed || pp->buttons[NT_BUTTON_RIGHT].is_pressed;
         const int16_t pad_lrtb[4] = {close_pad, close_pad, close_pad, close_pad};
         const uint32_t hot = ctx->pointer_hot[ctx->frame_primary].id;
-        if (esc_close && ctx->keys_owner == id && nt_input_key_is_pressed(NT_KEY_ESCAPE)) {
+        if (esc_close && nt_ui_key_pressed(ctx, id, NT_KEY_ESCAPE)) {
             close_src = NT_UI_POPUP_CLOSE_ESC;
-        } else if (dismiss_on_click && pressed && (hot == catcher_id || hot == 0U) && !nt_ui_inspector_pointer_consumed(ctx) && !nt_ui_internal_hit_test_padded(ctx, id, pp->x, pp->y, pad_lrtb)) {
+        } else if (dismiss_on_click && pressed && (hot == catcher_id || hot == 0U) && !nt_ui_internal_hit_test_padded(ctx, id, pp->x, pp->y, pad_lrtb)) {
             close_src = NT_UI_POPUP_CLOSE_OUTSIDE;
         }
         if (close_src != NT_UI_POPUP_CLOSE_NONE) {

@@ -228,17 +228,17 @@ static nt_ui_popup_anchor_t menu_submenu_anchor(const nt_ui_context_t *ctx, uint
 enum { MENU_KEY_NONE = 0, MENU_KEY_BACK, MENU_KEY_RIGHT, MENU_KEY_ENTER, MENU_KEY_UP, MENU_KEY_DOWN };
 
 /* The first pressed key decides the frame, Esc and Left first; Right and Enter without a focused row are no key. */
-static uint8_t menu_read_key(const nt_ui_menu_t *menu) {
-    if (nt_input_key_is_pressed(NT_KEY_ESCAPE) || nt_input_key_is_pressed(NT_KEY_ARROW_LEFT)) {
+static uint8_t menu_read_key(const nt_ui_menu_t *menu, const nt_ui_context_t *ctx, uint32_t root_id) {
+    if (nt_ui_key_pressed(ctx, root_id, NT_KEY_ESCAPE) || nt_ui_key_pressed(ctx, root_id, NT_KEY_ARROW_LEFT)) {
         return MENU_KEY_BACK;
     }
-    if (menu->focus != 0U && (nt_input_key_is_pressed(NT_KEY_ARROW_RIGHT) || nt_input_key_is_pressed(NT_KEY_ENTER))) {
-        return nt_input_key_is_pressed(NT_KEY_ARROW_RIGHT) ? MENU_KEY_RIGHT : MENU_KEY_ENTER;
+    if (menu->focus != 0U && (nt_ui_key_pressed(ctx, root_id, NT_KEY_ARROW_RIGHT) || nt_ui_key_pressed(ctx, root_id, NT_KEY_ENTER))) {
+        return nt_ui_key_pressed(ctx, root_id, NT_KEY_ARROW_RIGHT) ? MENU_KEY_RIGHT : MENU_KEY_ENTER;
     }
-    if (nt_input_key_is_pressed(NT_KEY_ARROW_UP)) {
+    if (nt_ui_key_pressed(ctx, root_id, NT_KEY_ARROW_UP)) {
         return MENU_KEY_UP;
     }
-    return nt_input_key_is_pressed(NT_KEY_ARROW_DOWN) ? MENU_KEY_DOWN : MENU_KEY_NONE;
+    return nt_ui_key_pressed(ctx, root_id, NT_KEY_ARROW_DOWN) ? MENU_KEY_DOWN : MENU_KEY_NONE;
 }
 
 static bool menu_key_on(const nt_ui_menu_t *menu, uint32_t row_id, uint8_t key) { return menu->frame.key == key && row_id == menu->frame.key_row; }
@@ -265,13 +265,12 @@ static bool menu_frame_input(nt_ui_menu_t *menu, nt_ui_context_t *ctx, uint32_t 
         menu->focus = 0U; /* the focused row's level closed: keys act on the deepest open one, unfocused */
         menu->focus_depth = open_depth;
     }
-    const bool top = f->top;
-    const nt_pointer_t *pp = &ctx->frame_pointers[ctx->frame_primary];
-    f->ours = top && pp->active && !nt_ui_inspector_pointer_consumed(ctx);
+    const nt_pointer_t *pp = nt_ui_internal_top_pointer(ctx, root_id);
+    f->ours = f->top && pp->active;
     const bool ours = f->ours;
     const bool pressed = pp->buttons[NT_BUTTON_LEFT].is_pressed || pp->buttons[NT_BUTTON_RIGHT].is_pressed;
-    /* A text field focused inside the menu owns the keys (the top takes the focus of a field under it). */
-    const uint8_t key = (top && ctx->keys_owner == root_id) ? menu_read_key(menu) : MENU_KEY_NONE;
+    /* The opening frame reads nothing; a text field focused in a custom row owns the keys instead. */
+    const uint8_t key = f->top ? menu_read_key(menu, ctx, root_id) : MENU_KEY_NONE;
     f->key = key;
     const uint8_t d = menu->focus_depth;
     if (key != MENU_KEY_NONE) {
@@ -470,7 +469,7 @@ bool nt_ui_menu_begin(nt_ui_menu_t *menu, nt_ui_context_t *ctx, const nt_ui_elem
         .menu_id = menu_id,
         .fill_layer = (data != NULL) ? data->layer : 0U,
         .label_layer = label_layer,
-        .top = !menu->arming && ctx->overlay_top_id_prev == root_id && ctx->inert_from == 0U,
+        .top = !menu->arming && nt_ui_internal_is_top(ctx, root_id),
     };
     /* BELOW flips only vertically: shift the root left by last frame's width to stay on screen (unclamped on
      * the first frame). */
@@ -661,7 +660,7 @@ static void menu_resolve(nt_ui_menu_t *menu) {
             menu_set_open(menu, d, 0U); /* focus leaving the open parent closes its child */
         }
     }
-    const nt_pointer_t *pp = &ctx->frame_pointers[ctx->frame_primary];
+    const nt_pointer_t *pp = nt_ui_internal_top_pointer(ctx, menu_level_id(f->menu_id, 0U));
     const bool ours = f->ours;
     const float mx = pp->x;
     const float my = pp->y;

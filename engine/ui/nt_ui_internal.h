@@ -593,6 +593,13 @@ nt_ui_hit_kind_t nt_ui_internal_record_kind(nt_ui_context_t *ctx, uint32_t id);
  * an inspector pane and id 0 always belong): the top overlay owns gestures, text focus and Tab stops. */
 bool nt_ui_internal_owned_by_top(nt_ui_context_t *ctx, uint32_t id);
 
+/* Router reads for overlays and fields (spec: "Input ownership"): `id` is the live top overlay, owns this
+ * frame's keys, or gets the primary pointer (an idle one unless it is the live top and the inspector does
+ * not hold the pointer). */
+static inline bool nt_ui_internal_is_top(const nt_ui_context_t *ctx, uint32_t id) { return id == ctx->overlay_top_id_prev && ctx->inert_from == 0U; }
+static inline bool nt_ui_internal_owns_keys(const nt_ui_context_t *ctx, uint32_t id) { return id == ctx->keys_owner && ctx->inert_from == 0U; }
+const nt_pointer_t *nt_ui_internal_top_pointer(const nt_ui_context_t *ctx, uint32_t id);
+
 /* Adds a registry record for the front-most resolve. */
 void nt_ui_internal_register_interactive(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lrtb[4]);
 
