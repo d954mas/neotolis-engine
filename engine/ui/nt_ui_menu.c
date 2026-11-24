@@ -17,7 +17,7 @@
 #include "ui/nt_ui_popup.h"
 #include "ui/nt_ui_popup_internal.h"
 
-_Static_assert(NT_UI_MENU_MAX_DEPTH <= NT_UI_OVERLAY_MAX_DEPTH, "a menu level is a popup: its depth must fit the overlay stack");
+_Static_assert(NT_UI_MENU_MAX_DEPTH <= NT_UI_OVERLAY_MAX, "a menu level is a popup: its depth must fit the overlay stack");
 
 const nt_ui_widget_def_t NT_UI_MENU_DEF = {
     .name = "nt_menu",
@@ -232,8 +232,9 @@ static uint8_t menu_read_key(const nt_ui_menu_t *menu, const nt_ui_context_t *ct
     if (nt_ui_key_pressed(ctx, root_id, NT_KEY_ESCAPE) || nt_ui_key_pressed(ctx, root_id, NT_KEY_ARROW_LEFT)) {
         return MENU_KEY_BACK;
     }
-    if (menu->focus != 0U && (nt_ui_key_pressed(ctx, root_id, NT_KEY_ARROW_RIGHT) || nt_ui_key_pressed(ctx, root_id, NT_KEY_ENTER))) {
-        return nt_ui_key_pressed(ctx, root_id, NT_KEY_ARROW_RIGHT) ? MENU_KEY_RIGHT : MENU_KEY_ENTER;
+    const bool right = nt_ui_key_pressed(ctx, root_id, NT_KEY_ARROW_RIGHT);
+    if (menu->focus != 0U && (right || nt_ui_key_pressed(ctx, root_id, NT_KEY_ENTER))) {
+        return right ? MENU_KEY_RIGHT : MENU_KEY_ENTER;
     }
     if (nt_ui_key_pressed(ctx, root_id, NT_KEY_ARROW_UP)) {
         return MENU_KEY_UP;
@@ -256,8 +257,7 @@ static bool menu_frame_input(nt_ui_menu_t *menu, nt_ui_context_t *ctx, uint32_t 
         menu->focus_depth = open_depth;
     }
     const nt_pointer_t *pp = nt_ui_internal_top_pointer(ctx, root_id);
-    f->ours = f->top && pp->active;
-    const bool ours = f->ours;
+    const bool ours = pp->active; /* the top pointer is idle unless the menu is the live top */
     const bool pressed = pp->buttons[NT_BUTTON_LEFT].is_pressed || pp->buttons[NT_BUTTON_RIGHT].is_pressed;
     /* The opening frame reads nothing; a text field focused in a custom row owns the keys instead. */
     const uint8_t key = f->top ? menu_read_key(menu, ctx, root_id) : MENU_KEY_NONE;
@@ -650,7 +650,7 @@ static void menu_resolve(nt_ui_menu_t *menu) {
         }
     }
     const nt_pointer_t *pp = nt_ui_internal_top_pointer(ctx, menu_level_id(f->menu_id, 0U));
-    const bool ours = f->ours;
+    const bool ours = pp->active;
     const float mx = pp->x;
     const float my = pp->y;
     if (!menu->kbd_mode && f->hover_id != 0U) {
@@ -659,7 +659,7 @@ static void menu_resolve(nt_ui_menu_t *menu) {
     }
     /* A click opens its parent over a holding corridor, after the key; a same-frame Up/Down may have closed
      * its level. */
-    if (f->click_id != 0U && f->click_depth <= menu_open_depth(menu)) {
+    if (f->top && f->click_id != 0U && f->click_depth <= menu_open_depth(menu)) {
         menu_set_open(menu, f->click_depth, f->click_id);
         menu->focus = f->click_id; /* focus follows the parent it opens */
         menu->focus_depth = f->click_depth;

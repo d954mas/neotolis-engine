@@ -71,7 +71,7 @@
 #define NT_UI_DEFAULT_MAX_ELEMENT_COUNT 1024
 #endif
 
-/* Default overlay z-band stride: overlay stack slot i sits at stride + i * NT_UI_OVERLAY_MAX_DEPTH, whatever
+/* Default overlay z-band stride: overlay stack slot i sits at stride + i * NT_UI_OVERLAY_MAX, whatever
  * floating encloses it (spec: "Floating zIndex is relative"). Per-context override via
  * nt_ui_create_desc_t.overlay_zband_stride. */
 #define NT_UI_OVERLAY_ZBAND_STRIDE 1000

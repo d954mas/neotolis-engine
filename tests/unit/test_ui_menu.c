@@ -1658,64 +1658,21 @@ static void test_menu_opening_frame_ignores_the_pointer(void) {
     }
 }
 
-/* ---- A modal opened over the menu is the top and owns the keys: Esc closes only the modal, the menu stays
- *      open under it. ---- */
-static void test_menu_under_a_modal_is_not_the_top(void) {
+/* ---- A modal opened over an open menu closes it: the menu, declared first, closes at its next begin, and the
+ *      modal is the top that takes Esc. ---- */
+static void test_menu_closed_by_a_modal_opened_over_it(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
     nt_ui_menu_t st = {0};
     nt_ui_menu_open(&st, 120.0F, 80.0F);
+    menu_im_frame(&st, &style, 0.0F, 0.0F);
+    menu_im_frame(&st, &style, 0.0F, 0.0F);
     s_modal = MODAL_OVER_MENU;
     menu_im_frame(&st, &style, 0.0F, 0.0F);
+    TEST_ASSERT_TRUE_MESSAGE(st.open, "the menu declared before the modal closes at its next begin");
     menu_im_frame(&st, &style, 0.0F, 0.0F);
+    TEST_ASSERT_FALSE_MESSAGE(st.open, "the opening modal closes the menu");
     menu_key(NT_KEY_ESCAPE);
     TEST_ASSERT_TRUE_MESSAGE(menu_im_frame_ptr(&st, &style, &(nt_pointer_t){.active = true}), "Esc closes the modal");
-    TEST_ASSERT_TRUE_MESSAGE(st.open, "and only the modal");
-}
-
-#define DEEP_MODAL 0x40DB1U
-static bool s_deep_modal;
-
-/* A modal holding a nested modal, shown while s_deep_modal and declared before the menu tree. */
-static void menu_deep_modal_frame(nt_ui_menu_t *st, nt_ui_menu_style_t *style) {
-    menu_frame_begin(&(nt_pointer_t){.active = true});
-    nt_ui_modal_style_t ms = nt_ui_modal_style_defaults();
-    bool modal_open = true;
-    if (nt_ui_modal_begin(s_fx.ctx, MODAL_ID, &ms, &modal_open, NULL)) {
-        nt_ui_modal_style_t ds = ms;
-        ds.ease_speed = 0.0F;
-        bool deep = s_deep_modal;
-        if (nt_ui_modal_begin(s_fx.ctx, DEEP_MODAL, &ds, &deep, NULL)) {
-            CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(20), CLAY_SIZING_FIXED(20)}}}) {}
-            nt_ui_modal_end(s_fx.ctx);
-        }
-        menu_im_tree(st, style);
-        nt_ui_modal_end(s_fx.ctx);
-    }
-    nt_ui_end(s_fx.ctx);
-}
-
-/* ---- An overlay declared before a nested menu but opened after it covers the menu without replacing it: the
- *      menu stays open under the nested modal with its chain instead of closing its open level. ---- */
-static void test_menu_under_an_earlier_overlay_keeps_its_chain(void) {
-    nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
-    nt_ui_menu_t st = {0};
-    s_deep_modal = false;
-    nt_ui_menu_open(&st, 120.0F, 80.0F);
-    menu_deep_modal_frame(&st, &style);
-    menu_deep_modal_frame(&st, &style);
-    menu_key(NT_KEY_ARROW_DOWN);
-    menu_deep_modal_frame(&st, &style);
-    menu_key(NT_KEY_ARROW_RIGHT);
-    menu_deep_modal_frame(&st, &style);
-    TEST_ASSERT_TRUE(menu_level_found(1U));
-    s_deep_modal = true;
-    for (int f = 0; f < 3; ++f) {
-        menu_deep_modal_frame(&st, &style);
-    }
-    TEST_ASSERT_EQUAL_UINT32(DEEP_MODAL, s_fx.ctx->overlay_top);
-    TEST_ASSERT_TRUE(st.open);
-    TEST_ASSERT_EQUAL_UINT32(nt_ui_menu_test_item_id(MENU_A, KEY_FILE), st.open_path[0]);
-    TEST_ASSERT_TRUE_MESSAGE(menu_level_found(1U), "the open level stays under the overlay");
 }
 
 /* ---- A menu over a modal owns the pointer: a full click on the modal's button outside the menu closes the
@@ -1760,8 +1717,8 @@ static void two_menus_frame(nt_ui_menu_t *a, nt_ui_menu_t *b, nt_ui_menu_style_t
     nt_ui_end(s_fx.ctx);
 }
 
-/* ---- A menu is a transient overlay: opening menu B while menu A is open at the same parent closes A, and
- *      B stays open on top. The Esc of the frame B opens is A's, the top at begin, not B's. ---- */
+/* ---- A menu is a light-dismiss overlay: opening menu B while menu A is open closes A, declared first, at its
+ *      next begin, and B stays open on top: the next Esc closes it. ---- */
 static void test_menu_opening_a_second_menu_closes_the_first(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
     nt_ui_menu_t a = {0};
@@ -1771,9 +1728,9 @@ static void test_menu_opening_a_second_menu_closes_the_first(void) {
     two_menus_frame(&a, &b, &style, false);
     TEST_ASSERT_TRUE(a.open);
     nt_ui_menu_open(&b, 400.0F, 300.0F);
-    two_menus_frame(&a, &b, &style, true);
-    TEST_ASSERT_TRUE_MESSAGE(b.open, "the Esc of B's opening frame is not B's");
     two_menus_frame(&a, &b, &style, false);
+    TEST_ASSERT_TRUE_MESSAGE(a.open, "A, declared before B, closes at its next begin");
+    TEST_ASSERT_TRUE(b.open);
     two_menus_frame(&a, &b, &style, false);
     TEST_ASSERT_FALSE_MESSAGE(a.open, "opening B closes A");
     TEST_ASSERT_TRUE(b.open);
@@ -1998,27 +1955,27 @@ static void menu_still_press_ends_keyboard_mode(nt_button_t button) {
 static void test_menu_still_press_ends_keyboard_mode(void) { menu_still_press_ends_keyboard_mode(NT_BUTTON_LEFT); }
 static void test_menu_still_right_press_ends_keyboard_mode(void) { menu_still_press_ends_keyboard_mode(NT_BUTTON_RIGHT); }
 
-/* ---- A modal over the menu stops its pending switch: the sibling the pointer rests on does not take
- *      the branch while the modal is up. ---- */
+/* ---- A popup a File row opens covers the menu without closing it (it is declared inside) and stops its
+ *      pending switch: the root row the pointer rests on does not take the branch while the popup is up. ---- */
 static void test_menu_covered_switch_waits(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
     nt_ui_menu_t st = {0};
     nt_ui_menu_open(&st, 120.0F, 80.0F);
-    menu_im_frame(&st, &style, 0.0F, 0.0F);
-    menu_im_frame(&st, &style, 0.0F, 0.0F);
+    menu_popup_frame(&st, &style, 0.0F, 0.0F);
+    menu_popup_frame(&st, &style, 0.0F, 0.0F);
     const uint32_t file = nt_ui_menu_test_item_id(MENU_A, KEY_FILE);
-    menu_hover_open(&st, &style, file, 1U, menu_im_frame);
-    float ex = 0.0F;
-    float ey = 0.0F;
-    menu_row_center(nt_ui_menu_test_item_id(MENU_A, KEY_EDIT), &ex, &ey);
-    menu_im_frame(&st, &style, ex, ey); /* the switch to Edit is pending: File's child stays */
+    menu_hover_open(&st, &style, file, 1U, menu_popup_frame);
+    float lx = 0.0F;
+    float ly = 0.0F;
+    menu_row_center(nt_ui_menu_test_item_id(MENU_A, KEY_L1), &lx, &ly);
+    menu_popup_frame(&st, &style, lx, ly); /* the switch to L1 is pending: File's child stays */
     TEST_ASSERT_EQUAL_UINT32(file, st.open_path[0]);
-    s_modal = MODAL_OVER_MENU;
+    s_popup_depth = 1;
     for (int f = 0; f < (int)(4.0F * NT_UI_MENU_AIM_FALLBACK_SECS / UI_FX_DT); ++f) {
-        menu_im_frame(&st, &style, ex, ey);
+        menu_popup_frame(&st, &style, lx, ly);
     }
     TEST_ASSERT_TRUE(st.open);
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(file, st.open_path[0], "the covered menu's switch waits for the modal");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(file, st.open_path[0], "the covered menu's switch waits for the popup");
 }
 
 /* ---- A right press while the left drags across the rows is inside the menu: it stays open. ---- */
@@ -2320,7 +2277,7 @@ int main(void) {
     RUN_TEST(test_menu_one_highlight_per_level);
     RUN_TEST(test_menu_reshown_row_does_not_flash);
     RUN_TEST(test_menu_pointer_over_child_holds_it);
-    RUN_TEST(test_menu_under_a_modal_is_not_the_top);
+    RUN_TEST(test_menu_closed_by_a_modal_opened_over_it);
     RUN_TEST(test_menu_over_modal_blocks_its_button);
     RUN_TEST(test_menu_opening_a_second_menu_closes_the_first);
     RUN_TEST(test_menu_outside_press_ignores_other_pointers);
@@ -2374,7 +2331,6 @@ int main(void) {
     RUN_TEST(test_menu_left_at_root_closes);
     RUN_TEST(test_menu_back_closes_a_hover_opened_child);
     RUN_TEST(test_menu_back_closes_only_the_deepest_level);
-    RUN_TEST(test_menu_under_an_earlier_overlay_keeps_its_chain);
     RUN_TEST(test_menu_no_focus_right_leaves_down);
     RUN_TEST(test_menu_reopen_starts_fresh);
     RUN_TEST(test_menu_opening_frame_ignores_the_pointer);

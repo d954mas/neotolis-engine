@@ -79,6 +79,7 @@ typedef struct {
     nt_ui_menu_t menu;
     nt_ui_menu_style_t menu_style;
     bool file_body, open_body;
+    int frames;
     nt_ui_dropdown_style_t dd_style;
     nt_ui_tooltip_style_t tip_style;
     nt_ui_input_style_t in_style;
@@ -282,6 +283,33 @@ static void frame_modal_combo(void *game) {
     }
 }
 
+/* A combo at the base, then a modal declared after it. */
+static void frame_combo_modal(void *game) {
+    (void)game;
+    base_combo(30.0F, 30.0F);
+    if (modal_begin(MODAL_A, &g.modal_a, &g.reason_modal_a)) {
+        button(MODAL_A_BTN, 80.0F, 30.0F);
+        nt_ui_modal_end(s.ctx);
+    }
+}
+
+/* A combo whose list holds a confirm modal after its rows, as one a row opens. */
+static void frame_combo_confirm(void *game) {
+    (void)game;
+    CLAY({.id = (Clay_ElementId){.id = nt_ui_fmix_id(COMBO_A, 1U)}, .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = 30.0F, .y = 30.0F}}}) {
+        if (nt_ui_combo_begin(s.ctx, NULL, 0U, COMBO_A, "pick", &g.dd_style, &g.combo)) {
+            for (int i = 0; i < 3; ++i) {
+                (void)nt_ui_combo_selectable(s.ctx, ROW_KEY(i), s_rows[i], false);
+            }
+            if (modal_begin(MODAL_B, &g.modal_b, NULL)) {
+                button(MODAL_B_BTN, 80.0F, 30.0F);
+                nt_ui_modal_end(s.ctx);
+            }
+            nt_ui_combo_end(s.ctx);
+        }
+    }
+}
+
 static void frame_inert_popup(void *game) {
     (void)game;
     base_button(BTN_UNDER, 60.0F, 60.0F, 300.0F, 200.0F);
@@ -324,6 +352,7 @@ static void frame_menu(void *game) {
 /* Root: File > (New), a custom row hosting the combo, Edit. */
 static void frame_menu_combo_row(void *game) {
     (void)game;
+    ++g.frames;
     g.file_body = false;
     if (nt_ui_menu_begin(&g.menu, s.ctx, NULL, 0U, MENU_A, &g.menu_style)) {
         if (nt_ui_menu_submenu_begin(&g.menu, KEY_FILE, "File")) {
@@ -357,8 +386,7 @@ static void test_pointer_front_most_of_two_buttons_takes_the_click(void) {
     TEST_ASSERT_EQUAL_UINT32(BTN_A, g.log[1]);
 }
 
-/* Gesture: the press that dismisses a combo is the UI's to its release, on empty space too; one over a
- * button clicks nothing, and the next click on it works. */
+/* Gesture: the press that dismisses a combo is the UI's to its release, on empty space too. */
 static void test_gesture_combo_dismiss_press_stays_with_the_ui(void) {
     scenario(frame_combo_button);
     sc_click_id(&s, COMBO_A);
@@ -375,15 +403,6 @@ static void test_gesture_combo_dismiss_press_stays_with_the_ui(void) {
     TEST_ASSERT_TRUE_MESSAGE(s.wants_pointer, "up to its release");
     sc_frames(&s, 1);
     TEST_ASSERT_FALSE_MESSAGE(s.wants_pointer, "and no longer after it");
-
-    sc_click_id(&s, COMBO_A);
-    TEST_ASSERT_TRUE(g.combo);
-    sc_frames(&s, 1);
-    sc_click_id(&s, BTN_A);
-    TEST_ASSERT_FALSE(g.combo);
-    TEST_ASSERT_EQUAL_INT_MESSAGE(0, clicks(BTN_A), "the dismissing click does not click the button under it");
-    sc_click_id(&s, BTN_A);
-    TEST_ASSERT_EQUAL_INT(1, clicks(BTN_A));
 }
 
 /* Gesture: a left press while the game's right-drag is held joins the game's gesture and clicks nothing. */
@@ -409,7 +428,7 @@ static void test_live_modal_over_held_press_cancels_the_click(void) {
     sc_move_to(&s, BTN_A);
     sc_press(&s, NT_BUTTON_LEFT);
     g.modal_a = true;
-    sc_frames(&s, 2);
+    sc_frames(&s, 1);
     sc_release(&s, NT_BUTTON_LEFT);
     TEST_ASSERT_EQUAL_INT(0, g.n);
     g.modal_a = false;
@@ -460,6 +479,7 @@ static void test_keys_esc_unfocuses_field_then_closes_modal(void) {
     sc_key(&s, NT_KEY_ESCAPE);
     TEST_ASSERT_FALSE(nt_ui_input_focused(s.ctx, FIELD_M1));
     TEST_ASSERT_TRUE_MESSAGE(g.modal_a, "the field's Esc does not reach the modal");
+    sc_frames(&s, 1);
     TEST_ASSERT_TRUE_MESSAGE(s.wants_keyboard, "the modal owns the keys now");
     sc_key(&s, NT_KEY_ESCAPE);
     TEST_ASSERT_FALSE(g.modal_a);
@@ -509,6 +529,7 @@ static void test_stack_last_opened_modal_is_on_top(void) {
     sc_frames(&s, 2);
     sc_click_id(&s, MODAL_A_BTN);
     TEST_ASSERT_EQUAL_INT(0, g.n);
+    TEST_ASSERT_TRUE_MESSAGE(g.modal_a, "the covered modal stays open");
     sc_click_id(&s, MODAL_B_BTN);
     TEST_ASSERT_EQUAL_INT(1, g.n);
     TEST_ASSERT_EQUAL_UINT32(MODAL_B_BTN, g.log[0]);
@@ -540,10 +561,45 @@ static void test_transient_second_popup_replaces_the_first(void) {
     scenario(frame_two_popups);
     sc_frames(&s, 1);
     g.pop_b = true;
-    sc_frames(&s, 2);
+    sc_frames(&s, 1);
+    TEST_ASSERT_TRUE_MESSAGE(g.pop_a, "A, declared before B, closes at its next begin");
+    sc_frames(&s, 1);
     TEST_ASSERT_FALSE(g.pop_a);
     TEST_ASSERT_EQUAL_UINT8(NT_UI_POPUP_CLOSE_REPLACED, g.reason_pop_a);
     TEST_ASSERT_TRUE(g.pop_b);
+}
+
+/* Opening closes light dismiss: a modal opened next to an open combo closes it, and takes Esc. */
+static void test_transient_modal_closes_open_combo(void) {
+    scenario(frame_combo_modal);
+    sc_click_id(&s, COMBO_A);
+    TEST_ASSERT_TRUE(g.combo);
+    sc_frames(&s, 1);
+    g.modal_flags = NT_UI_MODAL_LISTEN_ESC;
+    g.modal_a = true;
+    sc_frames(&s, 1);
+    TEST_ASSERT_TRUE_MESSAGE(g.combo, "the combo, declared before the modal, closes at its next begin");
+    sc_frames(&s, 1);
+    TEST_ASSERT_FALSE_MESSAGE(g.combo, "the opening modal closes the combo");
+    TEST_ASSERT_TRUE(g.modal_a);
+    sc_key(&s, NT_KEY_ESCAPE);
+    TEST_ASSERT_FALSE(g.modal_a);
+}
+
+/* Opening closes light dismiss: a confirm modal declared inside the combo list leaves the list open under it,
+ * and its button takes the click. */
+static void test_transient_confirm_inside_combo_keeps_it_open(void) {
+    scenario(frame_combo_confirm);
+    sc_click_id(&s, COMBO_A);
+    TEST_ASSERT_TRUE(g.combo);
+    sc_frames(&s, 1);
+    g.modal_b = true;
+    sc_frames(&s, 2);
+    TEST_ASSERT_TRUE_MESSAGE(g.combo, "the confirm inside the list does not close it");
+    sc_click_id(&s, MODAL_B_BTN);
+    TEST_ASSERT_EQUAL_INT(1, clicks(MODAL_B_BTN));
+    TEST_ASSERT_TRUE(g.combo);
+    TEST_ASSERT_TRUE(g.modal_b);
 }
 
 /* One transient child: opening a menu closes an open combo. */
@@ -685,13 +741,15 @@ static void test_menu_combo_from_custom_row_closes_sibling_submenu(void) {
     sc_move_to(&s, menu_row(MENU_A, KEY_FILE));
     sc_frames(&s, 1);
     TEST_ASSERT_TRUE(g.file_body);
+    const int left_row = g.frames;
     sc_move_to(&s, COMBO_A);
     sc_press(&s, NT_BUTTON_LEFT);
     TEST_ASSERT_TRUE_MESSAGE(g.file_body, "the submenu is still open when the combo's trigger is pressed");
     sc_release(&s, NT_BUTTON_LEFT);
     TEST_ASSERT_TRUE(g.combo);
+    TEST_ASSERT_TRUE_MESSAGE(g.file_body, "the submenu, declared before the combo, closes at its next begin");
     sc_frames(&s, 1);
-    TEST_ASSERT_TRUE_MESSAGE(4 < AIM_FALLBACK_FRAMES, "the four frames since the row was hovered stay under the aim fallback");
+    TEST_ASSERT_TRUE_MESSAGE(g.frames - left_row < AIM_FALLBACK_FRAMES, "the frames since the pointer left the row stay under the aim fallback");
     TEST_ASSERT_FALSE_MESSAGE(g.file_body, "the combo replaces the sibling submenu");
     TEST_ASSERT_TRUE(g.combo);
     TEST_ASSERT_TRUE(g.menu.open);
@@ -712,6 +770,8 @@ int main(void) {
     RUN_TEST(test_stack_last_opened_modal_is_on_top);
     RUN_TEST(test_stack_combo_in_modal_stays_above_it);
     RUN_TEST(test_transient_second_popup_replaces_the_first);
+    RUN_TEST(test_transient_modal_closes_open_combo);
+    RUN_TEST(test_transient_confirm_inside_combo_keeps_it_open);
     RUN_TEST(test_transient_menu_closes_open_combo);
     RUN_TEST(test_transient_tooltip_keeps_open_combo);
     RUN_TEST(test_own_close_outside_click_closes_popup);

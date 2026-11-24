@@ -71,7 +71,7 @@ nt_ui_modal_style_t nt_ui_modal_style_defaults(void);
  *
  * One window, many open sites = ONE bool + ONE id; call this from the active container's body so
  * nesting/z follow context. id non-zero, style and open non-NULL, info nullable. Asserts depth <
- * NT_UI_OVERLAY_MAX_DEPTH. */
+ * NT_UI_OVERLAY_MAX. */
 bool nt_ui_modal_begin(nt_ui_context_t *ctx, uint32_t id, const nt_ui_modal_style_t *style, bool *open, nt_ui_popup_info_t *info);
 void nt_ui_modal_end(nt_ui_context_t *ctx);
 

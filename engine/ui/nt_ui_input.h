@@ -2,7 +2,7 @@
 #define NT_UI_INPUT_H
 
 /* Single-line text field over a game-owned UTF-8 buffer (char* + capacity). Editing is codepoint-aware;
- * typed chars come from nt_input_pop_char, physical keys drive editing and focus. */
+ * typed chars come from nt_ui_pop_char, physical keys (nt_ui_key_*) drive editing and focus. */
 
 #include <stdbool.h>
 #include <stddef.h>

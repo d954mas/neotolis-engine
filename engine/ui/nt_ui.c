@@ -237,7 +237,7 @@ nt_ui_context_t *nt_ui_create_context(void *arena, size_t arena_size, const nt_u
     ctx->element_depth_bias_ndc = desc->element_depth_bias_ndc;
     /* Used as-is; the default comes solely from nt_ui_create_desc_defaults() (same convention as max_elements). */
     ctx->overlay_zband_stride = desc->overlay_zband_stride;
-    NT_ASSERT(ctx->overlay_zband_stride > 0 && (int32_t)ctx->overlay_zband_stride + ((NT_UI_OVERLAY_MAX_DEPTH - 1) * NT_UI_OVERLAY_MAX_DEPTH) <= INT16_MAX &&
+    NT_ASSERT(ctx->overlay_zband_stride > 0 && (int32_t)ctx->overlay_zband_stride + ((NT_UI_OVERLAY_MAX - 1) * NT_UI_OVERLAY_MAX) <= INT16_MAX &&
               "nt_ui_create_context: overlay_zband_stride must be > 0 with room for every overlay stack slot's band");
     /* Touch-friendly baseline, looser than ImGui's mouse 6px/0.3s: the engine targets mobile/WASM. */
     ctx->gesture_dbl_window_secs = 0.50F;
@@ -2769,6 +2769,9 @@ nt_ui_interaction_t nt_ui_step(nt_ui_context_t *ctx, uint32_t id, const nt_ui_st
     NT_ASSERT(!nt_ui_state_has_tag(ctx, id, NT_UI_SCROLL_TAG) && "nt_ui_step: a scroll's own id is its surface, not a widget (step a child id)");
 #endif
 
+    if (ctx->inert_from != 0U) {
+        return (nt_ui_interaction_t){0}; /* inert: no record, no capture, no debug zone */
+    }
     bool owner_over = false;
     nt_ui_widget_pidx_state_t s;
     nt_ui_interaction_t out = query_interaction_padded(ctx, id, pad_lrtb, &owner_over, &s);
@@ -2981,6 +2984,14 @@ const nt_pointer_t *nt_ui_internal_top_pointer(const nt_ui_context_t *ctx, uint3
     }
 #endif
     return nt_ui_internal_is_top(ctx, id) ? &ctx->frame_pointers[ctx->frame_primary] : &idle;
+}
+
+bool nt_ui_internal_outside_press(nt_ui_context_t *ctx, uint32_t id, int16_t pad) {
+    const nt_pointer_t *pp = nt_ui_internal_top_pointer(ctx, id);
+    const uint32_t hot = ctx->pointer_hot[ctx->frame_primary].id;
+    const int16_t pad_lrtb[4] = {pad, pad, pad, pad};
+    return (pp->buttons[NT_BUTTON_LEFT].is_pressed || pp->buttons[NT_BUTTON_RIGHT].is_pressed) && (hot == nt_ui_internal_popup_catcher_id(id) || hot == 0U) &&
+           !nt_ui_internal_hit_test_padded(ctx, id, pp->x, pp->y, pad_lrtb);
 }
 
 bool nt_ui_wants_pointer(const nt_ui_context_t *ctx) {

@@ -156,21 +156,21 @@ typedef struct {
     int16_t pad[4]; /* hit padding L/R/T/B */
 } nt_ui_interactive_t;
 
-/* Overlays shown at once: the overlay stack's capacity (fail-early assert, no heap). Build-overridable. */
-#ifndef NT_UI_OVERLAY_MAX_DEPTH
-#define NT_UI_OVERLAY_MAX_DEPTH 16
+/* Live overlays at once: the overlay stack's capacity (fail-early assert, no heap; a fading one gives way).
+ * Each stack slot also spans this many z-bands. Build-overridable. */
+#ifndef NT_UI_OVERLAY_MAX
+#define NT_UI_OVERLAY_MAX 16
 #endif
-_Static_assert(NT_UI_OVERLAY_MAX_DEPTH >= 1 && NT_UI_OVERLAY_MAX_DEPTH <= UINT8_MAX, "NT_UI_OVERLAY_MAX_DEPTH must fit the uint8_t stack counters");
+_Static_assert(NT_UI_OVERLAY_MAX >= 1 && NT_UI_OVERLAY_MAX <= UINT8_MAX, "NT_UI_OVERLAY_MAX must fit the uint8_t stack counters");
 
 /* One overlay stack entry (spec: "Input ownership", Overlay stack). */
 typedef struct {
     uint32_t id;
-    uint32_t parent; /* the overlay declared around it, 0 = the base UI */
-    bool seen;       /* declared since the last nt_ui_begin */
-    bool live;       /* open and outside an inert subtree when last declared */
-    bool catcher;    /* gates the UI under it: it can be the top */
-    bool transient;  /* light dismiss: one open per parent */
-    bool replaced;   /* a newer transient sibling opened: it closes at its next begin */
+    bool seen;      /* declared since the last nt_ui_begin */
+    bool live;      /* open and outside an inert subtree when last declared */
+    bool catcher;   /* gates the UI under it: it can be the top */
+    bool transient; /* light dismiss: an overlay that takes input closes it when it opens */
+    bool replaced;  /* such an overlay opened: it closes at its next begin */
 } nt_ui_overlay_t;
 
 /* Bound the storage and per-row work of NT_UI_CHECKS duplicate detection. */
@@ -227,9 +227,9 @@ struct nt_ui_context {
     /* The top overlay read at nt_ui_begin from the stack: the highest live entry with a catcher (0 = none). */
     uint32_t overlay_top;
     /* The overlay stack in open order, which is also its paint and hit order (slot i takes band
-     * stride + i * NT_UI_OVERLAY_MAX_DEPTH), and the ids of the overlays open in the declaration. */
-    nt_ui_overlay_t overlays[NT_UI_OVERLAY_MAX_DEPTH];
-    uint32_t overlay_decl[NT_UI_OVERLAY_MAX_DEPTH];
+     * stride + i * NT_UI_OVERLAY_MAX), and the ids of the overlays open in the declaration. */
+    nt_ui_overlay_t overlays[NT_UI_OVERLAY_MAX];
+    uint32_t overlay_decl[NT_UI_OVERLAY_MAX];
     /* Keyboard-focus arbiter (0 = none): a press sets it; Esc or a disabled declaration clears it.
      * Survives frames; begin only drops an orphan and applies a pending Tab. */
     uint32_t focused_input_id;
@@ -602,6 +602,11 @@ bool nt_ui_internal_owned_by_top(nt_ui_context_t *ctx, uint32_t id);
 static inline bool nt_ui_internal_is_top(const nt_ui_context_t *ctx, uint32_t id) { return id == ctx->overlay_top && ctx->inert_from == 0U; }
 static inline bool nt_ui_internal_owns_keys(const nt_ui_context_t *ctx, uint32_t id) { return id == ctx->keys_owner && ctx->inert_from == 0U; }
 const nt_pointer_t *nt_ui_internal_top_pointer(const nt_ui_context_t *ctx, uint32_t id);
+/* `id` is live: outside an inert subtree, at or above the top's catcher (spec: "Input ownership", Live). */
+static inline bool nt_ui_internal_live(nt_ui_context_t *ctx, uint32_t id) { return ctx->inert_from == 0U && nt_ui_internal_owned_by_top(ctx, id); }
+/* The live top overlay `id` got a primary press, either button, outside its panel grown by `pad`, on its catcher
+ * or on no record (spec: "Input ownership", Own close). */
+bool nt_ui_internal_outside_press(nt_ui_context_t *ctx, uint32_t id, int16_t pad);
 
 /* Adds a registry record for the front-most resolve. */
 void nt_ui_internal_register_interactive(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lrtb[4]);

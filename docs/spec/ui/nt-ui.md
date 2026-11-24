@@ -144,11 +144,11 @@ Bands accumulate with declaration nesting, NOT with attachment:
 `attachTo = ROOT` still stacks where it was declared. Overlays are the
 exception: each takes an absolute band from its slot in the overlay stack (see
 "Input ownership"), slot `i` at `overlay_zband_stride + i *
-NT_UI_OVERLAY_MAX_DEPTH`, whatever floating encloses it (popup-core declares
+NT_UI_OVERLAY_MAX`, whatever floating encloses it (popup-core declares
 the difference as its delta), so an overlay opened later covers every earlier
 one together with its widget parts. A game floating with its own positive
 `zIndex` inside an overlay can rise over it, and from
-`NT_UI_OVERLAY_MAX_DEPTH` up over a later overlay too. A widget's own floating
+`NT_UI_OVERLAY_MAX` up over a later overlay too. A widget's own floating
 parts declare delta 0 and paint above their container's content because each
 is a later tree root of the same band, and `layer` never reorders across tree
 roots. A floating declared AFTER one of them in the same band paints over it.
@@ -325,8 +325,11 @@ Router:
   declaration order: the focused field, else the top overlay (a modal
   without Esc included), else the game. Widgets read keys and typed text only
   through `nt_ui_key_pressed`, `nt_ui_key_down` and `nt_ui_pop_char` with
-  their own id, which answer only for a live owner; `scripts/check_ui_input.py`
-  rejects a raw key, char or pointer read in an `engine/ui` widget. A field a
+  their own id, which answer only for a live owner (a game reads its own
+  overlay body's keys the same way, with the overlay's id);
+  `scripts/check_ui_input.py` rejects in an `engine/ui` widget a raw `nt_input`
+  key, char or mouse read, `g_nt_input`, and the router's own pointer, capture
+  and inert state. A field a
   press focuses reads keys from the next frame. Esc in a field inside a modal
   unfocuses the field, and a second Esc closes the modal. A field focused at
   begin that the frame declares disabled, inert or not at all still owns that
@@ -335,7 +338,8 @@ Router:
   frame's owner) and skips its hotkeys, as Dear ImGui's `WantCaptureKeyboard`.
   Contexts do not arbitrate: a game with two contexts gates a key on both.
 - *Inert.* An overlay that is not open (easing out, or closed this frame)
-  makes everything declared inside it inert, nested overlays included, as
+  makes everything declared inside it inert (popup-core marks it, the router
+  reads it), nested overlays included, as
   HTML `inert`: it paints but makes no record, and its steps, queries,
   `nt_ui_hovered_within` and key reads report nothing; a scroll in it drops
   its gesture; it has no catcher and is never the top. The wheel
@@ -345,27 +349,33 @@ Router:
 Overlay stack (popup-core):
 
 - *Stack.* An overlay enters the stack on top the first frame it is declared
-  shown and leaves it at the `nt_ui_begin` after a frame that did not declare
-  it. Stack order is the paint and hit order (see "Floating zIndex is
-  relative"): the last opened covers every earlier one wherever it is
-  declared, as Dear ImGui's popup stack and the HTML top layer. The top is the
-  highest open overlay with a catcher outside an inert subtree, read at
-  `nt_ui_begin`. Overlays under it stay open and are not live.
-- *One transient child.* A light-dismiss overlay (a combo list, a menu and
-  each of its levels) is transient. Opening one replaces the open transient
-  overlays opened inside the same parent (an overlay, or the base UI): each
-  sees the close at its next begin, with `NT_UI_POPUP_CLOSE_REPLACED`, as an
-  HTML auto popover closes the others. So a menu level keeps one open child,
-  and a popup a row opens closes the sibling level. A modal and a tooltip are
-  not transient.
+  shown, moves to the top when it is reopened during its fade, and leaves it at
+  the `nt_ui_begin` after a frame that did not declare it. Stack order is the
+  paint and hit order (see "Floating zIndex is relative"): the last opened
+  covers every earlier one wherever it is declared, as Dear ImGui's popup
+  stack and the HTML top layer. The top is the highest live overlay with a
+  catcher that no opening closed, read at `nt_ui_begin`. Overlays under it
+  stay open and are not live.
+- *Opening closes light dismiss.* An overlay that takes input (one with a
+  catcher, or a light-dismiss one) closes, as it opens, every open
+  light-dismiss overlay (a combo list, a menu and each of its levels) it is not
+  declared inside, as HTML closes auto popovers when a popover or a modal
+  dialog opens. Each sees the close with `NT_UI_POPUP_CLOSE_REPLACED` at its
+  next begin, in the same frame when it is declared after the opener. So a
+  menu level keeps one open child, a popup a row opens closes the sibling
+  level, a second menu closes the first and a modal closes an open combo; a
+  confirm a combo row opens inside the list leaves the list open. A tooltip or
+  a toast takes no input and closes nothing. One the game stops declaring
+  before that begin keeps the game's bool true (Model D).
 - *Own close.* An open overlay decides its own close at its begin, before it
   declares anything: on Esc it owns, or, for light dismiss, on a press of the
   primary pointer outside its panel grown by `close_pad`, on its catcher or
   on no record. It is inert that whole frame and registers no catcher, so the
   next press reaches what lies under it.
-- *Illegal states*, asserted: more than `NT_UI_OVERLAY_MAX_DEPTH` overlays
-  shown at once, a stride whose last slot passes `int16`, and a root overlay
-  inside a game floating at or above `overlay_zband_stride`.
+- *Illegal states*, asserted: more than `NT_UI_OVERLAY_MAX` live overlays at
+  once (a fading one gives its slot to a new one and ends its fade), a stride
+  whose last slot passes `int16`, and a root
+  overlay inside a game floating at or above `overlay_zband_stride`.
 
 **When a rule runs.** Input is decided from last frame's layout, so a rule
 that needs only last frame's records and this frame's input runs before the
@@ -439,7 +449,7 @@ pointer itself (`nt_ui_block_pointer`; its children are declared later and still
 Floating children count as inside, overlays too: a combo or menu opened inside a container
 puts its full-viewport catcher inside that container, so the container reads
 hovered within over the whole screen while the overlay is open (as CSS does for a fixed
-overlay inside a hovered element); a tooltip on that container shows over the open overlay. Combo rows, the combo trigger, tabs, menu rows and
+overlay inside a hovered element); a tooltip that container shows after the overlay opened lies over it. Combo rows, the combo trigger, tabs, menu rows and
 tooltips read hover within; a sidebar-consumed pointer hovers nothing, as in every query.
 
 ## Anim cache
@@ -843,10 +853,11 @@ a sibling's child closes before the rows declare (Left and Esc close it as the
 deepest level and do nothing more). A click opens its parent
 after the key acts, so it wins over Right; an activation, by Enter or a
 click, closes the menu, and a frame activates at most one row, the first
-declared. A light-dismiss popup a row opens (a dropdown) replaces the open child of
-that row's level (see "Input ownership", One transient child): the child level
-reports the close at its begin and its parent row closes the branch, so each
-level keeps one open child and no level paints over that popup. Before it reads the pointer, `nt_ui_menu_end` reconciles the kept state with the frame: an open parent the
+declared. An overlay that takes input and a row declares (a dropdown, a confirm)
+closes the open child of that row's level (see "Input ownership", Opening
+closes light dismiss): the child level reports the close at its begin and its
+parent row closes the branch, so each level keeps one open child and no level
+paints over that overlay. Before it reads the pointer, `nt_ui_menu_end` reconciles the kept state with the frame: an open parent the
 frame does not declare as an enabled parent closes its branch, and a focused row
 its declared level lacks loses focus, so a row that returns later is not
 focused. With no focus, Enter does nothing, Down

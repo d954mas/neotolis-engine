@@ -6,8 +6,9 @@ nt_ui_begin; widgets read keys and chars through nt_ui_key_pressed,
 nt_ui_key_down and nt_ui_pop_char with their own id, and the pointer through
 nt_ui_step and the router queries. A raw nt_input key/char read, g_nt_input or
 ctx->frame_pointers in a widget would bypass the owner rules
-(docs/spec/ui/nt-ui.md, "Input ownership"). nt_ui_scroll.c is the router's
-gesture core and reads the pointer copy itself.
+(docs/spec/ui/nt-ui.md, "Input ownership"); so would a widget reading the
+router's own pointer, capture, key-owner or inert state. nt_ui_scroll.c is the
+router's gesture core; popup-core marks the inert subtree.
 """
 
 import re
@@ -16,8 +17,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 UI_DIR = ROOT / "engine" / "ui"
-ROUTER = {UI_DIR / "nt_ui.c", UI_DIR / "nt_ui_scroll.c"}
-RAW_READ = re.compile(r"\bnt_input_key_is_(?:pressed|down)\s*\(|\bnt_input_pop_char\s*\(|\bg_nt_input\b|\bframe_pointers\b")
+# The router and the headers that define its state; popup-core marks the inert subtree.
+ROUTER = {UI_DIR / "nt_ui.c", UI_DIR / "nt_ui_scroll.c", UI_DIR / "nt_ui_internal.h"}
+RAW_READ = re.compile(r"\bnt_input_(?:key|any_key|mouse|pop_char)\w*\s*\(|\bg_nt_input\b|\bframe_pointers\b|\bpointer_hot\b|->captures\b|\bkeys_owner\b|\boverlay_top\b")
+INERT = re.compile(r"\binert_from\b")
+INERT_OWNERS = ROUTER | {UI_DIR / "nt_ui_popup.c"}
 ROUTER_READ = re.compile(r"\bnt_ui_(?:key_pressed|key_down|pop_char)\s*\(")
 
 
@@ -30,12 +34,12 @@ def strip_comments_and_strings(text: str) -> str:
 def main() -> int:
     failures = []
     router_reads = 0
-    for path in sorted(UI_DIR.glob("*.c")):
-        if path in ROUTER:
-            continue
+    for path in sorted([*UI_DIR.glob("*.c"), *UI_DIR.glob("*.h")]):
         code = strip_comments_and_strings(path.read_text(encoding="utf-8"))
         router_reads += len(ROUTER_READ.findall(code))
-        for match in RAW_READ.finditer(code):
+        matches = [] if path in ROUTER else list(RAW_READ.finditer(code))
+        matches += [] if path in INERT_OWNERS else list(INERT.finditer(code))
+        for match in matches:
             line = code.count("\n", 0, match.start()) + 1
             failures.append(f"{path.relative_to(ROOT).as_posix()}:{line}: raw input read '{match.group(0).rstrip('( ')}' bypasses the nt_ui router")
     # Positive control: the scan must see widgets reading through the router, or it proves nothing.

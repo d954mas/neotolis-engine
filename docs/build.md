@@ -358,7 +358,7 @@ relinked executables cause false failures. `build/.check.lock` rejects a second
 check with exit 2; remove it only after confirming the owner is dead.
 
 The default gate checks module composition, EM_JS_DEPS, doc links/spec-index
-coverage, CRT pins, the GL call funnel (`scripts/check_gl_calls.py`) and test registration; builds native-debug; runs ctest; and
+coverage, CRT pins, the GL call funnel (`scripts/check_gl_calls.py`), the UI input router (`scripts/check_ui_input.py`) and test registration; builds native-debug; runs ctest; and
 checks changed files with clang-format/clang-tidy. A changed header also lints
 every TU that includes it (native-debug's ninja deps) plus the DevAPI-only TUs;
 a header no deps mention, and `--full`, lint the whole tree. The check scripts' own tests run when `scripts/`, `cmake/` or

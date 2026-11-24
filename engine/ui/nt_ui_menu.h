@@ -18,7 +18,7 @@ extern const nt_ui_widget_def_t NT_UI_MENU_DEF;
 #define NT_UI_MENU_AIM_FALLBACK_SECS 0.12F
 
 /* Submenu nesting cap: a parent row declared on the deepest level asserts (fail-early, no fallback), so a
- * runaway tree never exhausts the popup stack (NT_UI_OVERLAY_MAX_DEPTH, asserted at build time).
+ * runaway tree never exhausts the popup stack (NT_UI_OVERLAY_MAX, asserted at build time).
  * Build-overridable for parity with every other cap in the subsystem. */
 #ifndef NT_UI_MENU_MAX_DEPTH
 #define NT_UI_MENU_MAX_DEPTH 8
@@ -105,7 +105,6 @@ typedef struct {
     bool focus_seen;  /* the focused row is declared and enabled this frame */
     bool focus_opens; /* the focused row is a parent */
     bool top;         /* the menu is the top overlay: its rows take the pointer and it reads the keys */
-    bool ours;        /* top, and the primary pointer is the menu's (not the inspector's) */
     bool activated;   /* a row activated: the chain closes */
     bool item_steps;  /* the open custom row is enabled and has an action of its own */
 } nt_ui_menu_frame_t;

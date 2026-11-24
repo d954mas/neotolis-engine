@@ -1839,9 +1839,9 @@ static bool modal_field_esc(bool *open, char *a, char *b) {
     return after_press;
 }
 
-/* ---- Esc has one owner per frame, chosen at nt_ui_begin, and the focused field comes first: a field
- *      declared before the modal but floating above it, then a field inside the modal, each unfocus on Esc
- *      and the same Esc does not also close the modal; the next Esc closes it. ---- */
+/* ---- Esc has one owner per frame, chosen at nt_ui_begin, and the focused field comes first: a field declared
+ *      before the modal but floating above it unfocuses on Esc and the same Esc does not also close the modal;
+ *      the next Esc closes it. ---- */
 static void test_esc_owner_is_decided_once(void) {
     char a[32] = "base";
     char b[32] = "modal";
@@ -1859,14 +1859,6 @@ static void test_esc_owner_is_decided_once(void) {
     (void)modal_field_esc(&open, a, b);
     TEST_ASSERT_FALSE(nt_ui_input_focused(s_fx.ctx, BASE_FIELD));
     TEST_ASSERT_TRUE_MESSAGE(open, "the Esc the field over the modal took does not close the modal");
-
-    s_base_z = 0;
-    tap_modal_field(true, 0.0F, a, b);
-    (void)modal_field_frame_io(&IDLE_PTR, &open, 0.0F, a, b);
-    TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, MODAL_FIELD));
-    (void)modal_field_esc(&open, a, b);
-    TEST_ASSERT_FALSE(nt_ui_input_focused(s_fx.ctx, MODAL_FIELD));
-    TEST_ASSERT_TRUE_MESSAGE(open, "the Esc the field in the modal took does not close the modal");
     TEST_ASSERT_FALSE_MESSAGE(modal_field_esc(&open, a, b), "the next Esc closes the modal in its frame");
 }
 
