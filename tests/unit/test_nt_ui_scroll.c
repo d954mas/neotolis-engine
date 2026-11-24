@@ -2088,8 +2088,8 @@ static void arb_popup_over(void) {
     nt_ui_popup_style_t ps = nt_ui_popup_style_defaults();
     ps.ease_speed = 0.0F;
     const nt_ui_popup_anchor_t anc = {.x = 500.0F, .y = 350.0F, .prefer_side = NT_UI_POPUP_BELOW};
-    bool popup_open = true;
-    if (nt_ui_popup_begin(s_fx.ctx, ARB_POPUP, &ps, &anc, &popup_open, NULL)) {
+    nt_ui_open(s_fx.ctx, ARB_POPUP);
+    if (nt_ui_popup_begin(s_fx.ctx, ARB_POPUP, &ps, &anc, NULL)) {
         CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(60), CLAY_SIZING_FIXED(30)}}}) {}
         nt_ui_popup_end(s_fx.ctx);
     }
@@ -2365,8 +2365,12 @@ static void inert_list_frame(const nt_pointer_t *p, bool open) {
     nt_ui_popup_style_t ps = nt_ui_popup_style_defaults();
     ps.ease_speed = 8.0F;
     const nt_ui_popup_anchor_t anc = {.x = 300.0F, .y = 100.0F, .prefer_side = NT_UI_POPUP_BELOW};
-    bool o = open;
-    if (nt_ui_popup_begin(s_fx.ctx, INERT_LIST_POPUP, &ps, &anc, &o, NULL)) {
+    if (open) {
+        nt_ui_open(s_fx.ctx, INERT_LIST_POPUP);
+    } else {
+        nt_ui_close(s_fx.ctx, INERT_LIST_POPUP);
+    }
+    if (nt_ui_popup_begin(s_fx.ctx, INERT_LIST_POPUP, &ps, &anc, NULL)) {
         nt_ui_scroll_begin(s_fx.ctx, NULL, INERT_LIST, &s_scene.style, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(200)}}});
         CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(1000)}}}) {}
         nt_ui_scroll_end(s_fx.ctx);
@@ -2526,8 +2530,8 @@ static void body_real_popup(void) {
     nt_ui_popup_style_t st = nt_ui_popup_style_defaults();
     st.ease_speed = 0.0F;
     const nt_ui_popup_anchor_t anchor = {.x = 40.0F, .y = 20.0F, .w = 80.0F, .h = 30.0F, .prefer_side = NT_UI_POPUP_BELOW};
-    bool popup_open = true;
-    if (nt_ui_popup_begin(s_fx.ctx, CLAY_ID("arb_real_popup").id, &st, &anchor, &popup_open, NULL)) {
+    nt_ui_open(s_fx.ctx, CLAY_ID("arb_real_popup").id);
+    if (nt_ui_popup_begin(s_fx.ctx, CLAY_ID("arb_real_popup").id, &st, &anchor, NULL)) {
         CLAY({.id = CLAY_ID("arb_popup_btn"), .layout = {.sizing = {CLAY_SIZING_FIXED(80), CLAY_SIZING_FIXED(80)}}}) { s_fg_in = nt_ui_step(s_fx.ctx, CLAY_ID("arb_popup_btn").id, NULL); }
         nt_ui_popup_end(s_fx.ctx);
     }

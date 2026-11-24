@@ -1,7 +1,7 @@
 /* UI scenario tests: scripted pointer and key actions over a game-like frame, one story per input-ownership
  * rule (spec chapter UI, "Interaction model", "Input ownership") and per key menu or popup behavior. They
- * assert only what a game observes: the clicks it logged, its open bools and close reasons, the field
- * buffers, nt_ui_wants_pointer / nt_ui_wants_keyboard and what the menu rows returned. */
+ * assert only what a game observes: the clicks it logged, nt_ui_is_open, what its overlays' begins returned and
+ * reported, the field buffers, nt_ui_wants_pointer / nt_ui_wants_keyboard and what the menu rows returned. */
 
 #include <math.h>
 #include <stdalign.h>
@@ -65,14 +65,16 @@ static ui_walker_fixture_t s_fx;
 /* The 60 Hz frame on which the menu's aim fallback runs out. */
 #define AIM_FALLBACK_FRAMES ((int)ceilf(NT_UI_MENU_AIM_FALLBACK_SECS / UI_FX_DT))
 
-/* What a game keeps: its click log, open bools, buffers and what its overlays reported. */
+/* What a game keeps: its click log, buffers and what its overlays reported. */
 typedef struct {
     uint32_t log[16];
     int n;
-    bool modal_a, modal_b, pop_a, pop_b, combo;
+    bool combo; /* the combo's list showed this frame */
     bool pop_a_shown;
+    bool skip_pop_a; /* frame_popup_button leaves popup A out */
     uint8_t modal_flags;
-    uint8_t reason_modal_a, reason_pop_a;
+    uint8_t reason_modal_a, reason_pop_a; /* the last close each reported */
+    uint8_t reason_pop_a_now;             /* what popup A's begin reported this frame */
     int combo_sel;
     bool tip_seen;
     char buf_base[32], buf_m1[32], buf_m2[32];
@@ -150,7 +152,8 @@ static void base_field(uint32_t id, char *buf, float x, float y) {
 }
 
 static void combo(void) {
-    if (nt_ui_combo_begin(s.ctx, NULL, 0U, COMBO_A, "pick", &g.dd_style, &g.combo)) {
+    g.combo = nt_ui_combo_begin(s.ctx, NULL, 0U, COMBO_A, "pick", &g.dd_style);
+    if (g.combo) {
         for (int i = 0; i < 3; ++i) {
             if (nt_ui_combo_selectable(s.ctx, ROW_KEY(i), s_rows[i], g.combo_sel == i)) {
                 g.combo_sel = i;
@@ -166,27 +169,31 @@ static void base_combo(float x, float y) {
 
 static uint32_t combo_row(int i) { return nt_ui_dropdown_test_combo_row_id(COMBO_A, ROW_KEY(i)); }
 
-static bool modal_begin(uint32_t id, bool *open, uint8_t *reason) {
+static bool modal_begin(uint32_t id, uint8_t *reason) {
     nt_ui_modal_style_t ms = nt_ui_modal_style_defaults();
     ms.ease_speed = 0.0F;
     ms.flags = g.modal_flags;
     nt_ui_popup_info_t info = {0};
-    const bool shown = nt_ui_modal_begin(s.ctx, id, &ms, open, &info);
+    const bool shown = nt_ui_modal_begin(s.ctx, id, &ms, &info);
     if (reason != NULL && info.reason != NT_UI_POPUP_CLOSE_NONE) {
         *reason = info.reason;
     }
     return shown;
 }
 
-/* A light-dismiss popup below (x, y) holding one button; ease 0 snaps. Returns whether it shows. */
-static bool popup(uint32_t id, uint32_t btn, float x, float y, float ease, bool *open, uint8_t *reason) {
+/* A popup below (x, y) holding one button; ease 0 snaps. Keeps the last close it reported in `reason` and
+ * this frame's report in `reason_now` (both nullable). Returns whether it shows. */
+static bool popup(uint32_t id, uint32_t btn, float x, float y, float ease, uint8_t *reason, uint8_t *reason_now) {
     nt_ui_popup_style_t ps = nt_ui_popup_style_defaults();
     ps.ease_speed = ease;
     const nt_ui_popup_anchor_t anc = {.x = x, .y = y, .w = 10.0F, .h = 10.0F, .prefer_side = NT_UI_POPUP_BELOW};
     nt_ui_popup_info_t info = {0};
-    const bool shown = nt_ui_popup_begin(s.ctx, id, &ps, &anc, open, &info);
+    const bool shown = nt_ui_popup_begin(s.ctx, id, &ps, &anc, &info);
     if (reason != NULL && info.reason != NT_UI_POPUP_CLOSE_NONE) {
         *reason = info.reason;
+    }
+    if (reason_now != NULL) {
+        *reason_now = info.reason;
     }
     if (shown) {
         button(btn, 120.0F, 40.0F);
@@ -240,7 +247,7 @@ static void frame_combo_button(void *game) {
 static void frame_button_modal(void *game) {
     (void)game;
     base_button(BTN_A, 50.0F, 50.0F, 120.0F, 50.0F);
-    if (modal_begin(MODAL_A, &g.modal_a, &g.reason_modal_a)) {
+    if (modal_begin(MODAL_A, &g.reason_modal_a)) {
         button(MODAL_A_BTN, 80.0F, 30.0F);
         nt_ui_modal_end(s.ctx);
     }
@@ -249,7 +256,7 @@ static void frame_button_modal(void *game) {
 static void frame_field_modal(void *game) {
     (void)game;
     base_field(FIELD_BASE, g.buf_base, 50.0F, 50.0F);
-    if (modal_begin(MODAL_A, &g.modal_a, &g.reason_modal_a)) {
+    if (modal_begin(MODAL_A, &g.reason_modal_a)) {
         CLAY({.id = CLAY_ID("sc_modal_col"), .layout = {.layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 8}}) {
             field(FIELD_M1, g.buf_m1);
             field(FIELD_M2, g.buf_m2);
@@ -261,11 +268,11 @@ static void frame_field_modal(void *game) {
 /* Modal B is declared before modal A: only the open order may put it on top. */
 static void frame_two_modals(void *game) {
     (void)game;
-    if (modal_begin(MODAL_B, &g.modal_b, NULL)) {
+    if (modal_begin(MODAL_B, NULL)) {
         CLAY({.id = CLAY_ID("sc_panel_b"), .layout = {.sizing = {CLAY_SIZING_FIXED(100), CLAY_SIZING_FIXED(60)}}}) { button(MODAL_B_BTN, 80.0F, 30.0F); }
         nt_ui_modal_end(s.ctx);
     }
-    if (modal_begin(MODAL_A, &g.modal_a, NULL)) {
+    if (modal_begin(MODAL_A, NULL)) {
         CLAY({.id = CLAY_ID("sc_panel_a"), .layout = {.sizing = {CLAY_SIZING_FIXED(300), CLAY_SIZING_FIXED(200)}}}) { button(MODAL_A_BTN, 80.0F, 30.0F); }
         nt_ui_modal_end(s.ctx);
     }
@@ -274,7 +281,7 @@ static void frame_two_modals(void *game) {
 /* A modal holding a combo with a button declared after it, right under the combo's list. */
 static void frame_modal_combo(void *game) {
     (void)game;
-    if (modal_begin(MODAL_A, &g.modal_a, &g.reason_modal_a)) {
+    if (modal_begin(MODAL_A, &g.reason_modal_a)) {
         CLAY({.id = CLAY_ID("sc_modal_combo_col"), .layout = {.layoutDirection = CLAY_TOP_TO_BOTTOM}}) {
             combo();
             button(MODAL_A_BTN, 200.0F, 120.0F);
@@ -287,7 +294,7 @@ static void frame_modal_combo(void *game) {
 static void frame_combo_modal(void *game) {
     (void)game;
     base_combo(30.0F, 30.0F);
-    if (modal_begin(MODAL_A, &g.modal_a, &g.reason_modal_a)) {
+    if (modal_begin(MODAL_A, &g.reason_modal_a)) {
         button(MODAL_A_BTN, 80.0F, 30.0F);
         nt_ui_modal_end(s.ctx);
     }
@@ -297,11 +304,12 @@ static void frame_combo_modal(void *game) {
 static void frame_combo_confirm(void *game) {
     (void)game;
     CLAY({.id = (Clay_ElementId){.id = nt_ui_fmix_id(COMBO_A, 1U)}, .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = 30.0F, .y = 30.0F}}}) {
-        if (nt_ui_combo_begin(s.ctx, NULL, 0U, COMBO_A, "pick", &g.dd_style, &g.combo)) {
+        g.combo = nt_ui_combo_begin(s.ctx, NULL, 0U, COMBO_A, "pick", &g.dd_style);
+        if (g.combo) {
             for (int i = 0; i < 3; ++i) {
                 (void)nt_ui_combo_selectable(s.ctx, ROW_KEY(i), s_rows[i], false);
             }
-            if (modal_begin(MODAL_B, &g.modal_b, NULL)) {
+            if (modal_begin(MODAL_B, NULL)) {
                 button(MODAL_B_BTN, 80.0F, 30.0F);
                 nt_ui_modal_end(s.ctx);
             }
@@ -313,18 +321,18 @@ static void frame_combo_confirm(void *game) {
 static void frame_inert_popup(void *game) {
     (void)game;
     base_button(BTN_UNDER, 60.0F, 60.0F, 300.0F, 200.0F);
-    g.pop_a_shown = popup(POP_A, POP_A_BTN, 100.0F, 100.0F, 4.0F, &g.pop_a, &g.reason_pop_a);
+    g.pop_a_shown = popup(POP_A, POP_A_BTN, 100.0F, 100.0F, 4.0F, &g.reason_pop_a, &g.reason_pop_a_now);
 }
 
 static void frame_two_popups(void *game) {
     (void)game;
-    (void)popup(POP_A, POP_A_BTN, 100.0F, 100.0F, 0.0F, &g.pop_a, &g.reason_pop_a);
-    (void)popup(POP_B, BTN_B, 400.0F, 100.0F, 0.0F, &g.pop_b, NULL);
+    (void)popup(POP_A, POP_A_BTN, 100.0F, 100.0F, 0.0F, &g.reason_pop_a, NULL);
+    (void)popup(POP_B, BTN_B, 400.0F, 100.0F, 0.0F, NULL, NULL);
 }
 
 static void frame_popup_button(void *game) {
     (void)game;
-    (void)popup(POP_A, POP_A_BTN, 100.0F, 100.0F, 0.0F, &g.pop_a, &g.reason_pop_a);
+    g.pop_a_shown = !g.skip_pop_a && popup(POP_A, POP_A_BTN, 100.0F, 100.0F, 0.0F, &g.reason_pop_a, NULL);
     base_button(BTN_A, 400.0F, 400.0F, 150.0F, 60.0F);
 }
 
@@ -427,11 +435,11 @@ static void test_live_modal_over_held_press_cancels_the_click(void) {
     scenario(frame_button_modal);
     sc_move_to(&s, BTN_A);
     sc_press(&s, NT_BUTTON_LEFT);
-    g.modal_a = true;
+    nt_ui_open(s_fx.ctx, MODAL_A);
     sc_frames(&s, 1);
     sc_release(&s, NT_BUTTON_LEFT);
     TEST_ASSERT_EQUAL_INT(0, g.n);
-    g.modal_a = false;
+    nt_ui_close(s_fx.ctx, MODAL_A);
     sc_frames(&s, 1);
     sc_click_id(&s, BTN_A);
     TEST_ASSERT_EQUAL_INT(1, clicks(BTN_A));
@@ -443,7 +451,7 @@ static void test_live_field_under_modal_stops_typing(void) {
     sc_click_id(&s, FIELD_BASE);
     sc_char(&s, 'a');
     TEST_ASSERT_EQUAL_STRING("a", g.buf_base);
-    g.modal_a = true;
+    nt_ui_open(s_fx.ctx, MODAL_A);
     sc_frames(&s, 1);
     sc_char(&s, 'b');
     TEST_ASSERT_EQUAL_STRING("a", g.buf_base);
@@ -452,7 +460,7 @@ static void test_live_field_under_modal_stops_typing(void) {
 
 /* Live: Tab inside a modal cycles its own fields and never lands on the field under it. */
 static void test_live_tab_in_modal_cycles_only_its_fields(void) {
-    g.modal_a = true;
+    nt_ui_open(s_fx.ctx, MODAL_A);
     scenario(frame_field_modal);
     sc_frames(&s, 1);
     sc_click_id(&s, FIELD_M1);
@@ -470,7 +478,7 @@ static void test_live_tab_in_modal_cycles_only_its_fields(void) {
 // #region Router: Keys
 /* Keys: a focused field in a modal owns the keys; its Esc unfocuses it, the next Esc closes the modal. */
 static void test_keys_esc_unfocuses_field_then_closes_modal(void) {
-    g.modal_a = true;
+    nt_ui_open(s_fx.ctx, MODAL_A);
     g.modal_flags = NT_UI_MODAL_LISTEN_ESC;
     scenario(frame_field_modal);
     sc_frames(&s, 1);
@@ -478,11 +486,11 @@ static void test_keys_esc_unfocuses_field_then_closes_modal(void) {
     TEST_ASSERT_TRUE(s.wants_keyboard);
     sc_key(&s, NT_KEY_ESCAPE);
     TEST_ASSERT_FALSE(nt_ui_input_focused(s.ctx, FIELD_M1));
-    TEST_ASSERT_TRUE_MESSAGE(g.modal_a, "the field's Esc does not reach the modal");
+    TEST_ASSERT_TRUE_MESSAGE(nt_ui_is_open(s_fx.ctx, MODAL_A), "the field's Esc does not reach the modal");
     sc_frames(&s, 1);
     TEST_ASSERT_TRUE_MESSAGE(s.wants_keyboard, "the modal owns the keys now");
     sc_key(&s, NT_KEY_ESCAPE);
-    TEST_ASSERT_FALSE(g.modal_a);
+    TEST_ASSERT_FALSE(nt_ui_is_open(s_fx.ctx, MODAL_A));
     TEST_ASSERT_EQUAL_UINT8(NT_UI_POPUP_CLOSE_ESC, g.reason_modal_a);
     sc_frames(&s, 1);
     TEST_ASSERT_FALSE(s.wants_keyboard);
@@ -491,11 +499,11 @@ static void test_keys_esc_unfocuses_field_then_closes_modal(void) {
 /* Keys: the Esc that closes a menu was the menu's, so the game sees wants_keyboard in that frame. */
 static void test_keys_menu_closing_esc_still_wants_keyboard(void) {
     scenario(frame_menu);
-    nt_ui_menu_open(&g.menu, 120.0F, 80.0F);
+    nt_ui_menu_open(&g.menu, s_fx.ctx, MENU_A, 120.0F, 80.0F);
     sc_frames(&s, 2);
     TEST_ASSERT_TRUE(s.wants_keyboard);
     sc_key(&s, NT_KEY_ESCAPE);
-    TEST_ASSERT_FALSE(g.menu.open);
+    TEST_ASSERT_FALSE(nt_ui_is_open(s_fx.ctx, MENU_A));
     TEST_ASSERT_TRUE_MESSAGE(s.wants_keyboard, "the closing Esc is not the game's");
     sc_frames(&s, 1);
     TEST_ASSERT_FALSE(s.wants_keyboard);
@@ -505,13 +513,13 @@ static void test_keys_menu_closing_esc_still_wants_keyboard(void) {
 // #region Router: Inert
 /* Inert: a popup fading out takes no click; the button under its panel does. */
 static void test_inert_fading_popup_passes_the_click_through(void) {
-    g.pop_a = true;
+    nt_ui_open(s_fx.ctx, POP_A);
     scenario(frame_inert_popup);
     sc_frames(&s, 1);
     sc_click_id(&s, POP_A_BTN);
     TEST_ASSERT_EQUAL_INT(1, clicks(POP_A_BTN));
     TEST_ASSERT_EQUAL_INT(0, clicks(BTN_UNDER));
-    g.pop_a = false;
+    nt_ui_close(s_fx.ctx, POP_A);
     sc_click_id(&s, POP_A_BTN);
     TEST_ASSERT_TRUE_MESSAGE(g.pop_a_shown, "the popup still fades out");
     TEST_ASSERT_EQUAL_INT(1, clicks(POP_A_BTN));
@@ -522,14 +530,14 @@ static void test_inert_fading_popup_passes_the_click_through(void) {
 // #region Overlay stack: Stack, One transient child, Own close
 /* Stack: the modal opened last is on top though declared first. */
 static void test_stack_last_opened_modal_is_on_top(void) {
-    g.modal_a = true;
+    nt_ui_open(s_fx.ctx, MODAL_A);
     scenario(frame_two_modals);
     sc_frames(&s, 1);
-    g.modal_b = true;
+    nt_ui_open(s_fx.ctx, MODAL_B);
     sc_frames(&s, 2);
     sc_click_id(&s, MODAL_A_BTN);
     TEST_ASSERT_EQUAL_INT(0, g.n);
-    TEST_ASSERT_TRUE_MESSAGE(g.modal_a, "the covered modal stays open");
+    TEST_ASSERT_TRUE_MESSAGE(nt_ui_is_open(s_fx.ctx, MODAL_A), "the covered modal stays open");
     sc_click_id(&s, MODAL_B_BTN);
     TEST_ASSERT_EQUAL_INT(1, g.n);
     TEST_ASSERT_EQUAL_UINT32(MODAL_B_BTN, g.log[0]);
@@ -537,7 +545,7 @@ static void test_stack_last_opened_modal_is_on_top(void) {
 
 /* Stack: a combo opened inside a modal lies above it: its row wins over the modal's button under the list. */
 static void test_stack_combo_in_modal_stays_above_it(void) {
-    g.modal_a = true;
+    nt_ui_open(s_fx.ctx, MODAL_A);
     scenario(frame_modal_combo);
     sc_frames(&s, 1);
     sc_click_id(&s, COMBO_A);
@@ -550,56 +558,58 @@ static void test_stack_combo_in_modal_stays_above_it(void) {
     TEST_ASSERT_TRUE_MESSAGE(rx > btn.x && rx < btn.x + btn.width && ry > btn.y && ry < btn.y + btn.height, "the row lies over the modal's button");
     sc_click(&s, rx, ry);
     TEST_ASSERT_EQUAL_INT(1, g.combo_sel);
-    TEST_ASSERT_FALSE(g.combo);
+    sc_frames(&s, 1);
+    TEST_ASSERT_FALSE_MESSAGE(g.combo, "the pick closed the list");
     TEST_ASSERT_EQUAL_INT(0, clicks(MODAL_A_BTN));
-    TEST_ASSERT_TRUE(g.modal_a);
+    TEST_ASSERT_TRUE(nt_ui_is_open(s_fx.ctx, MODAL_A));
 }
 
-/* One transient child: a second light-dismiss popup opened at the base closes the first one. */
+/* Opening closes popups: a second popup opened at the base closes the first at its first declaration; the first,
+ * declared before it, reports REPLACED at its next begin. */
 static void test_transient_second_popup_replaces_the_first(void) {
-    g.pop_a = true;
+    nt_ui_open(s_fx.ctx, POP_A);
     scenario(frame_two_popups);
     sc_frames(&s, 1);
-    g.pop_b = true;
+    nt_ui_open(s_fx.ctx, POP_B);
     sc_frames(&s, 1);
-    TEST_ASSERT_TRUE_MESSAGE(g.pop_a, "A, declared before B, closes at its next begin");
+    TEST_ASSERT_FALSE_MESSAGE(nt_ui_is_open(s_fx.ctx, POP_A), "B's first declaration closes A");
+    TEST_ASSERT_EQUAL_UINT8(NT_UI_POPUP_CLOSE_NONE, g.reason_pop_a);
     sc_frames(&s, 1);
-    TEST_ASSERT_FALSE(g.pop_a);
     TEST_ASSERT_EQUAL_UINT8(NT_UI_POPUP_CLOSE_REPLACED, g.reason_pop_a);
-    TEST_ASSERT_TRUE(g.pop_b);
+    TEST_ASSERT_TRUE(nt_ui_is_open(s_fx.ctx, POP_B));
 }
 
-/* Opening closes light dismiss: a modal opened next to an open combo closes it, and takes Esc. */
+/* Opening closes popups: a modal opened next to an open combo closes it, and takes Esc. */
 static void test_transient_modal_closes_open_combo(void) {
     scenario(frame_combo_modal);
     sc_click_id(&s, COMBO_A);
     TEST_ASSERT_TRUE(g.combo);
     sc_frames(&s, 1);
     g.modal_flags = NT_UI_MODAL_LISTEN_ESC;
-    g.modal_a = true;
+    nt_ui_open(s_fx.ctx, MODAL_A);
     sc_frames(&s, 1);
-    TEST_ASSERT_TRUE_MESSAGE(g.combo, "the combo, declared before the modal, closes at its next begin");
+    TEST_ASSERT_TRUE_MESSAGE(g.combo, "the combo, declared before the modal, still showed in that frame");
     sc_frames(&s, 1);
     TEST_ASSERT_FALSE_MESSAGE(g.combo, "the opening modal closes the combo");
-    TEST_ASSERT_TRUE(g.modal_a);
+    TEST_ASSERT_TRUE(nt_ui_is_open(s_fx.ctx, MODAL_A));
     sc_key(&s, NT_KEY_ESCAPE);
-    TEST_ASSERT_FALSE(g.modal_a);
+    TEST_ASSERT_FALSE(nt_ui_is_open(s_fx.ctx, MODAL_A));
 }
 
-/* Opening closes light dismiss: a confirm modal declared inside the combo list leaves the list open under it,
- * and its button takes the click. */
+/* Opening closes popups: a confirm modal declared inside the combo list leaves the list open under it, and its
+ * button takes the click. */
 static void test_transient_confirm_inside_combo_keeps_it_open(void) {
     scenario(frame_combo_confirm);
     sc_click_id(&s, COMBO_A);
     TEST_ASSERT_TRUE(g.combo);
     sc_frames(&s, 1);
-    g.modal_b = true;
+    nt_ui_open(s_fx.ctx, MODAL_B);
     sc_frames(&s, 2);
     TEST_ASSERT_TRUE_MESSAGE(g.combo, "the confirm inside the list does not close it");
     sc_click_id(&s, MODAL_B_BTN);
     TEST_ASSERT_EQUAL_INT(1, clicks(MODAL_B_BTN));
     TEST_ASSERT_TRUE(g.combo);
-    TEST_ASSERT_TRUE(g.modal_b);
+    TEST_ASSERT_TRUE(nt_ui_is_open(s_fx.ctx, MODAL_B));
 }
 
 /* One transient child: opening a menu closes an open combo. */
@@ -608,10 +618,10 @@ static void test_transient_menu_closes_open_combo(void) {
     sc_click_id(&s, COMBO_A);
     TEST_ASSERT_TRUE(g.combo);
     sc_frames(&s, 1);
-    nt_ui_menu_open(&g.menu, 400.0F, 300.0F);
+    nt_ui_menu_open(&g.menu, s_fx.ctx, MENU_A, 400.0F, 300.0F);
     sc_frames(&s, 2);
     TEST_ASSERT_FALSE(g.combo);
-    TEST_ASSERT_TRUE(g.menu.open);
+    TEST_ASSERT_TRUE(nt_ui_is_open(s_fx.ctx, MENU_A));
 }
 
 /* One transient child: a tooltip is not transient, so showing one next to an open combo keeps it open, and the
@@ -632,11 +642,11 @@ static void test_transient_tooltip_keeps_open_combo(void) {
 
 /* Own close: an outside press closes a popup, clicks nothing under it, and the next press reaches it. */
 static void test_own_close_outside_click_closes_popup(void) {
-    g.pop_a = true;
+    nt_ui_open(s_fx.ctx, POP_A);
     scenario(frame_popup_button);
     sc_frames(&s, 1);
     sc_click_id(&s, BTN_A);
-    TEST_ASSERT_FALSE(g.pop_a);
+    TEST_ASSERT_FALSE(nt_ui_is_open(s_fx.ctx, POP_A));
     TEST_ASSERT_EQUAL_UINT8(NT_UI_POPUP_CLOSE_OUTSIDE, g.reason_pop_a);
     TEST_ASSERT_EQUAL_INT(0, clicks(BTN_A));
     sc_click_id(&s, BTN_A);
@@ -645,7 +655,7 @@ static void test_own_close_outside_click_closes_popup(void) {
 
 /* Own close: Esc closes the top overlay only, the combo inside the modal; the next Esc closes the modal. */
 static void test_own_close_esc_closes_top_combo_only(void) {
-    g.modal_a = true;
+    nt_ui_open(s_fx.ctx, MODAL_A);
     g.modal_flags = NT_UI_MODAL_LISTEN_ESC;
     scenario(frame_modal_combo);
     sc_frames(&s, 1);
@@ -654,10 +664,59 @@ static void test_own_close_esc_closes_top_combo_only(void) {
     sc_frames(&s, 1);
     sc_key(&s, NT_KEY_ESCAPE);
     TEST_ASSERT_FALSE(g.combo);
-    TEST_ASSERT_TRUE(g.modal_a);
+    TEST_ASSERT_TRUE(nt_ui_is_open(s_fx.ctx, MODAL_A));
     sc_key(&s, NT_KEY_ESCAPE);
-    TEST_ASSERT_FALSE(g.modal_a);
+    TEST_ASSERT_FALSE(nt_ui_is_open(s_fx.ctx, MODAL_A));
     TEST_ASSERT_EQUAL_UINT8(NT_UI_POPUP_CLOSE_ESC, g.reason_modal_a);
+}
+/* Stack: nt_ui_open between frames (after nt_ui_end, before the next nt_ui_begin) shows the overlay at its next
+ * declaration. */
+static void test_stack_open_between_frames_shows_next_frame(void) {
+    scenario(frame_popup_button);
+    TEST_ASSERT_FALSE(g.pop_a_shown);
+    nt_ui_open(s_fx.ctx, POP_A);
+    sc_frames(&s, 1);
+    TEST_ASSERT_TRUE_MESSAGE(g.pop_a_shown, "the popup opened between frames shows at its declaration");
+    sc_click_id(&s, POP_A_BTN);
+    TEST_ASSERT_EQUAL_INT(1, clicks(POP_A_BTN));
+}
+
+/* Stack: an overlay opened but never declared waits one begin, then the next begin closes it. */
+static void test_stack_undeclared_open_closes_after_one_begin(void) {
+    scenario(frame_overlap);
+    nt_ui_open(s_fx.ctx, POP_B);
+    sc_frames(&s, 1);
+    TEST_ASSERT_TRUE_MESSAGE(nt_ui_is_open(s_fx.ctx, POP_B), "one opened since the last begin waits one more");
+    sc_frames(&s, 1);
+    TEST_ASSERT_FALSE_MESSAGE(nt_ui_is_open(s_fx.ctx, POP_B), "the second begin closes the overlay no frame declared");
+}
+
+/* Stack: an overlay the game leaves out for one frame is closed; declared again without nt_ui_open, it stays
+ * hidden. */
+static void test_stack_overlay_left_out_for_a_frame_closes(void) {
+    nt_ui_open(s_fx.ctx, POP_A);
+    scenario(frame_popup_button);
+    sc_frames(&s, 1);
+    TEST_ASSERT_TRUE(g.pop_a_shown);
+    g.skip_pop_a = true;
+    sc_frames(&s, 1);
+    g.skip_pop_a = false;
+    sc_frames(&s, 1);
+    TEST_ASSERT_FALSE_MESSAGE(g.pop_a_shown, "a popup left out for a frame does not come back by itself");
+    TEST_ASSERT_FALSE(nt_ui_is_open(s_fx.ctx, POP_A));
+}
+
+/* Own close: nt_ui_close reports GAME once, at the next begin, while the popup still fades. */
+static void test_own_close_game_close_reports_once(void) {
+    nt_ui_open(s_fx.ctx, POP_A);
+    scenario(frame_inert_popup);
+    sc_frames(&s, 1);
+    nt_ui_close(s_fx.ctx, POP_A);
+    sc_frames(&s, 1);
+    TEST_ASSERT_EQUAL_UINT8(NT_UI_POPUP_CLOSE_GAME, g.reason_pop_a_now);
+    sc_frames(&s, 1);
+    TEST_ASSERT_TRUE_MESSAGE(g.pop_a_shown, "the popup still fades");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(NT_UI_POPUP_CLOSE_NONE, g.reason_pop_a_now, "the close is reported once");
 }
 // #endregion
 
@@ -665,7 +724,7 @@ static void test_own_close_esc_closes_top_combo_only(void) {
 /* Down, Right, Down, Enter, Down, Enter reach File > Open > File2, which reports its activation once. */
 static void test_menu_keys_activate_nested_leaf_once(void) {
     scenario(frame_menu);
-    nt_ui_menu_open(&g.menu, 120.0F, 80.0F);
+    nt_ui_menu_open(&g.menu, s_fx.ctx, MENU_A, 120.0F, 80.0F);
     sc_frames(&s, 1);
     sc_key(&s, NT_KEY_ARROW_DOWN);
     sc_key(&s, NT_KEY_ARROW_RIGHT);
@@ -677,7 +736,7 @@ static void test_menu_keys_activate_nested_leaf_once(void) {
     sc_key(&s, NT_KEY_ENTER);
     TEST_ASSERT_EQUAL_INT(1, g.n);
     TEST_ASSERT_EQUAL_UINT32(ACT_FILE2, g.log[0]);
-    TEST_ASSERT_FALSE(g.menu.open);
+    TEST_ASSERT_FALSE(nt_ui_is_open(s_fx.ctx, MENU_A));
     sc_frames(&s, 2);
     TEST_ASSERT_EQUAL_INT(1, g.n);
 }
@@ -685,20 +744,20 @@ static void test_menu_keys_activate_nested_leaf_once(void) {
 /* Esc closes the deepest level first and focuses its parent (Right opens it again), then the menu. */
 static void test_menu_esc_closes_deepest_level_first(void) {
     scenario(frame_menu);
-    nt_ui_menu_open(&g.menu, 120.0F, 80.0F);
+    nt_ui_menu_open(&g.menu, s_fx.ctx, MENU_A, 120.0F, 80.0F);
     sc_frames(&s, 1);
     sc_key(&s, NT_KEY_ARROW_DOWN);
     sc_key(&s, NT_KEY_ARROW_RIGHT);
     TEST_ASSERT_TRUE(g.file_body);
     sc_key(&s, NT_KEY_ESCAPE);
-    TEST_ASSERT_TRUE(g.menu.open);
+    TEST_ASSERT_TRUE(nt_ui_is_open(s_fx.ctx, MENU_A));
     TEST_ASSERT_FALSE(g.file_body);
     sc_key(&s, NT_KEY_ARROW_RIGHT);
     TEST_ASSERT_TRUE_MESSAGE(g.file_body, "the closed level's parent keeps the focus");
     sc_key(&s, NT_KEY_ESCAPE);
-    TEST_ASSERT_TRUE(g.menu.open);
+    TEST_ASSERT_TRUE(nt_ui_is_open(s_fx.ctx, MENU_A));
     sc_key(&s, NT_KEY_ESCAPE);
-    TEST_ASSERT_FALSE(g.menu.open);
+    TEST_ASSERT_FALSE(nt_ui_is_open(s_fx.ctx, MENU_A));
     TEST_ASSERT_EQUAL_INT(0, g.n);
 }
 
@@ -706,7 +765,7 @@ static void test_menu_esc_closes_deepest_level_first(void) {
  * the aim fallback (and under twice it); a leaf there then activates. */
 static void test_menu_diagonal_travel_keeps_hovered_submenu(void) {
     scenario(frame_menu);
-    nt_ui_menu_open(&g.menu, 120.0F, 80.0F);
+    nt_ui_menu_open(&g.menu, s_fx.ctx, MENU_A, 120.0F, 80.0F);
     sc_frames(&s, 1);
     sc_move_to(&s, menu_row(MENU_A, KEY_FILE));
     sc_frames(&s, 1);
@@ -730,13 +789,13 @@ static void test_menu_diagonal_travel_keeps_hovered_submenu(void) {
     sc_click_id(&s, menu_row(menu_row(MENU_A, KEY_FILE), KEY_QUIT));
     TEST_ASSERT_EQUAL_INT(1, g.n);
     TEST_ASSERT_EQUAL_UINT32(ACT_QUIT, g.log[0]);
-    TEST_ASSERT_FALSE(g.menu.open);
+    TEST_ASSERT_FALSE(nt_ui_is_open(s_fx.ctx, MENU_A));
 }
 
 /* A combo opened from a custom menu row closes the sibling submenu, well before any hover switch could. */
 static void test_menu_combo_from_custom_row_closes_sibling_submenu(void) {
     scenario(frame_menu_combo_row);
-    nt_ui_menu_open(&g.menu, 120.0F, 80.0F);
+    nt_ui_menu_open(&g.menu, s_fx.ctx, MENU_A, 120.0F, 80.0F);
     sc_frames(&s, 1);
     sc_move_to(&s, menu_row(MENU_A, KEY_FILE));
     sc_frames(&s, 1);
@@ -747,12 +806,12 @@ static void test_menu_combo_from_custom_row_closes_sibling_submenu(void) {
     TEST_ASSERT_TRUE_MESSAGE(g.file_body, "the submenu is still open when the combo's trigger is pressed");
     sc_release(&s, NT_BUTTON_LEFT);
     TEST_ASSERT_TRUE(g.combo);
-    TEST_ASSERT_TRUE_MESSAGE(g.file_body, "the submenu, declared before the combo, closes at its next begin");
+    TEST_ASSERT_TRUE_MESSAGE(g.file_body, "the submenu, declared before the combo, still showed in that frame");
     sc_frames(&s, 1);
     TEST_ASSERT_TRUE_MESSAGE(g.frames - left_row < AIM_FALLBACK_FRAMES, "the frames since the pointer left the row stay under the aim fallback");
     TEST_ASSERT_FALSE_MESSAGE(g.file_body, "the combo replaces the sibling submenu");
     TEST_ASSERT_TRUE(g.combo);
-    TEST_ASSERT_TRUE(g.menu.open);
+    TEST_ASSERT_TRUE(nt_ui_is_open(s_fx.ctx, MENU_A));
 }
 // #endregion
 
@@ -776,6 +835,10 @@ int main(void) {
     RUN_TEST(test_transient_tooltip_keeps_open_combo);
     RUN_TEST(test_own_close_outside_click_closes_popup);
     RUN_TEST(test_own_close_esc_closes_top_combo_only);
+    RUN_TEST(test_stack_open_between_frames_shows_next_frame);
+    RUN_TEST(test_stack_undeclared_open_closes_after_one_begin);
+    RUN_TEST(test_stack_overlay_left_out_for_a_frame_closes);
+    RUN_TEST(test_own_close_game_close_reports_once);
     RUN_TEST(test_menu_keys_activate_nested_leaf_once);
     RUN_TEST(test_menu_esc_closes_deepest_level_first);
     RUN_TEST(test_menu_diagonal_travel_keeps_hovered_submenu);

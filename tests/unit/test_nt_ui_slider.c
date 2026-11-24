@@ -964,8 +964,8 @@ static void test_thumb_above_modal_band_first_frame(void) {
     mst.ease_speed = 0.0F; /* snap open: the panel is at full size on frame 1 */
 
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &idle, .pointer_count = 1});
-    bool modal_open = true;
-    if (nt_ui_modal_begin(s_fx.ctx, 0x5D0001U, &mst, &modal_open, NULL)) {
+    nt_ui_open(s_fx.ctx, 0x5D0001U);
+    if (nt_ui_modal_begin(s_fx.ctx, 0x5D0001U, &mst, NULL)) {
         CLAY({.id = CLAY_ID("modal_panel"),
               .layout = {.sizing = {CLAY_SIZING_FIXED(400.0F), CLAY_SIZING_FIXED(200.0F)}},
               .backgroundColor = {10, 10, 10, 255},

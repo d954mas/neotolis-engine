@@ -271,9 +271,9 @@ static bool dropdown_declare_row(nt_ui_context_t *ctx, uint8_t fill_layer, uint8
 
 /* Emit the trigger element + harvest the toggle. When `leave_open` the element stays OPEN (the game declares
  * the preview content) and combo_preview_end appends the chevron tail + closes + does the ONE step; otherwise
- * emit the preview label + chevron inline here, close, and do the step (toggling *open on a click). The
+ * emit the preview label + chevron inline here, close, and do the step (a click opens the list). The
  * trigger interior is fed a single `preview` string (the game-owned current-selection label). */
-static void combo_open_trigger(nt_ui_context_t *ctx, uint8_t fill_layer, uint8_t label_layer, uint32_t id, const char *preview, nt_ui_dropdown_style_t *style, bool *open, bool leave_open) {
+static void combo_open_trigger(nt_ui_context_t *ctx, uint8_t fill_layer, uint8_t label_layer, uint32_t id, const char *preview, nt_ui_dropdown_style_t *style, bool leave_open) {
     const nt_ui_interaction_t in = nt_ui_query_interaction(ctx, id);
 
     nt_ui_dd_state_t *st = &style->trigger_idle;
@@ -283,7 +283,7 @@ static void combo_open_trigger(nt_ui_context_t *ctx, uint8_t fill_layer, uint8_t
         st = &style->trigger_hover; /* also over an interactive child of the preview content */
     }
 
-    const nt_ui_anim_target_t tgt = {.scale_x = st->scale, .scale_y = st->scale, .scale_z = 1.0F, .opacity = st->opacity, .value_t = *open ? 1.0F : 0.0F};
+    const nt_ui_anim_target_t tgt = {.scale_x = st->scale, .scale_y = st->scale, .scale_z = 1.0F, .opacity = st->opacity, .value_t = nt_ui_is_open(ctx, dropdown_popup_id(id)) ? 1.0F : 0.0F};
     const nt_ui_anim_interaction_t *a = nt_ui_anim(ctx, id, &tgt, style->state_speed, style->value_speed);
     const nt_ui_transform_t trig_t = {.scale_x = a->scale_x, .scale_y = a->scale_y, .scale_z = 1.0F};
     const nt_ui_element_data_t *trig_data = nt_ui_make_element_data_xform(fill_layer, NULL, &trig_t, a->opacity);
@@ -317,7 +317,7 @@ static void combo_open_trigger(nt_ui_context_t *ctx, uint8_t fill_layer, uint8_t
     dropdown_declare_chevron(ctx, fill_layer, 0U, style, a->value_t);
     nt_ui_clay_priv_close_element();
     if (nt_ui_step(ctx, id, NULL).clicked) {
-        *open = !*open;
+        nt_ui_open(ctx, dropdown_popup_id(id)); /* an open list's catcher covers the trigger: a click only opens */
     }
 }
 
@@ -363,7 +363,7 @@ static void combo_open_body(nt_ui_context_t *ctx, uint8_t fill_layer, uint32_t i
 /* Open the list popup + the inner row container after the trigger has emitted. Returns whether the body
  * should be declared this frame (the popup is visible). On true, pushes pending_combo so the per-row
  * selectables + combo_end find their bookkeeping. */
-static bool combo_open_list(nt_ui_context_t *ctx, uint8_t fill_layer, uint8_t label_layer, uint32_t id, nt_ui_dropdown_style_t *style, bool *open) {
+static bool combo_open_list(nt_ui_context_t *ctx, uint8_t fill_layer, uint8_t label_layer, uint32_t id, nt_ui_dropdown_style_t *style) {
     nt_ui_popup_anchor_t anc = {.prefer_side = NT_UI_POPUP_BELOW};
     const nt_ui_bbox_t bb = nt_ui_get_bbox(ctx, id);
     if (bb.found) {
@@ -380,7 +380,7 @@ static bool combo_open_list(nt_ui_context_t *ctx, uint8_t fill_layer, uint8_t la
     nt_atlas_resolve_ref(&style->panel_bg);
     const bool panel_art = (style->panel_bg.atlas.id != 0U && style->panel_bg.region != NT_ATLAS_INVALID_REGION);
 
-    if (!nt_ui_popup_begin(ctx, dropdown_popup_id(id), &pst, &anc, open, NULL)) {
+    if (!nt_ui_popup_begin(ctx, dropdown_popup_id(id), &pst, &anc, NULL)) {
         return false; /* hidden: nothing declared, no end */
     }
     const bool scrolls = (style->max_visible_rows > 0U);
@@ -388,7 +388,6 @@ static bool combo_open_list(nt_ui_context_t *ctx, uint8_t fill_layer, uint8_t la
 
     ctx->pending_combo.style = style;
     ctx->pending_combo.id = id;
-    ctx->pending_combo.open = open;
     ctx->pending_combo.row_idx = 0U;
 #if NT_UI_CHECKS
     ctx->pending_combo.dup_key_count = 0U; /* fresh per-list dup-key window */
@@ -401,29 +400,28 @@ static bool combo_open_list(nt_ui_context_t *ctx, uint8_t fill_layer, uint8_t la
     return true;
 }
 
-bool nt_ui_combo_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t id, const char *preview, nt_ui_dropdown_style_t *style, bool *open) {
+bool nt_ui_combo_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t id, const char *preview, nt_ui_dropdown_style_t *style) {
     NT_ASSERT(ctx != NULL && ctx->in_frame && ctx == nt_ui_internal_get_inframe_ctx() && "nt_ui_combo_begin: call between nt_ui_begin/end on the active ctx");
-    NT_ASSERT(id != 0U && style != NULL && open != NULL && "nt_ui_combo_begin: id non-zero, pointers non-NULL");
+    NT_ASSERT(id != 0U && style != NULL && "nt_ui_combo_begin: id non-zero, style non-NULL");
     NT_ASSERT(!ctx->pending_combo.active && !ctx->pending_combo.trigger_open && "nt_ui_combo_begin: combos do not nest");
     assert_style_valid(style);
 
     const uint8_t fill_layer = (data != NULL) ? data->layer : 0U; /* fills on data->layer, text on label_layer (game-controlled render order) */
-    combo_open_trigger(ctx, fill_layer, label_layer, id, preview, style, open, false);
-    return combo_open_list(ctx, fill_layer, label_layer, id, style, open);
+    combo_open_trigger(ctx, fill_layer, label_layer, id, preview, style, false);
+    return combo_open_list(ctx, fill_layer, label_layer, id, style);
 }
 
-void nt_ui_combo_preview_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t id, nt_ui_dropdown_style_t *style, bool *open) {
+void nt_ui_combo_preview_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t id, nt_ui_dropdown_style_t *style) {
     NT_ASSERT(ctx != NULL && ctx->in_frame && ctx == nt_ui_internal_get_inframe_ctx() && "nt_ui_combo_preview_begin: call between nt_ui_begin/end on the active ctx");
-    NT_ASSERT(id != 0U && style != NULL && open != NULL && "nt_ui_combo_preview_begin: id non-zero, pointers non-NULL");
+    NT_ASSERT(id != 0U && style != NULL && "nt_ui_combo_preview_begin: id non-zero, style non-NULL");
     NT_ASSERT(!ctx->pending_combo.active && !ctx->pending_combo.trigger_open && "nt_ui_combo_preview_begin: combos do not nest");
     assert_style_valid(style);
 
     const uint8_t fill_layer = (data != NULL) ? data->layer : 0U; /* fills on data->layer, text on label_layer (game-controlled render order) */
-    combo_open_trigger(ctx, fill_layer, label_layer, id, NULL, style, open, true);
+    combo_open_trigger(ctx, fill_layer, label_layer, id, NULL, style, true);
     /* The trigger element stays open for the game's content; stash what combo_preview_end needs. */
     ctx->pending_combo.id = id;
     ctx->pending_combo.style = style;
-    ctx->pending_combo.open = open;
     ctx->pending_combo.fill_layer = fill_layer; /* combo_preview_end re-opens the list with the game's base layer */
     ctx->pending_combo.label_layer = label_layer;
     ctx->pending_combo.trigger_open = 1U;
@@ -435,7 +433,6 @@ bool nt_ui_combo_preview_end(nt_ui_context_t *ctx) {
 
     const uint32_t id = ctx->pending_combo.id;
     nt_ui_dropdown_style_t *style = (nt_ui_dropdown_style_t *)ctx->pending_combo.style;
-    bool *open = ctx->pending_combo.open;
     const uint8_t fill_layer = ctx->pending_combo.fill_layer;
     const uint8_t label_layer = ctx->pending_combo.label_layer;
 
@@ -450,11 +447,11 @@ bool nt_ui_combo_preview_end(nt_ui_context_t *ctx) {
 
     nt_ui_clay_priv_close_element();
     if (nt_ui_step(ctx, id, NULL).clicked) {
-        *open = !*open;
+        nt_ui_open(ctx, dropdown_popup_id(id));
     }
     ctx->pending_combo.trigger_open = 0U;
     /* Open the list now that the trigger bbox is closed (matches combo_begin's order). */
-    return combo_open_list(ctx, fill_layer, label_layer, id, style, open);
+    return combo_open_list(ctx, fill_layer, label_layer, id, style);
 }
 
 /* Shared row emit for the plain + iconed selectable: one engine-owned column ([icon gutter][label LEFT]),
@@ -468,7 +465,7 @@ static bool combo_emit_selectable(nt_ui_context_t *ctx, uint32_t key, const nt_a
     combo_dup_key_check(ctx, row_id);
     const bool clicked = dropdown_declare_row(ctx, ctx->pending_combo.fill_layer, ctx->pending_combo.label_layer, row_id, label_id, label, icon, selected, style);
     if (clicked) {
-        *ctx->pending_combo.open = false; /* the game writes *selected; the combo clears *open */
+        nt_ui_close(ctx, dropdown_popup_id(ctx->pending_combo.id)); /* the game writes *selected; a pick closes the list */
     }
     return clicked;
 }
@@ -518,10 +515,10 @@ bool nt_ui_combo_selectable_end(nt_ui_context_t *ctx) {
     const uint32_t row_id = ctx->pending_combo.row_id;
     nt_ui_clay_priv_close_element();
     /* The ONE nt_ui_step picks the row; an interactive child, declared later, wins the press over its own
-     * area. On click the combo clears *open (game writes *selected). */
+     * area. On click the list closes (game writes *selected). */
     const nt_ui_interaction_t step = nt_ui_step(ctx, row_id, NULL);
     if (step.clicked) {
-        *ctx->pending_combo.open = false; /* the game writes *selected; the combo clears *open */
+        nt_ui_close(ctx, dropdown_popup_id(ctx->pending_combo.id)); /* the game writes *selected; a pick closes the list */
     }
     ctx->pending_combo.row_open = 0U;
     return step.clicked;
@@ -541,7 +538,6 @@ void nt_ui_combo_end(nt_ui_context_t *ctx) {
     nt_ui_popup_end(ctx);
     ctx->pending_combo.active = 0U;
     ctx->pending_combo.style = NULL;
-    ctx->pending_combo.open = NULL;
 }
 
 #ifdef NT_TEST_ACCESS

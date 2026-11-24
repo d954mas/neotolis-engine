@@ -624,6 +624,13 @@ bool nt_ui_wants_pointer(const nt_ui_context_t *ctx);
  * a menu, a combo list). Fixed at nt_ui_begin, so read it after begin; the game gates its hotkeys on it. */
 bool nt_ui_wants_keyboard(const nt_ui_context_t *ctx);
 
+/* Overlays (a popup, a modal, a menu): open pushes `id` on top of the overlay stack (a reopen during its fade
+ * moves it there; opening an open one does nothing), close starts its fade, is_open asks. Callable anywhere, also between frames; an overlay takes input from the
+ * frame after it opens, and one not declared for a frame closes (spec: "Input ownership"). */
+void nt_ui_open(nt_ui_context_t *ctx, uint32_t id);
+void nt_ui_close(nt_ui_context_t *ctx, uint32_t id);
+bool nt_ui_is_open(const nt_ui_context_t *ctx, uint32_t id);
+
 /* The keys and typed chars of this frame, read by the widget `id`: answered only while `id` owns the keys
  * (the focused field, else the top overlay) and is live, so a widget never reads another's key. */
 bool nt_ui_key_pressed(const nt_ui_context_t *ctx, uint32_t id, nt_key_t key);

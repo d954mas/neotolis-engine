@@ -20,15 +20,13 @@ typedef struct {
     uint32_t backdrop_color;       /* 0xAABBGGRR; 0 = no visible backdrop (transparent catcher) */
     float backdrop_alpha;          /* peak backdrop opacity at t==1 (0..1); multiplied into the color alpha */
     int16_t close_pad;             /* px margin around the panel; an outside press within it does NOT dismiss */
-    bool catcher;                  /* an open popup gates the UI under it and claims the top; dismiss needs it */
+    bool catcher;                  /* takes input and gates the UI under it: it can be the top */
     bool esc_close;                /* Escape on the top popup raises NT_UI_POPUP_CLOSE_ESC */
     bool dismiss_on_click;         /* an outside press beyond the panel+pad raises NT_UI_POPUP_CLOSE_OUTSIDE */
-    bool transient;                /* one open per parent: opening it replaces its transient siblings */
+    bool popup;                    /* light dismiss: an overlay that takes input closes it when it opens */
 } nt_ui_popup_ext_t;
 
-/* The shared core: tween + z-band push + catcher/backdrop + close-scan + panel decl, only for a shown popup.
- * A raised close clears *open and lands in info->reason. ext (nullable) layers backdrop/esc/pad/def on top. */
-bool nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t id, const nt_ui_popup_style_t *style, const nt_ui_popup_anchor_t *anchor, bool *open, const nt_ui_popup_ext_t *ext,
-                                nt_ui_popup_info_t *info);
+/* The shared core: own close + tween + stack slot band + catcher/backdrop + panel decl, only for a shown popup. */
+bool nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t id, const nt_ui_popup_style_t *style, const nt_ui_popup_anchor_t *anchor, const nt_ui_popup_ext_t *ext, nt_ui_popup_info_t *info);
 
 #endif /* NT_UI_POPUP_INTERNAL_H */

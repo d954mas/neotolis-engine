@@ -163,8 +163,6 @@ typedef struct {
     float angles[SKELETAL_SHOWCASE_MAX_JOINTS][3];
     int selected_joint;
     bool show_axes;
-    bool combo_open;
-    bool rig_combo_open;
 } skeletal_pose_scene_state_t;
 
 typedef struct {
@@ -183,8 +181,6 @@ typedef struct {
 
 typedef struct {
     character_player_t player;
-    bool rig_combo_open;
-    bool clip_combo_open;
 } skinned_scene_state_t;
 
 typedef enum {
@@ -241,7 +237,6 @@ typedef struct {
     bool strict_partial;
     bool using_snapshot;
     bool repeating;
-    bool mode_combo_open;
 } mixing_scene_state_t;
 
 static skeletal_pose_scene_state_t s_skeleton_scene;
@@ -258,7 +253,6 @@ static int s_order_mode;
 static bool s_order_shared;
 static bool s_order_two_passes;
 static bool s_order_paused;
-static bool s_order_combo_open;
 static const char *const s_order_names[] = {"Grouped", "Alternating meshes", "Alternating materials"};
 static struct {
     uint32_t draws[2], expected[2], instances[2];
@@ -320,7 +314,6 @@ static float s_fit_center[3];
 static float s_fit_scale = 1.0F; /* rig extent / humanoid extent: scales the camera and the stage primitives */
 static bool s_fit_pending;       /* the active scene refits the camera to its rig on its next update */
 static bool s_show_controls = true;
-static bool s_scene_combo_open;
 static int s_active_scene = -1;
 static bool s_skip_scene_interaction_this_frame;
 
@@ -352,15 +345,12 @@ typedef struct {
     const char *source;
     void (*reset)(void);
     void (*update)(void);
-    void (*cancel_input)(void);
     void (*declare_controls)(void);
     void (*prepare)(void); /* before the first pass: palettes, CPU work, item lists; NULL when nothing to do */
     void (*draw)(void);    /* inside the pass: recorded draws only */
 } skeletal_scene_desc_t;
 
 static void cancel_scene_input(void);
-static void cancel_active_scene_input(void);
-static void skeleton_cancel_input(void);
 static void skeleton_draw(void);
 static void reset_scene(void);
 static void skeleton_update(void);
@@ -368,19 +358,16 @@ static void declare_properties(void);
 
 static void skinned_reset(void);
 static void skinned_update(void);
-static void skinned_cancel_input(void);
 static void skinned_declare_controls(void);
 static void skinned_prepare(void);
 static void skinned_draw(void);
 static void ordering_reset(void);
 static void ordering_update(void);
-static void ordering_cancel_input(void);
 static void ordering_declare_controls(void);
 static void ordering_prepare(void);
 static void ordering_draw(void);
 static void mixing_reset(void);
 static void mixing_update(void);
-static void mixing_cancel_input(void);
 static void mixing_declare_controls(void);
 static void mixing_prepare(void);
 static void mixing_draw(void);
@@ -392,7 +379,6 @@ static const skeletal_scene_desc_t s_scene_registry[] = {
         .source = "Source: examples/skeletal_showcase/main.c",
         .reset = reset_scene,
         .update = skeleton_update,
-        .cancel_input = skeleton_cancel_input,
         .declare_controls = declare_properties,
         .draw = skeleton_draw,
     },
@@ -402,7 +388,6 @@ static const skeletal_scene_desc_t s_scene_registry[] = {
         .source = "Source: examples/skeletal_showcase/main.c",
         .reset = skinned_reset,
         .update = skinned_update,
-        .cancel_input = skinned_cancel_input,
         .declare_controls = skinned_declare_controls,
         .prepare = skinned_prepare,
         .draw = skinned_draw,
@@ -413,7 +398,6 @@ static const skeletal_scene_desc_t s_scene_registry[] = {
         .source = "Source: examples/skeletal_showcase/main.c",
         .reset = ordering_reset,
         .update = ordering_update,
-        .cancel_input = ordering_cancel_input,
         .declare_controls = ordering_declare_controls,
         .prepare = ordering_prepare,
         .draw = ordering_draw,
@@ -424,7 +408,6 @@ static const skeletal_scene_desc_t s_scene_registry[] = {
         .source = "Source: examples/skeletal_showcase/main.c",
         .reset = mixing_reset,
         .update = mixing_update,
-        .cancel_input = mixing_cancel_input,
         .declare_controls = mixing_declare_controls,
         .prepare = mixing_prepare,
         .draw = mixing_draw,
@@ -605,7 +588,6 @@ static void select_rig(rig_source_t rig) {
     s_skeleton_scene.rig_source = rig;
     s_skeleton_scene.view = rig_view(rig);
     s_skeleton_scene.selected_joint = 0;
-    s_skeleton_scene.combo_open = false;
     s_fit_pending = true;
     memset(s_skeleton_scene.angles, 0, sizeof s_skeleton_scene.angles);
     skeleton_update();
@@ -613,8 +595,6 @@ static void select_rig(rig_source_t rig) {
 
 static void reset_scene(void) {
     s_skeleton_scene.show_axes = false;
-    s_skeleton_scene.combo_open = false;
-    s_skeleton_scene.rig_combo_open = false;
     select_rig(s_skeleton_scene.rig_source);
 }
 
@@ -797,10 +777,7 @@ static void player_update(character_player_t *p) {
         fit_rig(s_rig_names[p->rig], p->skel);
     }
 }
-static void skinned_reset(void) {
-    player_reset(&s_skinned_scene.player);
-    skinned_cancel_input();
-}
+static void skinned_reset(void) { player_reset(&s_skinned_scene.player); }
 
 static void skinned_update(void) {
     character_player_t *p = &s_skinned_scene.player;
@@ -1117,7 +1094,6 @@ static void mixing_set_mode(mixing_mode_t mode) {
     NT_ASSERT(mode < MIX_MODE_COUNT);
     s_mixing_scene.mode = mode;
     mixing_reset();
-    mixing_cancel_input();
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -1216,7 +1192,6 @@ static void mixing_update(void) {
     }
 }
 
-static void mixing_cancel_input(void) { s_mixing_scene.mode_combo_open = false; }
 // #endregion
 
 // #region ordering
@@ -1226,7 +1201,6 @@ static void ordering_reset(void) {
     s_order_shared = false;
     s_order_two_passes = false;
     s_order_paused = false;
-    s_order_combo_open = false;
     memset(&s_order_stats, 0, sizeof s_order_stats);
     for (uint32_t i = 0; i < SKELETAL_SHOWCASE_MAX_INSTANCES; ++i) {
         s_order_tracks[i] = (nt_skeletal_track_t){
@@ -1251,7 +1225,6 @@ static void ordering_update(void) {
     }
 }
 
-static void ordering_cancel_input(void) { s_order_combo_open = false; }
 // #endregion
 
 // #region scene meshes
@@ -1783,13 +1756,6 @@ static bool text_button_fixed(uint32_t id, const char *text, bool active, float 
 static void cancel_scene_input(void) {
     s_shell_stage_drag = false;
     s_shell_stage_pan = false;
-    s_scene_combo_open = false;
-}
-
-static void cancel_active_scene_input(void) {
-    if (s_active_scene >= 0) {
-        s_scene_registry[s_active_scene].cancel_input();
-    }
 }
 
 static void declare_header(void) {
@@ -1803,7 +1769,7 @@ static void declare_header(void) {
         nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), "Scene", label_style(13.0F, NT_RGBA8(160, 180, 205, 255)));
         char scene_preview[96];
         (void)snprintf(scene_preview, sizeof scene_preview, "%s v", s_scene_registry[s_active_scene].title);
-        if (nt_ui_combo_begin(s_ui, NULL, 4U, nt_ui_id("shell/scene_combo"), scene_preview, &s_scene_combo_style, &s_scene_combo_open)) {
+        if (nt_ui_combo_begin(s_ui, NULL, 4U, nt_ui_id("shell/scene_combo"), scene_preview, &s_scene_combo_style)) {
             for (uint32_t scene_index = 0U; scene_index < (uint32_t)SKELETAL_SCENE_COUNT; ++scene_index) {
                 if (nt_ui_combo_selectable(s_ui, scene_index, s_scene_registry[scene_index].title, (int)scene_index == s_active_scene)) {
                     switch_scene((int)scene_index);
@@ -1815,7 +1781,6 @@ static void declare_header(void) {
         if (text_button_fixed(nt_ui_id("shell/controls"), s_show_controls ? "Hide controls" : "Show controls", false, 132.0F, 32.0F)) {
             s_show_controls = !s_show_controls;
             cancel_scene_input();
-            cancel_active_scene_input();
         }
     }
 }
@@ -1833,7 +1798,7 @@ static void declare_rig_combo(void) {
     nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), "Rig", label_style(13.0F, NT_RGBA8(120, 205, 255, 255)));
     char rig_preview[64];
     (void)snprintf(rig_preview, sizeof rig_preview, "%s v", s_rig_names[s_skeleton_scene.rig_source]);
-    if (nt_ui_combo_begin(s_ui, NULL, 4U, nt_ui_id("skeleton/rig_combo"), rig_preview, &s_scene_combo_style, &s_skeleton_scene.rig_combo_open)) {
+    if (nt_ui_combo_begin(s_ui, NULL, 4U, nt_ui_id("skeleton/rig_combo"), rig_preview, &s_scene_combo_style)) {
         for (uint32_t rig = 0; rig < (uint32_t)RIG_COUNT; ++rig) {
             if (nt_ui_combo_selectable(s_ui, rig, s_rig_names[rig], rig == (uint32_t)s_skeleton_scene.rig_source) && rig != (uint32_t)s_skeleton_scene.rig_source) {
                 select_rig((rig_source_t)rig);
@@ -1862,7 +1827,7 @@ static void declare_pose_controls(const nt_skeletal_skeleton_t *skel) {
     nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), "Selected joint", label_style(13.0F, NT_RGBA8(120, 205, 255, 255)));
     char joint_preview[64];
     (void)snprintf(joint_preview, sizeof joint_preview, "%s v", joint_name((uint32_t)s_skeleton_scene.selected_joint, name_buf, sizeof name_buf));
-    if (nt_ui_combo_begin(s_ui, NULL, 4U, nt_ui_id("skeleton/joint_combo"), joint_preview, &s_joint_combo_style, &s_skeleton_scene.combo_open)) {
+    if (nt_ui_combo_begin(s_ui, NULL, 4U, nt_ui_id("skeleton/joint_combo"), joint_preview, &s_joint_combo_style)) {
         for (uint32_t j = 0; j < skel->joint_count; ++j) {
             char joint_label[48];
             int depth = 0;
@@ -1922,7 +1887,7 @@ static void declare_player_rig_combo(skinned_scene_state_t *scene) {
     nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), "Character", label_style(13.0F, NT_RGBA8(120, 205, 255, 255)));
     char rig_preview[64];
     (void)snprintf(rig_preview, sizeof rig_preview, "%s v", s_rig_names[p->rig]);
-    if (nt_ui_combo_begin(s_ui, NULL, 4U, nt_ui_id("player/rig_combo"), rig_preview, &s_scene_combo_style, &scene->rig_combo_open)) {
+    if (nt_ui_combo_begin(s_ui, NULL, 4U, nt_ui_id("player/rig_combo"), rig_preview, &s_scene_combo_style)) {
         for (uint32_t rig = RIG_HUMANOID; rig < (uint32_t)RIG_COUNT; ++rig) {
             if (nt_ui_combo_selectable(s_ui, rig, s_rig_names[rig], rig == (uint32_t)p->rig) && rig != (uint32_t)p->rig) {
                 player_select_rig(p, (rig_source_t)rig);
@@ -1938,7 +1903,7 @@ static void declare_player_clip_combo(skinned_scene_state_t *scene) {
     nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), "Clip", label_style(13.0F, NT_RGBA8(120, 205, 255, 255)));
     char clip_preview[64];
     (void)snprintf(clip_preview, sizeof clip_preview, "%s v", p->clip >= 0 ? s_clips[p->clip].name : "none");
-    if (nt_ui_combo_begin(s_ui, NULL, 4U, nt_ui_id("player/clip_combo"), clip_preview, &s_joint_combo_style, &scene->clip_combo_open)) {
+    if (nt_ui_combo_begin(s_ui, NULL, 4U, nt_ui_id("player/clip_combo"), clip_preview, &s_joint_combo_style)) {
         for (int i = 0; i < CLIP_COUNT; ++i) {
             const nt_skeletal_clip_t *view = player_clip_view(i);
             if (view == NULL) {
@@ -2014,7 +1979,7 @@ static void ordering_declare_controls(void) {
                              &(const Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(34)}}}, !s_skip_scene_interaction_this_frame)) {
             s_fit_pending = true;
         }
-        if (nt_ui_combo_begin(s_ui, NULL, 4, nt_ui_id("ordering/mode"), s_order_names[s_order_mode], &s_joint_combo_style, &s_order_combo_open)) {
+        if (nt_ui_combo_begin(s_ui, NULL, 4, nt_ui_id("ordering/mode"), s_order_names[s_order_mode], &s_joint_combo_style)) {
             for (uint32_t i = 0; i < 3; ++i) {
                 if (nt_ui_combo_selectable(s_ui, i, s_order_names[i], i == (uint32_t)s_order_mode)) {
                     s_order_mode = (int)i;
@@ -2051,7 +2016,7 @@ static void mixing_declare_controls(void) {
     const Clay_ElementDeclaration row = {.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIXED(30)}}};
     CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 8}}) {
         nt_ui_label(s_ui, NT_UI_DATA_LAYER(4), "Mode", label_style(13.0F, NT_RGBA8(120, 205, 255, 255)));
-        if (nt_ui_combo_begin(s_ui, NULL, 4U, nt_ui_id("mixing/mode"), s_mixing_mode_names[s_mixing_scene.mode], &s_joint_combo_style, &s_mixing_scene.mode_combo_open)) {
+        if (nt_ui_combo_begin(s_ui, NULL, 4U, nt_ui_id("mixing/mode"), s_mixing_mode_names[s_mixing_scene.mode], &s_joint_combo_style)) {
             for (uint32_t i = 0; i < MIX_MODE_COUNT; ++i) {
                 if (nt_ui_combo_selectable(s_ui, i, s_mixing_mode_names[i], i == (uint32_t)s_mixing_scene.mode) && i != (uint32_t)s_mixing_scene.mode) {
                     mixing_set_mode((mixing_mode_t)i);
@@ -2581,22 +2546,12 @@ static void end_stage(void) {
 // #endregion
 
 // #region scene registry callbacks
-static void skeleton_cancel_input(void) {
-    s_skeleton_scene.combo_open = false;
-    s_skeleton_scene.rig_combo_open = false;
-}
-
-static void skinned_cancel_input(void) {
-    s_skinned_scene.rig_combo_open = false;
-    s_skinned_scene.clip_combo_open = false;
-}
 
 static void switch_scene(int next_scene) {
     if (next_scene == s_active_scene) {
         return;
     }
     NT_ASSERT(next_scene >= 0 && next_scene < SKELETAL_SCENE_COUNT && "switch_scene: invalid scene index");
-    cancel_active_scene_input();
     cancel_scene_input();
     reset_camera();
     s_active_scene = next_scene;
@@ -2609,7 +2564,6 @@ static void reset_active_scene(void) {
     s_scene_registry[s_active_scene].reset();
     reset_camera();
     cancel_scene_input();
-    cancel_active_scene_input();
     s_skip_scene_interaction_this_frame = true;
 }
 // #endregion

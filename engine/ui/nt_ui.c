@@ -36,6 +36,7 @@ _Static_assert(CLAY_PINNED_MAJOR == 0 && CLAY_PINNED_MINOR == 14, "Clay v0.14 re
 #include "ui/nt_ui_debug_hit_zones.h"
 #include "ui/nt_ui_image.h"
 #include "ui/nt_ui_internal.h"
+#include "ui/nt_ui_popup.h" /* nt_ui_popup_close_t */
 #include "ui/nt_ui_state.h"
 
 // #region module_state
@@ -547,19 +548,20 @@ void nt_ui_begin(nt_ui_context_t *ctx, const nt_ui_frame_desc_t *frame) {
     ctx->last_press_age += dt;
     ctx->overlay_depth = 0U; /* overlay begin++/end-- balance across the frame (asserted == 0 at end) */
     ctx->inert_from = 0U;
-    /* An overlay last frame did not declare leaves the stack; the top is the highest live one with a catcher
-     * that no newer transient sibling replaced. */
+    /* S1: an overlay last frame did not declare leaves (one opened since the last begin waits one more); the top is
+     * the highest open one with a catcher declared last frame. */
     uint8_t kept = 0U;
     ctx->overlay_top = 0U;
     for (uint8_t i = 0U; i < ctx->overlay_count; ++i) {
         nt_ui_overlay_t o = ctx->overlays[i];
-        if (!o.seen) {
+        if (!o.seen && !o.fresh) {
             continue;
         }
-        o.seen = false;
-        if (o.live && o.catcher && !o.replaced) {
+        if (o.seen && o.open && o.live && o.catcher) {
             ctx->overlay_top = o.id;
         }
+        o.seen = false;
+        o.fresh = false;
         ctx->overlays[kept++] = o;
     }
     ctx->overlay_count = kept;
@@ -2985,6 +2987,97 @@ const nt_pointer_t *nt_ui_internal_top_pointer(const nt_ui_context_t *ctx, uint3
 #endif
     return nt_ui_internal_is_top(ctx, id) ? &ctx->frame_pointers[ctx->frame_primary] : &idle;
 }
+
+// #region overlay stack (spec: "Input ownership", S1-S2; out of line: inlined they cost ~1.2 KB wasm)
+NT_NOINLINE nt_ui_overlay_t *nt_ui_internal_overlay_find(nt_ui_context_t *ctx, uint32_t id) {
+    for (uint8_t i = 0U; i < ctx->overlay_count; ++i) {
+        if (ctx->overlays[i].id == id) {
+            return &ctx->overlays[i];
+        }
+    }
+    return NULL;
+}
+
+NT_NOINLINE void nt_ui_internal_overlay_remove(nt_ui_context_t *ctx, nt_ui_overlay_t *o) {
+    const nt_ui_overlay_t *end = &ctx->overlays[ctx->overlay_count];
+    memmove(o, o + 1, (size_t)(end - (o + 1)) * sizeof *o);
+    --ctx->overlay_count;
+}
+
+NT_NOINLINE static bool overlay_declared_around(const nt_ui_context_t *ctx, uint32_t id) {
+    for (uint8_t d = 0U; d < ctx->overlay_depth; ++d) {
+        if (ctx->overlay_decl[d] == id) {
+            return true;
+        }
+    }
+    return false;
+}
+
+NT_NOINLINE void nt_ui_internal_overlay_open(nt_ui_context_t *ctx, uint32_t id, uint32_t opener) {
+    nt_ui_overlay_t *o = nt_ui_internal_overlay_find(ctx, id);
+    if (o != NULL && o->open && o->opener == opener) {
+        return;
+    }
+    if (o != NULL) {
+        nt_ui_internal_overlay_remove(ctx, o); /* a reopen is the last opened */
+    } else if (ctx->overlay_count == NT_UI_OVERLAY_MAX) {
+        for (uint8_t i = 0U; i < ctx->overlay_count; ++i) {
+            if (!ctx->overlays[i].open && !overlay_declared_around(ctx, ctx->overlays[i].id)) {
+                nt_ui_internal_overlay_remove(ctx, &ctx->overlays[i]); /* a full stack takes a fading slot; its fade ends */
+                break;
+            }
+        }
+    }
+    NT_ASSERT(ctx->overlay_count < NT_UI_OVERLAY_MAX && "nt_ui_open: more than NT_UI_OVERLAY_MAX open overlays");
+    if (ctx->overlay_top == id) {
+        ctx->overlay_top = 0U; /* a reopened top takes input from the next frame, as a new one */
+    }
+    ctx->overlays[ctx->overlay_count++] = (nt_ui_overlay_t){.id = id, .opener = opener, .open = true, .fresh = true};
+}
+
+NT_NOINLINE void nt_ui_internal_overlay_close(nt_ui_context_t *ctx, uint32_t id, uint8_t reason) {
+    nt_ui_overlay_t *o = nt_ui_internal_overlay_find(ctx, id);
+    if (o != NULL && o->open) {
+        o->open = false;
+        o->reason = reason;
+    }
+}
+
+NT_NOINLINE uint32_t nt_ui_internal_overlay_opener(nt_ui_context_t *ctx, uint32_t id) {
+    const nt_ui_overlay_t *o = nt_ui_internal_overlay_find(ctx, id);
+    return (o != NULL && o->open) ? o->opener : 0U;
+}
+
+NT_NOINLINE void nt_ui_internal_overlay_close_popups(nt_ui_context_t *ctx, const nt_ui_overlay_t *opener) {
+    for (uint8_t i = 0U; i < ctx->overlay_count; ++i) {
+        nt_ui_overlay_t *o = &ctx->overlays[i];
+        if (o != opener && o->popup && o->open && o->live && !overlay_declared_around(ctx, o->id)) {
+            o->open = false;
+            o->reason = NT_UI_POPUP_CLOSE_REPLACED;
+        }
+    }
+}
+
+void nt_ui_open(nt_ui_context_t *ctx, uint32_t id) {
+    NT_ASSERT(ctx != NULL && id != 0U && "nt_ui_open: ctx non-NULL, id non-zero");
+    nt_ui_internal_overlay_open(ctx, id, 0U);
+}
+
+void nt_ui_close(nt_ui_context_t *ctx, uint32_t id) {
+    NT_ASSERT(ctx != NULL && id != 0U && "nt_ui_close: ctx non-NULL, id non-zero");
+    nt_ui_internal_overlay_close(ctx, id, NT_UI_POPUP_CLOSE_GAME);
+}
+
+bool nt_ui_is_open(const nt_ui_context_t *ctx, uint32_t id) {
+    NT_ASSERT(ctx != NULL && id != 0U && "nt_ui_is_open: ctx non-NULL, id non-zero");
+    for (uint8_t i = 0U; i < ctx->overlay_count; ++i) {
+        if (ctx->overlays[i].id == id) {
+            return ctx->overlays[i].open;
+        }
+    }
+    return false;
+}
+// #endregion
 
 bool nt_ui_internal_outside_press(nt_ui_context_t *ctx, uint32_t id, int16_t pad) {
     const nt_pointer_t *pp = nt_ui_internal_top_pointer(ctx, id);

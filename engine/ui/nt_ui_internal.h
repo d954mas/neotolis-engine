@@ -163,14 +163,17 @@ typedef struct {
 #endif
 _Static_assert(NT_UI_OVERLAY_MAX >= 1 && NT_UI_OVERLAY_MAX <= UINT8_MAX, "NT_UI_OVERLAY_MAX must fit the uint8_t stack counters");
 
-/* One overlay stack entry (spec: "Input ownership", Overlay stack). */
+/* One overlay stack entry: the stack is the open state (spec: "Input ownership", S1). */
 typedef struct {
     uint32_t id;
-    bool seen;      /* declared since the last nt_ui_begin */
-    bool live;      /* open and outside an inert subtree when last declared */
-    bool catcher;   /* gates the UI under it: it can be the top */
-    bool transient; /* light dismiss: an overlay that takes input closes it when it opens */
-    bool replaced;  /* such an overlay opened: it closes at its next begin */
+    uint32_t opener; /* the row that opened a menu level, else 0 */
+    bool open;       /* false while it fades out after a close */
+    bool seen;       /* declared since the last nt_ui_begin */
+    bool fresh;      /* opened since the last nt_ui_begin: kept one prune undeclared */
+    bool live;       /* open and outside a closing overlay when last declared */
+    bool catcher;    /* takes input and gates the UI under it: it can be the top */
+    bool popup;      /* light dismiss: an overlay that takes input closes it when it opens (S2) */
+    uint8_t reason;  /* nt_ui_popup_close_t not yet reported to its begin */
 } nt_ui_overlay_t;
 
 /* Bound the storage and per-row work of NT_UI_CHECKS duplicate detection. */
@@ -297,13 +300,12 @@ struct nt_ui_context {
      * combo_selectable derives its INTERACTIVE row id via mix(id, key) only (KEY-STABLE — reorder/hide a
      * row mid-press never shifts a fixed-key row's identity); row_idx is kept only for the positional LABEL
      * cell id + the test probe. The GAME owns int *selected and writes it on the selectable's clicked return;
-     * the combo only clears *open on a row click. trigger_open marks a custom preview element
+     * a row click closes the list. trigger_open marks a custom preview element
      * open between combo_preview_begin/end; row_open marks a custom selectable open between
      * selectable_begin/end (its id + click latch deferred to selectable_end). */
     struct {
         const void *style;    /* nt_ui_dropdown_style_t* (void to keep the internal header widget-agnostic) */
         uint32_t id;          /* the combo id (scope for the row fmix) */
-        bool *open;           /* game-owned open flag; a selectable click clears it */
         uint32_t row_id;      /* the open custom selectable's row id (for selectable_end's step + click latch) */
         float trigger_open_t; /* eased open amount stashed by the custom trigger; combo_preview_end's chevron rotation */
         uint16_t row_idx;     /* per-frame running row index (positional LABEL cell id + test probe only, NOT the interactive id) */
@@ -605,8 +607,18 @@ const nt_pointer_t *nt_ui_internal_top_pointer(const nt_ui_context_t *ctx, uint3
 /* `id` is live: outside an inert subtree, at or above the top's catcher (spec: "Input ownership", Live). */
 static inline bool nt_ui_internal_live(nt_ui_context_t *ctx, uint32_t id) { return ctx->inert_from == 0U && nt_ui_internal_owned_by_top(ctx, id); }
 /* The live top overlay `id` got a primary press, either button, outside its panel grown by `pad`, on its catcher
- * or on no record (spec: "Input ownership", Own close). */
+ * or on no record (spec: "Input ownership", S3). */
 bool nt_ui_internal_outside_press(nt_ui_context_t *ctx, uint32_t id, int16_t pad);
+
+/* The overlay stack (spec: "Input ownership", S1-S2). open pushes or reopens `id` (opened by `opener`, a menu
+ * row, or 0); close starts its fade with `reason`; find returns its entry or NULL; opener is 0 unless it is
+ * open. close_popups runs S2 for `opener` as it first declares; remove drops a hidden entry. */
+void nt_ui_internal_overlay_open(nt_ui_context_t *ctx, uint32_t id, uint32_t opener);
+void nt_ui_internal_overlay_close(nt_ui_context_t *ctx, uint32_t id, uint8_t reason);
+nt_ui_overlay_t *nt_ui_internal_overlay_find(nt_ui_context_t *ctx, uint32_t id);
+uint32_t nt_ui_internal_overlay_opener(nt_ui_context_t *ctx, uint32_t id);
+void nt_ui_internal_overlay_close_popups(nt_ui_context_t *ctx, const nt_ui_overlay_t *opener);
+void nt_ui_internal_overlay_remove(nt_ui_context_t *ctx, nt_ui_overlay_t *o);
 
 /* Adds a registry record for the front-most resolve. */
 void nt_ui_internal_register_interactive(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lrtb[4]);

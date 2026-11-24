@@ -43,12 +43,12 @@ static bool float_near(float a, float b, float eps) { return fabsf(a - b) <= eps
 #define MODAL_A 0x4D0001U
 #define MODAL_B 0x4D0002U
 
-/* Begins a modal the test holds open: a fresh `true` per call, so a raised close never sticks across
- * frames. An open modal always shows, so the caller declares the body and ends it unconditionally. */
+/* Begins a modal the test holds open: opened per call, so a raised close never sticks across frames. An
+ * open modal always shows, so the caller declares the body and ends it unconditionally. */
 static nt_ui_popup_info_t modal_begin_open(nt_ui_context_t *ctx, uint32_t id, const nt_ui_modal_style_t *st) {
-    bool open = true;
+    nt_ui_open(ctx, id);
     nt_ui_popup_info_t info = {0};
-    TEST_ASSERT_TRUE(nt_ui_modal_begin(ctx, id, st, &open, &info));
+    TEST_ASSERT_TRUE(nt_ui_modal_begin(ctx, id, st, &info));
     return info;
 }
 
@@ -60,8 +60,8 @@ static void modal_body(void) {
 /* Begins a modal the test holds closed; declares the body and ends it only when it still shows (easing
  * closed). */
 static void modal_begin_closed(nt_ui_context_t *ctx, uint32_t id, const nt_ui_modal_style_t *st) {
-    bool open = false;
-    if (nt_ui_modal_begin(ctx, id, st, &open, NULL)) {
+    nt_ui_close(ctx, id);
+    if (nt_ui_modal_begin(ctx, id, st, NULL)) {
         modal_body();
         nt_ui_modal_end(ctx);
     }
@@ -144,8 +144,12 @@ typedef struct {
 
 static void modal_frame(uint32_t id, const nt_ui_modal_style_t *st, bool open, modal_frame_t *out) {
     ui_fx_frame_begin(s_fx.ctx, NULL);
-    bool o = open;
-    out->visible = nt_ui_modal_begin(s_fx.ctx, id, st, &o, &out->info);
+    if (open) {
+        nt_ui_open(s_fx.ctx, id);
+    } else {
+        nt_ui_close(s_fx.ctx, id);
+    }
+    out->visible = nt_ui_modal_begin(s_fx.ctx, id, st, &out->info);
     if (out->visible) {
         nt_ui_modal_end(s_fx.ctx);
     }
@@ -240,7 +244,12 @@ static nt_ui_interaction_t modal_gate_base_frame(const nt_ui_modal_style_t *st, 
     CLAY({.id = (Clay_ElementId){.id = nt_ui_id("gated_base_btn")}, .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(120)}}}) {
         in = nt_ui_step(s_fx.ctx, nt_ui_id("gated_base_btn"), NULL);
     }
-    *shown = nt_ui_modal_begin(s_fx.ctx, MODAL_A, st, &open, NULL);
+    if (open) {
+        nt_ui_open(s_fx.ctx, MODAL_A);
+    } else {
+        nt_ui_close(s_fx.ctx, MODAL_A);
+    }
+    *shown = nt_ui_modal_begin(s_fx.ctx, MODAL_A, st, NULL);
     if (*shown) {
         nt_ui_modal_end(s_fx.ctx);
     }
@@ -293,10 +302,10 @@ static void test_modal_closing_backdrop_lets_the_pointer_through(void) {
 
 static nt_ui_interaction_t modal_button_frame(const nt_ui_modal_style_t *st, const nt_pointer_t *p) {
     ui_fx_frame_begin(s_fx.ctx, p);
-    bool open = true;
+    nt_ui_open(s_fx.ctx, MODAL_A);
     nt_ui_popup_info_t info = {0};
     nt_ui_interaction_t in = {0};
-    if (nt_ui_modal_begin(s_fx.ctx, MODAL_A, st, &open, &info)) { /* a snap modal that closed itself shows nothing */
+    if (nt_ui_modal_begin(s_fx.ctx, MODAL_A, st, &info)) { /* a snap modal that closed itself shows nothing */
         CLAY({.id = (Clay_ElementId){.id = nt_ui_id("modal_btn")}, .layout = {.sizing = {CLAY_SIZING_FIXED(MODAL_BTN_W), CLAY_SIZING_FIXED(MODAL_BTN_H)}}}) {
             in = nt_ui_step(s_fx.ctx, nt_ui_id("modal_btn"), NULL);
         }
@@ -378,10 +387,10 @@ static void test_wants_keyboard_follows_the_top(void) {
     TEST_ASSERT_TRUE(nt_ui_wants_keyboard(s_fx.ctx));
 
     /* A closed modal declares nothing and claims no top: the keys are the game's again. */
-    bool open = false;
+    nt_ui_close(s_fx.ctx, MODAL_A);
     for (int f = 0; f < 2; ++f) {
         ui_fx_frame_begin(s_fx.ctx, NULL);
-        if (nt_ui_modal_begin(s_fx.ctx, MODAL_A, &st, &open, NULL)) {
+        if (nt_ui_modal_begin(s_fx.ctx, MODAL_A, &st, NULL)) {
             nt_ui_modal_end(s_fx.ctx);
         }
         nt_ui_end(s_fx.ctx);
@@ -550,26 +559,26 @@ static void test_modal_anim_asserts(void) {
     nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
     st.ease_speed = 0.0F;
     ui_fx_frame_begin(s_fx.ctx, NULL);
-    bool open = true;
+    nt_ui_open(s_fx.ctx, MODAL_A);
 
     nt_ui_modal_style_t bad = st;
     bad.open = (nt_ui_modal_anim_t){.type = NT_UI_MODAL_ANIM_SCALE_POP, .scale_start = 0.0F};
-    NT_TEST_EXPECT_ASSERT(nt_ui_modal_begin(s_fx.ctx, MODAL_A, &bad, &open, NULL));
+    NT_TEST_EXPECT_ASSERT(nt_ui_modal_begin(s_fx.ctx, MODAL_A, &bad, NULL));
     TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "scale_start must be finite > 0"));
 
     bad = st;
     bad.open = (nt_ui_modal_anim_t){.type = NT_UI_MODAL_ANIM_SLIDE, .edge = NT_UI_MODAL_BOTTOM, .offset = NAN};
-    NT_TEST_EXPECT_ASSERT(nt_ui_modal_begin(s_fx.ctx, MODAL_A, &bad, &open, NULL));
+    NT_TEST_EXPECT_ASSERT(nt_ui_modal_begin(s_fx.ctx, MODAL_A, &bad, NULL));
     TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "SLIDE offset finite + edge in range"));
 
     bad = st;
     bad.open = (nt_ui_modal_anim_t){.type = NT_UI_MODAL_ANIM_SLIDE, .edge = 4, .offset = 10.0F};
-    NT_TEST_EXPECT_ASSERT(nt_ui_modal_begin(s_fx.ctx, MODAL_A, &bad, &open, NULL));
+    NT_TEST_EXPECT_ASSERT(nt_ui_modal_begin(s_fx.ctx, MODAL_A, &bad, NULL));
     TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "SLIDE offset finite + edge in range"));
 
     bad = st;
     bad.open.type = 7;
-    NT_TEST_EXPECT_ASSERT(nt_ui_modal_begin(s_fx.ctx, MODAL_A, &bad, &open, NULL));
+    NT_TEST_EXPECT_ASSERT(nt_ui_modal_begin(s_fx.ctx, MODAL_A, &bad, NULL));
     TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "anim.type out of range"));
 
     nt_ui_end(s_fx.ctx);
@@ -601,9 +610,7 @@ static void test_modal_close_uses_close_recipe(void) {
             nt_input_feed(nt_test_key(NT_KEY_ESCAPE, true));
         }
         ui_fx_frame_begin(s_fx.ctx, NULL);
-        bool open = true;
-        nt_ui_popup_info_t info = {0};
-        TEST_ASSERT_TRUE(nt_ui_modal_begin(s_fx.ctx, MODAL_A, &st, &open, &info));
+        const nt_ui_popup_info_t info = modal_begin_open(s_fx.ctx, MODAL_A, &st);
         modal_body();
         nt_ui_modal_end(s_fx.ctx);
         nt_ui_end(s_fx.ctx);

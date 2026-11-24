@@ -1722,8 +1722,8 @@ static void test_field_text_above_modal_band(void) {
     mst.ease_speed = 0.0F;
 
     ui_fx_frame_begin(s_fx.ctx, NULL);
-    bool modal_open = true;
-    if (nt_ui_modal_begin(s_fx.ctx, 0x1F0001U, &mst, &modal_open, NULL)) {
+    nt_ui_open(s_fx.ctx, 0x1F0001U);
+    if (nt_ui_modal_begin(s_fx.ctx, 0x1F0001U, &mst, NULL)) {
         CLAY({.id = CLAY_ID("modal_panel"), .layout = {.sizing = {CLAY_SIZING_FIXED(400.0F), CLAY_SIZING_FIXED(200.0F)}}, .backgroundColor = {10, 10, 10, 255}}) {
             (void)nt_ui_input_text(s_fx.ctx, NULL, 0, nt_ui_id("modal_field"), buf, sizeof buf, &s_props, &s_style, &s_field_decl, true, NULL);
         }
@@ -1749,15 +1749,19 @@ static void test_field_text_above_modal_band(void) {
 #define MODAL_FIELD 0x1F0102U
 #define FIELD_MODAL 0x1F0103U
 
-/* One frame: a field in the base UI, then a modal (open or closing) holding a second field. */
-static bool modal_field_frame_io(const nt_pointer_t *p, bool *open, float ease, char *base_buf, char *modal_buf);
+/* One frame: a field in the base UI, then the modal, whatever its open state, holding a second field. */
+static bool modal_field_frame_decl(const nt_pointer_t *p, float ease, char *base_buf, char *modal_buf);
+/* As modal_field_frame_decl, the game opening or closing the modal first. */
 static bool modal_field_frame(const nt_pointer_t *p, bool open, float ease, char *base_buf, char *modal_buf) {
-    bool o = open;
-    return modal_field_frame_io(p, &o, ease, base_buf, modal_buf);
+    if (open) {
+        nt_ui_open(s_fx.ctx, FIELD_MODAL);
+    } else {
+        nt_ui_close(s_fx.ctx, FIELD_MODAL);
+    }
+    return modal_field_frame_decl(p, ease, base_buf, modal_buf);
 }
 
-/* As modal_field_frame, with the game's open bool (a modal Esc clears it). */
-static bool modal_field_frame_io(const nt_pointer_t *p, bool *open, float ease, char *base_buf, char *modal_buf) {
+static bool modal_field_frame_decl(const nt_pointer_t *p, float ease, char *base_buf, char *modal_buf) {
     ui_fx_frame_begin(s_fx.ctx, p);
     CLAY({.id = CLAY_ID("base_root"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = IN_X, .y = IN_Y}, .zIndex = s_base_z}}) {
         (void)nt_ui_input_text(s_fx.ctx, NULL, 0, BASE_FIELD, base_buf, 32U, &s_props, &s_style, &s_field_decl, true, NULL);
@@ -1765,7 +1769,7 @@ static bool modal_field_frame_io(const nt_pointer_t *p, bool *open, float ease, 
     nt_ui_modal_style_t mst = nt_ui_modal_style_defaults();
     mst.ease_speed = ease;
     mst.flags |= NT_UI_MODAL_LISTEN_ESC;
-    const bool visible = nt_ui_modal_begin(s_fx.ctx, FIELD_MODAL, &mst, open, NULL);
+    const bool visible = nt_ui_modal_begin(s_fx.ctx, FIELD_MODAL, &mst, NULL);
     if (visible) {
         CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(400.0F), CLAY_SIZING_FIXED(200.0F)}}}) {
             (void)nt_ui_input_text(s_fx.ctx, NULL, 0, MODAL_FIELD, modal_buf, 32U, &s_props, &s_style, &s_field_decl, true, NULL);
@@ -1828,14 +1832,13 @@ static void test_tab_skips_a_closing_modal(void) {
     TEST_ASSERT_TRUE_MESSAGE(nt_ui_input_focused(s_fx.ctx, BASE_FIELD), "Tab wraps to the base field, past the inert one");
 }
 
-/* One frame holding a fresh Esc press, then one with it released. */
-/* Esc pressed for one frame, then released; returns `open` right after the press frame. */
-static bool modal_field_esc(bool *open, char *a, char *b) {
+/* Esc pressed for one frame, then released; returns whether the modal is open right after the press frame. */
+static bool modal_field_esc(char *a, char *b) {
     nt_input_feed(nt_test_key(NT_KEY_ESCAPE, true));
-    (void)modal_field_frame_io(&IDLE_PTR, open, 0.0F, a, b);
-    const bool after_press = *open;
+    (void)modal_field_frame_decl(&IDLE_PTR, 0.0F, a, b);
+    const bool after_press = nt_ui_is_open(s_fx.ctx, FIELD_MODAL);
     nt_input_feed(nt_test_key(NT_KEY_ESCAPE, false));
-    (void)modal_field_frame_io(&IDLE_PTR, open, 0.0F, a, b);
+    (void)modal_field_frame_decl(&IDLE_PTR, 0.0F, a, b);
     return after_press;
 }
 
@@ -1845,21 +1848,21 @@ static bool modal_field_esc(bool *open, char *a, char *b) {
 static void test_esc_owner_is_decided_once(void) {
     char a[32] = "base";
     char b[32] = "modal";
-    bool open = true;
     s_base_z = 1100; /* over the modal's band 1000: owned by the top, declared first */
-    (void)modal_field_frame_io(&IDLE_PTR, &open, 0.0F, a, b);
-    (void)modal_field_frame_io(&IDLE_PTR, &open, 0.0F, a, b);
+    nt_ui_open(s_fx.ctx, FIELD_MODAL);
+    (void)modal_field_frame_decl(&IDLE_PTR, 0.0F, a, b);
+    (void)modal_field_frame_decl(&IDLE_PTR, 0.0F, a, b);
     const nt_ui_bbox_t fb = nt_ui_get_bbox(s_fx.ctx, BASE_FIELD);
     TEST_ASSERT_TRUE(fb.found);
     nt_pointer_t tap = ui_fx_pointer(fb.x + 10.0F, fb.y + 10.0F, false, true, true);
     tap.type = NT_POINTER_TOUCH;
-    (void)modal_field_frame_io(&tap, &open, 0.0F, a, b);
-    (void)modal_field_frame_io(&IDLE_PTR, &open, 0.0F, a, b);
+    (void)modal_field_frame_decl(&tap, 0.0F, a, b);
+    (void)modal_field_frame_decl(&IDLE_PTR, 0.0F, a, b);
     TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, BASE_FIELD));
-    (void)modal_field_esc(&open, a, b);
+    (void)modal_field_esc(a, b);
     TEST_ASSERT_FALSE(nt_ui_input_focused(s_fx.ctx, BASE_FIELD));
-    TEST_ASSERT_TRUE_MESSAGE(open, "the Esc the field over the modal took does not close the modal");
-    TEST_ASSERT_FALSE_MESSAGE(modal_field_esc(&open, a, b), "the next Esc closes the modal in its frame");
+    TEST_ASSERT_TRUE_MESSAGE(nt_ui_is_open(s_fx.ctx, FIELD_MODAL), "the Esc the field over the modal took does not close the modal");
+    TEST_ASSERT_FALSE_MESSAGE(modal_field_esc(a, b), "the next Esc closes the modal in its frame");
 }
 
 int main(void) {

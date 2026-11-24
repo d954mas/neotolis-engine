@@ -163,6 +163,22 @@ static void menu_key(nt_key_t key) { nt_input_test_key_press(key); }
 /* True when the menu level `depth` was laid out last frame. */
 static bool menu_level_found(uint8_t depth) { return nt_ui_get_bbox(s_fx.ctx, nt_ui_menu_test_panel_id(MENU_A, depth)).found; }
 
+/* The row that opened level d + 1 (the open parent on level d), 0 when that level is closed: the menu keeps its
+ * open chain on the overlay stack, one open entry per level in chain order, each recording the row that opened it. */
+static uint32_t menu_open_parent(uint8_t d) {
+    uint8_t k = 0U;
+    for (uint8_t i = 0U; i < s_fx.ctx->overlay_count; ++i) {
+        const nt_ui_overlay_t *o = &s_fx.ctx->overlays[i];
+        if (o->open && o->opener != 0U) {
+            if (k == d) {
+                return o->opener;
+            }
+            ++k;
+        }
+    }
+    return 0U;
+}
+
 /* The menu tree: File > (New, Open > (Project, File2), Quit), Tools > (Opt), Edit. */
 static void menu_im_tree(nt_ui_menu_t *st, nt_ui_menu_style_t *style) {
     if (nt_ui_menu_begin(st, s_fx.ctx, NULL, 0U, MENU_A, style)) {
@@ -191,13 +207,25 @@ static void menu_im_tree(nt_ui_menu_t *st, nt_ui_menu_style_t *style) {
 #define MODAL_ID 0x40DA1U
 #define MODAL_BTN 0x40DA2U
 
+/* Places the test modal (menu_set_modal) and opens it, except for MODAL_CLOSES_AROUND_MENU: the game opens it
+ * when it shows it first, so the modal opened before the menu lies under it. */
+static void menu_set_modal(menu_modal_t m) {
+    s_modal = m;
+    if (m != MODAL_NONE && m != MODAL_CLOSES_AROUND_MENU) {
+        nt_ui_open(s_fx.ctx, MODAL_ID);
+    }
+}
+
 /* The test modal: an Esc-listening one holding a button (its click goes to act_capture), and the menu when
  * s_modal puts it inside; returns whether the modal reported a close. */
 static bool menu_im_modal(nt_ui_menu_t *st, nt_ui_menu_style_t *style) {
     nt_ui_modal_style_t ms = nt_ui_modal_style_defaults();
     ms.flags = NT_UI_MODAL_LISTEN_ESC;
-    bool open = (s_modal != MODAL_CLOSES_AROUND_MENU);
-    if (nt_ui_modal_begin(s_fx.ctx, MODAL_ID, &ms, &open, NULL)) {
+    if (s_modal == MODAL_CLOSES_AROUND_MENU) {
+        nt_ui_close(s_fx.ctx, MODAL_ID);
+    }
+    nt_ui_popup_info_t info = {0};
+    if (nt_ui_modal_begin(s_fx.ctx, MODAL_ID, &ms, &info)) {
         CLAY({.id = (Clay_ElementId){.id = MODAL_BTN}, .layout = {.sizing = {CLAY_SIZING_FIXED(80), CLAY_SIZING_FIXED(30)}}}) {}
         act_capture(MODAL_BTN, nt_ui_step(s_fx.ctx, MODAL_BTN, NULL).clicked);
         if (s_modal >= MODAL_HOLDS_MENU) {
@@ -205,12 +233,18 @@ static bool menu_im_modal(nt_ui_menu_t *st, nt_ui_menu_style_t *style) {
         }
         nt_ui_modal_end(s_fx.ctx);
     }
-    return !open;
+    return info.reason != NT_UI_POPUP_CLOSE_NONE;
 }
 
 /* One frame of the menu tree and the s_modal placement; returns whether the modal reported a close. */
+static bool s_reopen_in_frame; /* menu_im_frame_ptr reopens the menu after nt_ui_begin, as a game's right-click */
+
 static bool menu_im_frame_ptr(nt_ui_menu_t *st, nt_ui_menu_style_t *style, const nt_pointer_t *p) {
     menu_frame_begin(p);
+    if (s_reopen_in_frame) {
+        s_reopen_in_frame = false;
+        nt_ui_menu_open(st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
+    }
     bool modal_close = false;
     if (s_modal == MODAL_UNDER_MENU || s_modal >= MODAL_HOLDS_MENU) {
         modal_close = menu_im_modal(st, style);
@@ -243,14 +277,14 @@ static void test_menu_outside_press_dismisses_chain(void) {
     for (int i = 0; i < 3; ++i) {
         nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
         nt_ui_menu_t st = {0};
-        nt_ui_menu_open(&st, 120.0F, 80.0F);
+        nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
         menu_im_frame(&st, &style, 700.0F, 500.0F);
         const nt_ui_bbox_t root = nt_ui_get_bbox(s_fx.ctx, nt_ui_menu_test_panel_id(MENU_A, 0U));
         TEST_ASSERT_TRUE_MESSAGE(root.found && float_near(root.x, 120.0F, 0.5F) && float_near(root.y, 80.0F, 0.5F), "the root's top-left sits at the open point");
         nt_pointer_t p = {.x = 780.0F, .y = 580.0F, .type = types[i], .active = true};
         p.buttons[buttons[i]] = (nt_button_state_t){.is_down = true, .is_pressed = true};
         (void)menu_im_frame_ptr(&st, &style, &p);
-        TEST_ASSERT_FALSE_MESSAGE(st.open, "an outside press dismisses the whole chain");
+        TEST_ASSERT_FALSE_MESSAGE(nt_ui_is_open(s_fx.ctx, MENU_A), "an outside press dismisses the whole chain");
         TEST_ASSERT_FALSE_MESSAGE(menu_level_found(0U), "the press frame declares no level");
     }
 }
@@ -290,7 +324,7 @@ static void menu_open_file_open(nt_ui_menu_t *st, nt_ui_menu_style_t *style) {
 
 /* Opens the menu with File > Open open, then clicks Tools (a press frame, then a release frame). */
 static void menu_click_tools_over_file_open(nt_ui_menu_t *st, nt_ui_menu_style_t *style) {
-    nt_ui_menu_open(st, 120.0F, 80.0F);
+    nt_ui_menu_open(st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
     menu_open_file_open(st, style);
     float cx = 0.0F;
     float cy = 0.0F;
@@ -316,8 +350,8 @@ static void test_menu_click_root_parent_switches_branch(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
     nt_ui_menu_t st = {0};
     menu_click_tools_over_file_open(&st, &style); /* two frames over Tools keep the corridor: only the click switches */
-    TEST_ASSERT_TRUE_MESSAGE(st.open, "clicking a root parent must NOT dismiss the chain");
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, st.open_path[1], "switching the root branch closes File > Open");
+    TEST_ASSERT_TRUE_MESSAGE(nt_ui_is_open(s_fx.ctx, MENU_A), "clicking a root parent must NOT dismiss the chain");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, menu_open_parent(1U), "switching the root branch closes File > Open");
 
     /* The click left focus on Tools: Right enters its submenu, Enter activates Opt. */
     const uint32_t opt = nt_ui_menu_test_item_id(nt_ui_menu_test_item_id(MENU_A, KEY_TOOLS), KEY_OPT);
@@ -328,7 +362,7 @@ static void test_menu_click_root_parent_switches_branch(void) {
 static void test_menu_hover_root_parent_switches_branch(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
     nt_ui_menu_t st = {0};
-    nt_ui_menu_open(&st, 120.0F, 80.0F);
+    nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
     menu_open_file_open(&st, &style);
 
     float cx = 0.0F;
@@ -336,11 +370,11 @@ static void test_menu_hover_root_parent_switches_branch(void) {
     menu_row_center(nt_ui_menu_test_item_id(MENU_A, KEY_TOOLS), &cx, &cy);
     const uint32_t opt = nt_ui_menu_test_item_id(nt_ui_menu_test_item_id(MENU_A, KEY_TOOLS), KEY_OPT);
     const uint32_t tools = nt_ui_menu_test_item_id(MENU_A, KEY_TOOLS);
-    for (int f = 0; f < 30 && st.open_path[0] != tools; ++f) {
+    for (int f = 0; f < 30 && menu_open_parent(0U) != tools; ++f) {
         menu_im_frame(&st, &style, cx, cy);
     }
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(tools, st.open_path[0], "hovering Tools must open its submenu after the corridor releases");
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, st.open_path[1], "switching the root branch must close File > Open in the same frame");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(tools, menu_open_parent(0U), "hovering Tools must open its submenu after the corridor releases");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, menu_open_parent(1U), "switching the root branch must close File > Open in the same frame");
     TEST_ASSERT_TRUE_MESSAGE(menu_right_enter_activates(&st, &style, opt), "Right + Enter must activate Tools > Opt");
 }
 
@@ -349,7 +383,7 @@ static void test_menu_hover_root_parent_switches_branch(void) {
 static void test_menu_hover_collapse_reopen_forgets_descendants(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
     nt_ui_menu_t st = {0};
-    nt_ui_menu_open(&st, 120.0F, 80.0F);
+    nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
     menu_open_file_open(&st, &style);
 
     float ex = 0.0F;
@@ -416,10 +450,12 @@ static void menu_dyn_frame_ptr(nt_ui_menu_t *st, nt_ui_menu_style_t *style, cons
 
 static void menu_dyn_frame(nt_ui_menu_t *st, nt_ui_menu_style_t *style, const menu_dyn_tree_t *t) { menu_dyn_frame_ptr(st, style, t, &(nt_pointer_t){.active = true}); }
 
-/* One frame per key; the keys are released after the last. */
+/* One frame per key, after a first one when the menu was not declared since it opened (it reads keys from the
+ * frame after it opens); the keys are released after the last. */
 static void menu_dyn_keys(nt_ui_menu_t *st, nt_ui_menu_style_t *style, const menu_dyn_tree_t *t, const nt_key_t *keys, int count) {
-    if (st->arming) {
-        menu_dyn_frame(st, style, t); /* the menu reads keys from the frame after it opens */
+    const nt_ui_overlay_t *root = nt_ui_internal_overlay_find(s_fx.ctx, MENU_A);
+    if (root != NULL && !root->live) {
+        menu_dyn_frame(st, style, t);
     }
     for (int i = 0; i < count; ++i) {
         menu_key(keys[i]);
@@ -441,7 +477,7 @@ static bool menu_dyn_enter_activates(nt_ui_menu_t *st, nt_ui_menu_style_t *style
 static void test_menu_insert_before_open_parent_keeps_branch(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
     nt_ui_menu_t st = {0};
-    nt_ui_menu_open(&st, 120.0F, 80.0F);
+    nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
     static const uint32_t before[] = {KEY_P1, KEY_P2};
     static const uint32_t after[] = {KEY_L0, KEY_P1, KEY_P2};
     const menu_dyn_tree_t t0 = {.keys = before, .count = 2};
@@ -474,7 +510,7 @@ static void test_menu_focus_follows_key_across_edits(void) {
     const nt_key_t downs[] = {NT_KEY_ARROW_DOWN, NT_KEY_ARROW_DOWN, NT_KEY_ARROW_DOWN};
     for (int c = 0; c < 4; ++c) {
         nt_ui_menu_t st = {0};
-        nt_ui_menu_open(&st, 120.0F, 80.0F);
+        nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
         menu_dyn_keys(&st, &style, &cases[c].before, downs, cases[c].before.count);
         menu_dyn_frame(&st, &style, &cases[c].after);
         TEST_ASSERT_TRUE_MESSAGE(menu_dyn_enter_activates(&st, &style, &cases[c].after, nt_ui_menu_test_item_id(MENU_A, cases[c].focus_key)), "Enter must activate the focused key after the edit");
@@ -489,11 +525,11 @@ static void test_menu_disabled_focused_row_keeps_its_place(void) {
     const menu_dyn_tree_t lost = {.keys = l123, .count = 3, .disabled_key = KEY_L2};
     const nt_key_t focus_l2[] = {NT_KEY_ARROW_DOWN, NT_KEY_ARROW_DOWN};
     nt_ui_menu_t st = {0};
-    nt_ui_menu_open(&st, 120.0F, 80.0F);
+    nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
     menu_dyn_keys(&st, &style, &full, focus_l2, 2);
     menu_dyn_frame(&st, &style, &lost);
     TEST_ASSERT_FALSE_MESSAGE(menu_dyn_enter_activates(&st, &style, &lost, nt_ui_menu_test_item_id(MENU_A, KEY_L2)), "Enter on a disabled focused row does nothing");
-    TEST_ASSERT_TRUE(st.open);
+    TEST_ASSERT_TRUE(nt_ui_is_open(s_fx.ctx, MENU_A));
     const nt_key_t down = NT_KEY_ARROW_DOWN;
     menu_dyn_keys(&st, &style, &lost, &down, 1);
     TEST_ASSERT_TRUE_MESSAGE(menu_dyn_enter_activates(&st, &style, &lost, nt_ui_menu_test_item_id(MENU_A, KEY_L3)), "Down steps from the disabled focused row");
@@ -505,15 +541,15 @@ static void test_menu_up_down_wrap(void) {
     static const uint32_t l123[] = {KEY_L1, KEY_L2, KEY_L3};
     const menu_dyn_tree_t t = {.keys = l123, .count = 3};
     nt_ui_menu_t st = {0};
-    nt_ui_menu_open(&st, 120.0F, 80.0F);
+    nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
     const nt_key_t up = NT_KEY_ARROW_UP;
     menu_dyn_keys(&st, &style, &t, &up, 1);
     TEST_ASSERT_TRUE_MESSAGE(menu_dyn_enter_activates(&st, &style, &t, nt_ui_menu_test_item_id(MENU_A, KEY_L3)), "Up from no focus lands on the last row");
-    nt_ui_menu_open(&st, 120.0F, 80.0F);
+    nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
     const nt_key_t downs[] = {NT_KEY_ARROW_DOWN, NT_KEY_ARROW_DOWN, NT_KEY_ARROW_DOWN, NT_KEY_ARROW_DOWN};
     menu_dyn_keys(&st, &style, &t, downs, 4);
     TEST_ASSERT_TRUE_MESSAGE(menu_dyn_enter_activates(&st, &style, &t, nt_ui_menu_test_item_id(MENU_A, KEY_L1)), "Down past the last row wraps to the first");
-    nt_ui_menu_open(&st, 120.0F, 80.0F);
+    nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
     const nt_key_t down_down_up[] = {NT_KEY_ARROW_DOWN, NT_KEY_ARROW_DOWN, NT_KEY_ARROW_UP};
     menu_dyn_keys(&st, &style, &t, down_down_up, 3);
     TEST_ASSERT_TRUE_MESSAGE(menu_dyn_enter_activates(&st, &style, &t, nt_ui_menu_test_item_id(MENU_A, KEY_L1)), "Up steps back from the focused row");
@@ -526,11 +562,11 @@ static void test_menu_down_skips_disabled(void) {
     const menu_dyn_tree_t mid_off = {.keys = l123, .count = 3, .disabled_key = KEY_L2};
     const menu_dyn_tree_t first_off = {.keys = l123, .count = 3, .disabled_key = KEY_L1};
     nt_ui_menu_t st = {0};
-    nt_ui_menu_open(&st, 120.0F, 80.0F);
+    nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
     const nt_key_t downs[] = {NT_KEY_ARROW_DOWN, NT_KEY_ARROW_DOWN};
     menu_dyn_keys(&st, &style, &mid_off, downs, 2);
     TEST_ASSERT_TRUE_MESSAGE(menu_dyn_enter_activates(&st, &style, &mid_off, nt_ui_menu_test_item_id(MENU_A, KEY_L3)), "Down from L1 skips the disabled L2");
-    nt_ui_menu_open(&st, 120.0F, 80.0F);
+    nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
     menu_dyn_keys(&st, &style, &first_off, downs, 1);
     TEST_ASSERT_TRUE_MESSAGE(menu_dyn_enter_activates(&st, &style, &first_off, nt_ui_menu_test_item_id(MENU_A, KEY_L2)), "Down from no focus starts at the first enabled row");
 }
@@ -552,15 +588,15 @@ static void test_menu_lost_open_parent_closes_branch(void) {
     const uint32_t p1_opt = nt_ui_menu_test_item_id(nt_ui_menu_test_item_id(MENU_A, KEY_P1), KEY_OPT);
     for (int c = 0; c < 6; ++c) {
         nt_ui_menu_t st = {0};
-        nt_ui_menu_open(&st, 120.0F, 80.0F);
+        nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
         menu_dyn_keys(&st, &style, &open_tree, open_p2, 3);
         TEST_ASSERT_TRUE(menu_level_found(1U));
         if (c >= 3) {
             menu_key(NT_KEY_ESCAPE);
         }
         menu_dyn_frame(&st, &style, &lost[c % 3]);
-        TEST_ASSERT_TRUE_MESSAGE(st.open, "the menu stays open");
-        TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, st.open_path[0], "a lost open parent closes its branch");
+        TEST_ASSERT_TRUE_MESSAGE(nt_ui_is_open(s_fx.ctx, MENU_A), "the menu stays open");
+        TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, menu_open_parent(0U), "a lost open parent closes its branch");
         menu_dyn_keys(&st, &style, &lost[c % 3], open_first, 2);
         TEST_ASSERT_TRUE_MESSAGE(menu_dyn_enter_activates(&st, &style, &lost[c % 3], p1_opt), "the keyboard must open P1 and activate P1 > Opt");
     }
@@ -570,7 +606,7 @@ static void test_menu_lost_open_parent_closes_branch(void) {
 static void test_menu_kbd_open_focuses_first_enabled_row(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
     nt_ui_menu_t st = {0};
-    nt_ui_menu_open(&st, 120.0F, 80.0F);
+    nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
     static const uint32_t p1[] = {KEY_P1};
     const menu_dyn_tree_t t = {.keys = p1, .count = 1, .disabled_first_child = true};
     const nt_key_t open_p1[] = {NT_KEY_ARROW_DOWN, NT_KEY_ARROW_RIGHT};
@@ -584,7 +620,7 @@ static void test_menu_kbd_open_focuses_first_enabled_row(void) {
 static void test_menu_kbd_empty_submenu(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
     nt_ui_menu_t st = {0};
-    nt_ui_menu_open(&st, 120.0F, 80.0F);
+    nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
     static const uint32_t keys[] = {KEY_P1, KEY_L1};
     const menu_dyn_tree_t t = {.keys = keys, .count = 2, .empty_children = true};
     const nt_key_t open_p1[] = {NT_KEY_ARROW_DOWN, NT_KEY_ARROW_RIGHT};
@@ -592,7 +628,7 @@ static void test_menu_kbd_empty_submenu(void) {
     TEST_ASSERT_TRUE_MESSAGE(menu_level_found(1U), "Right opens the empty submenu");
     const nt_key_t down = NT_KEY_ARROW_DOWN;
     menu_dyn_keys(&st, &style, &t, &down, 1);
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, st.open_path[0], "Down closes the empty submenu");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, menu_open_parent(0U), "Down closes the empty submenu");
     TEST_ASSERT_TRUE_MESSAGE(menu_dyn_enter_activates(&st, &style, &t, nt_ui_menu_test_item_id(MENU_A, KEY_L1)), "Down moves on in the parent's level");
 }
 
@@ -617,7 +653,7 @@ static void menu_im_self_ref(nt_ui_menu_t *st, nt_ui_menu_style_t *style, bool d
 static void menu_depth_cap_trips(bool deepest_disabled) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
     nt_ui_menu_t st = {0};
-    nt_ui_menu_open(&st, 120.0F, 80.0F);
+    nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
     menu_im_self_ref(&st, &style, deepest_disabled); /* the menu reads keys from the frame after it opens */
     menu_key(NT_KEY_ARROW_DOWN);
     menu_im_self_ref(&st, &style, deepest_disabled);
@@ -674,7 +710,7 @@ static void menu_im_frame_rows(nt_ui_menu_t *st, nt_ui_menu_style_t *style, cons
 
 /* Opens the vitrine and lays it out twice, so every cell bbox exists. */
 static void menu_rows_settle(nt_ui_menu_t *st, nt_ui_menu_style_t *style) {
-    nt_ui_menu_open(st, 120.0F, 80.0F);
+    nt_ui_menu_open(st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
     menu_im_frame_rows(st, style, &(nt_pointer_t){.active = true});
     menu_im_frame_rows(st, style, &(nt_pointer_t){.active = true});
 }
@@ -711,7 +747,7 @@ static void test_menu_separators_non_interactive(void) {
     const uint32_t landing[] = {KEY_QUIT, KEY_EDIT};
     for (int c = 0; c < 2; ++c) {
         nt_ui_menu_t st = {0};
-        nt_ui_menu_open(&st, 120.0F, 80.0F);
+        nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
         menu_im_frame_rows(&st, &style, &(nt_pointer_t){.active = true});
         s_act_capture_id = nt_ui_menu_test_item_id(MENU_A, landing[c]);
         s_act_hit = false;
@@ -809,7 +845,7 @@ static void test_menu_submenu_begin_ex_icon_disabled(void) {
     p.buttons[NT_BUTTON_LEFT] = (nt_button_state_t){.is_released = true};
     menu_im_frame_rows(&st, &style, &p);
     menu_im_frame_rows(&st, &style, &(nt_pointer_t){.active = true});
-    TEST_ASSERT_TRUE(st.open);
+    TEST_ASSERT_TRUE(nt_ui_is_open(s_fx.ctx, MENU_A));
     TEST_ASSERT_EQUAL_UINT32(0U, st.focus);
     TEST_ASSERT_FALSE_MESSAGE(menu_level_found(1U), "a disabled parent opens neither by hover nor by click");
 }
@@ -819,21 +855,21 @@ static void test_menu_submenu_begin_ex_icon_disabled(void) {
 static void test_menu_is_modal_overlay(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
     nt_ui_menu_t st = {0};
-    nt_ui_menu_open(&st, 120.0F, 80.0F);
+    nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
     menu_im_frame(&st, &style, 0.0F, 0.0F);
     menu_im_frame(&st, &style, 0.0F, 0.0F);
     TEST_ASSERT_TRUE_MESSAGE(nt_ui_wants_keyboard(s_fx.ctx), "an open menu owns the keys");
-    st.open = false;
+    nt_ui_close(s_fx.ctx, MENU_A);
     menu_im_frame(&st, &style, 0.0F, 0.0F);
     menu_im_frame(&st, &style, 0.0F, 0.0F);
     TEST_ASSERT_FALSE(nt_ui_wants_keyboard(s_fx.ctx));
 
-    nt_ui_menu_open(&st, 120.0F, 80.0F);
-    s_modal = MODAL_UNDER_MENU;
+    menu_set_modal(MODAL_UNDER_MENU);
+    nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
     TEST_ASSERT_FALSE(menu_im_frame_ptr(&st, &style, &(nt_pointer_t){.active = true}));
     menu_key(NT_KEY_ESCAPE);
     const bool modal_close = menu_im_frame_ptr(&st, &style, &(nt_pointer_t){.active = true});
-    TEST_ASSERT_FALSE_MESSAGE(st.open, "Esc closes the menu");
+    TEST_ASSERT_FALSE_MESSAGE(nt_ui_is_open(s_fx.ctx, MENU_A), "Esc closes the menu");
     TEST_ASSERT_FALSE_MESSAGE(modal_close, "Esc over a modal closes only the menu on top of it");
 }
 
@@ -853,12 +889,12 @@ static void test_menu_left_at_root_closes(void) {
     const nt_key_t keys[] = {NT_KEY_ESCAPE, NT_KEY_ARROW_LEFT};
     for (int k = 0; k < 2; ++k) {
         nt_ui_menu_t st = {0};
-        nt_ui_menu_open(&st, 120.0F, 80.0F);
+        nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
         menu_im_frame(&st, &style, 0.0F, 0.0F);
         menu_key(keys[k]);
         menu_im_frame(&st, &style, 0.0F, 0.0F);
         nt_input_init();
-        TEST_ASSERT_FALSE(st.open);
+        TEST_ASSERT_FALSE(nt_ui_is_open(s_fx.ctx, MENU_A));
         TEST_ASSERT_FALSE_MESSAGE(menu_level_found(0U), "the closing frame declares no root");
         TEST_ASSERT_TRUE_MESSAGE(nt_ui_wants_keyboard(s_fx.ctx), "the key that closed the menu was the menu's, not the game's");
     }
@@ -872,7 +908,7 @@ static void test_menu_back_closes_a_hover_opened_child(void) {
     const nt_key_t keys[] = {NT_KEY_ESCAPE, NT_KEY_ARROW_LEFT};
     for (int k = 0; k < 2; ++k) {
         nt_ui_menu_t st = {0};
-        nt_ui_menu_open(&st, 120.0F, 80.0F);
+        nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
         menu_im_frame(&st, &style, 0.0F, 0.0F);
         menu_hover_open(&st, &style, file, 1U, menu_im_frame);
         float fx = 0.0F;
@@ -882,13 +918,13 @@ static void test_menu_back_closes_a_hover_opened_child(void) {
         menu_key(keys[k]);
         menu_im_frame(&st, &style, fx, fy);
         nt_input_init();
-        TEST_ASSERT_TRUE_MESSAGE(st.open, "the first Esc or Left closes only the open child");
+        TEST_ASSERT_TRUE_MESSAGE(nt_ui_is_open(s_fx.ctx, MENU_A), "the first Esc or Left closes only the open child");
         TEST_ASSERT_FALSE(menu_level_found(1U));
         TEST_ASSERT_EQUAL_UINT32(file, st.focus);
         menu_key(keys[k]);
         menu_im_frame(&st, &style, fx, fy);
         nt_input_init();
-        TEST_ASSERT_FALSE(st.open);
+        TEST_ASSERT_FALSE(nt_ui_is_open(s_fx.ctx, MENU_A));
     }
 }
 
@@ -898,7 +934,7 @@ static void test_menu_no_focus_right_leaves_down(void) {
     const nt_key_t keys[] = {NT_KEY_ENTER, NT_KEY_ARROW_RIGHT};
     for (int k = 0; k < 2; ++k) {
         nt_ui_menu_t st = {0};
-        nt_ui_menu_open(&st, 120.0F, 80.0F);
+        nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
         menu_im_frame(&st, &style, 790.0F, 590.0F);
         menu_im_frame(&st, &style, 790.0F, 590.0F);
         TEST_ASSERT_EQUAL_UINT32(0U, st.focus);
@@ -960,35 +996,35 @@ static menu_row_child_result_t menu_row_child_frames(nt_ui_menu_t *st, bool non_
  *      the one under the pointer, so it takes hover focus. ---- */
 static void test_menu_item_begin_child_owns_its_press(void) {
     nt_ui_menu_t st = {0};
-    nt_ui_menu_open(&st, 120.0F, 80.0F);
+    nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
     menu_row_child_result_t r = menu_row_child_frames(&st, false, true);
     TEST_ASSERT_TRUE(r.btn_clicked);
     TEST_ASSERT_FALSE(r.end_activated);
-    TEST_ASSERT_TRUE(st.open);
+    TEST_ASSERT_TRUE(nt_ui_is_open(s_fx.ctx, MENU_A));
     TEST_ASSERT_EQUAL_UINT32(nt_ui_menu_test_item_id(MENU_A, KEY_NEW), st.focus);
 
     r = menu_row_child_frames(&st, true, true);
     TEST_ASSERT_TRUE(r.btn_clicked);
     TEST_ASSERT_FALSE(r.end_activated);
-    TEST_ASSERT_TRUE(st.open);
+    TEST_ASSERT_TRUE(nt_ui_is_open(s_fx.ctx, MENU_A));
 }
 
 /* ---- Beside the child a not-activatable row takes hover focus but never captures, activates or
  *      closes (first, on a fresh registry); an activatable row activates and closes the chain. ---- */
 static void test_menu_item_begin_press_beside_child(void) {
     nt_ui_menu_t st = {0};
-    nt_ui_menu_open(&st, 120.0F, 80.0F);
+    nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
     menu_row_child_result_t r = menu_row_child_frames(&st, true, false);
     TEST_ASSERT_FALSE(r.btn_clicked);
     TEST_ASSERT_FALSE(r.end_activated);
     TEST_ASSERT_FALSE(r.row_captured);
-    TEST_ASSERT_TRUE(st.open);
+    TEST_ASSERT_TRUE(nt_ui_is_open(s_fx.ctx, MENU_A));
     TEST_ASSERT_EQUAL_UINT32(nt_ui_menu_test_item_id(MENU_A, KEY_NEW), st.focus);
 
     r = menu_row_child_frames(&st, false, false);
     TEST_ASSERT_FALSE(r.btn_clicked);
     TEST_ASSERT_TRUE(r.end_activated);
-    TEST_ASSERT_FALSE(st.open);
+    TEST_ASSERT_FALSE(nt_ui_is_open(s_fx.ctx, MENU_A));
 }
 
 /* ---- A drag captured by one row's control does not hover another row: pressing row A's control and
@@ -999,7 +1035,7 @@ static void test_menu_item_begin_press_beside_child(void) {
 static void test_menu_item_begin_captured_drag_keeps_focus(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
     nt_ui_menu_t st = {0};
-    nt_ui_menu_open(&st, 120.0F, 80.0F);
+    nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
     for (int frame = 0; frame < 5; ++frame) {
         const nt_ui_bbox_t ca = nt_ui_get_bbox(s_fx.ctx, MENU_ROW_CHILD_ID);
         const nt_ui_bbox_t cb = nt_ui_get_bbox(s_fx.ctx, MENU_ROW_B_CHILD_ID);
@@ -1031,7 +1067,7 @@ static void test_menu_item_begin_enter_activates(void) {
     for (int a = 0; a < 2; ++a) {
         const bool activatable = (a == 0);
         nt_ui_menu_t st = {0};
-        nt_ui_menu_open(&st, 120.0F, 80.0F);
+        nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
         bool activated = false;
         for (int frame = 0; frame < 3; ++frame) {
             if (frame > 0) {
@@ -1050,7 +1086,7 @@ static void test_menu_item_begin_enter_activates(void) {
             }
         }
         TEST_ASSERT_EQUAL_MESSAGE(activatable, activated, "Enter on the focused custom row must make item_end return true exactly when it is activatable");
-        TEST_ASSERT_EQUAL(!activatable, st.open);
+        TEST_ASSERT_EQUAL(!activatable, nt_ui_is_open(s_fx.ctx, MENU_A));
     }
 }
 
@@ -1095,9 +1131,9 @@ static void test_menu_click_activates_enabled_rows_only(void) {
     for (int k = 0; k < 4; ++k) {
         const bool enabled = (kinds[k] == MENU_ROW_ITEM || kinds[k] == MENU_ROW_CUSTOM);
         nt_ui_menu_t st = {0};
-        nt_ui_menu_open(&st, 120.0F, 80.0F);
+        nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
         TEST_ASSERT_EQUAL_MESSAGE(enabled, menu_click_row(&st, &style, kinds[k]), "a click activates exactly the enabled rows");
-        TEST_ASSERT_EQUAL_MESSAGE(!enabled, st.open, "an activation closes the menu");
+        TEST_ASSERT_EQUAL_MESSAGE(!enabled, nt_ui_is_open(s_fx.ctx, MENU_A), "an activation closes the menu");
     }
 }
 
@@ -1107,7 +1143,7 @@ typedef void (*menu_body_fn)(nt_ui_menu_t *st);
 static bool menu_body_asserts(menu_body_fn body, const char *msg) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
     nt_ui_menu_t st = {0};
-    nt_ui_menu_open(&st, 120.0F, 80.0F);
+    nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
     bool tripped = false;
     nt_test_assert_armed = true;
     if (setjmp(nt_test_assert_jmp) == 0) {
@@ -1156,7 +1192,7 @@ static void test_menu_duplicate_sibling_key_asserts(void) {
 static void test_menu_hover_corridor_keeps_then_releases(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
     nt_ui_menu_t st = {0};
-    nt_ui_menu_open(&st, 120.0F, 80.0F);
+    nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
     menu_im_frame(&st, &style, 0.0F, 0.0F);
     float fx = 0.0F;
     float fy = 0.0F;
@@ -1190,7 +1226,7 @@ static void test_menu_hover_corridor_keeps_then_releases(void) {
 static void test_menu_right_edge_root_clamp_and_submenu_flip(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
     nt_ui_menu_t st = {0};
-    nt_ui_menu_open(&st, 780.0F, 100.0F); /* open hard against the right edge (780 + min_width 160 > 800) */
+    nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 780.0F, 100.0F); /* open hard against the right edge (780 + min_width 160 > 800) */
 
     menu_im_frame(&st, &style, 0.0F, 0.0F); /* F1: lay out root */
     menu_key(NT_KEY_ARROW_DOWN);
@@ -1226,7 +1262,7 @@ static void test_menu_right_edge_root_clamp_and_submenu_flip(void) {
 static void test_menu_resting_pointer_yields_to_keyboard(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
     nt_ui_menu_t st = {0};
-    nt_ui_menu_open(&st, 120.0F, 80.0F);
+    nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
     menu_im_frame(&st, &style, 0.0F, 0.0F);
     float fx = 0.0F;
     float fy = 0.0F;
@@ -1257,7 +1293,7 @@ static void test_menu_resting_pointer_yields_to_keyboard(void) {
 static void test_menu_keys_act_on_the_focused_level(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
     nt_ui_menu_t st = {0};
-    nt_ui_menu_open(&st, 120.0F, 80.0F);
+    nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
     menu_im_frame(&st, &style, 0.0F, 0.0F);
     float fx = 0.0F;
     float fy = 0.0F;
@@ -1277,12 +1313,12 @@ static void test_menu_press_in_just_closed_panel_keeps_open(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
     nt_ui_menu_t st = {0};
     menu_click_tools_over_file_open(&st, &style);
-    TEST_ASSERT_EQUAL_UINT32(nt_ui_menu_test_item_id(MENU_A, KEY_TOOLS), st.open_path[0]);
+    TEST_ASSERT_EQUAL_UINT32(nt_ui_menu_test_item_id(MENU_A, KEY_TOOLS), menu_open_parent(0U));
     float nx = 0.0F;
     float ny = 0.0F;
     menu_row_center(nt_ui_menu_test_item_id(nt_ui_menu_test_item_id(MENU_A, KEY_FILE), KEY_QUIT), &nx, &ny);
     menu_im_press(&st, &style, nx, ny, NT_POINTER_MOUSE);
-    TEST_ASSERT_TRUE_MESSAGE(st.open, "a press on a panel shown last frame must not dismiss the menu");
+    TEST_ASSERT_TRUE_MESSAGE(nt_ui_is_open(s_fx.ctx, MENU_A), "a press on a panel shown last frame must not dismiss the menu");
 }
 
 /* ---- A frame activates one row, the first declared: a tap on one row (press and release in one frame)
@@ -1292,7 +1328,7 @@ static void menu_tap_and_enter(int focus_downs, uint32_t tap_key, bool *l1, bool
     *l2 = false;
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
     nt_ui_menu_t st = {0};
-    nt_ui_menu_open(&st, 120.0F, 80.0F);
+    nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
     static const uint32_t l12[] = {KEY_L1, KEY_L2};
     const menu_dyn_tree_t t = {.keys = l12, .count = 2};
     const nt_key_t downs[] = {NT_KEY_ARROW_DOWN, NT_KEY_ARROW_DOWN};
@@ -1349,7 +1385,7 @@ static void menu_im_overlap_frame(nt_ui_menu_t *st, nt_ui_menu_style_t *style, f
 static void test_menu_panel_blocks_pointer_under_it(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
     nt_ui_menu_t st = {0};
-    nt_ui_menu_open(&st, 780.0F, 100.0F);
+    nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 780.0F, 100.0F);
     menu_im_overlap_frame(&st, &style, 0.0F, 0.0F);
     const nt_key_t keys[] = {NT_KEY_ARROW_DOWN, NT_KEY_ARROW_RIGHT, NT_KEY_ARROW_DOWN, NT_KEY_ARROW_RIGHT};
     for (int i = 0; i < 4; ++i) {
@@ -1381,7 +1417,7 @@ static void test_menu_panel_blocks_pointer_under_it(void) {
 static void test_menu_right_into_open_parent_closes_grandchild(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
     nt_ui_menu_t st = {0};
-    nt_ui_menu_open(&st, 120.0F, 80.0F);
+    nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
     menu_im_frame(&st, &style, 0.0F, 0.0F);
     const uint32_t file = nt_ui_menu_test_item_id(MENU_A, KEY_FILE);
     menu_hover_open(&st, &style, file, 1U, menu_im_frame);
@@ -1405,7 +1441,7 @@ static void test_menu_right_into_open_parent_closes_grandchild(void) {
  * frame. */
 static void menu_keys_beside_open_sibling(nt_ui_menu_t *st, const nt_key_t *keys, int count) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
-    nt_ui_menu_open(st, 120.0F, 80.0F);
+    nt_ui_menu_open(st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
     menu_im_frame(st, &style, 0.0F, 0.0F);
     menu_hover_open(st, &style, nt_ui_menu_test_item_id(MENU_A, KEY_FILE), 1U, menu_im_frame);
     float tx = 0.0F;
@@ -1413,7 +1449,7 @@ static void menu_keys_beside_open_sibling(nt_ui_menu_t *st, const nt_key_t *keys
     menu_row_center(nt_ui_menu_test_item_id(MENU_A, KEY_TOOLS), &tx, &ty);
     menu_im_frame(st, &style, tx, ty);
     menu_im_frame(st, &style, tx, ty);
-    TEST_ASSERT_EQUAL_UINT32(nt_ui_menu_test_item_id(MENU_A, KEY_FILE), st->open_path[0]);
+    TEST_ASSERT_EQUAL_UINT32(nt_ui_menu_test_item_id(MENU_A, KEY_FILE), menu_open_parent(0U));
     TEST_ASSERT_EQUAL_UINT32(nt_ui_menu_test_item_id(MENU_A, KEY_TOOLS), st->focus);
     nt_input_init();
     for (int i = 0; i < count; ++i) {
@@ -1430,7 +1466,7 @@ static void test_menu_back_closes_only_the_deepest_level(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
     const uint32_t file = nt_ui_menu_test_item_id(MENU_A, KEY_FILE);
     nt_ui_menu_t st = {0};
-    nt_ui_menu_open(&st, 120.0F, 80.0F);
+    nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
     menu_im_frame(&st, &style, 0.0F, 0.0F);
     menu_hover_open(&st, &style, file, 1U, menu_im_frame);
     menu_hover_open(&st, &style, nt_ui_menu_test_item_id(file, KEY_OPEN), 2U, menu_im_frame);
@@ -1450,8 +1486,8 @@ static void test_menu_back_closes_only_the_deepest_level(void) {
     nt_ui_menu_t pending = {0};
     const nt_key_t esc = NT_KEY_ESCAPE;
     menu_keys_beside_open_sibling(&pending, &esc, 1);
-    TEST_ASSERT_TRUE_MESSAGE(pending.open, "Esc beside a held sibling child closes that child, not the menu");
-    TEST_ASSERT_EQUAL_UINT32(0U, pending.open_path[0]);
+    TEST_ASSERT_TRUE_MESSAGE(nt_ui_is_open(s_fx.ctx, MENU_A), "Esc beside a held sibling child closes that child, not the menu");
+    TEST_ASSERT_EQUAL_UINT32(0U, menu_open_parent(0U));
 }
 
 /* ---- Right next to a sibling's open child opens the focused parent in the same frame and focuses its first
@@ -1463,13 +1499,13 @@ static void test_menu_right_beside_open_sibling_opens_at_once(void) {
     const nt_key_t right = NT_KEY_ARROW_RIGHT;
     nt_ui_menu_t st = {0};
     menu_keys_beside_open_sibling(&st, &right, 1);
-    TEST_ASSERT_EQUAL_UINT32(tools, st.open_path[0]);
+    TEST_ASSERT_EQUAL_UINT32(tools, menu_open_parent(0U));
     TEST_ASSERT_EQUAL_UINT32(opt, st.focus);
 
     const nt_key_t right_down[] = {NT_KEY_ARROW_RIGHT, NT_KEY_ARROW_DOWN};
     nt_ui_menu_t st2 = {0};
     menu_keys_beside_open_sibling(&st2, right_down, 2);
-    TEST_ASSERT_EQUAL_UINT32(tools, st2.open_path[0]);
+    TEST_ASSERT_EQUAL_UINT32(tools, menu_open_parent(0U));
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(opt, st2.focus, "one key per frame: the Down does not step past the first row");
 }
 
@@ -1479,7 +1515,7 @@ static void test_menu_pending_switch_lands_off_the_rows(void) {
     for (int c = 0; c < 2; ++c) {
         nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
         nt_ui_menu_t st = {0};
-        nt_ui_menu_open(&st, 120.0F, 80.0F);
+        nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
         menu_im_frame(&st, &style, 0.0F, 0.0F);
         menu_hover_open(&st, &style, nt_ui_menu_test_item_id(MENU_A, KEY_FILE), 1U, menu_im_frame);
         const uint32_t edit = nt_ui_menu_test_item_id(MENU_A, KEY_EDIT);
@@ -1514,7 +1550,7 @@ static void test_menu_one_highlight_per_level(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
     style.state_speed = 0.0F; /* highlights snap */
     nt_ui_menu_t st = {0};
-    nt_ui_menu_open(&st, 120.0F, 80.0F);
+    nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
     menu_im_frame(&st, &style, 0.0F, 0.0F);
     const uint32_t file = nt_ui_menu_test_item_id(MENU_A, KEY_FILE);
     const uint32_t edit = nt_ui_menu_test_item_id(MENU_A, KEY_EDIT);
@@ -1531,7 +1567,7 @@ static void test_menu_one_highlight_per_level(void) {
     TEST_ASSERT_TRUE_MESSAGE(menu_level_found(1U), "the corridor holds File's submenu");
     TEST_ASSERT_TRUE_MESSAGE(menu_row_lit(edit) > 0.0F && menu_row_lit(file) == 0.0F, "the pointer's row alone is lit on its level");
 
-    nt_ui_menu_open(&st, 120.0F, 80.0F);
+    nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
     menu_im_frame(&st, &style, 0.0F, 0.0F);
     menu_hover_open(&st, &style, file, 1U, menu_im_frame);
     menu_hover_open(&st, &style, open, 2U, menu_im_frame);
@@ -1549,7 +1585,7 @@ static void test_menu_one_highlight_per_level(void) {
 static void test_menu_reshown_row_does_not_flash(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
     nt_ui_menu_t st = {0};
-    nt_ui_menu_open(&st, 120.0F, 80.0F);
+    nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
     menu_im_frame(&st, &style, 0.0F, 0.0F);
     const uint32_t file = nt_ui_menu_test_item_id(MENU_A, KEY_FILE);
     const uint32_t file_new = nt_ui_menu_test_item_id(file, KEY_NEW);
@@ -1574,7 +1610,7 @@ static void test_menu_reshown_row_does_not_flash(void) {
 static void test_menu_pointer_over_child_holds_it(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
     nt_ui_menu_t st = {0};
-    nt_ui_menu_open(&st, 120.0F, 80.0F);
+    nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
     menu_im_frame(&st, &style, 0.0F, 0.0F);
     menu_hover_open(&st, &style, nt_ui_menu_test_item_id(MENU_A, KEY_FILE), 1U, menu_im_frame);
     const uint32_t edit = nt_ui_menu_test_item_id(MENU_A, KEY_EDIT);
@@ -1596,23 +1632,23 @@ static void test_menu_pointer_over_child_holds_it(void) {
 static void test_menu_reopen_starts_fresh(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
     nt_ui_menu_t st = {0};
-    nt_ui_menu_open(&st, 120.0F, 80.0F);
+    nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
     menu_im_frame(&st, &style, 0.0F, 0.0F);
     const uint32_t file = nt_ui_menu_test_item_id(MENU_A, KEY_FILE);
     menu_hover_open(&st, &style, file, 1U, menu_im_frame);
     float fx = 0.0F;
     float fy = 0.0F;
     menu_row_center(file, &fx, &fy);
-    nt_ui_menu_open(&st, 400.0F, 300.0F);
+    nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 400.0F, 300.0F);
     menu_key(NT_KEY_ESCAPE);
     menu_im_frame(&st, &style, fx, fy);
-    TEST_ASSERT_TRUE_MESSAGE(st.open, "the reopened menu reads keys from its next frame");
+    TEST_ASSERT_TRUE_MESSAGE(nt_ui_is_open(s_fx.ctx, MENU_A), "the reopened menu reads keys from its next frame");
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, st.focus, "the opening frame takes no focus from the old place");
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, st.open_path[0], "the opening frame opens nothing from the old place");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, menu_open_parent(0U), "the opening frame opens nothing from the old place");
     TEST_ASSERT_FALSE_MESSAGE(menu_level_found(1U), "a reopened menu starts at the root");
     menu_key(NT_KEY_ESCAPE);
     menu_im_frame(&st, &style, fx, fy);
-    TEST_ASSERT_FALSE(st.open);
+    TEST_ASSERT_FALSE(nt_ui_is_open(s_fx.ctx, MENU_A));
 }
 
 /* ---- The opening frame takes no pointer input: a release over a row's old rect after a reopen elsewhere,
@@ -1624,7 +1660,7 @@ static void test_menu_opening_frame_ignores_the_pointer(void) {
     const uint32_t edit = nt_ui_menu_test_item_id(MENU_A, KEY_EDIT);
     s_act_capture_id = edit;
     for (int c = 0; c < 2; ++c) {
-        nt_ui_menu_open(&st, 120.0F, 80.0F);
+        nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
         menu_im_frame(&st, &style, 0.0F, 0.0F);
         menu_im_frame(&st, &style, 0.0F, 0.0F);
         float ex = 0.0F;
@@ -1633,44 +1669,77 @@ static void test_menu_opening_frame_ignores_the_pointer(void) {
         menu_im_frame(&st, &style, ex, ey);
         if (c == 0) { /* pressed on Edit, released on the frame the menu reopens elsewhere */
             menu_im_press(&st, &style, ex, ey, NT_POINTER_MOUSE);
-            nt_ui_menu_open(&st, 400.0F, 300.0F);
+            nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 400.0F, 300.0F);
         } else { /* the game reopens the menu at the same place with this press */
-            nt_ui_menu_open(&st, 120.0F, 80.0F);
+            nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
             menu_im_press(&st, &style, ex, ey, NT_POINTER_MOUSE);
         }
         nt_pointer_t release = {.x = ex, .y = ey, .active = true};
         release.buttons[NT_BUTTON_LEFT].is_released = true;
         (void)menu_im_frame_ptr(&st, &style, &release);
         TEST_ASSERT_FALSE_MESSAGE(s_act_hit, c == 0 ? "the release at the old place activates nothing" : "the reopening press is not a click on the row under it");
-        TEST_ASSERT_TRUE(st.open);
+        TEST_ASSERT_TRUE(nt_ui_is_open(s_fx.ctx, MENU_A));
     }
     const nt_button_t buttons[] = {NT_BUTTON_LEFT, NT_BUTTON_RIGHT};
     for (int b = 0; b < 2; ++b) {
-        nt_ui_menu_open(&st, 120.0F, 80.0F);
+        nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
         menu_im_frame(&st, &style, 0.0F, 0.0F);
         menu_im_frame(&st, &style, 0.0F, 0.0F);
-        nt_ui_menu_open(&st, 400.0F, 300.0F);
+        nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 400.0F, 300.0F);
         nt_pointer_t p = {.x = 780.0F, .y = 580.0F, .active = true};
         p.buttons[buttons[b]] = (nt_button_state_t){.is_down = true, .is_pressed = true};
         (void)menu_im_frame_ptr(&st, &style, &p);
-        TEST_ASSERT_TRUE_MESSAGE(st.open, "the reopening press is not an outside press");
+        TEST_ASSERT_TRUE_MESSAGE(nt_ui_is_open(s_fx.ctx, MENU_A), "the reopening press is not an outside press");
         menu_im_frame(&st, &style, 780.0F, 580.0F);
     }
 }
 
-/* ---- A modal opened over an open menu closes it: the menu, declared first, closes at its next begin, and the
- *      modal is the top that takes Esc. ---- */
+/* ---- A menu reopened while open takes no input in that frame: a tap on a row in the frame the game reopens it
+ *      at the same place activates nothing, and the same tap a frame later does. ---- */
+static void test_menu_reopened_while_open_ignores_that_frames_tap(void) {
+    const uint32_t edit = nt_ui_menu_test_item_id(MENU_A, KEY_EDIT);
+    for (int mid_frame = 0; mid_frame < 2; ++mid_frame) {
+        nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
+        nt_ui_menu_t st = {0};
+        s_act_capture_id = edit;
+        s_act_hit = false;
+        nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
+        menu_im_frame(&st, &style, 0.0F, 0.0F);
+        menu_im_frame(&st, &style, 0.0F, 0.0F);
+        float ex = 0.0F;
+        float ey = 0.0F;
+        menu_row_center(edit, &ex, &ey);
+        menu_im_frame(&st, &style, ex, ey);
+        nt_pointer_t tap = {.x = ex, .y = ey, .active = true};
+        tap.buttons[NT_BUTTON_LEFT] = (nt_button_state_t){.is_pressed = true, .is_released = true};
+        if (mid_frame != 0) {
+            s_reopen_in_frame = true; /* after nt_ui_begin chose the menu as the top */
+        } else {
+            nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
+        }
+        (void)menu_im_frame_ptr(&st, &style, &tap);
+        TEST_ASSERT_FALSE_MESSAGE(s_act_hit, "the frame the menu reopens takes no tap");
+        TEST_ASSERT_TRUE(nt_ui_is_open(s_fx.ctx, MENU_A));
+        (void)menu_im_frame_ptr(&st, &style, &tap);
+        TEST_ASSERT_TRUE_MESSAGE(s_act_hit, "the same tap a frame later activates the row");
+        nt_ui_close(s_fx.ctx, MENU_A);
+        menu_im_frame(&st, &style, 0.0F, 0.0F);
+    }
+}
+
+/* ---- A modal opened over an open menu closes it at the modal's first declaration, so the menu declares nothing
+ *      from the next frame, and the modal is the top that takes Esc. ---- */
 static void test_menu_closed_by_a_modal_opened_over_it(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
     nt_ui_menu_t st = {0};
-    nt_ui_menu_open(&st, 120.0F, 80.0F);
+    nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
     menu_im_frame(&st, &style, 0.0F, 0.0F);
     menu_im_frame(&st, &style, 0.0F, 0.0F);
-    s_modal = MODAL_OVER_MENU;
+    menu_set_modal(MODAL_OVER_MENU);
     menu_im_frame(&st, &style, 0.0F, 0.0F);
-    TEST_ASSERT_TRUE_MESSAGE(st.open, "the menu declared before the modal closes at its next begin");
+    TEST_ASSERT_FALSE_MESSAGE(nt_ui_is_open(s_fx.ctx, MENU_A), "the opening modal closes the menu");
     menu_im_frame(&st, &style, 0.0F, 0.0F);
-    TEST_ASSERT_FALSE_MESSAGE(st.open, "the opening modal closes the menu");
+    TEST_ASSERT_FALSE_MESSAGE(menu_level_found(0U), "the closed menu declares no root");
     menu_key(NT_KEY_ESCAPE);
     TEST_ASSERT_TRUE_MESSAGE(menu_im_frame_ptr(&st, &style, &(nt_pointer_t){.active = true}), "Esc closes the modal");
 }
@@ -1680,17 +1749,17 @@ static void test_menu_closed_by_a_modal_opened_over_it(void) {
 static void test_menu_over_modal_blocks_its_button(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
     nt_ui_menu_t st = {0};
-    s_modal = MODAL_UNDER_MENU;
+    menu_set_modal(MODAL_UNDER_MENU);
     s_act_capture_id = MODAL_BTN;
     menu_im_frame(&st, &style, 0.0F, 0.0F);
-    nt_ui_menu_open(&st, 120.0F, 80.0F);
+    nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
     menu_im_frame(&st, &style, 0.0F, 0.0F);
     menu_im_frame(&st, &style, 0.0F, 0.0F);
     const nt_ui_bbox_t btn = nt_ui_get_bbox(s_fx.ctx, MODAL_BTN);
     TEST_ASSERT_TRUE(btn.found);
     nt_pointer_t p = {.x = btn.x + 40.0F, .y = btn.y + 15.0F, .active = true};
     menu_im_press(&st, &style, p.x, p.y, NT_POINTER_MOUSE);
-    TEST_ASSERT_FALSE_MESSAGE(st.open, "the press outside the menu closes it");
+    TEST_ASSERT_FALSE_MESSAGE(nt_ui_is_open(s_fx.ctx, MENU_A), "the press outside the menu closes it");
     p.buttons[NT_BUTTON_LEFT].is_released = true;
     (void)menu_im_frame_ptr(&st, &style, &p);
     TEST_ASSERT_FALSE_MESSAGE(s_act_hit, "the press that closed the menu does not click the modal's button");
@@ -1717,25 +1786,25 @@ static void two_menus_frame(nt_ui_menu_t *a, nt_ui_menu_t *b, nt_ui_menu_style_t
     nt_ui_end(s_fx.ctx);
 }
 
-/* ---- A menu is a light-dismiss overlay: opening menu B while menu A is open closes A, declared first, at its
- *      next begin, and B stays open on top: the next Esc closes it. ---- */
+/* ---- A menu is a popup: opening menu B while menu A is open closes A at B's first declaration, so A declares
+ *      nothing from the next frame, and B stays open on top: the next Esc closes it. ---- */
 static void test_menu_opening_a_second_menu_closes_the_first(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
     nt_ui_menu_t a = {0};
     nt_ui_menu_t b = {0};
-    nt_ui_menu_open(&a, 120.0F, 80.0F);
+    nt_ui_menu_open(&a, s_fx.ctx, MENU_A, 120.0F, 80.0F);
     two_menus_frame(&a, &b, &style, false);
     two_menus_frame(&a, &b, &style, false);
-    TEST_ASSERT_TRUE(a.open);
-    nt_ui_menu_open(&b, 400.0F, 300.0F);
+    TEST_ASSERT_TRUE(nt_ui_is_open(s_fx.ctx, MENU_A));
+    nt_ui_menu_open(&b, s_fx.ctx, MENU_B, 400.0F, 300.0F);
     two_menus_frame(&a, &b, &style, false);
-    TEST_ASSERT_TRUE_MESSAGE(a.open, "A, declared before B, closes at its next begin");
-    TEST_ASSERT_TRUE(b.open);
+    TEST_ASSERT_FALSE_MESSAGE(nt_ui_is_open(s_fx.ctx, MENU_A), "opening B closes A");
+    TEST_ASSERT_TRUE(nt_ui_is_open(s_fx.ctx, MENU_B));
     two_menus_frame(&a, &b, &style, false);
-    TEST_ASSERT_FALSE_MESSAGE(a.open, "opening B closes A");
-    TEST_ASSERT_TRUE(b.open);
+    TEST_ASSERT_FALSE_MESSAGE(menu_level_found(0U), "the closed A declares no root");
+    TEST_ASSERT_TRUE(nt_ui_is_open(s_fx.ctx, MENU_B));
     two_menus_frame(&a, &b, &style, true);
-    TEST_ASSERT_FALSE_MESSAGE(b.open, "B is the top: the next Esc closes it");
+    TEST_ASSERT_FALSE_MESSAGE(nt_ui_is_open(s_fx.ctx, MENU_B), "B is the top: the next Esc closes it");
 }
 
 /* ---- The outside press belongs to the pointer that pressed: a second finger resting on the menu does not
@@ -1743,7 +1812,7 @@ static void test_menu_opening_a_second_menu_closes_the_first(void) {
 static void test_menu_outside_press_ignores_other_pointers(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
     nt_ui_menu_t st = {0};
-    nt_ui_menu_open(&st, 120.0F, 80.0F);
+    nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
     menu_im_frame(&st, &style, 0.0F, 0.0F);
     menu_im_frame(&st, &style, 0.0F, 0.0F);
     float ex = 0.0F;
@@ -1759,7 +1828,7 @@ static void test_menu_outside_press_ignores_other_pointers(void) {
         nt_ui_menu_end(&st);
     }
     nt_ui_end(s_fx.ctx);
-    TEST_ASSERT_FALSE_MESSAGE(st.open, "the primary pointer's outside press dismisses the menu");
+    TEST_ASSERT_FALSE_MESSAGE(nt_ui_is_open(s_fx.ctx, MENU_A), "the primary pointer's outside press dismisses the menu");
 }
 
 /* ---- A child opened last frame has no rect yet: the pointer flicking on to a sibling keeps it (the
@@ -1767,7 +1836,7 @@ static void test_menu_outside_press_ignores_other_pointers(void) {
 static void test_menu_fresh_child_survives_a_flick(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
     nt_ui_menu_t st = {0};
-    nt_ui_menu_open(&st, 120.0F, 80.0F);
+    nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
     menu_im_frame(&st, &style, 0.0F, 0.0F);
     const uint32_t file = nt_ui_menu_test_item_id(MENU_A, KEY_FILE);
     float fx = 0.0F;
@@ -1777,16 +1846,16 @@ static void test_menu_fresh_child_survives_a_flick(void) {
     menu_row_center(file, &fx, &fy);
     menu_row_center(nt_ui_menu_test_item_id(MENU_A, KEY_TOOLS), &tx, &ty);
     menu_im_frame(&st, &style, fx, fy);
-    TEST_ASSERT_EQUAL_UINT32(file, st.open_path[0]);
+    TEST_ASSERT_EQUAL_UINT32(file, menu_open_parent(0U));
     menu_im_frame(&st, &style, tx, ty);
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(file, st.open_path[0], "File's child, opened last frame, survives the flick");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(file, menu_open_parent(0U), "File's child, opened last frame, survives the flick");
 }
 
 /* ---- A key ends a pending switch: Right on a leaf beside a held sibling's child closes that child. ---- */
 static void test_menu_key_ends_pending_switch(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
     nt_ui_menu_t st = {0};
-    nt_ui_menu_open(&st, 120.0F, 80.0F);
+    nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
     menu_im_frame(&st, &style, 0.0F, 0.0F);
     menu_hover_open(&st, &style, nt_ui_menu_test_item_id(MENU_A, KEY_FILE), 1U, menu_im_frame);
     const uint32_t edit = nt_ui_menu_test_item_id(MENU_A, KEY_EDIT);
@@ -1800,9 +1869,9 @@ static void test_menu_key_ends_pending_switch(void) {
     menu_im_frame(&st, &style, ex, ey);
     nt_input_init();
     menu_im_frame(&st, &style, ex, ey);
-    TEST_ASSERT_EQUAL_UINT32(0U, st.open_path[0]);
+    TEST_ASSERT_EQUAL_UINT32(0U, menu_open_parent(0U));
     TEST_ASSERT_EQUAL_UINT32(edit, st.focus);
-    TEST_ASSERT_TRUE(st.open);
+    TEST_ASSERT_TRUE(nt_ui_is_open(s_fx.ctx, MENU_A));
 }
 
 #define ROW_POPUP_ID 0x9091U
@@ -1813,11 +1882,11 @@ static void menu_popup_row(nt_ui_menu_t *st, int depth) {
     nt_ui_menu_item_begin(st, KEY_L1, true, false);
     if (s_popup_depth == depth) {
         nt_ui_popup_style_t ps = nt_ui_popup_style_defaults();
-        ps.flags = s_popup_tooltip ? 0U : NT_UI_POPUP_LIGHT_DISMISS; /* a tooltip-like popup, or a combo list */
+        ps.kind = s_popup_tooltip ? NT_UI_POPUP_KIND_TOOLTIP : NT_UI_POPUP_KIND_POPUP; /* a tooltip, or a combo list */
         ps.ease_speed = 0.0F;
         const nt_ui_popup_anchor_t anchor = {.x = 600.0F, .y = 450.0F, .prefer_side = NT_UI_POPUP_BELOW};
-        bool open = true;
-        if (nt_ui_popup_begin(s_fx.ctx, ROW_POPUP_ID, &ps, &anchor, &open, NULL)) {
+        nt_ui_open(s_fx.ctx, ROW_POPUP_ID);
+        if (nt_ui_popup_begin(s_fx.ctx, ROW_POPUP_ID, &ps, &anchor, NULL)) {
             CLAY({.id = (Clay_ElementId){.id = ROW_POPUP_BOX}, .layout = {.sizing = {CLAY_SIZING_FIXED(60), CLAY_SIZING_FIXED(40)}}}){}(void)nt_ui_step(s_fx.ctx, ROW_POPUP_BOX, NULL);
             nt_ui_popup_end(s_fx.ctx);
         }
@@ -1853,7 +1922,7 @@ static void test_menu_press_on_row_popup_keeps_open(void) {
         s_popup_tooltip = (c == 0);
         nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
         nt_ui_menu_t st = {0};
-        nt_ui_menu_open(&st, 120.0F, 80.0F);
+        nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
         menu_popup_frame(&st, &style, 0.0F, 0.0F);
         menu_popup_frame(&st, &style, 0.0F, 0.0F);
         const nt_ui_bbox_t box = nt_ui_get_bbox(s_fx.ctx, ROW_POPUP_BOX);
@@ -1863,7 +1932,8 @@ static void test_menu_press_on_row_popup_keeps_open(void) {
         p.buttons[NT_BUTTON_LEFT].is_down = true;
         p.buttons[NT_BUTTON_LEFT].is_pressed = true;
         menu_popup_frame_ptr(&st, &style, &p);
-        TEST_ASSERT_TRUE_MESSAGE(st.open, "a press on a popup inside the menu is not an outside press, nor does that popup supersede it");
+        TEST_ASSERT_TRUE_MESSAGE(nt_ui_is_open(s_fx.ctx, MENU_A), "a press on a popup inside the menu is not an outside press, nor does that popup supersede it");
+        nt_ui_close(s_fx.ctx, ROW_POPUP_ID); /* the next case's popup opens fresh, after the reopened menu */
     }
 }
 
@@ -1872,7 +1942,7 @@ static void test_menu_press_on_row_popup_keeps_open(void) {
 static void test_menu_row_popup_closes_the_branch_before_the_rows(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
     nt_ui_menu_t st = {0};
-    nt_ui_menu_open(&st, 120.0F, 80.0F);
+    nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
     menu_popup_frame(&st, &style, 0.0F, 0.0F);
     menu_popup_frame(&st, &style, 0.0F, 0.0F);
     const uint32_t file = nt_ui_menu_test_item_id(MENU_A, KEY_FILE);
@@ -1892,7 +1962,7 @@ static void test_menu_row_popup_closes_the_branch_before_the_rows(void) {
 static void test_menu_deep_row_popup_closes_its_level_branch(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
     nt_ui_menu_t st = {0};
-    nt_ui_menu_open(&st, 120.0F, 80.0F);
+    nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
     menu_popup_frame(&st, &style, 0.0F, 0.0F);
     menu_popup_frame(&st, &style, 0.0F, 0.0F);
     const uint32_t file = nt_ui_menu_test_item_id(MENU_A, KEY_FILE);
@@ -1906,22 +1976,22 @@ static void test_menu_deep_row_popup_closes_its_level_branch(void) {
     for (int f = 0; f < 3; ++f) {
         menu_popup_frame(&st, &style, x, y);
     }
-    TEST_ASSERT_EQUAL_UINT32(file, st.open_path[0]);
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, st.open_path[1], "the popup closes the branch beside its row");
+    TEST_ASSERT_EQUAL_UINT32(file, menu_open_parent(0U));
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, menu_open_parent(1U), "the popup closes the branch beside its row");
 }
 
 /* ---- Right on a focused leaf does nothing. ---- */
 static void test_menu_right_on_leaf_does_nothing(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
     nt_ui_menu_t st = {0};
-    nt_ui_menu_open(&st, 120.0F, 80.0F);
+    nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
     static const uint32_t l12[] = {KEY_L1, KEY_L2};
     const menu_dyn_tree_t t = {.keys = l12, .count = 2};
     const uint32_t l1 = nt_ui_menu_test_item_id(MENU_A, KEY_L1);
     s_act_capture_id = l1;
     const nt_key_t keys[] = {NT_KEY_ARROW_DOWN, NT_KEY_ARROW_RIGHT};
     menu_dyn_keys(&st, &style, &t, keys, 2);
-    TEST_ASSERT_TRUE(st.open);
+    TEST_ASSERT_TRUE(nt_ui_is_open(s_fx.ctx, MENU_A));
     TEST_ASSERT_EQUAL_UINT32(l1, st.focus);
     TEST_ASSERT_FALSE(s_act_hit);
 }
@@ -1930,7 +2000,7 @@ static void test_menu_right_on_leaf_does_nothing(void) {
 static void menu_still_press_ends_keyboard_mode(nt_button_t button) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
     nt_ui_menu_t st = {0};
-    nt_ui_menu_open(&st, 120.0F, 80.0F);
+    nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
     menu_im_frame(&st, &style, 0.0F, 0.0F);
     const uint32_t edit = nt_ui_menu_test_item_id(MENU_A, KEY_EDIT);
     float ex = 0.0F;
@@ -1949,7 +2019,7 @@ static void menu_still_press_ends_keyboard_mode(nt_button_t button) {
     p.buttons[button].is_pressed = true;
     (void)menu_im_frame_ptr(&st, &style, &p);
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(edit, st.focus, "a still press hands focus back to the pointer");
-    TEST_ASSERT_TRUE(st.open);
+    TEST_ASSERT_TRUE(nt_ui_is_open(s_fx.ctx, MENU_A));
 }
 
 static void test_menu_still_press_ends_keyboard_mode(void) { menu_still_press_ends_keyboard_mode(NT_BUTTON_LEFT); }
@@ -1960,7 +2030,7 @@ static void test_menu_still_right_press_ends_keyboard_mode(void) { menu_still_pr
 static void test_menu_covered_switch_waits(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
     nt_ui_menu_t st = {0};
-    nt_ui_menu_open(&st, 120.0F, 80.0F);
+    nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
     menu_popup_frame(&st, &style, 0.0F, 0.0F);
     menu_popup_frame(&st, &style, 0.0F, 0.0F);
     const uint32_t file = nt_ui_menu_test_item_id(MENU_A, KEY_FILE);
@@ -1969,20 +2039,20 @@ static void test_menu_covered_switch_waits(void) {
     float ly = 0.0F;
     menu_row_center(nt_ui_menu_test_item_id(MENU_A, KEY_L1), &lx, &ly);
     menu_popup_frame(&st, &style, lx, ly); /* the switch to L1 is pending: File's child stays */
-    TEST_ASSERT_EQUAL_UINT32(file, st.open_path[0]);
+    TEST_ASSERT_EQUAL_UINT32(file, menu_open_parent(0U));
     s_popup_depth = 1;
     for (int f = 0; f < (int)(4.0F * NT_UI_MENU_AIM_FALLBACK_SECS / UI_FX_DT); ++f) {
         menu_popup_frame(&st, &style, lx, ly);
     }
-    TEST_ASSERT_TRUE(st.open);
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(file, st.open_path[0], "the covered menu's switch waits for the popup");
+    TEST_ASSERT_TRUE(nt_ui_is_open(s_fx.ctx, MENU_A));
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(file, menu_open_parent(0U), "the covered menu's switch waits for the popup");
 }
 
 /* ---- A right press while the left drags across the rows is inside the menu: it stays open. ---- */
 static void test_menu_right_press_during_a_drag_keeps_open(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
     nt_ui_menu_t st = {0};
-    nt_ui_menu_open(&st, 120.0F, 80.0F);
+    nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
     static const uint32_t l12[] = {KEY_L1, KEY_L2};
     const menu_dyn_tree_t t = {.keys = l12, .count = 2};
     menu_dyn_frame(&st, &style, &t);
@@ -2002,7 +2072,7 @@ static void test_menu_right_press_during_a_drag_keeps_open(void) {
     menu_dyn_frame_ptr(&st, &style, &t, &p);
     p.buttons[NT_BUTTON_RIGHT] = (nt_button_state_t){.is_down = true, .is_pressed = true};
     menu_dyn_frame_ptr(&st, &style, &t, &p);
-    TEST_ASSERT_TRUE_MESSAGE(st.open, "a press over a row is not an outside press, whatever the left holds");
+    TEST_ASSERT_TRUE_MESSAGE(nt_ui_is_open(s_fx.ctx, MENU_A), "a press over a row is not an outside press, whatever the left holds");
     p.buttons[NT_BUTTON_RIGHT] = (nt_button_state_t){.is_down = false, .is_released = true};
     menu_dyn_frame_ptr(&st, &style, &t, &p);
     p.x = 780.0F;
@@ -2011,14 +2081,14 @@ static void test_menu_right_press_during_a_drag_keeps_open(void) {
     menu_dyn_frame_ptr(&st, &style, &t, &p);
     p.buttons[NT_BUTTON_RIGHT] = (nt_button_state_t){.is_down = true, .is_pressed = true};
     menu_dyn_frame_ptr(&st, &style, &t, &p);
-    TEST_ASSERT_FALSE_MESSAGE(st.open, "a press off the menu dismisses it while the left still holds a row");
+    TEST_ASSERT_FALSE_MESSAGE(nt_ui_is_open(s_fx.ctx, MENU_A), "a press off the menu dismisses it while the left still holds a row");
 }
 
 /* ---- Right and Esc in one frame: the frame acts on one key, and Esc comes first, so the menu closes. ---- */
 static void test_menu_right_and_esc_in_one_frame(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
     nt_ui_menu_t st = {0};
-    nt_ui_menu_open(&st, 120.0F, 80.0F);
+    nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
     static const uint32_t p1[] = {KEY_P1};
     const menu_dyn_tree_t t = {.keys = p1, .count = 1};
     const nt_key_t down = NT_KEY_ARROW_DOWN;
@@ -2028,7 +2098,7 @@ static void test_menu_right_and_esc_in_one_frame(void) {
     nt_input_feed(nt_test_key(NT_KEY_ESCAPE, true));
     nt_input_poll();
     menu_dyn_frame(&st, &style, &t);
-    TEST_ASSERT_FALSE_MESSAGE(st.open, "Esc at the root closes the menu; the Right does nothing");
+    TEST_ASSERT_FALSE_MESSAGE(nt_ui_is_open(s_fx.ctx, MENU_A), "Esc at the root closes the menu; the Right does nothing");
 }
 
 /* ---- A focused row removed for one frame loses focus: when it returns, Enter does not activate it. ---- */
@@ -2039,14 +2109,14 @@ static void test_menu_returned_row_is_not_focused(void) {
     const menu_dyn_tree_t full = {.keys = l123, .count = 3};
     const menu_dyn_tree_t lost = {.keys = l13, .count = 2};
     nt_ui_menu_t st = {0};
-    nt_ui_menu_open(&st, 120.0F, 80.0F);
+    nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
     const nt_key_t focus_l2[] = {NT_KEY_ARROW_DOWN, NT_KEY_ARROW_DOWN};
     menu_dyn_keys(&st, &style, &full, focus_l2, 2);
     TEST_ASSERT_EQUAL_UINT32(nt_ui_menu_test_item_id(MENU_A, KEY_L2), st.focus);
     menu_dyn_frame(&st, &style, &lost);
     menu_dyn_frame(&st, &style, &full);
     TEST_ASSERT_FALSE_MESSAGE(menu_dyn_enter_activates(&st, &style, &full, nt_ui_menu_test_item_id(MENU_A, KEY_L2)), "a removed row loses focus");
-    TEST_ASSERT_TRUE(st.open);
+    TEST_ASSERT_TRUE(nt_ui_is_open(s_fx.ctx, MENU_A));
 }
 
 /* ---- An open menu the game skipped for a frame (the modal holding it hid) closes at its next declaration:
@@ -2054,7 +2124,7 @@ static void test_menu_returned_row_is_not_focused(void) {
 static void test_menu_skipped_while_open_closes(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
     nt_ui_menu_t st = {0};
-    nt_ui_menu_open(&st, 120.0F, 80.0F);
+    nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
     menu_im_frame(&st, &style, 0.0F, 0.0F);
     menu_im_frame(&st, &style, 0.0F, 0.0F);
     menu_frame_begin(&(nt_pointer_t){.active = true}); /* a frame without the menu */
@@ -2062,7 +2132,7 @@ static void test_menu_skipped_while_open_closes(void) {
     menu_frame_begin(&(nt_pointer_t){.active = true});
     TEST_ASSERT_FALSE(nt_ui_menu_begin(&st, s_fx.ctx, NULL, 0U, MENU_A, &style));
     nt_ui_end(s_fx.ctx);
-    TEST_ASSERT_FALSE(st.open);
+    TEST_ASSERT_FALSE(nt_ui_is_open(s_fx.ctx, MENU_A));
 }
 
 /* ---- A tap on one parent and Right on a later focused parent in one frame, with a third parent's child
@@ -2073,7 +2143,7 @@ static void test_menu_click_beats_a_same_frame_key(void) {
     static const uint32_t parents[] = {KEY_PARENT, KEY_PARENT + 1U, KEY_PARENT + 2U};
     const menu_dyn_tree_t t = {.keys = parents, .count = 3};
     nt_ui_menu_t st = {0};
-    nt_ui_menu_open(&st, 120.0F, 80.0F);
+    nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
     menu_dyn_frame(&st, &style, &t);
     menu_dyn_frame(&st, &style, &t);
     const uint32_t b = nt_ui_menu_test_item_id(MENU_A, KEY_PARENT);
@@ -2082,27 +2152,27 @@ static void test_menu_click_beats_a_same_frame_key(void) {
     float x = 0.0F;
     float y = 0.0F;
     menu_row_center(c, &x, &y);
-    for (int f = 0; f < 3 && st.open_path[0] != c; ++f) {
+    for (int f = 0; f < 3 && menu_open_parent(0U) != c; ++f) {
         menu_dyn_frame_ptr(&st, &style, &t, &(nt_pointer_t){.x = x, .y = y, .active = true});
     }
-    TEST_ASSERT_EQUAL_UINT32(c, st.open_path[0]);
+    TEST_ASSERT_EQUAL_UINT32(c, menu_open_parent(0U));
     menu_row_center(a, &x, &y);
     menu_dyn_frame_ptr(&st, &style, &t, &(nt_pointer_t){.x = x, .y = y, .active = true}); /* focus A, C's child pending */
     TEST_ASSERT_EQUAL_UINT32(a, st.focus);
-    TEST_ASSERT_EQUAL_UINT32(c, st.open_path[0]);
+    TEST_ASSERT_EQUAL_UINT32(c, menu_open_parent(0U));
     menu_row_center(b, &x, &y);
     nt_pointer_t tap = {.x = x, .y = y, .active = true, .type = NT_POINTER_TOUCH};
     tap.buttons[NT_BUTTON_LEFT] = (nt_button_state_t){.is_pressed = true, .is_released = true};
     menu_key(NT_KEY_ARROW_RIGHT); /* on A */
     menu_dyn_frame_ptr(&st, &style, &t, &tap);
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(b, st.open_path[0], "the tap on B opens B over the Right on A");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(b, menu_open_parent(0U), "the tap on B opens B over the Right on A");
 }
 
 /* ---- An open menu with a submenu keeps no state-pool cell: its levels are snap popups. ---- */
 static void test_menu_keeps_no_state_cells(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
     nt_ui_menu_t st = {0};
-    nt_ui_menu_open(&st, 120.0F, 80.0F);
+    nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
     menu_open_file_open(&st, &style);
     TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_state_used_slots(s_fx.ctx));
 }
@@ -2112,7 +2182,7 @@ static void test_menu_instant_rows_take_no_anim_slot(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
     style.state_speed = 0.0F;
     nt_ui_menu_t st = {0};
-    nt_ui_menu_open(&st, 120.0F, 80.0F);
+    nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
     menu_im_frame(&st, &style, 0.0F, 0.0F);
     menu_im_frame(&st, &style, 0.0F, 0.0F);
     const uint32_t file = nt_ui_menu_test_item_id(MENU_A, KEY_FILE);
@@ -2127,9 +2197,9 @@ static void test_menu_instant_rows_take_no_anim_slot(void) {
 static void test_menu_in_a_closing_modal_takes_no_key(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
     nt_ui_menu_t st = {0};
-    s_modal = MODAL_HOLDS_MENU;
+    menu_set_modal(MODAL_HOLDS_MENU);
     menu_im_frame(&st, &style, 0.0F, 0.0F);
-    nt_ui_menu_open(&st, 120.0F, 80.0F);
+    nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
     for (int f = 0; f < 3; ++f) {
         menu_im_frame(&st, &style, 0.0F, 0.0F);
     }
@@ -2140,7 +2210,7 @@ static void test_menu_in_a_closing_modal_takes_no_key(void) {
     s_act_capture_id = row;
     s_act_hit = false;
     menu_key(NT_KEY_ENTER);
-    s_modal = MODAL_CLOSES_AROUND_MENU; /* the game closes the modal in the Enter frame */
+    menu_set_modal(MODAL_CLOSES_AROUND_MENU); /* the game closes the modal in the Enter frame */
     menu_im_frame(&st, &style, 0.0F, 0.0F);
     TEST_ASSERT_FALSE_MESSAGE(s_act_hit, "a menu in a closing modal activates nothing");
 }
@@ -2181,7 +2251,7 @@ static void test_menu_focused_field_owns_keys(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
     nt_ui_menu_t st = {0};
     memset(s_field_buf, 0, sizeof s_field_buf);
-    nt_ui_menu_open(&st, 120.0F, 80.0F);
+    nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
     menu_field_frame(&st, &style, true, &(nt_pointer_t){.active = true});
     menu_field_frame(&st, &style, true, &(nt_pointer_t){.active = true});
     const nt_ui_bbox_t fb = nt_ui_get_bbox(s_fx.ctx, MENU_FIELD);
@@ -2194,11 +2264,11 @@ static void test_menu_focused_field_owns_keys(void) {
     TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, MENU_FIELD));
     menu_key(NT_KEY_ARROW_LEFT);
     menu_field_frame(&st, &style, true, &rest);
-    TEST_ASSERT_TRUE_MESSAGE(st.open, "Left belongs to the focused field");
+    TEST_ASSERT_TRUE_MESSAGE(nt_ui_is_open(s_fx.ctx, MENU_A), "Left belongs to the focused field");
     menu_key(NT_KEY_ESCAPE);
     menu_field_frame(&st, &style, true, &rest);
     TEST_ASSERT_FALSE(nt_ui_input_focused(s_fx.ctx, MENU_FIELD));
-    TEST_ASSERT_TRUE_MESSAGE(st.open, "Esc unfocuses the field and does not also close the menu");
+    TEST_ASSERT_TRUE_MESSAGE(nt_ui_is_open(s_fx.ctx, MENU_A), "Esc unfocuses the field and does not also close the menu");
 }
 
 /* ---- A field focused under the menu loses focus once the menu is on top: the menu's keys are its own. ---- */
@@ -2216,7 +2286,7 @@ static void test_menu_takes_focus_from_a_field_under_it(void) {
     menu_field_frame(&st, &style, false, &tap);
     menu_field_frame(&st, &style, false, &idle);
     TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, MENU_FIELD));
-    nt_ui_menu_open(&st, 300.0F, 200.0F);
+    nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 300.0F, 200.0F);
     menu_field_frame(&st, &style, false, &idle);
     menu_field_frame(&st, &style, false, &idle);
     TEST_ASSERT_FALSE_MESSAGE(nt_ui_input_focused(s_fx.ctx, MENU_FIELD), "the menu on top takes the focus of a field under it");
@@ -2228,14 +2298,14 @@ static void test_menu_key_without_focus_keeps_pointer_mode(void) {
     const nt_key_t keys[] = {NT_KEY_ENTER, NT_KEY_ARROW_RIGHT};
     for (int k = 0; k < 2; ++k) {
         nt_ui_menu_t st = {0};
-        nt_ui_menu_open(&st, 120.0F, 80.0F);
+        nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
         menu_im_frame(&st, &style, 790.0F, 590.0F);
         menu_im_frame(&st, &style, 790.0F, 590.0F);
         TEST_ASSERT_EQUAL_UINT32(0U, st.focus);
         menu_key(keys[k]);
         menu_im_frame(&st, &style, 790.0F, 590.0F);
         nt_input_init();
-        TEST_ASSERT_TRUE(st.open);
+        TEST_ASSERT_TRUE(nt_ui_is_open(s_fx.ctx, MENU_A));
         TEST_ASSERT_FALSE_MESSAGE(st.kbd_mode, "a key with no focused row leaves the pointer in charge");
     }
 }
@@ -2249,21 +2319,21 @@ static void test_menu_lost_focus_lights_the_open_parent(void) {
     const menu_dyn_tree_t full = {.keys = full_keys, .count = 2};
     const menu_dyn_tree_t lost = {.keys = lost_keys, .count = 1};
     nt_ui_menu_t st = {0};
-    nt_ui_menu_open(&st, 120.0F, 80.0F);
+    nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
     menu_dyn_frame(&st, &style, &full);
     menu_dyn_frame(&st, &style, &full);
     const uint32_t p = nt_ui_menu_test_item_id(MENU_A, KEY_PARENT);
     float x = 0.0F;
     float y = 0.0F;
     menu_row_center(p, &x, &y);
-    for (int f = 0; f < 3 && st.open_path[0] != p; ++f) {
+    for (int f = 0; f < 3 && menu_open_parent(0U) != p; ++f) {
         menu_dyn_frame_ptr(&st, &style, &full, &(nt_pointer_t){.x = x, .y = y, .active = true});
     }
     menu_row_center(nt_ui_menu_test_item_id(MENU_A, KEY_L1), &x, &y);
     menu_dyn_frame_ptr(&st, &style, &full, &(nt_pointer_t){.x = x, .y = y, .active = true}); /* focus L1, switch pending */
     menu_dyn_frame_ptr(&st, &style, &lost, &(nt_pointer_t){.x = 790.0F, .y = 590.0F, .active = true});
     menu_dyn_frame_ptr(&st, &style, &lost, &(nt_pointer_t){.x = 790.0F, .y = 590.0F, .active = true});
-    TEST_ASSERT_EQUAL_UINT32(p, st.open_path[0]);
+    TEST_ASSERT_EQUAL_UINT32(p, menu_open_parent(0U));
     TEST_ASSERT_TRUE_MESSAGE(menu_row_lit(p) > 0.0F, "the open parent is lit when its level has no focus");
 }
 
@@ -2334,6 +2404,7 @@ int main(void) {
     RUN_TEST(test_menu_no_focus_right_leaves_down);
     RUN_TEST(test_menu_reopen_starts_fresh);
     RUN_TEST(test_menu_opening_frame_ignores_the_pointer);
+    RUN_TEST(test_menu_reopened_while_open_ignores_that_frames_tap);
     RUN_TEST(test_menu_disabled_focused_row_keeps_its_place);
     RUN_TEST(test_menu_up_down_wrap);
     RUN_TEST(test_menu_down_skips_disabled);

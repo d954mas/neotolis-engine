@@ -345,11 +345,8 @@ typedef struct {
 /* Dropdown tab: game-owned selection + open flags. */
 typedef struct {
     int fruit_sel; /* short list selection */
-    bool fruit_open;
-    int city_sel; /* long (scrolling) list selection */
-    bool city_open;
+    int city_sel;  /* long (scrolling) list selection */
     int color_sel; /* custom swatch-trigger combo selection */
-    bool color_open;
 } dropdown_params_t;
 
 /* Menu tab: two independent game-owned menus to show the optional target binding — a GLOBAL menu
@@ -395,8 +392,6 @@ struct tab_state {
     progress_params_t prog;
     btn_xform_params_t btn_xform;
     /* Modals tab. */
-    bool confirm_open;
-    bool nested_open;
     modal_params_t modal;
     /* Stress tab. */
     stress_params_t stress;
@@ -428,15 +423,13 @@ static struct tab_state s_state = {
     .s9 = {.inset_l = 10, .inset_r = 10, .inset_t = 10, .inset_b = 10, .target_w = 300, .target_h = 150, .slice9_scale = 1.0F},
     .prog = {.value = 0.4F, .auto_anim = false, .ramp_up = true},
     .btn_xform = {.rotation_deg = 20.0F, .scale = 1.0F, .offset_x = 0.0F, .offset_y = 0.0F, .clicks = 0},
-    .confirm_open = false,
-    .nested_open = false,
     .modal = {.open_type = 2, .close_type = 1, .open_edge = 0, .close_edge = 0, .ease_speed = 14.0F, .scale_start = 0.92F, .slide_offset = 32.0F, .backdrop_alpha = 0.55F}, /* default demo: slide-in /
                                                                                                                                                                                fade-out */
     .stress = {.label_count = 3000},
     .input = {.plain = "Edit me", .numeric = "42", .password = "secret", .cyrillic = "Привет, мир"},
     .events = {.confirms = 0, .dbl_clicks = 0, .last_progress = 0.0F},
     .radial = {.cooldown = 0.0F, .cooldown_secs = 3.0F, .hold_fires = 0, .hold_progress = 0.0F},
-    .dropdown = {.fruit_sel = 0, .fruit_open = false, .city_sel = -1, .city_open = false, .color_sel = -1, .color_open = false},
+    .dropdown = {.fruit_sel = 0, .city_sel = -1, .color_sel = -1},
     .menu = {.global_menu = {0}, .zone_menu = {0}, .last_chosen = NULL, .show_grid = false, .opacity_pct = 60}, /* non-100 start so "reset" visibly changes it */
     .rich = {.time = 0.0F, .last_link = 0U, .link_clicks = 0U, .hover_a = 0U, .hover_b = 0U, .latch_a = 0.0F, .latch_b = 0.0F},
 };
@@ -1707,7 +1700,7 @@ static void render_modals(nt_ui_context_t *ctx, tab_state_t *st) {
         true);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Show confirm", g_current->body);
     if (nt_ui_button_end(ctx)) {
-        st->confirm_open = true;
+        nt_ui_open(ctx, s_id_modal_confirm);
     }
 }
 
@@ -1723,7 +1716,7 @@ static void render_modal_overlay(nt_ui_context_t *ctx, tab_state_t *st) {
     s_modal_style_runtime.open = modal_param_anim(st->modal.open_type, st->modal.open_edge, st->modal.scale_start, st->modal.slide_offset);
     s_modal_style_runtime.close = modal_param_anim(st->modal.close_type, st->modal.close_edge, st->modal.scale_start, st->modal.slide_offset);
 
-    if (nt_ui_modal_begin(ctx, s_id_modal_confirm, &s_modal_style_runtime, &st->confirm_open, NULL)) {
+    if (nt_ui_modal_begin(ctx, s_id_modal_confirm, &s_modal_style_runtime, NULL)) {
         CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(520), CLAY_SIZING_FIT(0)},
                          .padding = CLAY_PADDING_ALL(22),
                          .layoutDirection = CLAY_TOP_TO_BOTTOM,
@@ -1736,35 +1729,31 @@ static void render_modal_overlay(nt_ui_context_t *ctx, tab_state_t *st) {
 
             CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 12}}) {
                 if (modal_action_btn(ctx, s_id_modal_ok_btn, "OK")) {
-                    st->confirm_open = false;
+                    nt_ui_close(ctx, s_id_modal_confirm);
                 }
                 if (modal_action_btn(ctx, s_id_modal_cancel_btn, "Cancel")) {
-                    st->confirm_open = false;
+                    nt_ui_close(ctx, s_id_modal_confirm);
                 }
                 if (modal_action_btn(ctx, s_id_modal_nested_btn, "Show nested")) {
-                    st->nested_open = true;
+                    nt_ui_open(ctx, s_id_modal_nested);
                 }
             }
 
             /* Nested modal (depth 2): proves z-banding + top-only Esc targeting. */
-            if (nt_ui_modal_begin(ctx, s_id_modal_nested, &s_modal_style_runtime, &st->nested_open, NULL)) {
+            if (nt_ui_modal_begin(ctx, s_id_modal_nested, &s_modal_style_runtime, NULL)) {
                 CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(340), CLAY_SIZING_FIT(0)}, .padding = CLAY_PADDING_ALL(20), .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 14},
                       .backgroundColor = g_current->panel,
                       .cornerRadius = CLAY_CORNER_RADIUS(12)}) {
                     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Nested modal (depth 2)", g_current->h1);
                     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Esc closes only this top modal.", g_current->body);
                     if (modal_action_btn(ctx, s_id_modal_nested_close_btn, "Close")) {
-                        st->nested_open = false;
+                        nt_ui_close(ctx, s_id_modal_nested);
                     }
                 }
                 nt_ui_modal_end(ctx);
             }
         }
         nt_ui_modal_end(ctx);
-    }
-    /* Closing the confirm closes the dialog it opened too, so it does not reopen with it. */
-    if (!st->confirm_open) {
-        st->nested_open = false;
     }
 }
 
@@ -2958,7 +2947,7 @@ static void render_dropdown(nt_ui_context_t *ctx, tab_state_t *st) {
      * icon + name in the SAME icon-gutter idiom as the open rows (mirrors the engine row gutter); a couple of
      * rows draw an icon in the engine gutter (combo_selectable_icon) — all labels stay in one aligned column. */
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Fruit (short list, icon gutter)", g_current->caption);
-    nt_ui_combo_preview_begin(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_dd_fruit, g_current->dropdown, &st->dropdown.fruit_open);
+    nt_ui_combo_preview_begin(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_dd_fruit, g_current->dropdown);
     {
         const int sel = st->dropdown.fruit_sel;
         const float gut = (float)g_current->dropdown->icon_size; /* same gutter as the open rows so the label x matches */
@@ -2988,7 +2977,7 @@ static void render_dropdown(nt_ui_context_t *ctx, tab_state_t *st) {
      * bottom flips the list ABOVE the trigger. Plain selectables (no icon gutter). */
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "City (long scrolling list)", g_current->caption);
     const char *city_preview = (st->dropdown.city_sel >= 0) ? cities[st->dropdown.city_sel] : "Pick a city";
-    if (nt_ui_combo_begin(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_dd_city, city_preview, g_current->dropdown, &st->dropdown.city_open)) {
+    if (nt_ui_combo_begin(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_dd_city, city_preview, g_current->dropdown)) {
         for (int i = 0; i < city_count; ++i) {
             if (nt_ui_combo_selectable(ctx, (uint32_t)i, cities[i], i == st->dropdown.city_sel)) {
                 st->dropdown.city_sel = i;
@@ -3003,7 +2992,7 @@ static void render_dropdown(nt_ui_context_t *ctx, tab_state_t *st) {
     static const char *const colors[] = {"Crimson", "Emerald", "Azure", "Amber"};
     static const Clay_Color swatches[] = {{208, 48, 48, 255}, {48, 176, 80, 255}, {48, 128, 208, 255}, {224, 192, 48, 255}}; /* RGBA */
     static const int color_count = (int)(sizeof colors / sizeof colors[0]);
-    nt_ui_combo_preview_begin(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_dd_color, g_current->dropdown, &st->dropdown.color_open);
+    nt_ui_combo_preview_begin(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_dd_color, g_current->dropdown);
     {
         const int sel = st->dropdown.color_sel;
         const Clay_Color sw = (sel >= 0 && sel < color_count) ? swatches[sel] : (Clay_Color){128, 128, 128, 255};
@@ -3204,14 +3193,12 @@ static void render_menu(nt_ui_context_t *ctx, tab_state_t *st) {
     const bool right = nt_input_mouse_is_pressed(NT_BUTTON_RIGHT) && !nt_ui_inspector_pointer_consumed(ctx);
     const bool held = nt_ui_hold_crossed(&zone_ev, 0.5F);
     if (held || (right && over_zone)) {
-        nt_ui_menu_open(&st->menu.zone_menu, held ? zone_ev.pos[0] : px, held ? zone_ev.pos[1] : py); /* a hold opens under its own finger */
-        st->menu.global_menu.open = false;
+        nt_ui_menu_open(&st->menu.zone_menu, ctx, s_id_menu_zone, held ? zone_ev.pos[0] : px, held ? zone_ev.pos[1] : py); /* a hold opens under its finger */
     } else if (right) {
-        nt_ui_menu_open(&st->menu.global_menu, px, py);
-        st->menu.zone_menu.open = false;
+        nt_ui_menu_open(&st->menu.global_menu, ctx, s_id_menu_global, px, py); /* opening one menu closes the other */
     }
 
-    /* Render both menus; the open branch above keeps at most one open. Rows report activation inline. */
+    /* Render both menus; at most one is open. Rows report activation inline. */
     render_menu_global(ctx, st);
     render_menu_zone(ctx, st);
 
@@ -3774,7 +3761,7 @@ static void frame(void) {
         }
 
         /* Modal declared at ROOT (after the scene, before nt_ui_end): no scissor ancestor, so the
-         * floating panel renders unclipped. Self-gates on confirm_open; only the Modals tab drives it. */
+         * floating panel renders unclipped. Shows while it is open; only the Modals tab drives it. */
         if (g_tabs[s_active_tab].render == render_modals) {
             render_modal_overlay(s_ctx, &s_state);
         }

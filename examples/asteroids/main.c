@@ -1544,7 +1544,21 @@ static void build_ui(void) {
                 }
             }
             if (narrow) {
-                s_ui_modal_shown = nt_ui_modal_begin(s_ui, CLAY_ID("asteroids.compact_modal").id, &s_ui_modal, &s_ui_panel_open, NULL);
+                /* The compact layout shows the settings panel as a modal: it follows the panel flag, and its own
+                 * Esc or backdrop close clears the flag. */
+                const uint32_t modal_id = CLAY_ID("asteroids.compact_modal").id;
+                if (s_ui_panel_open != nt_ui_is_open(s_ui, modal_id)) {
+                    if (s_ui_panel_open) {
+                        nt_ui_open(s_ui, modal_id);
+                    } else {
+                        nt_ui_close(s_ui, modal_id);
+                    }
+                }
+                nt_ui_popup_info_t modal = {0};
+                s_ui_modal_shown = nt_ui_modal_begin(s_ui, modal_id, &s_ui_modal, &modal);
+                if (modal.reason == NT_UI_POPUP_CLOSE_ESC || modal.reason == NT_UI_POPUP_CLOSE_OUTSIDE) {
+                    s_ui_panel_open = false;
+                }
                 if (s_ui_modal_shown) {
                     if (height > 180) {
                         ui_panel(fminf(352, width - 24), fminf(680, height - 100));

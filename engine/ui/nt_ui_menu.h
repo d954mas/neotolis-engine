@@ -105,22 +105,19 @@ typedef struct {
     bool focus_seen;  /* the focused row is declared and enabled this frame */
     bool focus_opens; /* the focused row is a parent */
     bool top;         /* the menu is the top overlay: its rows take the pointer and it reads the keys */
+    bool opening;     /* its first declaration since it opened: the rows' highlight snaps */
     bool activated;   /* a row activated: the chain closes */
     bool item_steps;  /* the open custom row is enabled and has an action of its own */
 } nt_ui_menu_frame_t;
 
-/* One menu, owned by the game and kept across frames: one per logical menu and UI context. The game opens
- * it with nt_ui_menu_open and may close it by clearing `open`; the menu clears `open` on dismiss, on
- * activation and when the game skipped declaring it for a frame. The other fields are the menu's own; all-zero is the valid closed state. */
+/* One menu's navigation, owned by the game and kept across frames: one per logical menu and UI context. The open
+ * state is the overlay stack's, under the menu id (nt_ui_menu_open, nt_ui_close, nt_ui_is_open); all-zero is
+ * the valid closed state. */
 typedef struct {
     float anchor_x, anchor_y; /* open point (UI space) — root menu top-left attaches here */
     uint32_t focus;           /* focused row id (0 = none) */
-    /* Open parent row id per level; the first 0 ends the chain, and its length is the open depth. */
-    uint32_t open_path[NT_UI_MENU_MAX_DEPTH];
     nt_ui_menu_aim_t aim;
     uint8_t focus_depth; /* the focused row's level */
-    bool open;           /* the menu is shown; cleared on dismiss */
-    bool arming;         /* opened since the last end: the next declaration ignores the press and last frame's hits */
     bool kbd_mode;       /* a menu key was pressed: the pointer takes focus back once it moves or presses */
     nt_ui_menu_frame_t frame;
 } nt_ui_menu_t;
@@ -147,10 +144,10 @@ void nt_ui_menu_separator(nt_ui_menu_t *menu);                         /* non-in
 void nt_ui_menu_separator_text(nt_ui_menu_t *menu, const char *label); /* optional section header */
 void nt_ui_menu_end(nt_ui_menu_t *menu);
 
-/* Opens the menu with its root at (x, y) in UI space and starts its navigation fresh; the press of this
- * frame (usually the one that opened it) does not dismiss it. When to open is the game's call: a
- * right-click (nt_ui_pointer_pos gives the point), a long-press on its widget, a button. */
-void nt_ui_menu_open(nt_ui_menu_t *menu, float x, float y);
+/* Opens the menu `menu_id` with its root at (x, y) in UI space, on top of the overlay stack, and starts its
+ * navigation fresh; it takes input from the next frame, so the press that opened it does not dismiss it. When to
+ * open is the game's call: a right-click (nt_ui_pointer_pos gives the point), a long-press, a button. */
+void nt_ui_menu_open(nt_ui_menu_t *menu, nt_ui_context_t *ctx, uint32_t menu_id, float x, float y);
 
 #ifdef NT_TEST_ACCESS
 

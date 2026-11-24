@@ -180,7 +180,7 @@ static void test_tooltip_hide_on_leave(void) {
     TEST_ASSERT_TRUE(float_near(nt_ui_tooltip_test_hover_secs(s_fx.ctx, TGT_ID), 0.0F, 0.0001F));
 }
 
-/* ---- No catcher: even while the tooltip is shown, popup-core declares NO light-dismiss
+/* ---- No catcher: even while the tooltip is shown, popup-core declares NO
  *      catcher, so base UI stays clickable. ---- */
 static void test_tooltip_declares_no_catcher(void) {
     nt_ui_tooltip_style_t st = test_style();

@@ -1,13 +1,11 @@
 #include "ui/nt_ui_popup.h"
 
 #include <math.h>
-#include <string.h>
 
 #include <stdint.h>
 
 #include "clay.h"
 #include "core/nt_assert.h"
-#include "core/nt_builtins.h"
 #include "input/nt_input.h"
 #include "ui/nt_ui_anim.h"
 #include "ui/nt_ui_clay_impl.h"
@@ -30,7 +28,7 @@ nt_ui_popup_style_t nt_ui_popup_style_defaults(void) {
         .open_xf_start = nt_ui_transform_defaults(),  /* identity: no spatial animation by default */
         .close_xf_start = nt_ui_transform_defaults(), /* identity */
         .layer = 0U,
-        .flags = NT_UI_POPUP_LIGHT_DISMISS,
+        .kind = NT_UI_POPUP_KIND_POPUP,
     };
 }
 
@@ -115,58 +113,9 @@ static nt_ui_transform_t popup_eased_transform(const nt_ui_transform_t *start, f
     return xf;
 }
 
-// #region overlay stack helpers (out of line: inlined into begin they cost ~1.2 KB wasm)
-NT_NOINLINE static void overlay_remove(nt_ui_context_t *ctx, nt_ui_overlay_t *o) {
-    const nt_ui_overlay_t *end = &ctx->overlays[ctx->overlay_count];
-    memmove(o, o + 1, (size_t)(end - (o + 1)) * sizeof *o);
-    --ctx->overlay_count;
-}
-
-/* Moves `o` to the stack top, keeping the order of the rest; returns its new place. */
-NT_NOINLINE static nt_ui_overlay_t *overlay_move_to_top(nt_ui_context_t *ctx, nt_ui_overlay_t *o) {
-    const nt_ui_overlay_t moved = *o;
-    overlay_remove(ctx, o);
-    ctx->overlays[ctx->overlay_count] = moved;
-    return &ctx->overlays[ctx->overlay_count++];
-}
-
-NT_NOINLINE static bool overlay_is_open_around(const nt_ui_context_t *ctx, uint32_t id) {
-    for (uint8_t d = 0U; d < ctx->overlay_depth; ++d) {
-        if (ctx->overlay_decl[d] == id) {
-            return true;
-        }
-    }
-    return false;
-}
-
-/* A full stack gives the lowest fading slot that is not being declared around this one; a fading popup with
- * no slot ends its fade at its next begin. */
-NT_NOINLINE static void overlay_evict_fading(nt_ui_context_t *ctx) {
-    for (uint8_t i = 0U; i < ctx->overlay_count; ++i) {
-        if (!ctx->overlays[i].live && !overlay_is_open_around(ctx, ctx->overlays[i].id)) {
-            overlay_remove(ctx, &ctx->overlays[i]);
-            return;
-        }
-    }
-}
-
-/* An overlay that takes input closes, as it opens, the open light-dismiss overlays it is not declared inside,
- * as HTML closes auto popovers (spec: "Input ownership", Opening closes light dismiss). */
-NT_NOINLINE static void overlay_close_light(nt_ui_context_t *ctx, const nt_ui_overlay_t *opener) {
-    for (uint8_t i = 0U; i < ctx->overlay_count; ++i) {
-        nt_ui_overlay_t *o = &ctx->overlays[i];
-        if (o != opener && o->transient && o->live && !overlay_is_open_around(ctx, o->id)) {
-            o->replaced = true;
-        }
-    }
-}
-// #endregion
-
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-bool nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t id, const nt_ui_popup_style_t *style, const nt_ui_popup_anchor_t *anchor, bool *open_io, const nt_ui_popup_ext_t *ext,
-                                nt_ui_popup_info_t *info) {
+bool nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t id, const nt_ui_popup_style_t *style, const nt_ui_popup_anchor_t *anchor, const nt_ui_popup_ext_t *ext, nt_ui_popup_info_t *info) {
     NT_ASSERT(ctx != NULL && "nt_ui_popup_begin: ctx must be non-NULL");
-    NT_ASSERT(open_io != NULL && "nt_ui_popup_begin: open must be non-NULL");
     NT_ASSERT(ctx->in_frame && ctx == nt_ui_internal_get_inframe_ctx() && "nt_ui_popup_begin: must be called between nt_ui_begin and nt_ui_end on the active ctx");
     NT_ASSERT(id != 0U && "nt_ui_popup_begin: id must be non-zero");
     NT_ASSERT(style != NULL && "nt_ui_popup_begin: style must be non-NULL");
@@ -175,24 +124,22 @@ bool nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t id, const nt_ui_p
     NT_ASSERT(anchor->prefer_side <= NT_UI_POPUP_CENTER && "nt_ui_popup_begin: prefer_side out of range");
     NT_ASSERT(isfinite(anchor->x) && isfinite(anchor->y) && isfinite(anchor->w) && isfinite(anchor->h) && "nt_ui_popup_begin: anchor rect must be finite");
     NT_ASSERT(ext != NULL && "nt_ui_popup_begin_internal: ext must be non-NULL");
-    const bool has_backdrop = ext->backdrop_color != 0U;
-    nt_ui_overlay_t *slot = NULL;
-    for (uint8_t i = 0U; i < ctx->overlay_count && slot == NULL; ++i) {
-        slot = (ctx->overlays[i].id == id) ? &ctx->overlays[i] : NULL;
+    nt_ui_overlay_t *slot = nt_ui_internal_overlay_find(ctx, id);
+    if (slot == NULL) {
+        if (info != NULL) {
+            *info = (nt_ui_popup_info_t){.side = anchor->prefer_side};
+        }
+        return false; /* not open and not fading: declares nothing */
     }
-    // #region close-scan: the popup's own close, before anything of it is declared (spec: "When a rule runs")
-    nt_ui_popup_close_t close_src = NT_UI_POPUP_CLOSE_NONE;
-    if (*open_io && slot != NULL && slot->replaced) {
-        close_src = NT_UI_POPUP_CLOSE_REPLACED;
-    } else if (*open_io && ext->esc_close && nt_ui_key_pressed(ctx, id, NT_KEY_ESCAPE)) {
-        close_src = NT_UI_POPUP_CLOSE_ESC;
-    } else if (*open_io && ext->dismiss_on_click && nt_ui_internal_outside_press(ctx, id, ext->close_pad)) {
-        close_src = NT_UI_POPUP_CLOSE_OUTSIDE; /* on the press, as Dear ImGui */
+    // #region own close (S3): the top's, before anything of it is declared (spec: "When a rule runs")
+    if (slot->open && ext->esc_close && nt_ui_key_pressed(ctx, id, NT_KEY_ESCAPE)) {
+        nt_ui_internal_overlay_close(ctx, id, NT_UI_POPUP_CLOSE_ESC);
+    } else if (slot->open && ext->dismiss_on_click && nt_ui_internal_outside_press(ctx, id, ext->close_pad)) {
+        nt_ui_internal_overlay_close(ctx, id, NT_UI_POPUP_CLOSE_OUTSIDE); /* on the press, as Dear ImGui */
     }
-    if (close_src != NT_UI_POPUP_CLOSE_NONE) {
-        *open_io = false; /* a signal for the game's bool; t decays over the next frames */
-    }
-    const bool open = *open_io;
+    const uint8_t reason = slot->reason;
+    slot->reason = NT_UI_POPUP_CLOSE_NONE;
+    const bool open = slot->open;
     // #endregion
     const nt_ui_transform_t *xf_start = open ? &style->open_xf_start : &style->close_xf_start;
     /* scale_* must be > 0 (nt_ui_anim asserts it via the eased transform). */
@@ -212,18 +159,10 @@ bool nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t id, const nt_ui_p
         .tint_t = 0.0F,
         .value_t = open ? 1.0F : 0.0F,
     };
-    /* With no stack slot the popup was not shown last frame (or gave its fading slot away): the entrance eases
-     * from 0, and one not open is hidden. */
-    if (!open && slot == NULL) {
-        if (info != NULL) {
-            *info = (nt_ui_popup_info_t){.side = anchor->prefer_side};
-        }
-        return false; /* hidden: no panel, no anim slot */
-    }
-    if (open && style->ease_speed > 0.0F && slot == NULL) {
+    if (open && style->ease_speed > 0.0F && nt_ui_internal_live_slot(ctx, id) < 0) {
         nt_ui_anim_target_t seed = tgt;
         seed.value_t = 0.0F;
-        nt_ui_anim_seed(ctx, id, &seed); /* WRITE the pool slot at t=0; the eased call below ramps from it */
+        nt_ui_anim_seed(ctx, id, &seed); /* the entrance: the panel was not declared last frame */
     }
     const nt_ui_anim_interaction_t *a = nt_ui_anim(ctx, id, &tgt, 0.0F, style->ease_speed);
     const float t = a->value_t;
@@ -231,29 +170,22 @@ bool nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t id, const nt_ui_p
     const float screen_w = nt_ui_clay_priv_layout_width(ctx->clay);
     const float screen_h = nt_ui_clay_priv_layout_height(ctx->clay);
     const nt_ui_popup_side_t side = popup_resolve_side(ctx, id, anchor, screen_w, screen_h);
-    const bool present = open || (t > NT_UI_POPUP_EPSILON);
     if (info != NULL) {
-        *info = (nt_ui_popup_info_t){.t = t, .side = (uint8_t)side, .reason = (uint8_t)close_src};
+        *info = (nt_ui_popup_info_t){.t = t, .side = (uint8_t)side, .reason = reason};
     }
-    if (!present) {
-        return false; /* a hidden popup declares nothing: no panel, no band, no end */
+    if (!open && t <= NT_UI_POPUP_EPSILON) {
+        nt_ui_internal_overlay_remove(ctx, slot); /* faded out: it leaves the stack */
+        return false;
     }
-    // #region overlay stack slot + z-band (spec: "Input ownership", Overlay stack)
+    // #region stack slot band; S2 on the first live declaration after it opens
     const bool live = open && ctx->inert_from == 0U;
-    const bool opening = live && (slot == NULL || !slot->live);
-    if (slot == NULL && ctx->overlay_count == NT_UI_OVERLAY_MAX) {
-        overlay_evict_fading(ctx);
+    if (live && !slot->live && (ext->catcher || ext->popup)) {
+        nt_ui_internal_overlay_close_popups(ctx, slot);
     }
-    if (slot == NULL) {
-        NT_ASSERT(ctx->overlay_count < NT_UI_OVERLAY_MAX && "nt_ui_popup_begin: more than NT_UI_OVERLAY_MAX live overlays");
-        slot = &ctx->overlays[ctx->overlay_count++];
-    } else if (opening) {
-        slot = overlay_move_to_top(ctx, slot); /* a reopen during its fade is the last opened */
-    }
-    if (opening && (ext->transient || ext->catcher)) {
-        overlay_close_light(ctx, slot);
-    }
-    *slot = (nt_ui_overlay_t){.id = id, .seen = true, .live = live, .catcher = ext->catcher, .transient = ext->transient};
+    slot->seen = true;
+    slot->live = live;
+    slot->catcher = ext->catcher;
+    slot->popup = ext->popup;
     /* The slot's absolute band, whatever floating encloses it; the catcher shares it, declared before the panel. */
     const int32_t band = ctx->overlay_zband_stride + ((int32_t)(slot - ctx->overlays) * NT_UI_OVERLAY_MAX);
     const int32_t enclosing = nt_ui_clay_priv_open_floating_z(ctx->clay);
@@ -263,13 +195,13 @@ bool nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t id, const nt_ui_p
     ctx->overlay_decl[ctx->overlay_depth++] = id;
     // #endregion
     // #region catcher/backdrop
-    /* Only a live popup with a catcher gates the UI under it (spec: "Input ownership"). */
+    const bool has_backdrop = ext->backdrop_color != 0U;
     const bool want_catcher = live && ext->catcher;
     const uint32_t catcher_id = nt_ui_internal_popup_catcher_id(id);
     if (want_catcher || has_backdrop) {
-        /* Full-viewport catcher on the panel's band. Transparent for a plain popup; a visible dim rect when a
+        /* Full-viewport catcher on the panel's band. Transparent for a popup; a visible dim rect when a
          * backdrop color is given (alpha rides t*backdrop_alpha exactly once — folding t into element
-         * opacity too would dim t²). It wins next-frame topmost-z, gating click-through to base UI. */
+         * opacity too would dim t²). */
         const nt_ui_transform_t id_xf = nt_ui_transform_defaults();
         const nt_ui_element_data_t *catcher_data = nt_ui_make_element_data_xform(style->layer, NULL, &id_xf, 1.0F);
         Clay_Color cc_col = {0};
@@ -286,7 +218,7 @@ bool nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t id, const nt_ui_p
         }) {}
     }
     if (want_catcher) {
-        nt_ui_block_pointer(ctx, catcher_id, NULL); /* the gate; the close-scan above reads the press on it */
+        nt_ui_block_pointer(ctx, catcher_id, NULL); /* the gate; the own close reads the press on it */
     }
     // #endregion
     // #region panel floating decl (stays OPEN until nt_ui_popup_end)
@@ -304,19 +236,18 @@ bool nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t id, const nt_ui_p
     nt_ui_clay_priv_configure_open_element(panel_decl);
     nt_ui_widget_register(ctx, id, reg_def, NULL, true);
     if (!open && ctx->inert_from == 0U) {
-        ctx->inert_from = ctx->overlay_depth; /* its body, nested popups included, is inert */
+        ctx->inert_from = ctx->overlay_depth; /* its body, nested overlays included, is inert */
     }
     // #endregion
     return true;
 }
 
-bool nt_ui_popup_begin(nt_ui_context_t *ctx, uint32_t id, const nt_ui_popup_style_t *style, const nt_ui_popup_anchor_t *anchor, bool *open, nt_ui_popup_info_t *info) {
-    /* A light-dismiss popup gates, closes on an outside press or Esc as a <select>, and is transient; a plain
-     * one (a tooltip, a toast) does none of it. */
-    static const nt_ui_popup_ext_t light = {.catcher = true, .esc_close = true, .dismiss_on_click = true, .transient = true};
-    static const nt_ui_popup_ext_t plain = {0};
-    NT_ASSERT(style != NULL && "nt_ui_popup_begin: style must be non-NULL");
-    return nt_ui_popup_begin_internal(ctx, id, style, anchor, open, ((style->flags & NT_UI_POPUP_LIGHT_DISMISS) != 0U) ? &light : &plain, info);
+bool nt_ui_popup_begin(nt_ui_context_t *ctx, uint32_t id, const nt_ui_popup_style_t *style, const nt_ui_popup_anchor_t *anchor, nt_ui_popup_info_t *info) {
+    /* A popup gates, closes on an outside press or Esc as a <select>, and is light dismiss; a tooltip does none. */
+    static const nt_ui_popup_ext_t popup = {.catcher = true, .esc_close = true, .dismiss_on_click = true, .popup = true};
+    static const nt_ui_popup_ext_t tooltip = {0};
+    NT_ASSERT(style != NULL && style->kind <= NT_UI_POPUP_KIND_TOOLTIP && "nt_ui_popup_begin: style non-NULL, kind in range");
+    return nt_ui_popup_begin_internal(ctx, id, style, anchor, (style->kind == NT_UI_POPUP_KIND_POPUP) ? &popup : &tooltip, info);
 }
 
 void nt_ui_popup_end(nt_ui_context_t *ctx) {

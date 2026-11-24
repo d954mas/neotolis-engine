@@ -77,12 +77,11 @@ static NT_NOINLINE nt_ui_transform_t modal_anim_start(const nt_ui_modal_anim_t *
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-bool nt_ui_modal_begin(nt_ui_context_t *ctx, uint32_t id, const nt_ui_modal_style_t *style, bool *open, nt_ui_popup_info_t *info) {
+bool nt_ui_modal_begin(nt_ui_context_t *ctx, uint32_t id, const nt_ui_modal_style_t *style, nt_ui_popup_info_t *info) {
     NT_ASSERT(style != NULL && "nt_ui_modal_begin: style must be non-NULL");
     NT_ASSERT(isfinite(style->ease_speed) && style->ease_speed >= 0.0F && "nt_ui_modal_begin: ease_speed must be finite >= 0");
     NT_ASSERT(isfinite(style->backdrop_alpha) && style->backdrop_alpha >= 0.0F && style->backdrop_alpha <= 1.0F && "nt_ui_modal_begin: backdrop_alpha must be in [0,1]");
     NT_ASSERT(style->backdrop_close_pad >= 0 && "nt_ui_modal_begin: backdrop_close_pad must be >= 0");
-    NT_ASSERT(open != NULL && "nt_ui_modal_begin: open must be non-NULL");
 
     /* Map the modal onto popup-core: centered placement + dim backdrop + Esc/backdrop close. Both recipes,
      * validated before any push: the core picks one after its own close-scan. */
@@ -91,7 +90,7 @@ bool nt_ui_modal_begin(nt_ui_context_t *ctx, uint32_t id, const nt_ui_modal_styl
         .open_xf_start = modal_anim_start(&style->open),
         .close_xf_start = modal_anim_start(&style->close),
         .layer = style->layer,
-        .flags = 0U, /* modal drives dismiss/gate via ext, not the light-dismiss flag */
+        .kind = NT_UI_POPUP_KIND_POPUP, /* unused: the modal passes its own ext */
     };
     const nt_ui_popup_anchor_t anchor = {.prefer_side = NT_UI_POPUP_CENTER};
     const nt_ui_popup_ext_t ext = {
@@ -103,7 +102,7 @@ bool nt_ui_modal_begin(nt_ui_context_t *ctx, uint32_t id, const nt_ui_modal_styl
         .esc_close = (style->flags & NT_UI_MODAL_LISTEN_ESC) != 0U,
         .dismiss_on_click = (style->flags & NT_UI_MODAL_CLOSE_ON_BACKDROP) != 0U,
     };
-    return nt_ui_popup_begin_internal(ctx, id, &pstyle, &anchor, open, &ext, info);
+    return nt_ui_popup_begin_internal(ctx, id, &pstyle, &anchor, &ext, info);
 }
 
 void nt_ui_modal_end(nt_ui_context_t *ctx) { nt_ui_popup_end(ctx); }

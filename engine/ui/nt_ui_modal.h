@@ -1,10 +1,9 @@
 #ifndef NT_UI_MODAL_H
 #define NT_UI_MODAL_H
 
-/* Modal helper: panel + full-viewport backdrop floating elements, an input-gate occluder, and an
- * open/close tween. The game owns the `bool open`; Esc and a backdrop press (per flags) clear it. Conditional
- * begin/end: end only after begin returned true. It owns no scene, lifecycle,
- * or assets, and pauses nothing — only pointer routing is auto-gated by the backdrop occluder. */
+/* Modal: panel + full-viewport backdrop floating elements, an input gate and an open/close tween. The game opens
+ * and closes it with nt_ui_open / nt_ui_close (nt_ui.h); Esc and a backdrop press close it only per style flags.
+ * Conditional begin/end: end only after begin returned true. It owns no scene, lifecycle or assets. */
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -16,7 +15,7 @@ typedef struct nt_ui_context nt_ui_context_t;
 
 extern const nt_ui_widget_def_t NT_UI_MODAL_DEF;
 
-/* Style flags — only gate close SOURCES (Esc / backdrop press): a flagged source clears the game's open bool. */
+/* Style flags: the close sources a modal listens to besides nt_ui_close. */
 #define NT_UI_MODAL_LISTEN_ESC ((uint8_t)(1U << 0))
 #define NT_UI_MODAL_CLOSE_ON_BACKDROP ((uint8_t)(1U << 1))
 
@@ -58,21 +57,17 @@ _Static_assert(sizeof(nt_ui_modal_style_t) == 40, "nt_ui_modal_style_t stable AB
 /* Valid baseline: symmetric scale-pop entrance + exit. scale_start > 0 (nt_ui_anim asserts scale_* > 0). */
 nt_ui_modal_style_t nt_ui_modal_style_defaults(void);
 
-/* Returns whether the modal shows this frame: open, or still easing closed after *open was cleared. Only
- * then it opens the backdrop + panel floating elements on its overlay stack slot's band (the last opened lies
- * on top); the game declares the body and calls nt_ui_modal_end. Esc and a
- * backdrop press (per style flags) clear *open; info->reason says which (NT_UI_POPUP_CLOSE_ESC or _OUTSIDE). The game owns *open:
+/* Returns whether the modal shows this frame: open, or fading out after a close. Only then it declares the
+ * backdrop + panel on its overlay stack slot's band; the game declares the body and calls nt_ui_modal_end:
  *
- *   if (clicked_show) open = true;                            // open from any site: set your bool
- *   if (nt_ui_modal_begin(ctx, ID, &style, &open, NULL)) {    // declare once per frame, stable place
- *       CLAY({ ...panel... }) { if (ok_clicked) open = false; }
+ *   if (clicked_show) nt_ui_open(ctx, ID);
+ *   if (nt_ui_modal_begin(ctx, ID, &style, NULL)) {
+ *       CLAY({ ...panel... }) { if (ok_clicked) nt_ui_close(ctx, ID); }
  *       nt_ui_modal_end(ctx);
  *   }
  *
- * One window, many open sites = ONE bool + ONE id; call this from the active container's body so
- * nesting/z follow context. id non-zero, style and open non-NULL, info nullable. Asserts depth <
- * NT_UI_OVERLAY_MAX. */
-bool nt_ui_modal_begin(nt_ui_context_t *ctx, uint32_t id, const nt_ui_modal_style_t *style, bool *open, nt_ui_popup_info_t *info);
+ * id non-zero, style non-NULL, info nullable (info->reason: what closed it, once). */
+bool nt_ui_modal_begin(nt_ui_context_t *ctx, uint32_t id, const nt_ui_modal_style_t *style, nt_ui_popup_info_t *info);
 void nt_ui_modal_end(nt_ui_context_t *ctx);
 
 #endif /* NT_UI_MODAL_H */
