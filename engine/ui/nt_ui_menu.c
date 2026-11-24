@@ -291,7 +291,7 @@ static bool menu_frame_input(nt_ui_menu_t *menu, nt_ui_context_t *ctx, uint32_t 
     const bool ours = f->ours;
     const bool pressed = pp->buttons[NT_BUTTON_LEFT].is_pressed || pp->buttons[NT_BUTTON_RIGHT].is_pressed;
     /* A text field focused inside the menu owns the keys (the top takes the focus of a field under it). */
-    const uint8_t key = (top && !ctx->field_owns_keys) ? menu_read_key(menu) : MENU_KEY_NONE;
+    const uint8_t key = (top && ctx->keys_field == 0U) ? menu_read_key(menu) : MENU_KEY_NONE;
     f->key = key;
     const uint8_t d = menu->focus_depth;
     if (key != MENU_KEY_NONE) {

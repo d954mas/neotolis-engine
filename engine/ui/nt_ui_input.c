@@ -761,10 +761,11 @@ static void focus_step(input_frame_t *f) {
 
 /* The focused edit pipeline: drain the typed chars, then run the physical editing keys
  * (delete/arrows/home/end), selection chords (Shift/Ctrl+A), clipboard (Ctrl+C/X/V), submit + Tab/Esc.
- * No-op when unfocused. Sets changed/submitted; cur_len re-derived in f->cur_len. */
+ * Runs only for the field that held focus at nt_ui_begin (the frame's keys are its alone). Sets
+ * changed/submitted; cur_len re-derived in f->cur_len. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void edit_step(input_frame_t *f, bool *changed, bool *submitted) {
-    if (!f->focused) {
+    if (!f->focused || f->ctx->keys_field != f->id) {
         return;
     }
     nt_ui_context_t *ctx = f->ctx;

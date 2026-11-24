@@ -551,6 +551,26 @@ static void test_submit_and_change(void) {
     TEST_ASSERT_TRUE(submitted);
 }
 
+/* ---- The keys belong to the field focused at nt_ui_begin: a press that focuses a field in the frame of an
+ *      Enter does not submit it (the Enter was the menu's or the game's), the next Enter does. ---- */
+static void test_field_focused_mid_frame_reads_no_key(void) {
+    char buf[32] = {0};
+    const uint32_t id = nt_ui_id("f");
+    (void)field_frame(&IDLE_PTR, id, buf, sizeof buf, true, NULL);
+    nt_input_feed(nt_test_key(NT_KEY_ENTER, true));
+    nt_pointer_t press = make_pointer(IN_X + PAD_X + 1.0F, IN_Y + (IN_H * 0.5F), true, true, false);
+    bool submitted = false;
+    (void)field_frame(&press, id, buf, sizeof buf, true, &submitted);
+    nt_input_feed(nt_test_key(NT_KEY_ENTER, false));
+    TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, id));
+    TEST_ASSERT_FALSE_MESSAGE(submitted, "the Enter of the frame a press focuses the field is not its");
+    nt_input_feed(nt_test_key(NT_KEY_ENTER, true));
+    nt_pointer_t held = make_pointer(IN_X + PAD_X + 1.0F, IN_Y + (IN_H * 0.5F), true, false, false);
+    (void)field_frame(&held, id, buf, sizeof buf, true, &submitted);
+    nt_input_feed(nt_test_key(NT_KEY_ENTER, false));
+    TEST_ASSERT_TRUE(submitted);
+}
+
 /* ---- Test 9: a non-focused field never consumes typed chars. ---- */
 static void test_unfocused_ignores_chars(void) {
     char buf[32] = {0};
@@ -1267,7 +1287,8 @@ static void test_escape_cancels_tab_advance(void) {
     TEST_ASSERT_FALSE(nt_ui_input_any_focused(s_fx.ctx)); /* no Tab was left pending */
 }
 
-/* A press on B and a Tab in one frame act as press, then Tab: B takes the Tab, so focus lands on C. */
+/* A press on B and a Tab in one frame: the Tab is A's, the field focused at nt_ui_begin, so focus moves to B,
+ * where the press lands too (B reads keys from the next frame). */
 static void test_press_and_tab_in_one_frame(void) {
     char a[32] = {0};
     char b[32] = {0};
@@ -1290,7 +1311,7 @@ static void test_press_and_tab_in_one_frame(void) {
     nt_input_feed(nt_test_key(NT_KEY_TAB, false));
     rel = make_pointer(IN_X + PAD_X + 1.0F, by, false, false, true);
     three_field_frame(&rel, ia, a, true, ib, b, true, ic, c, true);
-    TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, ic));
+    TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, ib));
 }
 
 /* A disabled, C focused: Tab off the last field wraps past A to B, the first enabled field. */
@@ -1874,6 +1895,7 @@ int main(void) {
     RUN_TEST(test_focus_dropped_when_disabled);
     RUN_TEST(test_submit_and_change);
     RUN_TEST(test_unfocused_ignores_chars);
+    RUN_TEST(test_field_focused_mid_frame_reads_no_key);
     RUN_TEST(test_shift_select_and_collapse);
     RUN_TEST(test_shift_select_cyrillic);
     RUN_TEST(test_ctrl_a_select_all);

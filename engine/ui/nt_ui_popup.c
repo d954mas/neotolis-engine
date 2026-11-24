@@ -149,7 +149,7 @@ bool nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t id, const nt_ui_p
         const bool pressed = pp->buttons[NT_BUTTON_LEFT].is_pressed || pp->buttons[NT_BUTTON_RIGHT].is_pressed;
         const int16_t pad_lrtb[4] = {close_pad, close_pad, close_pad, close_pad};
         const uint32_t hot = ctx->pointer_hot[ctx->frame_primary].id;
-        if (esc_close && !ctx->field_owns_keys && nt_input_key_is_pressed(NT_KEY_ESCAPE)) {
+        if (esc_close && ctx->keys_field == 0U && nt_input_key_is_pressed(NT_KEY_ESCAPE)) {
             close_src = NT_UI_POPUP_CLOSE_ESC;
         } else if (dismiss_on_click && pressed && (hot == catcher_id || hot == 0U) && !nt_ui_inspector_pointer_consumed(ctx) && !nt_ui_internal_hit_test_padded(ctx, id, pp->x, pp->y, pad_lrtb)) {
             close_src = NT_UI_POPUP_CLOSE_OUTSIDE;
@@ -181,7 +181,14 @@ bool nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t id, const nt_ui_p
     };
     /* The entrance eases from 0 on a real closed->open edge: the panel was not declared last frame (a hidden
      * popup declares nothing). An anim slot a busy frame evicted restarts at its target, so it never flickers. */
-    if (open && style->ease_speed > 0.0F && nt_ui_internal_live_slot(ctx, id) < 0) {
+    const bool shown_last_frame = nt_ui_internal_live_slot(ctx, id) >= 0;
+    if (!open && !shown_last_frame) {
+        if (info != NULL) {
+            *info = (nt_ui_popup_info_t){.side = anchor->prefer_side};
+        }
+        return false; /* hidden: no panel, no anim slot */
+    }
+    if (open && style->ease_speed > 0.0F && !shown_last_frame) {
         nt_ui_anim_target_t seed = tgt;
         seed.value_t = 0.0F;
         nt_ui_anim_seed(ctx, id, &seed); /* WRITE the pool slot at t=0; the eased call below ramps from it */

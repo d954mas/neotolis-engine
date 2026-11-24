@@ -147,7 +147,8 @@ in place of open order. Root overlays are a top layer: the first visible root
 overlay of a frame sits at band `modal_zband_stride` and each later visible
 root overlay `NT_UI_MODAL_MAX_DEPTH` bands higher, whatever game floating
 encloses it (popup-core declares the difference as its delta, and asserts the
-enclosing floating lies under `modal_zband_stride`), so an overlay declared
+enclosing floating lies under `modal_zband_stride` and
+`band - enclosing <= INT16_MAX`), so an overlay declared
 later covers an earlier one together with every level nested in it; an
 overlay nested inside another declares delta 1, so it covers its parent and
 the parent's widget parts (delta 0) declared after it. A game floating with
@@ -339,15 +340,15 @@ path:
   its release even when the record it landed on goes away (the press that
   dismisses an overlay, a button hidden under a held press, a vanished scroll),
   so the game never sees the rest of it.
-- *Keys.* A text field focused at `nt_ui_begin` takes the frame's keys, decided
-  once there whatever the declaration order; with none, the top overlay
+- *Keys.* The text field focused at `nt_ui_begin` takes the frame's keys, decided
+  once there whatever the declaration order, so a field a press focuses reads
+  keys from the next frame; with none, the top overlay
   does (popup-core's Esc for a modal with `NT_UI_MODAL_LISTEN_ESC` and for a
   light-dismiss popup such as a combo list, the menu's keys); with no top, the
   game does, reading
   `nt_ui_overlay_active` and `nt_ui_input_any_focused`. Esc in a field inside a
-  modal unfocuses the field, and a second Esc closes the modal. The choice is
-  between a field and the overlays, not between two fields, whose focus moves
-  as they are declared (see "Text input"). A nested popup that
+  modal unfocuses the field, and a second Esc closes the modal. One key has one
+  owner among the fields and the overlays. A nested popup that
   closes itself does not hand the keys to the overlay under it in that frame;
   that one is the top from the next frame.
 - *Order.* Root overlays stack in declaration order, whatever encloses them
@@ -648,7 +649,9 @@ to the first enabled field, at the next `nt_ui_begin`; only an owned field outsi
 an inert subtree is a Tab stop (see "Input ownership"), so Tab wraps inside a modal
 as in an HTML modal dialog: for the rest of the Tab frame
 the source keeps focus, so the destination never sees that frame's keys. A press
-focuses at once, so a press and a Tab in one frame act as press, then Tab. Esc
+focuses at once, but the frame's keys stay with the field focused at `nt_ui_begin`:
+a press on another field and a Tab in one frame move focus by the Tab of the
+field focused before. Esc
 unfocuses and wins over a Tab in the same frame. A focused field loses focus when
 it is declared disabled or not declared for a frame, when an overlay opens
 over it or when it turns inert (see "Input ownership"). While a field is focused, the

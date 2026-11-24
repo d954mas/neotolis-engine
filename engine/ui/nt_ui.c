@@ -639,18 +639,18 @@ void nt_ui_begin(nt_ui_context_t *ctx, const nt_ui_frame_desc_t *frame) {
     if (!nt_ui_internal_owned_by_top(ctx, ctx->focused_input_id)) {
         ctx->focused_input_id = 0U;
     }
-    ctx->field_owns_keys = ctx->focused_input_id != 0U;
+    ctx->keys_field = ctx->focused_input_id;
 
     /* Input is decided here, from last frame's layout: the front-most record per pointer, then the
      * scroll gestures. Every step and query of the frame reads the result. */
     resolve_hot(ctx);
     /* A press on a record, or anywhere while an overlay held the pointer, makes the whole gesture the UI's
      * (Dear ImGui's MouseDownOwned): the game sees none of it, even after the record goes away. A press while
-     * the other button is held since an earlier frame joins that gesture. */
+     * the other button is held since an earlier frame (its release may land in this poll) joins it. */
     for (uint32_t i = 0; i < ctx->frame_pointer_count; ++i) {
         const nt_button_state_t *l = &ctx->frame_pointers[i].buttons[NT_BUTTON_LEFT];
         const nt_button_state_t *r = &ctx->frame_pointers[i].buttons[NT_BUTTON_RIGHT];
-        const bool joins = (l->is_down && !l->is_pressed) || (r->is_down && !r->is_pressed);
+        const bool joins = ((l->is_down || l->is_released) && !l->is_pressed) || ((r->is_down || r->is_released) && !r->is_pressed);
         if (l->is_pressed || r->is_pressed) {
             ctx->captures[i].ui_gesture = (joins && ctx->captures[i].ui_gesture) || ctx->pointer_hot[i].id != 0U || ctx->overlay_top_id_prev != 0U;
         } else if (!l->is_down && !l->is_released && !r->is_down && !r->is_released) {

@@ -304,6 +304,16 @@ static void test_interaction_second_button_keeps_the_gesture(void) {
     p.buttons[NT_BUTTON_RIGHT] = (nt_button_state_t){.is_down = true, .is_pressed = true};
     (void)query_btn_frame(&p);
     TEST_ASSERT_TRUE_MESSAGE(nt_ui_wants_pointer(s_fx.ctx), "the right press joins the left's gesture");
+    /* The left's release and the right's press can land in one poll too. */
+    p = make_pointer(600.0F, 500.0F, false, false, true);
+    p.buttons[NT_BUTTON_RIGHT] = (nt_button_state_t){.is_released = true};
+    (void)query_btn_frame(&p);
+    p = make_pointer(BTN_CX, BTN_CY, true, true, false);
+    (void)query_btn_frame(&p);
+    p = make_pointer(600.0F, 500.0F, false, false, true);
+    p.buttons[NT_BUTTON_RIGHT] = (nt_button_state_t){.is_down = true, .is_pressed = true};
+    (void)query_btn_frame(&p);
+    TEST_ASSERT_TRUE_MESSAGE(nt_ui_wants_pointer(s_fx.ctx), "a right press in the poll of the left's release joins it");
     p = make_pointer(600.0F, 500.0F, false, false, true);
     p.buttons[NT_BUTTON_RIGHT] = (nt_button_state_t){.is_released = true};
     (void)query_btn_frame(&p);

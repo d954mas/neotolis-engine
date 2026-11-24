@@ -38,7 +38,7 @@ static void anim_snap_to(nt_ui_anim_interaction_t *a, uint32_t id, const nt_ui_a
 
 /* Probe the open-addressed table for id; on probe-exhaust evict the STALEST slot in the window (oldest
  * last_touch), not blindly the tail — a tail-evict bleeds a slot that WAS touched this frame between
- * widgets. Stamps last_touch and returns the slot (matching id, empty, or evicted). */
+ * widgets. Returns the slot (matching id, empty, or evicted); the caller stamps last_touch. */
 static nt_ui_anim_interaction_t *anim_slot(nt_ui_context_t *ctx, uint32_t id) {
     const uint16_t tick = (uint16_t)ctx->current_generation;
     const uint32_t base = id & (uint32_t)(NT_UI_ANIM_SLOTS - 1);
@@ -63,7 +63,6 @@ static nt_ui_anim_interaction_t *anim_slot(nt_ui_context_t *ctx, uint32_t id) {
         ctx->anim_collision_count++;
         a = stalest;
     }
-    a->last_touch = tick;
     return a;
 }
 
@@ -96,11 +95,13 @@ const nt_ui_anim_interaction_t *nt_ui_anim(nt_ui_context_t *ctx, uint32_t id, co
 
     // #region slot-map + lerp
     nt_ui_anim_interaction_t *a = anim_slot(ctx, id);
-    if (!a->valid || a->id != id) {
-        /* First-touch / replace-on-collision: snap cur=target, no flash. */
+    if (!a->valid || a->id != id || (uint16_t)(tick - a->last_touch) > 1U) {
+        /* First touch, replace-on-collision, or a slot no frame touched since the last one (the widget was
+         * hidden or snapped): snap cur=target, no flash from a stale value. */
         anim_snap_to(a, id, t, tick);
         return a;
     }
+    a->last_touch = tick;
     // #region ease state fields (state_speed)
     if (state_speed == 0.0F) {
         a->scale_x = t->scale_x;

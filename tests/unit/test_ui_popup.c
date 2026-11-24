@@ -13,6 +13,7 @@
 #include "test_helpers/ui_test_arena.h"
 #include "test_helpers/ui_walker_fixture.h"
 #include "ui/nt_ui.h"
+#include "ui/nt_ui_anim.h"
 #include "ui/nt_ui_internal.h"
 #include "ui/nt_ui_popup.h"
 #include "ui/nt_ui_state.h"
@@ -306,6 +307,37 @@ static void test_popup_snap_to_eased_stays_open(void) {
     st.ease_speed = 8.0F;
     popup_frame(POP_A, &st, &anc, true, &r);
     TEST_ASSERT_TRUE_MESSAGE(r.info.t > 0.99F, "the open popup stays fully open");
+}
+
+/* ---- A closed popup a snap frame hid stays hidden when it eases again, and an open one a snap frame showed
+ *      stays fully open: an eased step after a snap one starts from what the snap frame showed. ---- */
+static void test_popup_snap_then_eased_keeps_what_it_showed(void) {
+    nt_ui_popup_style_t st = nt_ui_popup_style_defaults();
+    nt_ui_popup_anchor_t anc = {.x = 100.0F, .y = 100.0F, .w = 40.0F, .h = 24.0F, .prefer_side = NT_UI_POPUP_BELOW};
+    popup_frame_t r = {0};
+    for (int f = 0; f < 90; ++f) {
+        st.ease_speed = 8.0F;
+        popup_frame(POP_A, &st, &anc, true, &r);
+    }
+    st.ease_speed = 0.0F;
+    popup_frame(POP_A, &st, &anc, false, &r);
+    TEST_ASSERT_FALSE(r.visible);
+    st.ease_speed = 8.0F;
+    popup_frame(POP_A, &st, &anc, false, &r);
+    TEST_ASSERT_FALSE_MESSAGE(r.visible, "a popup a snap close hid does not show again");
+    for (uint32_t k = 0; k < NT_UI_ANIM_SLOTS; ++k) {
+        const nt_ui_anim_interaction_t *slot = &s_fx.ctx->anim[k];
+        TEST_ASSERT_FALSE_MESSAGE(slot->valid && slot->id == POP_A && (uint16_t)((uint16_t)s_fx.ctx->current_generation - slot->last_touch) <= 1U, "a hidden popup touches no anim slot");
+    }
+
+    popup_frame(POP_B, &st, &anc, true, &r);
+    popup_frame(POP_B, &st, &anc, true, &r);
+    st.ease_speed = 0.0F;
+    popup_frame(POP_B, &st, &anc, true, &r);
+    popup_frame(POP_B, &st, &anc, true, &r);
+    st.ease_speed = 8.0F;
+    popup_frame(POP_B, &st, &anc, true, &r);
+    TEST_ASSERT_TRUE_MESSAGE(r.info.t > 0.99F, "an open popup a snap frame showed stays fully open");
 }
 
 /* ---- A hidden popup at the nesting cap declares nothing, so it does not assert. ---- */
@@ -974,6 +1006,7 @@ int main(void) {
     RUN_TEST(test_popup_center_no_flip);
     RUN_TEST(test_popup_wrapper_clears_open);
     RUN_TEST(test_popup_snap_to_eased_stays_open);
+    RUN_TEST(test_popup_snap_then_eased_keeps_what_it_showed);
     RUN_TEST(test_popup_hidden_at_the_depth_cap_does_not_assert);
     RUN_TEST(test_popup_keeps_no_state);
     RUN_TEST(test_popup_tween_clamp);

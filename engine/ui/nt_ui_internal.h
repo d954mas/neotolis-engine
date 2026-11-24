@@ -232,6 +232,10 @@ struct nt_ui_context {
     uint32_t focus_tab_seek;
     uint32_t focus_tab_pending;
     uint32_t focus_first_id;
+    /* The field focused at nt_ui_begin, after the top took the focus under it (0 = none): the frame's keys
+     * are its alone, so one key has one owner whatever the declaration order and a field a press focuses
+     * reads keys from the next frame. */
+    uint32_t keys_field;
     /* Raw rich-text per-block caps (0 = compile-time NT_UI_RICH_MAX_* default); resolved in
      * nt_ui_rich_begin, which owns the rich #defines. Raw here so this widget-agnostic header stays
      * rich-text-agnostic. Slotted into the uint32 run so they add no struct padding. */
@@ -249,9 +253,6 @@ struct nt_ui_context {
      * everything declared inside it makes no record, steps nothing and owns no focus. Balanced by
      * nt_ui_popup_end, reset by nt_ui_begin. */
     uint8_t inert_from;
-    /* A text field held focus at nt_ui_begin, after the top took the focus under it: the keys are the
-     * field's for the whole frame, so one Esc has one owner whatever the declaration order. */
-    bool field_owns_keys;
     uint8_t capture_seen[NT_INPUT_MAX_POINTERS];
 
     /* Buttons do not nest (asserted). */
