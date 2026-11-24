@@ -2651,12 +2651,6 @@ static void frame(void) {
         nt_input_poll();
     }
     nt_arena_reset(&g_nt_mem_scratch);
-#ifndef NT_PLATFORM_WEB
-    const bool overlay_was_active = nt_ui_overlay_active(s_ui);
-    if (!overlay_was_active && nt_input_key_is_pressed(NT_KEY_ESCAPE)) {
-        nt_app_quit();
-    }
-#endif
     nt_resource_step();
     refresh_views();
     link_programs();
@@ -2692,6 +2686,11 @@ static void frame(void) {
         s_ui_scale.fb_h = fb_h;
         declare_ui(&s_ui_scale);
     }
+#ifndef NT_PLATFORM_WEB
+    if (!nt_ui_wants_keyboard(s_ui) && nt_input_key_is_pressed(NT_KEY_ESCAPE)) {
+        nt_app_quit(); /* after nt_ui_begin, which fixed this frame's keyboard owner */
+    }
+#endif
     const skeletal_scene_desc_t *scene = &s_scene_registry[s_active_scene];
     scene->update();
     const bool split = s_order_two_passes && scene->draw == ordering_draw;

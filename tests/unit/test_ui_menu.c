@@ -91,11 +91,16 @@ void tearDown(void) { ui_walker_fixture_shutdown(&s_fx); }
 
 static bool float_near(float a, float b, float eps) { return fabsf(a - b) <= eps; }
 
-/* ---- The corridor aims at the submenu edge facing the apex: the LEFT edge of a submenu opened to the
- *      right, the RIGHT edge of one edge-flipped to the left. ---- */
+/* ---- The corridor aims at the submenu edge facing the apex: a submenu edge-flipped to the LEFT of its parent
+ *      (x 200..350) is aimed at its RIGHT edge, so a cursor heading there keeps it past AIM_FALLBACK. ---- */
 static void test_menu_aim_near_edge_faces_apex(void) {
-    TEST_ASSERT_TRUE(float_near(nt_ui_menu_test_aim_near_x(200.0F, 150.0F, 190.0F), 200.0F, 0.01F));
-    TEST_ASSERT_TRUE(float_near(nt_ui_menu_test_aim_near_x(200.0F, 150.0F, 360.0F), 350.0F, 0.01F));
+    nt_ui_menu_aim_t aim = {0};
+    const float dt = NT_UI_MENU_AIM_FALLBACK_SECS * 0.75F;
+    TEST_ASSERT_TRUE(nt_ui_menu_test_hover_intent(&aim, 360.0F, 150.0F, 200.0F, 100.0F, 150.0F, 200.0F, 0.0F)); /* primes the apex */
+    /* (352, 265) lies in the triangle toward the right edge, outside the one toward the left edge. */
+    TEST_ASSERT_TRUE(nt_ui_menu_test_hover_intent(&aim, 352.0F, 265.0F, 200.0F, 100.0F, 150.0F, 200.0F, dt));
+    TEST_ASSERT_TRUE(nt_ui_menu_test_hover_intent(&aim, 352.0F, 265.0F, 200.0F, 100.0F, 150.0F, 200.0F, dt));
+    TEST_ASSERT_TRUE_MESSAGE(nt_ui_menu_test_hover_intent(&aim, 352.0F, 265.0F, 200.0F, 100.0F, 150.0F, 200.0F, dt), "past AIM_FALLBACK only the corridor keeps it");
 }
 
 /* ---- Aim KEEP: a diagonal from the parent toward the open submenu stays inside the fixed-apex triangle,
@@ -894,17 +899,19 @@ static void test_menu_submenu_begin_ex_icon_disabled(void) {
     TEST_ASSERT_FALSE_MESSAGE(menu_level_found(1U), "a disabled parent opens neither by hover nor by click");
 }
 
-/* ---- An open menu is a modal overlay: nt_ui_overlay_active reports it, and Esc over a modal closes only
- *      the menu. ---- */
+/* ---- An open menu is a modal overlay: it owns the keys from its second frame, and Esc over a modal closes
+ *      only the menu. ---- */
 static void test_menu_is_modal_overlay(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
     nt_ui_menu_t st = {0};
     nt_ui_menu_open(&st, 120.0F, 80.0F);
     menu_im_frame(&st, &style, 0.0F, 0.0F);
-    TEST_ASSERT_TRUE_MESSAGE(nt_ui_overlay_active(s_fx.ctx), "an open menu counts as an overlay");
+    menu_im_frame(&st, &style, 0.0F, 0.0F);
+    TEST_ASSERT_TRUE_MESSAGE(nt_ui_wants_keyboard(s_fx.ctx), "an open menu owns the keys");
     st.open = false;
     menu_im_frame(&st, &style, 0.0F, 0.0F);
-    TEST_ASSERT_FALSE(nt_ui_overlay_active(s_fx.ctx));
+    menu_im_frame(&st, &style, 0.0F, 0.0F);
+    TEST_ASSERT_FALSE(nt_ui_wants_keyboard(s_fx.ctx));
 
     nt_ui_menu_open(&st, 120.0F, 80.0F);
     s_modal = MODAL_UNDER_MENU;
@@ -944,15 +951,68 @@ static void test_menu_item_id_distinct_siblings_and_scopes(void) {
     TEST_ASSERT_TRUE_MESSAGE(b != c, "cross-scope ids must stay distinct");
 }
 
-/* ---- Left at the root closes the menu. ---- */
+/* ---- Esc or Left at the root closes the menu, and nt_ui_menu_begin declares nothing in that frame. ---- */
 static void test_menu_left_at_root_closes(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
-    nt_ui_menu_t st = {0};
-    nt_ui_menu_open(&st, 120.0F, 80.0F);
-    menu_im_frame(&st, &style, 0.0F, 0.0F);
-    menu_key(NT_KEY_ARROW_LEFT);
-    menu_im_frame(&st, &style, 0.0F, 0.0F);
-    TEST_ASSERT_FALSE(st.open);
+    const nt_key_t keys[] = {NT_KEY_ESCAPE, NT_KEY_ARROW_LEFT};
+    for (int k = 0; k < 2; ++k) {
+        nt_ui_menu_t st = {0};
+        nt_ui_menu_open(&st, 120.0F, 80.0F);
+        menu_im_frame(&st, &style, 0.0F, 0.0F);
+        menu_key(keys[k]);
+        menu_im_frame(&st, &style, 0.0F, 0.0F);
+        nt_input_init();
+        TEST_ASSERT_FALSE(st.open);
+        TEST_ASSERT_FALSE_MESSAGE(menu_level_found(0U), "the closing frame declares no root");
+    }
+}
+
+/* ---- Esc or Left with a child the pointer opened closes that child first, as Dear ImGui and Win32 close
+ *      the top popup; the next one closes the menu. ---- */
+static void test_menu_back_closes_a_hover_opened_child(void) {
+    nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
+    const uint32_t file = nt_ui_menu_test_item_id(MENU_A, KEY_FILE);
+    const nt_key_t keys[] = {NT_KEY_ESCAPE, NT_KEY_ARROW_LEFT};
+    for (int k = 0; k < 2; ++k) {
+        nt_ui_menu_t st = {0};
+        nt_ui_menu_open(&st, 120.0F, 80.0F);
+        menu_im_frame(&st, &style, 0.0F, 0.0F);
+        menu_hover_open(&st, &style, file, 1U, menu_im_frame);
+        float fx = 0.0F;
+        float fy = 0.0F;
+        menu_row_center(file, &fx, &fy);
+        TEST_ASSERT_EQUAL_UINT32(file, st.focus);
+        menu_key(keys[k]);
+        menu_im_frame(&st, &style, fx, fy);
+        nt_input_init();
+        TEST_ASSERT_TRUE_MESSAGE(st.open, "the first Esc or Left closes only the open child");
+        TEST_ASSERT_FALSE(menu_level_found(1U));
+        TEST_ASSERT_EQUAL_UINT32(file, st.focus);
+        menu_key(keys[k]);
+        menu_im_frame(&st, &style, fx, fy);
+        nt_input_init();
+        TEST_ASSERT_FALSE(st.open);
+    }
+}
+
+/* ---- Right or Enter with no focused row is no key: a Down pressed with it lands on the first row. ---- */
+static void test_menu_no_focus_right_leaves_down(void) {
+    nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
+    const nt_key_t keys[] = {NT_KEY_ENTER, NT_KEY_ARROW_RIGHT};
+    for (int k = 0; k < 2; ++k) {
+        nt_ui_menu_t st = {0};
+        nt_ui_menu_open(&st, 120.0F, 80.0F);
+        menu_im_frame(&st, &style, 790.0F, 590.0F);
+        menu_im_frame(&st, &style, 790.0F, 590.0F);
+        TEST_ASSERT_EQUAL_UINT32(0U, st.focus);
+        nt_input_init();
+        nt_input_feed(nt_test_key(keys[k], true));
+        nt_input_feed(nt_test_key(NT_KEY_ARROW_DOWN, true));
+        nt_input_poll();
+        menu_im_frame(&st, &style, 790.0F, 590.0F);
+        nt_input_init();
+        TEST_ASSERT_EQUAL_UINT32(nt_ui_menu_test_item_id(MENU_A, KEY_FILE), st.focus);
+    }
 }
 
 /* Four frames of one custom row (key KEY_NEW) hosting a 60x20 inner button: frames 0-1 bake the bboxes
@@ -1879,8 +1939,8 @@ static void test_menu_press_on_row_popup_keeps_open(void) {
     }
 }
 
-/* ---- The row's popup on top closes the sibling's open level before the rows declare: the frame after the
- *      popup first claims the top declares no level above it, so no control there takes a press. ---- */
+/* ---- A row's popup closes the sibling's open level from the frame it opens: the open parent declared after
+ *      the row closes its child at its own call, so no level paints or takes a press over the popup. ---- */
 static void test_menu_row_popup_closes_the_branch_before_the_rows(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
     nt_ui_menu_t st = {0};
@@ -1893,8 +1953,8 @@ static void test_menu_row_popup_closes_the_branch_before_the_rows(void) {
     float py = 0.0F;
     menu_row_center(file, &px, &py);
     s_popup_depth = 0;
-    menu_popup_frame(&st, &style, px, py); /* the popup claims the top */
-    TEST_ASSERT_TRUE(menu_level_found(1U));
+    menu_popup_frame(&st, &style, px, py); /* the popup opens and claims the top */
+    TEST_ASSERT_FALSE_MESSAGE(menu_level_found(1U), "the frame the popup opens declares no level over it");
     menu_popup_frame(&st, &style, px, py);
     TEST_ASSERT_EQUAL_UINT32(ROW_POPUP_ID, s_fx.ctx->overlay_top_id_prev);
     TEST_ASSERT_FALSE_MESSAGE(menu_level_found(1U), "the sibling's level is not declared over the row's popup");
@@ -2344,6 +2404,8 @@ int main(void) {
     RUN_TEST(test_menu_pointer_pos);
     RUN_TEST(test_menu_item_id_distinct_siblings_and_scopes);
     RUN_TEST(test_menu_left_at_root_closes);
+    RUN_TEST(test_menu_back_closes_a_hover_opened_child);
+    RUN_TEST(test_menu_no_focus_right_leaves_down);
     RUN_TEST(test_menu_reopen_starts_fresh);
     RUN_TEST(test_menu_opening_frame_ignores_the_pointer);
     RUN_TEST(test_menu_disabled_focused_row_keeps_its_place);

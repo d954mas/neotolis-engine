@@ -159,10 +159,10 @@ typedef struct {
 /* Nested-overlay cap (fail-early assert on overflow; depth is a counter, no heap). Depth is the
  * overflow guard and tells a root overlay from a nested one; top-targeting comes from overlay_top_z_cur.
  * Build-overridable. */
-#ifndef NT_UI_MODAL_MAX_DEPTH
-#define NT_UI_MODAL_MAX_DEPTH 16
+#ifndef NT_UI_OVERLAY_MAX_DEPTH
+#define NT_UI_OVERLAY_MAX_DEPTH 16
 #endif
-_Static_assert(NT_UI_MODAL_MAX_DEPTH >= 1 && NT_UI_MODAL_MAX_DEPTH <= UINT8_MAX, "NT_UI_MODAL_MAX_DEPTH must fit the uint8_t overlay_depth counter");
+_Static_assert(NT_UI_OVERLAY_MAX_DEPTH >= 1 && NT_UI_OVERLAY_MAX_DEPTH <= UINT8_MAX, "NT_UI_OVERLAY_MAX_DEPTH must fit the uint8_t overlay_depth counter");
 
 /* Bound the storage and per-row work of NT_UI_CHECKS duplicate detection. */
 #ifndef NT_UI_COMBO_DUP_KEY_WINDOW
@@ -215,9 +215,8 @@ struct nt_ui_context {
     float pointer_occlusion[NT_INPUT_MAX_POINTERS]; /* max world ray distance; default +inf = no cutoff */
     /* Per pointer and axis (0 = x, 1 = y): the scroll allowed to consume this frame's wheel. */
     uint32_t wheel_owner[NT_INPUT_MAX_POINTERS][2];
-    /* The top overlay with the 1-frame IM lag: _cur tracks the highest-band live catcher-bearing overlay of
-     * this frame; nt_ui_begin commits it into _prev, which owns the close-scan, the keys and the input
-     * (spec: "Input ownership"). */
+    /* The top overlay (spec: "Input ownership"): _cur is claimed during the frame by the highest-band live
+     * catcher-bearing popup, nt_ui_begin commits it into _prev, which every ownership rule reads. */
     uint32_t overlay_top_id_prev;
     uint32_t overlay_top_id_cur;
     /* Highest band claimed this frame; ties go to the last declared, matching the pointer arbiter that
@@ -232,26 +231,23 @@ struct nt_ui_context {
     uint32_t focus_tab_seek;
     uint32_t focus_tab_pending;
     uint32_t focus_first_id;
-    /* The field focused at nt_ui_begin, after the top took the focus under it (0 = none): the frame's keys
-     * are its alone, so one key has one owner whatever the declaration order and a field a press focuses
-     * reads keys from the next frame. */
-    uint32_t keys_field;
+    /* The frame's one keyboard owner, fixed at nt_ui_begin: the focused field, else last frame's top overlay
+     * (0 = the game's). A field a press focuses mid-frame reads keys from the next frame. */
+    uint32_t keys_owner;
     /* Raw rich-text per-block caps (0 = compile-time NT_UI_RICH_MAX_* default); resolved in
      * nt_ui_rich_begin, which owns the rich #defines. Raw here so this widget-agnostic header stays
      * rich-text-agnostic. Slotted into the uint32 run so they add no struct padding. */
     uint32_t rich_max_runs;
     uint32_t rich_max_styles;
     uint32_t rich_max_text_bytes;
-    /* Absolute band of the first root overlay; root k takes stride + k * NT_UI_MODAL_MAX_DEPTH. Validated in
+    /* Absolute band of the first root overlay; root k takes stride + k * NT_UI_OVERLAY_MAX_DEPTH. Validated in
      * create_context. */
-    int16_t modal_zband_stride;
+    int16_t overlay_zband_stride;
     /* Visible root overlays declared so far this frame: each takes the next band, so a later one covers an
      * earlier one with all its nested levels. Reset by nt_ui_begin, like overlay_depth. */
     uint16_t overlay_root_count;
     uint8_t overlay_depth;
-    /* Overlay depth of the popup whose subtree is inert (not open: closing or closed this frame), 0 = none:
-     * everything declared inside it makes no record, steps nothing and owns no focus. Balanced by
-     * nt_ui_popup_end, reset by nt_ui_begin. */
+    /* Overlay depth of the not-open popup whose subtree is inert (0 = none); cleared by its nt_ui_popup_end. */
     uint8_t inert_from;
     uint8_t capture_seen[NT_INPUT_MAX_POINTERS];
 

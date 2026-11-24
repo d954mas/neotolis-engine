@@ -18,7 +18,7 @@ extern const nt_ui_widget_def_t NT_UI_MENU_DEF;
 #define NT_UI_MENU_AIM_FALLBACK_SECS 0.12F
 
 /* Submenu nesting cap: a parent row declared on the deepest level asserts (fail-early, no fallback), so a
- * runaway tree never exhausts the popup stack (NT_UI_MODAL_MAX_DEPTH, asserted at build time).
+ * runaway tree never exhausts the popup stack (NT_UI_OVERLAY_MAX_DEPTH, asserted at build time).
  * Build-overridable for parity with every other cap in the subsystem. */
 #ifndef NT_UI_MENU_MAX_DEPTH
 #define NT_UI_MENU_MAX_DEPTH 8
@@ -104,7 +104,7 @@ typedef struct {
     bool hover_opens; /* hover_id is a parent */
     bool focus_seen;  /* the focused row is declared and enabled this frame */
     bool focus_opens; /* the focused row is a parent */
-    bool top;         /* the menu is the top overlay: it reads keys and the outside press */
+    bool top;         /* the menu is the top overlay: its rows take the pointer and it reads the keys */
     bool ours;        /* top, and the primary pointer is the menu's (not the inspector's) */
     bool activated;   /* a row activated: the chain closes */
     bool item_steps;  /* the open custom row is enabled and has an action of its own */
@@ -154,8 +154,6 @@ void nt_ui_menu_end(nt_ui_menu_t *menu);
 void nt_ui_menu_open(nt_ui_menu_t *menu, float x, float y);
 
 #ifdef NT_TEST_ACCESS
-/* The x of the submenu edge the corridor aims at: the edge facing the apex. */
-float nt_ui_menu_test_aim_near_x(float sub_x, float sub_w, float apex_x);
 
 /* The hover-intent decision for the corridor `aim` toward the open submenu rect: true KEEPS the submenu
  * (the cursor aims at it or sits over it), false allows a sibling switch once the off-corridor dwell

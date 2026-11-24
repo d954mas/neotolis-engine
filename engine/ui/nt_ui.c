@@ -236,9 +236,9 @@ nt_ui_context_t *nt_ui_create_context(void *arena, size_t arena_size, const nt_u
     NT_ASSERT((desc->element_depth_bias_ndc == 0.0F || desc->use_raycast_input) && "nt_ui_create_context: element_depth_bias_ndc requires use_raycast_input=true");
     ctx->element_depth_bias_ndc = desc->element_depth_bias_ndc;
     /* Used as-is; the default comes solely from nt_ui_create_desc_defaults() (same convention as max_elements). */
-    ctx->modal_zband_stride = desc->modal_zband_stride;
-    NT_ASSERT(ctx->modal_zband_stride > 0 && ctx->modal_zband_stride + NT_UI_MODAL_MAX_DEPTH - 1 <= INT16_MAX &&
-              "nt_ui_create_context: modal_zband_stride must be > 0 with room for a root overlay's nested levels");
+    ctx->overlay_zband_stride = desc->overlay_zband_stride;
+    NT_ASSERT(ctx->overlay_zband_stride > 0 && ctx->overlay_zband_stride + NT_UI_OVERLAY_MAX_DEPTH - 1 <= INT16_MAX &&
+              "nt_ui_create_context: overlay_zband_stride must be > 0 with room for a root overlay's nested levels");
     /* Touch-friendly baseline, looser than ImGui's mouse 6px/0.3s: the engine targets mobile/WASM. */
     ctx->gesture_dbl_window_secs = 0.50F;
     ctx->gesture_move_radius_dp = 16.0F;
@@ -405,9 +405,8 @@ void nt_ui_set_font(nt_ui_context_t *ctx, uint16_t font_id, nt_font_t font) {
 // #region begin_end
 static void resolve_hot(nt_ui_context_t *ctx);
 
-/* A record belongs to last frame's top overlay when it lies at or above the top's catcher in that frame's
- * stacking order, the order that paints and hit-tests; an inspector pane floats above every overlay. With no
- * top, and in a 3D ctx, which does not rank overlays by band, every record belongs. */
+/* A record is the top's when it lies at or above the top's catcher in last frame's paint/hit order; with no
+ * top, in a 3D ctx (no band ranking) and for an inspector pane, every record is. */
 bool nt_ui_internal_owned_by_top(nt_ui_context_t *ctx, uint32_t id) {
     const uint32_t top = ctx->overlay_top_id_prev;
     if (id == 0U || top == 0U || ctx->use_raycast_input) {
@@ -546,7 +545,7 @@ void nt_ui_begin(nt_ui_context_t *ctx, const nt_ui_frame_desc_t *frame) {
         NT_ASSERT(!isnan(ctx->pointer_occlusion[i]) && "nt_ui_begin: occlusion must not be NaN");
     }
     ctx->last_press_age += dt;
-    ctx->overlay_depth = 0U; /* modal begin++/end-- balance across the frame (asserted == 0 at end) */
+    ctx->overlay_depth = 0U; /* overlay begin++/end-- balance across the frame (asserted == 0 at end) */
     ctx->overlay_root_count = 0U;
     ctx->inert_from = 0U;
     /* Commit last frame's top overlay as the close-scan target (1-frame IM lag), then reset. */
@@ -624,9 +623,8 @@ void nt_ui_begin(nt_ui_context_t *ctx, const nt_ui_frame_desc_t *frame) {
      * clip) leaks a slot until the pool (64) overflows -> Clay error type=7 crash. */
     Clay_UpdateScrollContainers(false, (Clay_Vector2){0.0F, 0.0F}, ctx->frame_dt);
 
-    /* The top overlay owns the pointer and the keys: a capture or a pending scroll under it (a press under an
-     * overlay that opened mid-gesture) ends without a click, as a modal window cancels its owner's capture,
-     * and a text field under it loses focus, as a modal dialog takes focus. A 2D property, like the top. */
+    /* An overlay that opened over a held press ends it, as a modal window cancels its owner's capture, and
+     * takes the focus of a field under it, as a modal dialog. */
     for (uint32_t i = 0; i < ctx->frame_pointer_count; ++i) {
         nt_ui_capture_t *cap = &ctx->captures[i];
         if (!nt_ui_internal_owned_by_top(ctx, cap->active_id)) {
@@ -639,20 +637,20 @@ void nt_ui_begin(nt_ui_context_t *ctx, const nt_ui_frame_desc_t *frame) {
     if (!nt_ui_internal_owned_by_top(ctx, ctx->focused_input_id)) {
         ctx->focused_input_id = 0U;
     }
-    ctx->keys_field = ctx->focused_input_id;
+    /* One keyboard owner per frame (spec: "Input ownership"): the focused field, else the top overlay. */
+    ctx->keys_owner = (ctx->focused_input_id != 0U) ? ctx->focused_input_id : ctx->overlay_top_id_prev;
 
     /* Input is decided here, from last frame's layout: the front-most record per pointer, then the
      * scroll gestures. Every step and query of the frame reads the result. */
     resolve_hot(ctx);
-    /* A press on a record, or anywhere while an overlay held the pointer, makes the whole gesture the UI's
-     * (Dear ImGui's MouseDownOwned): the game sees none of it, even after the record goes away. A press while
-     * the other button is held since an earlier frame (its release may land in this poll) joins it. */
+    /* A press on a record, or anywhere while an overlay is up, makes the gesture the UI's (Dear ImGui's
+     * MouseDownOwned). A press while the other button is held joins that gesture: the earlier one decides. */
     for (uint32_t i = 0; i < ctx->frame_pointer_count; ++i) {
         const nt_button_state_t *l = &ctx->frame_pointers[i].buttons[NT_BUTTON_LEFT];
         const nt_button_state_t *r = &ctx->frame_pointers[i].buttons[NT_BUTTON_RIGHT];
         const bool joins = ((l->is_down || l->is_released) && !l->is_pressed) || ((r->is_down || r->is_released) && !r->is_pressed);
-        if (l->is_pressed || r->is_pressed) {
-            ctx->captures[i].ui_gesture = (joins && ctx->captures[i].ui_gesture) || ctx->pointer_hot[i].id != 0U || ctx->overlay_top_id_prev != 0U;
+        if ((l->is_pressed || r->is_pressed) && !joins) {
+            ctx->captures[i].ui_gesture = ctx->pointer_hot[i].id != 0U || ctx->overlay_top_id_prev != 0U;
         } else if (!l->is_down && !l->is_released && !r->is_down && !r->is_released) {
             ctx->captures[i].ui_gesture = false;
         }
@@ -667,7 +665,7 @@ void nt_ui_end(nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL && "nt_ui_end: ctx must be non-NULL");
     NT_ASSERT(ctx->in_frame && "nt_ui_end: ctx is not in_frame (begin was not called)");
     NT_ASSERT(ctx == g_nt_ui_inframe_ctx && "nt_ui_end: ctx mismatch with module in-frame ctx");
-    NT_ASSERT(ctx->overlay_depth == 0U && "nt_ui_end: unbalanced nt_ui_modal_begin/end (missing modal_end)");
+    NT_ASSERT(ctx->overlay_depth == 0U && "nt_ui_end: unbalanced overlay begin/end (a popup, modal or menu misses its end)");
 #if NT_UI_DEBUG_TOOLS
     if (ctx->inspector_active) {
         nt_ui_internal_emit_inspector_layout_extern(ctx);
@@ -2597,6 +2595,9 @@ static nt_ui_interaction_t query_interaction_padded(nt_ui_context_t *ctx, uint32
 
     nt_ui_interaction_t out = {0};
     *out_s = (nt_ui_widget_pidx_state_t){.effective_pidx = -1, .first_hover_pidx = -1};
+    if (ctx->inert_from != 0U) {
+        return out; /* inert: every read, not only the step */
+    }
 
 #if NT_UI_DEBUG_TOOLS
     /* Sidebar consumes the pointer; widgets behind it report no interaction. */
@@ -2663,9 +2664,6 @@ static nt_ui_interaction_t query_interaction_padded(nt_ui_context_t *ctx, uint32
 }
 
 nt_ui_interaction_t nt_ui_query_interaction(nt_ui_context_t *ctx, uint32_t id) {
-    if (ctx->inert_from != 0U) {
-        return (nt_ui_interaction_t){0}; /* inert: every read, not only the step */
-    }
     bool owner_over = false;
     nt_ui_widget_pidx_state_t s;
     return query_interaction_padded(ctx, id, NULL, &owner_over, &s);
@@ -2943,10 +2941,9 @@ void nt_ui_debug_record_disabled_zone(nt_ui_context_t *ctx, uint32_t id, const i
 }
 #endif /* NT_UI_DEBUG_TOOLS */
 
-bool nt_ui_overlay_active(const nt_ui_context_t *ctx) {
-    NT_ASSERT(ctx != NULL && "nt_ui_overlay_active: ctx must be non-NULL");
-    /* The latest finished frame's top: _cur between frames (a game polls before nt_ui_begin), _prev inside one. */
-    return (ctx->in_frame ? ctx->overlay_top_id_prev : ctx->overlay_top_id_cur) != 0U;
+bool nt_ui_wants_keyboard(const nt_ui_context_t *ctx) {
+    NT_ASSERT(ctx != NULL && "nt_ui_wants_keyboard: ctx must be non-NULL");
+    return ctx->keys_owner != 0U;
 }
 
 bool nt_ui_wants_pointer(const nt_ui_context_t *ctx) {

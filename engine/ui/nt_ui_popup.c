@@ -138,18 +138,15 @@ bool nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t id, const nt_ui_p
     const bool dismiss_on_click = (ext != NULL) ? ext->dismiss_on_click : light_dismiss;
     const bool esc_close = (ext != NULL) ? ext->esc_close : light_dismiss;
     // #region close-scan: the top popup's own close, before anything of it is declared
-    /* Decided from last frame's records and this frame's input (spec: "When a rule runs"): Esc when no field
-     * held the keys at nt_ui_begin, or a press of the primary pointer beyond the panel grown by close_pad on
-     * its catcher or on no record at all (a letterbox bar, a ray past the UI plane), as Dear ImGui closes a
-     * popup on the press. The frame it closes is inert from the start and registers no catcher, so the next
-     * press reaches what lies under. */
+    /* Before anything of it is declared (spec: "When a rule runs"): Esc it owns, or a primary press beyond the
+     * panel + close_pad on its catcher or on no record, as Dear ImGui closes a popup on the press. */
     nt_ui_popup_close_t close_src = NT_UI_POPUP_CLOSE_NONE;
     if (*open_io && ctx->inert_from == 0U && ctx->overlay_top_id_prev == id) {
         const nt_pointer_t *pp = &ctx->frame_pointers[ctx->frame_primary];
         const bool pressed = pp->buttons[NT_BUTTON_LEFT].is_pressed || pp->buttons[NT_BUTTON_RIGHT].is_pressed;
         const int16_t pad_lrtb[4] = {close_pad, close_pad, close_pad, close_pad};
         const uint32_t hot = ctx->pointer_hot[ctx->frame_primary].id;
-        if (esc_close && ctx->keys_field == 0U && nt_input_key_is_pressed(NT_KEY_ESCAPE)) {
+        if (esc_close && ctx->keys_owner == id && nt_input_key_is_pressed(NT_KEY_ESCAPE)) {
             close_src = NT_UI_POPUP_CLOSE_ESC;
         } else if (dismiss_on_click && pressed && (hot == catcher_id || hot == 0U) && !nt_ui_inspector_pointer_consumed(ctx) && !nt_ui_internal_hit_test_padded(ctx, id, pp->x, pp->y, pad_lrtb)) {
             close_src = NT_UI_POPUP_CLOSE_OUTSIDE;
@@ -208,28 +205,24 @@ bool nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t id, const nt_ui_p
     }
     // #region z-band + stack push (shared depth counter with modal)
     /* Assert BEFORE the push — fail-early, no heap growth, no silent fallback. */
-    NT_ASSERT(ctx->overlay_depth < NT_UI_MODAL_MAX_DEPTH && "nt_ui_popup_begin: nesting exceeds NT_UI_MODAL_MAX_DEPTH");
-    /* Root overlays are a top layer: each takes the frame's next absolute root band, whatever game floating
-     * encloses it, so a later one covers an earlier one with all its nested levels; a nested one sits a band
-     * above its parent, over the parent's widget parts (delta 0). The catcher, declared before its panel on
-     * the same band, lies between them. */
+    NT_ASSERT(ctx->overlay_depth < NT_UI_OVERLAY_MAX_DEPTH && "nt_ui_popup_begin: nesting exceeds NT_UI_OVERLAY_MAX_DEPTH");
+    /* Root overlays are a top layer: the frame's next absolute root band, whatever encloses them; a nested one
+     * sits a band above its parent's widget parts. The catcher shares the panel's band, declared before it. */
     int16_t panel_z = 1;
     if (root_overlay) {
-        const int32_t band = ctx->modal_zband_stride + ((int32_t)ctx->overlay_root_count * NT_UI_MODAL_MAX_DEPTH);
+        const int32_t band = ctx->overlay_zband_stride + ((int32_t)ctx->overlay_root_count * NT_UI_OVERLAY_MAX_DEPTH);
         const int32_t enclosing = nt_ui_clay_priv_open_floating_z(ctx->clay);
-        NT_ASSERT(band + NT_UI_MODAL_MAX_DEPTH - 1 <= INT16_MAX && "nt_ui_popup: a root overlay's nested levels would pass the int16 z-band");
-        NT_ASSERT(enclosing < ctx->modal_zband_stride && band - enclosing <= INT16_MAX &&
-                  "nt_ui_popup: a root overlay's enclosing floating must lie under modal_zband_stride, within int16 of the band");
+        NT_ASSERT(band + NT_UI_OVERLAY_MAX_DEPTH - 1 <= INT16_MAX && "nt_ui_popup: a root overlay's nested levels would pass the int16 z-band");
+        NT_ASSERT(enclosing < ctx->overlay_zband_stride && band - enclosing <= INT16_MAX &&
+                  "nt_ui_popup: a root overlay's enclosing floating must lie under overlay_zband_stride, within int16 of the band");
         panel_z = (int16_t)(band - enclosing);
         ++ctx->overlay_root_count;
     }
     ++ctx->overlay_depth;
     // #endregion
     // #region catcher/backdrop
-    /* Only an open popup outside an inert subtree gates the UI under it with its catcher and claims the top;
-     * otherwise it is inert and only paints, its backdrop included (spec: "Input ownership"). Only a
-     * catcher-bearing popup claims the top (and nt_ui_overlay_active): a catcher-less one (a tooltip) must
-     * not steal it from a coexisting dropdown. */
+    /* Only an open, live popup with a catcher gates the UI under it and claims the top (spec: "Input
+     * ownership"); a catcher-less one (a tooltip) must not steal the top from a coexisting dropdown. */
     const bool inert_parent = ctx->inert_from != 0U;
     const bool want_catcher = open && !inert_parent && catcher;
     if (want_catcher || has_backdrop) {
@@ -269,13 +262,10 @@ bool nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t id, const nt_ui_p
     nt_ui_clay_priv_open_element();
     nt_ui_clay_priv_configure_open_element(panel_decl);
     nt_ui_widget_register(ctx, id, reg_def, NULL, true);
-    /* The panel is the innermost open floating here, so this IS the band Clay stamped. The claim below
-     * ranks by band, ties to the last declared: the panels' tree-root order, which paints them and is the
-     * 2D pointer arbiter's key, so the winner's own catcher takes the outside press. A 3D ctx arbitrates by
-     * ray distance and does not rank overlays by band at all. */
+    /* The band Clay stamped on the panel. Ties go to the last declared, the paint and hit order, so the
+     * winner's own catcher takes the outside press. */
     const int32_t panel_band = nt_ui_clay_priv_open_floating_z(ctx->clay);
-    /* A catcher on the base band loses the hit arbitration and silently stops gating while
-     * nt_ui_overlay_active() still reports the overlay up. */
+    /* A catcher on the base band would lose every hit and stop gating while the overlay owns the keys. */
     NT_ASSERT((!want_catcher || panel_band > 0) && "nt_ui_popup: the catcher must sit above the base band (0)");
     if (want_catcher && panel_band >= ctx->overlay_top_z_cur) {
         ctx->overlay_top_z_cur = panel_band;

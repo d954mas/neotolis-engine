@@ -406,44 +406,41 @@ static void test_modal_backdrop_close_pad(void) {
     TEST_ASSERT_EQUAL_INT(NT_UI_POPUP_CLOSE_OUTSIDE, (int)modal_backdrop_click_reason(&st, 40.0F, 40.0F));
 }
 
-/* ---- nt_ui_overlay_active reports PREV-FRAME presence (not the live within-frame depth, which is
- *      always 0 once nt_ui_end balanced the stack). A game polls it before its next nt_ui_begin to
- *      gate hotkeys. Frame with a modal up -> active next; frame with no modal -> inactive next. ---- */
-static void test_overlay_active_prev_frame(void) {
+/* ---- nt_ui_wants_keyboard reports the keyboard owner nt_ui_begin fixed for the frame (last frame's top
+ *      overlay): it holds through nt_ui_end until the next begin, so a game reads it after begin. ---- */
+static void test_wants_keyboard_follows_the_top(void) {
     nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
     st.ease_speed = 0.0F; /* instant */
+    TEST_ASSERT_FALSE(nt_ui_wants_keyboard(s_fx.ctx));
 
-    /* Before any frame: nothing was up. */
-    TEST_ASSERT_FALSE(nt_ui_overlay_active(s_fx.ctx));
-
-    /* Frame 1: a modal is open. The live depth is 0 after end, but presence must be published. */
+    /* Frame 1 opens the modal: that frame's keys were fixed at its begin, before anything was up. */
     ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1, 0);
     (void)modal_begin_open(s_fx.ctx, MODAL_A, &st);
     nt_ui_modal_end(s_fx.ctx);
     nt_ui_end(s_fx.ctx);
-    TEST_ASSERT_EQUAL_UINT8(0U, s_fx.ctx->overlay_depth); /* live depth IS 0 ... */
-    TEST_ASSERT_TRUE(nt_ui_overlay_active(s_fx.ctx));     /* ... yet prev-frame presence is true */
+    TEST_ASSERT_FALSE(nt_ui_wants_keyboard(s_fx.ctx));
 
-    /* Frame 2: no modal declared at all -> presence falls back to inactive. Inside the frame it still reads
-     * the last finished frame. */
+    /* Frame 2: the modal is the top and owns the keys from begin, also after end. */
     ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1, 0);
-    TEST_ASSERT_TRUE(nt_ui_overlay_active(s_fx.ctx));
-    CLAY({.id = CLAY_ID("base2"), .layout = {.sizing = {CLAY_SIZING_FIXED(100), CLAY_SIZING_FIXED(100)}}}) {}
+    TEST_ASSERT_TRUE(nt_ui_wants_keyboard(s_fx.ctx));
+    (void)modal_begin_open(s_fx.ctx, MODAL_A, &st);
+    nt_ui_modal_end(s_fx.ctx);
     nt_ui_end(s_fx.ctx);
-    TEST_ASSERT_FALSE(nt_ui_overlay_active(s_fx.ctx));
+    TEST_ASSERT_TRUE(nt_ui_wants_keyboard(s_fx.ctx));
 
-    /* A fully-closed modal (settled, declares no backdrop) does NOT count as present. */
+    /* A closed modal declares nothing and claims no top: the keys are the game's again. */
     bool open = false;
-    ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1, 0);
-    const bool declared = nt_ui_modal_begin(s_fx.ctx, MODAL_A, &st, &open, NULL);
-    if (declared) {
-        nt_ui_modal_end(s_fx.ctx);
+    for (int f = 0; f < 2; ++f) {
+        ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1, 0);
+        if (nt_ui_modal_begin(s_fx.ctx, MODAL_A, &st, &open, NULL)) {
+            nt_ui_modal_end(s_fx.ctx);
+        }
+        nt_ui_end(s_fx.ctx);
     }
-    nt_ui_end(s_fx.ctx);
-    TEST_ASSERT_FALSE(nt_ui_overlay_active(s_fx.ctx));
+    TEST_ASSERT_FALSE(nt_ui_wants_keyboard(s_fx.ctx));
 }
 
-/* ---- Per-context modal_zband_stride: a custom stride drives a root modal's band. The default
+/* ---- Per-context overlay_zband_stride: a custom stride drives a root modal's band. The default
  *      fixture ctx uses 1000; a second ctx created with a custom desc reflects the configured value.
  *      Module is already inited by setUp, so a second ctx coexists (mirrors test_nt_ui_multictx). ---- */
 alignas(NT_UI_ARENA_ALIGN) static uint8_t s_custom_arena[NT_UI_TEST_ARENA_SIZE];
@@ -451,7 +448,7 @@ alignas(NT_UI_ARENA_ALIGN) static uint8_t s_custom_arena[NT_UI_TEST_ARENA_SIZE];
 static void test_modal_custom_zband_stride(void) {
     const int16_t custom_stride = 500;
     nt_ui_create_desc_t desc = nt_ui_create_desc_defaults();
-    desc.modal_zband_stride = custom_stride;
+    desc.overlay_zband_stride = custom_stride;
     nt_ui_context_t *ctx = nt_ui_create_context(s_custom_arena, sizeof s_custom_arena, &desc);
     TEST_ASSERT_NOT_NULL(ctx);
 
@@ -478,7 +475,7 @@ static void test_modal_custom_zband_stride(void) {
 /* ---- A stride of 1 is valid: the catcher shares the panel's band 1 and still gates the base band. ---- */
 static void test_modal_stride_one_gates_base_ui(void) {
     nt_ui_create_desc_t desc = nt_ui_create_desc_defaults();
-    desc.modal_zband_stride = 1;
+    desc.overlay_zband_stride = 1;
     nt_ui_context_t *ctx = nt_ui_create_context(s_custom_arena, sizeof s_custom_arena, &desc);
     TEST_ASSERT_NOT_NULL(ctx);
     nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
@@ -503,7 +500,7 @@ static void test_modal_stride_one_gates_base_ui(void) {
 /* ---- A root overlay band past int16 asserts: the second visible root overlay would overflow. ---- */
 static void test_modal_root_band_overflow_asserts(void) {
     nt_ui_create_desc_t desc = nt_ui_create_desc_defaults();
-    desc.modal_zband_stride = (int16_t)(INT16_MAX - (NT_UI_MODAL_MAX_DEPTH - 1));
+    desc.overlay_zband_stride = (int16_t)(INT16_MAX - (NT_UI_OVERLAY_MAX_DEPTH - 1));
     nt_ui_context_t *ctx = nt_ui_create_context(s_custom_arena, sizeof s_custom_arena, &desc);
     TEST_ASSERT_NOT_NULL(ctx);
     nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
@@ -521,7 +518,7 @@ static void test_modal_root_band_overflow_asserts(void) {
  *      assert. ---- */
 static void test_modal_closed_root_takes_no_band(void) {
     nt_ui_create_desc_t desc = nt_ui_create_desc_defaults();
-    desc.modal_zband_stride = (int16_t)(INT16_MAX - (NT_UI_MODAL_MAX_DEPTH - 1));
+    desc.overlay_zband_stride = (int16_t)(INT16_MAX - (NT_UI_OVERLAY_MAX_DEPTH - 1));
     nt_ui_context_t *ctx = nt_ui_create_context(s_custom_arena, sizeof s_custom_arena, &desc);
     TEST_ASSERT_NOT_NULL(ctx);
     nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
@@ -537,7 +534,7 @@ static void test_modal_closed_root_takes_no_band(void) {
 /* ---- A stride whose first root overlay's nested levels could pass int16 asserts at create. ---- */
 static void test_modal_stride_past_the_band_budget_asserts(void) {
     nt_ui_create_desc_t desc = nt_ui_create_desc_defaults();
-    desc.modal_zband_stride = (int16_t)(INT16_MAX - 8);
+    desc.overlay_zband_stride = (int16_t)(INT16_MAX - 8);
     NT_TEST_EXPECT_ASSERT((void)nt_ui_create_context(s_custom_arena, sizeof s_custom_arena, &desc));
 }
 
@@ -545,7 +542,7 @@ static void test_modal_stride_past_the_band_budget_asserts(void) {
  *      max_elements). A 0 stride is invalid and must fail-early at create. ---- */
 static void test_modal_zero_stride_asserts(void) {
     nt_ui_create_desc_t desc = nt_ui_create_desc_defaults();
-    desc.modal_zband_stride = 0;
+    desc.overlay_zband_stride = 0;
     NT_TEST_EXPECT_ASSERT((void)nt_ui_create_context(s_custom_arena, sizeof s_custom_arena, &desc));
 }
 
@@ -703,7 +700,7 @@ int main(void) {
     RUN_TEST(test_modal_closing_backdrop_lets_the_pointer_through);
     RUN_TEST(test_modal_body_button_clickable);
     RUN_TEST(test_modal_backdrop_close_pad);
-    RUN_TEST(test_overlay_active_prev_frame);
+    RUN_TEST(test_wants_keyboard_follows_the_top);
     RUN_TEST(test_modal_slide_dir);
     RUN_TEST(test_modal_asymmetric_open_close);
     RUN_TEST(test_modal_close_uses_close_recipe);

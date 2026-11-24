@@ -766,7 +766,7 @@ static void focus_step(input_frame_t *f) {
  * f->cur_len. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void edit_step(input_frame_t *f, bool *changed, bool *submitted) {
-    if (f->ctx->keys_field != f->id || !input_live(f->ctx, f)) {
+    if (f->ctx->keys_owner != f->id || !input_live(f->ctx, f)) {
         return;
     }
     nt_ui_context_t *ctx = f->ctx;

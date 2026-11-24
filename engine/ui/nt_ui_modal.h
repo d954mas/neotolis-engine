@@ -2,7 +2,7 @@
 #define NT_UI_MODAL_H
 
 /* Modal helper: panel + full-viewport backdrop floating elements, an input-gate occluder, and an
- * open/close tween. The game owns the `bool open`; Esc and a backdrop click (per flags) clear it. Conditional
+ * open/close tween. The game owns the `bool open`; Esc and a backdrop press (per flags) clear it. Conditional
  * begin/end: end only after begin returned true. It owns no scene, lifecycle,
  * or assets, and pauses nothing — only pointer routing is auto-gated by the backdrop occluder. */
 
@@ -16,7 +16,7 @@ typedef struct nt_ui_context nt_ui_context_t;
 
 extern const nt_ui_widget_def_t NT_UI_MODAL_DEF;
 
-/* Style flags — only gate close SOURCES (Esc / backdrop click): a flagged source clears the game's open bool. */
+/* Style flags — only gate close SOURCES (Esc / backdrop press): a flagged source clears the game's open bool. */
 #define NT_UI_MODAL_LISTEN_ESC ((uint8_t)(1U << 0))
 #define NT_UI_MODAL_CLOSE_ON_BACKDROP ((uint8_t)(1U << 1))
 
@@ -71,7 +71,7 @@ nt_ui_modal_style_t nt_ui_modal_style_defaults(void);
  *
  * One window, many open sites = ONE bool + ONE id; call this from the active container's body so
  * nesting/z follow context. id non-zero, style and open non-NULL, info nullable. Asserts depth <
- * NT_UI_MODAL_MAX_DEPTH. */
+ * NT_UI_OVERLAY_MAX_DEPTH. */
 bool nt_ui_modal_begin(nt_ui_context_t *ctx, uint32_t id, const nt_ui_modal_style_t *style, bool *open, nt_ui_popup_info_t *info);
 void nt_ui_modal_end(nt_ui_context_t *ctx);
 

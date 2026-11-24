@@ -17,7 +17,7 @@
 #include "ui/nt_ui_popup.h"
 #include "ui/nt_ui_popup_internal.h"
 
-_Static_assert(NT_UI_MENU_MAX_DEPTH <= NT_UI_MODAL_MAX_DEPTH, "a menu level is a popup: its depth must fit the overlay stack");
+_Static_assert(NT_UI_MENU_MAX_DEPTH <= NT_UI_OVERLAY_MAX_DEPTH, "a menu level is a popup: its depth must fit the overlay stack");
 
 const nt_ui_widget_def_t NT_UI_MENU_DEF = {
     .name = "nt_menu",
@@ -244,15 +244,12 @@ static nt_ui_popup_anchor_t menu_submenu_anchor(const nt_ui_context_t *ctx, uint
  * records one hover and one click candidate there. */
 enum { MENU_KEY_NONE = 0, MENU_KEY_BACK, MENU_KEY_RIGHT, MENU_KEY_ENTER, MENU_KEY_UP, MENU_KEY_DOWN };
 
-/* The first pressed key decides the frame, Esc and Left first; Right and Enter need a focused row. */
+/* The first pressed key decides the frame, Esc and Left first; Right and Enter without a focused row are no key. */
 static uint8_t menu_read_key(const nt_ui_menu_t *menu) {
     if (nt_input_key_is_pressed(NT_KEY_ESCAPE) || nt_input_key_is_pressed(NT_KEY_ARROW_LEFT)) {
         return MENU_KEY_BACK;
     }
-    if (nt_input_key_is_pressed(NT_KEY_ARROW_RIGHT) || nt_input_key_is_pressed(NT_KEY_ENTER)) {
-        if (menu->focus == 0U) {
-            return MENU_KEY_NONE;
-        }
+    if (menu->focus != 0U && (nt_input_key_is_pressed(NT_KEY_ARROW_RIGHT) || nt_input_key_is_pressed(NT_KEY_ENTER))) {
         return nt_input_key_is_pressed(NT_KEY_ARROW_RIGHT) ? MENU_KEY_RIGHT : MENU_KEY_ENTER;
     }
     if (nt_input_key_is_pressed(NT_KEY_ARROW_UP)) {
@@ -291,7 +288,7 @@ static bool menu_frame_input(nt_ui_menu_t *menu, nt_ui_context_t *ctx, uint32_t 
     const bool ours = f->ours;
     const bool pressed = pp->buttons[NT_BUTTON_LEFT].is_pressed || pp->buttons[NT_BUTTON_RIGHT].is_pressed;
     /* A text field focused inside the menu owns the keys (the top takes the focus of a field under it). */
-    const uint8_t key = (top && ctx->keys_field == 0U) ? menu_read_key(menu) : MENU_KEY_NONE;
+    const uint8_t key = (top && ctx->keys_owner == root_id) ? menu_read_key(menu) : MENU_KEY_NONE;
     f->key = key;
     const uint8_t d = menu->focus_depth;
     if (key != MENU_KEY_NONE) {
@@ -305,10 +302,13 @@ static bool menu_frame_input(nt_ui_menu_t *menu, nt_ui_context_t *ctx, uint32_t 
         menu->kbd_mode = false;
         menu->aim.depth = 0U; /* the corridor primed before the keys is stale */
     }
-    if (key == MENU_KEY_BACK && d == 0U) {
+    /* Back closes the deepest open level, as Dear ImGui and Win32 close the top popup: the focused row's open
+     * child first, then the focused level; at the root, the menu. */
+    if (key == MENU_KEY_BACK && menu->open_path[d] != 0U) {
+        menu_set_open(menu, d, 0U);
+    } else if (key == MENU_KEY_BACK && d == 0U) {
         return false;
-    }
-    if (key == MENU_KEY_BACK) {
+    } else if (key == MENU_KEY_BACK) {
         menu->focus = menu->open_path[d - 1U]; /* back on the parent it closes */
         menu->focus_depth = (uint8_t)(d - 1U);
         menu_set_open(menu, (uint8_t)(d - 1U), 0U);
@@ -443,10 +443,8 @@ static void menu_open_panel(nt_ui_context_t *ctx, uint8_t fill_layer, uint32_t m
     nt_ui_block_pointer(ctx, panel_id, NULL); /* the rows, declared later, win; nothing under a panel is hit */
 }
 
-/* Open a level's popup at `anchor` and its panel. The root's catcher keeps the pointer off the UI under the
- * menu, claims the top (nt_ui_overlay_active) and closes the menu on a press outside everything declared in
- * it, as any light-dismiss popup, except on the frame the menu opens. Levels snap open: a closed level
- * declares nothing, so there is no close to tween. Returns false when the root closed. */
+/* Open a level's popup at `anchor` and its panel. The root is a light-dismiss overlay, except on the frame the
+ * menu opens; levels snap (no close tween). Returns false when the root closed. */
 static bool menu_open_level(const nt_ui_menu_t *menu, uint8_t depth, const nt_ui_popup_anchor_t *anchor) {
     const nt_ui_menu_frame_t *f = &menu->frame;
     nt_ui_popup_style_t pst = nt_ui_popup_style_defaults();
@@ -491,12 +489,6 @@ bool nt_ui_menu_begin(nt_ui_menu_t *menu, nt_ui_context_t *ctx, const nt_ui_elem
         .label_layer = label_layer,
         .top = !menu->arming && ctx->overlay_top_id_prev == root_id && ctx->inert_from == 0U,
     };
-    if (!menu_frame_input(menu, ctx, menu_id)) {
-        menu->frame.ui = NULL;
-        menu->open = false;
-        return false;
-    }
-
     /* BELOW flips only vertically: shift the root left by last frame's width to stay on screen (unclamped on
      * the first frame). */
     float root_x = menu->anchor_x;
@@ -510,7 +502,8 @@ bool nt_ui_menu_begin(nt_ui_menu_t *menu, nt_ui_context_t *ctx, const nt_ui_elem
         }
     }
     const nt_ui_popup_anchor_t root_anchor = {.x = root_x, .y = menu->anchor_y, .w = 0.0F, .h = 0.0F, .prefer_side = NT_UI_POPUP_BELOW};
-    if (!menu_open_level(menu, 0U, &root_anchor)) { /* the outside press closed it */
+    /* Back at the root, or the outside press the root popup reads, closes the menu. */
+    if (!menu_frame_input(menu, ctx, menu_id) || !menu_open_level(menu, 0U, &root_anchor)) {
         menu->frame.ui = NULL;
         menu->open = false;
         return false;
@@ -590,6 +583,10 @@ bool nt_ui_menu_submenu_begin_ex(nt_ui_menu_t *menu, uint32_t key, const char *l
     if (menu_key_on(menu, row_id, MENU_KEY_RIGHT) || menu_key_on(menu, row_id, MENU_KEY_ENTER)) {
         menu_set_open(menu, depth, row_id); /* the key closed any sibling's child at begin */
         f->focus_first = true;              /* the child's first enabled row takes focus */
+    }
+    /* A popup an earlier row of this level opened this frame is that level's child: it closes this one. */
+    if (row_id == menu->open_path[depth] && f->ui->inert_from == 0U && f->ui->overlay_top_id_cur != menu_level_id(f->menu_id, 0U)) {
+        menu_set_open(menu, depth, 0U);
     }
     if (menu->open_path[depth] != row_id) {
         return false; /* this submenu is not the open one — game skips its body */
@@ -719,8 +716,6 @@ void nt_ui_menu_end(nt_ui_menu_t *menu) {
 // #endregion
 
 #ifdef NT_TEST_ACCESS
-float nt_ui_menu_test_aim_near_x(float sub_x, float sub_w, float apex_x) { return menu_aim_near_x(sub_x, sub_w, apex_x); }
-
 bool nt_ui_menu_test_hover_intent(nt_ui_menu_aim_t *aim, float mouse_x, float mouse_y, float sub_x, float sub_y, float sub_w, float sub_h, float dt) {
     return menu_hover_intent(aim, 1U, true, mouse_x, mouse_y, sub_x, sub_y, sub_w, sub_h, dt);
 }

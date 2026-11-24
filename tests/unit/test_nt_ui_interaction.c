@@ -322,6 +322,23 @@ static void test_interaction_second_button_keeps_the_gesture(void) {
     TEST_ASSERT_FALSE_MESSAGE(nt_ui_wants_pointer(s_fx.ctx), "a press of its own off the UI is the game's");
 }
 
+/* ---- A second button never takes a gesture the game began: the button pressed first decides (Dear ImGui's
+ *      earliest-down rule), so a right press over a widget mid-drag leaves the rest of the drag the game's. ---- */
+static void test_interaction_second_button_leaves_a_game_gesture(void) {
+    nt_pointer_t p = make_pointer(BTN_CX, BTN_CY, false, false, false);
+    warm_btn_frame(&p);
+    p = make_pointer(600.0F, 500.0F, true, true, false);
+    (void)query_btn_frame(&p);
+    TEST_ASSERT_FALSE(nt_ui_wants_pointer(s_fx.ctx));
+    p = make_pointer(BTN_CX, BTN_CY, true, false, false);
+    p.buttons[NT_BUTTON_RIGHT] = (nt_button_state_t){.is_down = true, .is_pressed = true};
+    (void)query_btn_frame(&p);
+    p = make_pointer(600.0F, 500.0F, true, false, false);
+    p.buttons[NT_BUTTON_RIGHT] = (nt_button_state_t){.is_down = true};
+    (void)query_btn_frame(&p);
+    TEST_ASSERT_FALSE_MESSAGE(nt_ui_wants_pointer(s_fx.ctx), "off the widget the drag is still the game's");
+}
+
 /* ---- Test 8: exclusive capture — while A owns capture, B sees zero ----
  * Standard UI semantics: one widget per pointer captures, others get nothing. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -810,6 +827,7 @@ int main(void) {
     RUN_TEST(test_interaction_disabled_skips);
     RUN_TEST(test_interaction_wants_pointer);
     RUN_TEST(test_interaction_second_button_keeps_the_gesture);
+    RUN_TEST(test_interaction_second_button_leaves_a_game_gesture);
     RUN_TEST(test_interaction_padded_hover_and_capture);
     RUN_TEST(test_interaction_disabled_with_padding_stays_disabled);
     RUN_TEST(test_interaction_capture_excludes_other_widgets);

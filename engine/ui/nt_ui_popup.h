@@ -85,7 +85,7 @@ nt_ui_popup_style_t nt_ui_popup_style_defaults(void);
  *       nt_ui_popup_end(ctx);
  *   }
  *
- * id non-zero, style, anchor and open non-NULL; info nullable. Asserts depth < NT_UI_MODAL_MAX_DEPTH. */
+ * id non-zero, style, anchor and open non-NULL; info nullable. Asserts depth < NT_UI_OVERLAY_MAX_DEPTH. */
 bool nt_ui_popup_begin(nt_ui_context_t *ctx, uint32_t id, const nt_ui_popup_style_t *style, const nt_ui_popup_anchor_t *anchor, bool *open, nt_ui_popup_info_t *info);
 void nt_ui_popup_end(nt_ui_context_t *ctx);
 

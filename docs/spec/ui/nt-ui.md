@@ -144,17 +144,17 @@ Bands accumulate with declaration nesting, NOT with attachment:
 `attachTo = ROOT` still stacks where it was declared. Overlays stack as
 in an HTML top layer or Dear ImGui's window stack, with declaration order
 in place of open order. Root overlays are a top layer: the first visible root
-overlay of a frame sits at band `modal_zband_stride` and each later visible
-root overlay `NT_UI_MODAL_MAX_DEPTH` bands higher, whatever game floating
+overlay of a frame sits at band `overlay_zband_stride` and each later visible
+root overlay `NT_UI_OVERLAY_MAX_DEPTH` bands higher, whatever game floating
 encloses it (popup-core declares the difference as its delta, and asserts the
-enclosing floating lies under `modal_zband_stride` and
+enclosing floating lies under `overlay_zband_stride` and
 `band - enclosing <= INT16_MAX`), so an overlay declared
 later covers an earlier one together with every level nested in it; an
 overlay nested inside another declares delta 1, so it covers its parent and
 the parent's widget parts (delta 0) declared after it. A game floating with
 its own positive `zIndex` inside an overlay can rise over that overlay's
 nested levels, as a positive `z-index` inside a CSS stacking context, and
-from `NT_UI_MODAL_MAX_DEPTH` up over every later root overlay too. A widget's own floating parts declare delta 0 and
+from `NT_UI_OVERLAY_MAX_DEPTH` up over every later root overlay too. A widget's own floating parts declare delta 0 and
 paint above their container's content because each is a later tree root
 of the same band, and `layer` never reorders across tree roots. A floating
 declared AFTER one of them in the same band paints over it. Apart from a root
@@ -174,7 +174,7 @@ Clay's command order (a parent's border after its children); SCISSOR/CUSTOM
 are hard barriers. An accumulated band that would saturate
 `int16` raises a Clay error, which `nt_ui` asserts on rather than
 silently merging two bands. `nt_ui_create_context` asserts that the first root
-overlay's band fits with all `NT_UI_MODAL_MAX_DEPTH` nested levels, and
+overlay's band fits with all `NT_UI_OVERLAY_MAX_DEPTH` nested levels, and
 popup-core asserts it for every later visible root overlay (a hidden popup
 takes none), so no nested level can overflow. A game floating inside an
 overlay adds its own `zIndex` to that overlay's band, which must still fit
@@ -320,11 +320,12 @@ path:
   drops the gesture it holds, so a press held on it ends without a click; a
   text field in it loses focus and is no Tab stop; an inert popup has no
   catcher record, claims no top and takes no Esc (a closing modal's catcher
-  only paints its backdrop). A read is inert when it is made inside the inert
-  subtree, whatever id it names. The wheel `nt_ui_begin` gave a scroll inside
+  only paints its backdrop). A step, `nt_ui_query_interaction` or
+  `nt_ui_hovered_within` made inside the inert subtree is inert, whatever id
+  it names. The wheel `nt_ui_begin` gave a scroll inside
   an overlay that closes itself still scrolls it in that frame.
 - *Top overlay.* The top is the front-most open popup with a catcher outside
-  any inert subtree; `nt_ui_overlay_active` reports it. In a 2D context with a
+  any inert subtree. In a 2D context with a
   top, an id is owned when it was declared last frame at or above the top's
   catcher in the stacking order (inspector panes excepted); with no top, or in
   a 3D ctx, which does not rank overlays, every id is (a 3D ctx still picks
@@ -335,20 +336,23 @@ path:
   ends as if released and a scroll keeps its fling), and a text field under it
   loses focus, as a modal dialog takes focus. A Tab stop is owned and not inert.
 - *Gestures.* A left or right press on a record, or anywhere while a top overlay was up last
-  frame, makes the gesture the UI's until both buttons of that pointer are up,
+  frame, makes the gesture the UI's until both buttons of that pointer are up;
+  a press while the other button is held joins that gesture, so the button
+  pressed first decides whose it is (a game drag keeps a later press over the UI),
   as Dear ImGui's `MouseDownOwned`: `nt_ui_wants_pointer` stays true through
   its release even when the record it landed on goes away (the press that
   dismisses an overlay, a button hidden under a held press, a vanished scroll),
   so the game never sees the rest of it.
-- *Keys.* The text field focused at `nt_ui_begin` takes the frame's keys, decided
-  once there whatever the declaration order, so a field a press focuses reads
-  keys from the next frame; with none, the top overlay
-  does (popup-core's Esc for a modal with `NT_UI_MODAL_LISTEN_ESC` and for a
-  light-dismiss popup such as a combo list, the menu's keys); with no top, the
-  game does, reading
-  `nt_ui_overlay_active` and `nt_ui_input_any_focused`. Esc in a field inside a
-  modal unfocuses the field, and a second Esc closes the modal. One key has one
-  owner among the fields and the overlays. A nested popup that
+- *Keys.* A context has one keyboard owner per frame, fixed at `nt_ui_begin`
+  whatever the declaration order: the focused text field, else the top
+  overlay (popup-core's Esc for a modal with `NT_UI_MODAL_LISTEN_ESC` and for a
+  light-dismiss popup such as a combo list, the menu's keys), else the game.
+  A field a press focuses reads keys from the next frame. `nt_ui_wants_keyboard`
+  reports a UI owner; the game reads it after `nt_ui_begin` and skips its
+  hotkeys while it is true, as Dear ImGui's `WantCaptureKeyboard`. Esc in a
+  field inside a modal unfocuses the field, and a second Esc closes the modal.
+  A field focused at begin that the frame declares disabled or inert still
+  owns the keys, so that frame's Esc reaches no one. A nested popup that
   closes itself does not hand the keys to the overlay under it in that frame;
   that one is the top from the next frame.
 - *Order.* Root overlays stack in declaration order, whatever encloses them
@@ -357,7 +361,7 @@ path:
   under.
 - *Illegal states*, asserted: a stride or a root overlay whose nested levels
   could pass `int16`, a root overlay inside a game floating at or above
-  `modal_zband_stride` (see "Floating zIndex is relative"), and a catcher on
+  `overlay_zband_stride` (see "Floating zIndex is relative"), and a catcher on
   or under the base band (a popup nested inside a game floating with a large
   negative zIndex).
 
@@ -443,7 +447,9 @@ tooltips read hover within; a sidebar-consumed pointer hovers nothing, as in eve
 visuals. Open-addressing direct-mapped table (`NT_UI_ANIM_SLOTS`,
 default 512, power-of-2); 4-probe chain; full-chain collision evicts the STALEST
 slot in the probe window — the one with the oldest `last_touch`
-generation tick (snap-reseed, easing lost for one id). Evicting by
+generation tick (snap-reseed, easing lost for one id). A slot no frame touched
+since the previous one (its widget was hidden or snapped) snaps to the target
+on its next touch, so a widget shown again never eases from a stale value. Evicting by
 staleness rather than blindly the tail avoids bleeding a slot that
 was already touched this frame between widgets sharing the window.
 The `anim_collision_count` monotonic counter surfaces this
@@ -768,14 +774,14 @@ UI space, from anywhere outside `nt_ui_menu_begin..nt_ui_menu_end`, even outside
 a UI frame; `nt_ui_pointer_pos`, called inside a UI frame, gives the primary
 pointer in that space of a 2D context. The root's top-left sits at that point,
 flips above it when the root does not fit below, and shifts left to stay on screen
-from its second frame. A menu opens only through
+from the first frame that knows its width (its second, or at once on a reopen). A menu opens only through
 `nt_ui_menu_open`: it starts the navigation fresh, and the first declaration
 after it ignores the press and last frame's hover and clicks, which belong to
 the old place: its rows register without capturing the press. A control the
 game declares inside a custom row steps as usual, so a game that reopens a
 menu with a press over that control also presses it. An open menu is a modal overlay: its root claims the modal top like a
-popup with a catcher, so the UI under it takes no pointer, `nt_ui_overlay_active`
-reports it, and the menu reads input (keys, a pending switch) only while it
+popup with a catcher, so the UI under it takes no pointer, it owns the keys
+(`nt_ui_wants_keyboard`), and the menu reads input (keys, a pending switch) only while it
 was on top last frame and not on the frame it opens,
 reopened included: one key has one owner, a menu opened over a modal takes
 Esc from its next frame, a text field under the menu loses focus, and a
@@ -834,8 +840,10 @@ binds Esc or Enter elsewhere skips them while a menu is open:
   on the parent.
 - Up and Down step over the enabled rows of the level declared this frame and
   wrap; focus leaving the open parent closes its child.
-- Left and Esc close the focused level and focus its parent; at the root they
-  close the menu, and `nt_ui_menu_begin` returns false in that frame.
+- Left and Esc close the deepest open level, as Dear ImGui and Win32 close the
+  top popup: the focused row's open child (one the pointer opened), else the
+  focused level, focusing its parent; at the root they close the menu, and
+  `nt_ui_menu_begin` returns false in that frame.
 
 A frame acts on one key, the first pressed of Esc or Left, Right, Enter, Up,
 Down. `nt_ui_menu_begin` reads it before the rows declare and applies Left and
@@ -848,7 +856,8 @@ click, closes the menu, and a frame activates at most one row, the first
 declared. Before the rows declare, a popup a row opened (a dropdown, a
 confirm) that is on top closes the open branch below that row, so each level
 keeps one open child, as the Dear ImGui popup stack does, and no level lies
-above that popup. Before it reads the pointer, `nt_ui_menu_end` reconciles the kept state with the frame: an open parent the
+above that popup; in the frame such a popup opens, the open parent declared
+after its row closes its child at its own call. Before it reads the pointer, `nt_ui_menu_end` reconciles the kept state with the frame: an open parent the
 frame does not declare as an enabled parent closes its branch, and a focused row
 its declared level lacks loses focus, so a row that returns later is not
 focused. With no focus, Enter does nothing, Down

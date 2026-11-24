@@ -110,7 +110,7 @@ static void test_popup_zband_and_nesting(void) {
     TEST_ASSERT_EQUAL_UINT8(0U, s_fx.ctx->overlay_depth);
     nt_ui_end(s_fx.ctx);
 
-    const int32_t stride = (int32_t)s_fx.ctx->modal_zband_stride;
+    const int32_t stride = (int32_t)s_fx.ctx->overlay_zband_stride;
     int32_t z_a = INT32_MIN;
     int32_t z_b = INT32_MIN;
     int32_t at_a = -1;
@@ -139,15 +139,55 @@ static void test_popup_depth_overflow_asserts(void) {
     st.ease_speed = 0.0F;
     nt_ui_popup_anchor_t anc = {.x = 0.0F, .y = 0.0F, .w = 10.0F, .h = 10.0F, .prefer_side = NT_UI_POPUP_BELOW};
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = &(nt_pointer_t){.active = true}, .pointer_count = 1});
-    for (uint32_t i = 0; i < NT_UI_MODAL_MAX_DEPTH; ++i) {
+    for (uint32_t i = 0; i < NT_UI_OVERLAY_MAX_DEPTH; ++i) {
         (void)popup_begin_open(0x50B000U + i, &st, &anc);
     }
     bool open = true;
     NT_TEST_EXPECT_ASSERT(nt_ui_popup_begin(s_fx.ctx, 0x50BFFFU, &st, &anc, &open, NULL));
-    for (uint32_t i = 0; i < NT_UI_MODAL_MAX_DEPTH; ++i) {
+    for (uint32_t i = 0; i < NT_UI_OVERLAY_MAX_DEPTH; ++i) {
         nt_ui_popup_end(s_fx.ctx);
     }
     nt_ui_end(s_fx.ctx);
+}
+
+/* ---- A catcher on or under the base band would stop gating while the overlay owns the keys: a light-dismiss
+ *      popup nested in a game floating with a large negative zIndex asserts. ---- */
+static void test_popup_catcher_under_the_base_band_asserts(void) {
+    nt_ui_popup_style_t st = nt_ui_popup_style_defaults();
+    st.ease_speed = 0.0F;
+    st.flags = NT_UI_POPUP_LIGHT_DISMISS;
+    nt_ui_popup_anchor_t anc = {.x = 0.0F, .y = 0.0F, .w = 10.0F, .h = 10.0F, .prefer_side = NT_UI_POPUP_BELOW};
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = &(nt_pointer_t){.active = true}, .pointer_count = 1});
+    (void)popup_begin_open(0x50C100U, &st, &anc);
+    CLAY({.id = CLAY_ID("deep_floating"), .floating = {.attachTo = CLAY_ATTACH_TO_PARENT, .zIndex = -2000}}) {
+        bool open = true;
+        NT_TEST_EXPECT_ASSERT(nt_ui_popup_begin(s_fx.ctx, 0x50C101U, &st, &anc, &open, NULL));
+        TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "base band"));
+        nt_ui_popup_end(s_fx.ctx); /* the assert fired after the push */
+    }
+    nt_ui_popup_end(s_fx.ctx);
+    nt_ui_end(s_fx.ctx);
+}
+
+/* ---- A read inside an inert subtree still checks its arguments: the misuse asserts run before the inert
+ *      early return. ---- */
+static void test_popup_inert_query_keeps_its_asserts(void) {
+    nt_ui_popup_style_t st = nt_ui_popup_style_defaults();
+    st.ease_speed = 4.0F;
+    nt_ui_popup_anchor_t anc = {.x = 0.0F, .y = 0.0F, .w = 10.0F, .h = 10.0F, .prefer_side = NT_UI_POPUP_BELOW};
+    bool open = true;
+    for (int f = 0; f < 2; ++f) {
+        nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = &(nt_pointer_t){.active = true}, .pointer_count = 1});
+        if (f == 1) {
+            open = false; /* the body of a popup easing out is inert */
+        }
+        TEST_ASSERT_TRUE(nt_ui_popup_begin(s_fx.ctx, 0x50C200U, &st, &anc, &open, NULL));
+        if (f == 1) {
+            NT_TEST_EXPECT_ASSERT((void)nt_ui_query_interaction(s_fx.ctx, 0U));
+        }
+        nt_ui_popup_end(s_fx.ctx);
+        nt_ui_end(s_fx.ctx);
+    }
 }
 
 /* ---- A fully-closed popup called every frame must NOT block a base widget under the same point. ---- */
@@ -346,12 +386,12 @@ static void test_popup_hidden_at_the_depth_cap_does_not_assert(void) {
     st.ease_speed = 0.0F;
     nt_ui_popup_anchor_t anc = {.x = 0.0F, .y = 0.0F, .w = 10.0F, .h = 10.0F, .prefer_side = NT_UI_POPUP_BELOW};
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = &(nt_pointer_t){.active = true}, .pointer_count = 1});
-    for (uint32_t i = 0; i < NT_UI_MODAL_MAX_DEPTH; ++i) {
+    for (uint32_t i = 0; i < NT_UI_OVERLAY_MAX_DEPTH; ++i) {
         (void)popup_begin_open(0x50B000U + i, &st, &anc);
     }
     bool open = false;
     TEST_ASSERT_FALSE(nt_ui_popup_begin(s_fx.ctx, 0x50BFFFU, &st, &anc, &open, NULL));
-    for (uint32_t i = 0; i < NT_UI_MODAL_MAX_DEPTH; ++i) {
+    for (uint32_t i = 0; i < NT_UI_OVERLAY_MAX_DEPTH; ++i) {
         nt_ui_popup_end(s_fx.ctx);
     }
     nt_ui_end(s_fx.ctx);
@@ -970,7 +1010,7 @@ static void test_popup_root_overlay_out_of_the_bands_asserts(void) {
     nt_ui_popup_style_t st = nt_ui_popup_style_defaults();
     const nt_ui_popup_anchor_t anc = {.x = 100.0F, .y = 100.0F, .prefer_side = NT_UI_POPUP_BELOW};
     const nt_pointer_t idle = pointer_at(5.0F, 5.0F, false, false, false);
-    const int16_t window_z[] = {NT_UI_MODAL_ZBAND_STRIDE, -32000};
+    const int16_t window_z[] = {NT_UI_OVERLAY_ZBAND_STRIDE, -32000};
     for (int i = 0; i < 2; ++i) {
         nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = &idle, .pointer_count = 1});
         CLAY(
@@ -1000,6 +1040,8 @@ int main(void) {
     RUN_TEST(test_popup_root_overlay_is_a_top_layer);
     RUN_TEST(test_popup_root_overlay_out_of_the_bands_asserts);
     RUN_TEST(test_popup_depth_overflow_asserts);
+    RUN_TEST(test_popup_catcher_under_the_base_band_asserts);
+    RUN_TEST(test_popup_inert_query_keeps_its_asserts);
     RUN_TEST(test_popup_closed_does_not_block_base);
     RUN_TEST(test_popup_edge_flip_four_borders);
     RUN_TEST(test_popup_first_frame_uses_prefer_side);

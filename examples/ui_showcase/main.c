@@ -3658,34 +3658,6 @@ static void frame(void) {
     }
     nt_arena_reset(&g_nt_mem_scratch);
 
-    /* Gameplay/global hotkeys yield to an open overlay (a modal, a menu, a dropdown) so Esc never quits from
-     * under it and the palette/inspector keys don't fire underneath it. nt_ui_overlay_active reports last frame's
-     * presence (polled here before this frame's nt_ui_begin) -- the inherent IM 1-frame gate. */
-    const bool overlay_was_active = nt_ui_overlay_active(s_ctx);
-
-#ifndef NT_PLATFORM_WEB
-    /* Esc unfocuses a focused field first (the field consumes it in its own pass); an open menu counts as an
-     * overlay. Only quit when no modal or field holds it, both last frame's (read pre-begin). */
-    if (!overlay_was_active && !nt_ui_input_any_focused(s_ctx) && nt_input_key_is_pressed(NT_KEY_ESCAPE)) {
-        nt_app_quit();
-    }
-#endif
-
-    /* Single-key [T]/[D] hotkeys yield while a field holds focus so typing 'd'/'t' edits the field
-     * instead of toggling the inspector/palette. any_focused reads last frame's focus, same as the
-     * modal gate above (both polled here before this frame's nt_ui_begin). */
-    if (!overlay_was_active && !nt_ui_input_any_focused(s_ctx)) {
-        if (nt_input_key_is_pressed(NT_KEY_T)) {
-            g_current = (g_current == &g_dark) ? &g_light : &g_dark;
-            nt_log_info("ui_showcase: palette -> %s", g_current->name);
-        }
-        if (nt_input_key_is_pressed(NT_KEY_D)) {
-            const bool now_on = !nt_ui_inspector_is_active(s_ctx);
-            nt_ui_inspector_set_active(s_ctx, now_on);
-            nt_log_info("ui_showcase: inspector %s", now_on ? "ON" : "OFF");
-        }
-    }
-
     nt_resource_step();
     link_programs();
 
@@ -3808,6 +3780,25 @@ static void frame(void) {
         }
 
         nt_ui_end(s_ctx);
+
+        /* Global hotkeys yield to the UI's keyboard owner (a focused field, a modal, a menu), which nt_ui_begin
+         * fixed for this frame's keys: Esc never quits from under a menu and typing 'd'/'t' edits a field. */
+        if (!nt_ui_wants_keyboard(s_ctx)) {
+#ifndef NT_PLATFORM_WEB
+            if (nt_input_key_is_pressed(NT_KEY_ESCAPE)) {
+                nt_app_quit();
+            }
+#endif
+            if (nt_input_key_is_pressed(NT_KEY_T)) {
+                g_current = (g_current == &g_dark) ? &g_light : &g_dark;
+                nt_log_info("ui_showcase: palette -> %s", g_current->name);
+            }
+            if (nt_input_key_is_pressed(NT_KEY_D)) {
+                const bool now_on = !nt_ui_inspector_is_active(s_ctx);
+                nt_ui_inspector_set_active(s_ctx, now_on);
+                nt_log_info("ui_showcase: inspector %s", now_on ? "ON" : "OFF");
+            }
+        }
 
         /* Stash what the <obj=cube/> draw_fn needs (it has no ctx): view_proj (the frame UBO ortho) to remap
          * the cube into its box NDC (VP_box = view_proj * world_mat4) + the physical fb dims for the box->NDC

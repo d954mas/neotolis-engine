@@ -357,7 +357,7 @@ static void test_dropdown_long_list_scrollbar_inherits_popup_band(void) {
     TEST_ASSERT_TRUE_MESSAGE(ui_bar_declared(s_fx.ctx, nt_ui_scroll_test_bar_id(nt_ui_dropdown_test_scroll_id(DD_A), 1)), "popup-nested long list must emit a vertical scrollbar");
     /* The combo popup panel floats one band up (stride*1 here). The bar is declared INSIDE that panel, so
      * it must inherit the panel's band instead of sinking to the base 0 and drawing under the panel. */
-    const int32_t stride = (int32_t)s_fx.ctx->modal_zband_stride;
+    const int32_t stride = (int32_t)s_fx.ctx->overlay_zband_stride;
     const uint32_t bar_id = nt_ui_scroll_test_bar_id(nt_ui_dropdown_test_scroll_id(DD_A), 1);
     const Clay_RenderCommandArray *arr = &s_fx.ctx->frozen_cmds;
     int32_t bar_at = -1;

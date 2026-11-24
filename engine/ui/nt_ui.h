@@ -71,10 +71,10 @@
 #define NT_UI_DEFAULT_MAX_ELEMENT_COUNT 1024
 #endif
 
-/* Default modal z-band stride: the first root overlay of a frame sits at this band, each later one
- * NT_UI_MODAL_MAX_DEPTH bands higher, whatever game floating encloses it (spec: "Floating zIndex is
- * relative"). Per-context override via nt_ui_create_desc_t.modal_zband_stride. */
-#define NT_UI_MODAL_ZBAND_STRIDE 1000
+/* Default overlay z-band stride: the first root overlay of a frame sits at this band, each later one
+ * NT_UI_OVERLAY_MAX_DEPTH bands higher, whatever game floating encloses it (spec: "Floating zIndex is
+ * relative"). Per-context override via nt_ui_create_desc_t.overlay_zband_stride. */
+#define NT_UI_OVERLAY_ZBAND_STRIDE 1000
 
 /* Bare uint8_t[N] is 1-byte aligned; create_context asserts otherwise. */
 #define NT_UI_DECLARE_ARENA(name, size) alignas(NT_UI_ARENA_ALIGN) uint8_t name[(size)]
@@ -269,8 +269,8 @@ typedef struct {
      * slightly closer in NDC Z; hit-test keeps using the unbiased widget plane. Panels whose
      * backgrounds write depth need it above 0, or their children are coplanar with the background. */
     float element_depth_bias_ndc;
-    /* Band each overlay level declares above the floating enclosing it; 0 = NT_UI_MODAL_ZBAND_STRIDE. */
-    int16_t modal_zband_stride;
+    /* Absolute z-band of the frame's first root overlay (> 0); default from nt_ui_create_desc_defaults. */
+    int16_t overlay_zband_stride;
     /* Per-id retained-state pool size; MUST be power-of-2. 0 = default NT_UI_STATE_SLOTS. */
     uint32_t state_slots;
     /* Linear-probe window for the state pool; 1..state_slots. 0 = default NT_UI_STATE_PROBE_MAX. */
@@ -288,7 +288,7 @@ static inline nt_ui_create_desc_t nt_ui_create_desc_defaults(void) {
         .max_elements = NT_UI_DEFAULT_MAX_ELEMENT_COUNT,
         .use_raycast_input = false,
         .element_depth_bias_ndc = 0.0F,
-        .modal_zband_stride = NT_UI_MODAL_ZBAND_STRIDE,
+        .overlay_zband_stride = NT_UI_OVERLAY_ZBAND_STRIDE,
         .state_slots = 0U,         /* 0 = compile-time NT_UI_STATE_SLOTS default */
         .state_probe_max = 0U,     /* 0 = compile-time NT_UI_STATE_PROBE_MAX default */
         .rich_max_runs = 0U,       /* 0 = compile-time NT_UI_RICH_MAX_RUNS default */
@@ -620,10 +620,9 @@ void nt_ui_block_pointer(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lr
  * to its release, or a pointer is over a widget declared again this frame. */
 bool nt_ui_wants_pointer(const nt_ui_context_t *ctx);
 
-/* True if an overlay that captures input (a popup with a catcher: a modal, an open menu or dropdown) was open
- * last frame; one fading out after its close does not count. The game gates its keyboard and gameplay hotkeys on it; the catcher already keeps the pointer
- * off the UI under the overlay. */
-bool nt_ui_overlay_active(const nt_ui_context_t *ctx);
+/* True when the UI owns this frame's keys: a focused text field, else an open overlay with a catcher (a modal,
+ * a menu, a combo list). Fixed at nt_ui_begin, so read it after begin; the game gates its hotkeys on it. */
+bool nt_ui_wants_keyboard(const nt_ui_context_t *ctx);
 
 /* Front-most interactive record under the pointer this frame (3D: nearest within the occlusion
  * cutoff first; then the later tree root — band, then declaration; then the later-declared element
