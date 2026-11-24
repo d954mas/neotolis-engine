@@ -327,7 +327,7 @@ static void test_popup_snap_then_eased_keeps_what_it_showed(void) {
     TEST_ASSERT_FALSE_MESSAGE(r.visible, "a popup a snap close hid does not show again");
     for (uint32_t k = 0; k < NT_UI_ANIM_SLOTS; ++k) {
         const nt_ui_anim_interaction_t *slot = &s_fx.ctx->anim[k];
-        TEST_ASSERT_FALSE_MESSAGE(slot->valid && slot->id == POP_A && (uint16_t)((uint16_t)s_fx.ctx->current_generation - slot->last_touch) <= 1U, "a hidden popup touches no anim slot");
+        TEST_ASSERT_FALSE_MESSAGE(slot->id == POP_A && s_fx.ctx->current_generation - slot->last_touch <= 1U, "a hidden popup touches no anim slot");
     }
 
     popup_frame(POP_B, &st, &anc, true, &r);

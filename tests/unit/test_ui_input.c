@@ -1287,8 +1287,9 @@ static void test_escape_cancels_tab_advance(void) {
     TEST_ASSERT_FALSE(nt_ui_input_any_focused(s_fx.ctx)); /* no Tab was left pending */
 }
 
-/* A press on B and a Tab in one frame: the Tab is A's, the field focused at nt_ui_begin, so focus moves to B,
- * where the press lands too (B reads keys from the next frame). */
+/* B focused, then a press on A (declared before B) with a Tab and a typed char in one frame: the frame's
+ * keys are B's, the field focused at nt_ui_begin, whatever took the focus first in the declaration, so the
+ * char lands in B and B's Tab moves focus on to C; an Esc of the next owner leaves A's fresh focus alone. */
 static void test_press_and_tab_in_one_frame(void) {
     char a[32] = {0};
     char b[32] = {0};
@@ -1297,21 +1298,31 @@ static void test_press_and_tab_in_one_frame(void) {
     const uint32_t ib = nt_ui_id("pb");
     const uint32_t ic = nt_ui_id("pc");
     three_field_frame(&IDLE_PTR, ia, a, true, ib, b, true, ic, c, true);
-    const float ay = IN_Y + (IN_H * 0.5F);
-    nt_pointer_t press = make_pointer(IN_X + PAD_X + 1.0F, ay, true, true, false);
-    three_field_frame(&press, ia, a, true, ib, b, true, ic, c, true);
-    nt_pointer_t rel = make_pointer(IN_X + PAD_X + 1.0F, ay, false, false, true);
-    three_field_frame(&rel, ia, a, true, ib, b, true, ic, c, true);
-    TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, ia));
-
     const float by = IN_Y + IN_H + (IN_H * 0.5F);
-    press = make_pointer(IN_X + PAD_X + 1.0F, by, true, true, false);
-    nt_input_feed(nt_test_key(NT_KEY_TAB, true));
+    nt_pointer_t press = make_pointer(IN_X + PAD_X + 1.0F, by, true, true, false);
     three_field_frame(&press, ia, a, true, ib, b, true, ic, c, true);
-    nt_input_feed(nt_test_key(NT_KEY_TAB, false));
-    rel = make_pointer(IN_X + PAD_X + 1.0F, by, false, false, true);
+    nt_pointer_t rel = make_pointer(IN_X + PAD_X + 1.0F, by, false, false, true);
     three_field_frame(&rel, ia, a, true, ib, b, true, ic, c, true);
     TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, ib));
+
+    const float ay = IN_Y + (IN_H * 0.5F);
+    press = make_pointer(IN_X + PAD_X + 1.0F, ay, true, true, false);
+    nt_input_feed(nt_test_key(NT_KEY_TAB, true));
+    nt_input_feed(nt_test_char((uint32_t)'q'));
+    three_field_frame(&press, ia, a, true, ib, b, true, ic, c, true);
+    nt_input_feed(nt_test_key(NT_KEY_TAB, false));
+    rel = make_pointer(IN_X + PAD_X + 1.0F, ay, false, false, true);
+    three_field_frame(&rel, ia, a, true, ib, b, true, ic, c, true);
+    TEST_ASSERT_TRUE_MESSAGE(nt_ui_input_focused(s_fx.ctx, ic), "B's Tab moves focus to C");
+    TEST_ASSERT_EQUAL_STRING_MESSAGE("q", b, "the char of that frame is B's");
+    TEST_ASSERT_EQUAL_STRING("", a);
+
+    /* C's Esc in the frame a press focuses A unfocuses C only: A keeps the focus the press gave it. */
+    press = make_pointer(IN_X + PAD_X + 1.0F, ay, true, true, false);
+    nt_input_feed(nt_test_key(NT_KEY_ESCAPE, true));
+    three_field_frame(&press, ia, a, true, ib, b, true, ic, c, true);
+    nt_input_feed(nt_test_key(NT_KEY_ESCAPE, false));
+    TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, ia));
 }
 
 /* A disabled, C focused: Tab off the last field wraps past A to B, the first enabled field. */

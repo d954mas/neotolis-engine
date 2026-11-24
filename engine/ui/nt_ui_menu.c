@@ -375,9 +375,10 @@ static uint32_t menu_im_row(nt_ui_menu_t *menu, uint32_t key, const char *label,
     const bool highlit = enabled && (row_id == menu->focus || (has_sub && row_id == menu->open_path[depth] && (depth != menu->focus_depth || menu->focus == 0U)));
 
     const nt_ui_anim_target_t tgt = {.scale_x = 1.0F, .scale_y = 1.0F, .scale_z = 1.0F, .opacity = 1.0F, .value_t = highlit ? 1.0F : 0.0F};
-    /* A row's highlight ease outlives its closed level, so a row shown again snaps it. */
-    const bool shown_again = style->state_speed > 0.0F && (menu->arming || nt_ui_internal_live_slot(ctx, row_id) < 0);
-    const nt_ui_anim_interaction_t *a = shown_again ? nt_ui_anim_seed(ctx, row_id, &tgt) : nt_ui_anim(ctx, row_id, &tgt, 0.0F, style->state_speed);
+    /* A reopened menu snaps its rows' highlight: they were declared without a break, so nt_ui_anim keeps
+     * easing them (a row shown again after a gap snaps there by itself). */
+    const bool reopened = style->state_speed > 0.0F && menu->arming;
+    const nt_ui_anim_interaction_t *a = reopened ? nt_ui_anim_seed(ctx, row_id, &tgt) : nt_ui_anim(ctx, row_id, &tgt, 0.0F, style->state_speed);
     Clay_Color bg = {0};
     if (style->item_hover_color != 0U) {
         bg = nt_ui_unpack_abgr(style->item_hover_color);

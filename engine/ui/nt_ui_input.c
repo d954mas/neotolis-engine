@@ -761,11 +761,12 @@ static void focus_step(input_frame_t *f) {
 
 /* The focused edit pipeline: drain the typed chars, then run the physical editing keys
  * (delete/arrows/home/end), selection chords (Shift/Ctrl+A), clipboard (Ctrl+C/X/V), submit + Tab/Esc.
- * Runs only for the field that held focus at nt_ui_begin (the frame's keys are its alone). Sets
- * changed/submitted; cur_len re-derived in f->cur_len. */
+ * Runs for the field that held focus at nt_ui_begin while it is live, even when a press took the focus
+ * earlier in the declaration: the frame's keys are its alone. Sets changed/submitted; cur_len re-derived in
+ * f->cur_len. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void edit_step(input_frame_t *f, bool *changed, bool *submitted) {
-    if (!f->focused || f->ctx->keys_field != f->id) {
+    if (f->ctx->keys_field != f->id || !input_live(f->ctx, f)) {
         return;
     }
     nt_ui_context_t *ctx = f->ctx;
@@ -906,7 +907,9 @@ static void edit_step(input_frame_t *f, bool *changed, bool *submitted) {
             *submitted = true;
         }
         if (nt_input_key_is_pressed(NT_KEY_ESCAPE)) {
-            ctx->focused_input_id = 0U;
+            if (ctx->focused_input_id == id) {
+                ctx->focused_input_id = 0U; /* a press elsewhere this frame keeps the focus it took */
+            }
         } else if (nt_input_key_is_pressed(NT_KEY_TAB)) {
             ctx->focus_tab_seek = id;
             ctx->focus_tab_pending = ctx->focus_first_id;
