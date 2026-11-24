@@ -7,6 +7,7 @@
 
 #include "clay.h"
 #include "core/nt_assert.h"
+#include "core/nt_builtins.h"
 #include "input/nt_input.h"
 #include "ui/nt_ui_anim.h"
 #include "ui/nt_ui_clay_impl.h"
@@ -114,22 +115,22 @@ static nt_ui_transform_t popup_eased_transform(const nt_ui_transform_t *start, f
     return xf;
 }
 
-// #region overlay stack helpers
-static void overlay_remove(nt_ui_context_t *ctx, nt_ui_overlay_t *o) {
+// #region overlay stack helpers (out of line: inlined into begin they cost ~1.2 KB wasm)
+NT_NOINLINE static void overlay_remove(nt_ui_context_t *ctx, nt_ui_overlay_t *o) {
     const nt_ui_overlay_t *end = &ctx->overlays[ctx->overlay_count];
     memmove(o, o + 1, (size_t)(end - (o + 1)) * sizeof *o);
     --ctx->overlay_count;
 }
 
 /* Moves `o` to the stack top, keeping the order of the rest; returns its new place. */
-static nt_ui_overlay_t *overlay_move_to_top(nt_ui_context_t *ctx, nt_ui_overlay_t *o) {
+NT_NOINLINE static nt_ui_overlay_t *overlay_move_to_top(nt_ui_context_t *ctx, nt_ui_overlay_t *o) {
     const nt_ui_overlay_t moved = *o;
     overlay_remove(ctx, o);
     ctx->overlays[ctx->overlay_count] = moved;
     return &ctx->overlays[ctx->overlay_count++];
 }
 
-static bool overlay_is_open_around(const nt_ui_context_t *ctx, uint32_t id) {
+NT_NOINLINE static bool overlay_is_open_around(const nt_ui_context_t *ctx, uint32_t id) {
     for (uint8_t d = 0U; d < ctx->overlay_depth; ++d) {
         if (ctx->overlay_decl[d] == id) {
             return true;
@@ -140,7 +141,7 @@ static bool overlay_is_open_around(const nt_ui_context_t *ctx, uint32_t id) {
 
 /* A full stack gives the lowest fading slot that is not being declared around this one; a fading popup with
  * no slot ends its fade at its next begin. */
-static void overlay_evict_fading(nt_ui_context_t *ctx) {
+NT_NOINLINE static void overlay_evict_fading(nt_ui_context_t *ctx) {
     for (uint8_t i = 0U; i < ctx->overlay_count; ++i) {
         if (!ctx->overlays[i].live && !overlay_is_open_around(ctx, ctx->overlays[i].id)) {
             overlay_remove(ctx, &ctx->overlays[i]);
@@ -151,7 +152,7 @@ static void overlay_evict_fading(nt_ui_context_t *ctx) {
 
 /* An overlay that takes input closes, as it opens, the open light-dismiss overlays it is not declared inside,
  * as HTML closes auto popovers (spec: "Input ownership", Opening closes light dismiss). */
-static void overlay_close_light(nt_ui_context_t *ctx, const nt_ui_overlay_t *opener) {
+NT_NOINLINE static void overlay_close_light(nt_ui_context_t *ctx, const nt_ui_overlay_t *opener) {
     for (uint8_t i = 0U; i < ctx->overlay_count; ++i) {
         nt_ui_overlay_t *o = &ctx->overlays[i];
         if (o != opener && o->transient && o->live && !overlay_is_open_around(ctx, o->id)) {
