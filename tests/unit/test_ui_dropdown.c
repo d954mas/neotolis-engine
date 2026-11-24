@@ -14,6 +14,7 @@
 #include "test_helpers/nt_assert_trap.h"
 #include "test_helpers/nt_input_test_frame.h"
 #include "test_helpers/ui_bar_probe.h"
+#include "test_helpers/ui_fx_frame.h"
 #include "test_helpers/ui_test_arena.h"
 #include "test_helpers/ui_walker_fixture.h"
 #include "ui/nt_ui.h"
@@ -48,17 +49,6 @@ void setUp(void) {
 }
 
 void tearDown(void) { ui_walker_fixture_shutdown(&s_fx); }
-
-static nt_pointer_t pointer_at(float x, float y, bool is_down, bool is_pressed, bool is_released) {
-    nt_pointer_t p = {0};
-    p.x = x;
-    p.y = y;
-    p.active = true;
-    p.buttons[NT_BUTTON_LEFT].is_down = is_down;
-    p.buttons[NT_BUTTON_LEFT].is_pressed = is_pressed;
-    p.buttons[NT_BUTTON_LEFT].is_released = is_released;
-    return p;
-}
 
 /* ---- ABI sanity ---- */
 static void test_dropdown_abi_size(void) {
@@ -135,13 +125,13 @@ static void test_dropdown_trigger_toggles_open(void) {
     bool open = false;
 
     /* Warm frame so the trigger bbox is baked. */
-    nt_pointer_t f1 = pointer_at(40.0F, 40.0F, false, false, false);
+    nt_pointer_t f1 = ui_fx_pointer(40.0F, 40.0F, false, false, false);
     combo_im_frame(&f1, 30.0F, 30.0F, s_short, 3, &selected, &open, &st, NULL);
 
     /* Press inside the trigger, then release inside -> click toggles open. */
-    nt_pointer_t f2 = pointer_at(40.0F, 40.0F, true, true, false);
+    nt_pointer_t f2 = ui_fx_pointer(40.0F, 40.0F, true, true, false);
     combo_im_frame(&f2, 30.0F, 30.0F, s_short, 3, &selected, &open, &st, NULL);
-    nt_pointer_t f3 = pointer_at(40.0F, 40.0F, false, false, true);
+    nt_pointer_t f3 = ui_fx_pointer(40.0F, 40.0F, false, false, true);
     combo_im_frame(&f3, 30.0F, 30.0F, s_short, 3, &selected, &open, &st, NULL);
     TEST_ASSERT_TRUE(open);
 }
@@ -158,7 +148,7 @@ static void test_dropdown_combo_keyboard(void) {
     bool open = true; /* list already open */
 
     /* Two warm frames so the list anchors to the trigger's prev-frame bbox (1-frame IM lag). */
-    nt_pointer_t idle = pointer_at(400.0F, 300.0F, false, false, false);
+    nt_pointer_t idle = ui_fx_pointer(400.0F, 300.0F, false, false, false);
     combo_im_frame(&idle, 30.0F, 30.0F, s_short, 3, &selected, &open, &st, NULL);
     combo_im_frame(&idle, 30.0F, 30.0F, s_short, 3, &selected, &open, &st, NULL);
 
@@ -197,17 +187,17 @@ static void test_dropdown_row_select_sets_int_and_closes(void) {
 
     /* Two warm frames: the list anchors to the trigger's PREVIOUS-frame bbox (1-frame IM lag), so the
      * rows are only at their final screen position from the 2nd frame on. */
-    nt_pointer_t w = pointer_at(row_x, row1_y, false, false, false);
+    nt_pointer_t w = ui_fx_pointer(row_x, row1_y, false, false, false);
     combo_im_frame(&w, 30.0F, 30.0F, s_short, 3, &selected, &open, &st, NULL);
     combo_im_frame(&w, 30.0F, 30.0F, s_short, 3, &selected, &open, &st, NULL);
 
     /* Frame 2: press on row 1. */
-    nt_pointer_t pr = pointer_at(row_x, row1_y, true, true, false);
+    nt_pointer_t pr = ui_fx_pointer(row_x, row1_y, true, true, false);
     combo_im_frame(&pr, 30.0F, 30.0F, s_short, 3, &selected, &open, &st, NULL);
 
     /* Frame 3: release over row 1 -> clicked -> selected = 1, open cleared. */
     bool made = false;
-    nt_pointer_t rl = pointer_at(row_x, row1_y, false, false, true);
+    nt_pointer_t rl = ui_fx_pointer(row_x, row1_y, false, false, true);
     combo_im_frame(&rl, 30.0F, 30.0F, s_short, 3, &selected, &open, &st, &made);
     TEST_ASSERT_EQUAL_INT(1, selected);
     TEST_ASSERT_FALSE(open);
@@ -225,7 +215,7 @@ static void test_dropdown_long_list_scroll_no_leak(void) {
 
     /* Baseline: one closed warm cycle, settle, sample the pool. */
     bool open = false;
-    nt_pointer_t idle = pointer_at(400.0F, 300.0F, false, false, false);
+    nt_pointer_t idle = ui_fx_pointer(400.0F, 300.0F, false, false, false);
     combo_im_frame(&idle, 30.0F, 30.0F, s_long, 12, &selected, &open, &st, NULL);
 
     uint32_t baseline = 0U;
@@ -265,7 +255,7 @@ static void test_dropdown_long_list_shows_scrollbar(void) {
 
     /* Two warm frames: the scroll container's bar reads prev-frame solved dims (1-frame lag), so the bar
      * geometry is only valid from the 2nd frame on. */
-    nt_pointer_t idle = pointer_at(400.0F, 300.0F, false, false, false);
+    nt_pointer_t idle = ui_fx_pointer(400.0F, 300.0F, false, false, false);
     combo_im_frame(&idle, 30.0F, 30.0F, s_long, 12, &selected, &open, &st, NULL);
     combo_im_frame(&idle, 30.0F, 30.0F, s_long, 12, &selected, &open, &st, NULL);
 
@@ -311,7 +301,7 @@ static void test_dropdown_long_list_scrollbar_showcase_fidelity(void) {
     int selected = 0;
     bool open = true;
 
-    nt_pointer_t idle = pointer_at(400.0F, 300.0F, false, false, false);
+    nt_pointer_t idle = ui_fx_pointer(400.0F, 300.0F, false, false, false);
     /* Several frames: let the eased open settle so the scroll container's prev-frame dims are solid. */
     for (int f = 0; f < 6; ++f) {
         combo_im_frame_icons(&idle, 30.0F, 30.0F, s_long, icons, 12, &selected, &open, &st, NULL);
@@ -350,7 +340,7 @@ static void test_dropdown_long_list_scrollbar_inherits_popup_band(void) {
 
     int selected = 0;
     bool open = true;
-    nt_pointer_t idle = pointer_at(400.0F, 300.0F, false, false, false);
+    nt_pointer_t idle = ui_fx_pointer(400.0F, 300.0F, false, false, false);
     combo_im_frame(&idle, 30.0F, 30.0F, s_long, 12, &selected, &open, &st, NULL);
     combo_im_frame(&idle, 30.0F, 30.0F, s_long, 12, &selected, &open, &st, NULL);
 
@@ -396,18 +386,18 @@ static void test_dropdown_eased_open_no_flicker(void) {
     bool open = false;
 
     /* Warm frame so the trigger bbox is baked. */
-    nt_pointer_t f1 = pointer_at(40.0F, 40.0F, false, false, false);
+    nt_pointer_t f1 = ui_fx_pointer(40.0F, 40.0F, false, false, false);
     combo_im_frame(&f1, 30.0F, 30.0F, s_short, 3, &selected, &open, &st, NULL);
 
     /* Click the trigger: press then release inside -> *open = true. */
-    nt_pointer_t pr = pointer_at(40.0F, 40.0F, true, true, false);
+    nt_pointer_t pr = ui_fx_pointer(40.0F, 40.0F, true, true, false);
     combo_im_frame(&pr, 30.0F, 30.0F, s_short, 3, &selected, &open, &st, NULL);
-    nt_pointer_t rl = pointer_at(40.0F, 40.0F, false, false, true);
+    nt_pointer_t rl = ui_fx_pointer(40.0F, 40.0F, false, false, true);
     combo_im_frame(&rl, 30.0F, 30.0F, s_short, 3, &selected, &open, &st, NULL);
     TEST_ASSERT_TRUE_MESSAGE(open, "trigger click must open the list");
 
     /* Several idle frames with NO button activity: *open must stay true and the popup stay present. */
-    nt_pointer_t idle = pointer_at(40.0F, 40.0F, false, false, false);
+    nt_pointer_t idle = ui_fx_pointer(40.0F, 40.0F, false, false, false);
     for (int f = 0; f < 12; ++f) {
         combo_im_frame(&idle, 30.0F, 30.0F, s_short, 3, &selected, &open, &st, NULL);
         TEST_ASSERT_TRUE_MESSAGE(open, "eased-open list must stay open across idle frames (no flicker)");
@@ -424,15 +414,15 @@ static void test_dropdown_eased_reclick_closes_once(void) {
     bool open = true; /* already open, mid-tween from the first frame */
 
     /* Warm frames: let the trigger bbox + popup bbox bake while the tween rises. */
-    nt_pointer_t idle = pointer_at(400.0F, 300.0F, false, false, false);
+    nt_pointer_t idle = ui_fx_pointer(400.0F, 300.0F, false, false, false);
     combo_im_frame(&idle, 30.0F, 30.0F, s_short, 3, &selected, &open, &st, NULL);
     combo_im_frame(&idle, 30.0F, 30.0F, s_short, 3, &selected, &open, &st, NULL);
 
     /* Click ON the trigger (press+release) to close. Both the catcher and the trigger see the click; both
      * must resolve to a SINGLE close. */
-    nt_pointer_t pr = pointer_at(40.0F, 40.0F, true, true, false);
+    nt_pointer_t pr = ui_fx_pointer(40.0F, 40.0F, true, true, false);
     combo_im_frame(&pr, 30.0F, 30.0F, s_short, 3, &selected, &open, &st, NULL);
-    nt_pointer_t rl = pointer_at(40.0F, 40.0F, false, false, true);
+    nt_pointer_t rl = ui_fx_pointer(40.0F, 40.0F, false, false, true);
     combo_im_frame(&rl, 30.0F, 30.0F, s_short, 3, &selected, &open, &st, NULL);
     TEST_ASSERT_FALSE_MESSAGE(open, "a single trigger re-click must close the list (and stay closed)");
 
@@ -451,7 +441,7 @@ static void test_dropdown_edge_flip_up_near_bottom(void) {
 
     /* Trigger near the bottom: the list would overflow downward -> flips ABOVE. Two frames so the list's
      * prev-frame bbox feeds the edge-flip projection (frame 1 measures, frame 2 flips). */
-    nt_pointer_t idle = pointer_at(400.0F, 300.0F, false, false, false);
+    nt_pointer_t idle = ui_fx_pointer(400.0F, 300.0F, false, false, false);
     combo_im_frame(&idle, 30.0F, 540.0F, s_short, 3, &selected, &open, &st, NULL);
     combo_im_frame(&idle, 30.0F, 540.0F, s_short, 3, &selected, &open, &st, NULL);
     /* The flip's visible consequence: the list is ADJACENT above the trigger. Bare "somewhere higher"
@@ -480,7 +470,7 @@ static float row_label_x(const nt_pointer_t *p, nt_ui_dropdown_style_t *st, cons
 /* ---- icon_size opens a leading gutter on the PLAIN combo_selectable path: the row label shifts RIGHT vs
  *      the text-only (icon_size=0) row. The plain path owns the single engine gutter. ---- */
 static void test_dropdown_icon_size_gutter_shifts_label(void) {
-    nt_pointer_t idle = pointer_at(400.0F, 300.0F, false, false, false);
+    nt_pointer_t idle = ui_fx_pointer(400.0F, 300.0F, false, false, false);
 
     nt_ui_dropdown_style_t no_gut = nt_ui_dropdown_style_defaults();
     no_gut.icon_size = 0U; /* text-only */
@@ -498,7 +488,7 @@ static void test_dropdown_icon_size_gutter_shifts_label(void) {
  *      align their labels at the SAME left x — the icon rides the engine gutter, the label starts past
  *      it for every row, iconed or not (OS-menu icon column). ---- */
 static void test_dropdown_iconed_and_plain_rows_share_one_column(void) {
-    nt_pointer_t idle = pointer_at(400.0F, 300.0F, false, false, false);
+    nt_pointer_t idle = ui_fx_pointer(400.0F, 300.0F, false, false, false);
 
     nt_ui_dropdown_style_t st = nt_ui_dropdown_style_defaults();
     st.icon_size = 24U; /* engine gutter so iconed + text-only rows align */
@@ -550,7 +540,7 @@ static void test_dropdown_preview_trigger_draws_chevron(void) {
     bool open = false;
 
     /* Two warm frames so the chevron element bbox bakes (1-frame IM lag on get_bbox). */
-    nt_pointer_t f = pointer_at(0.0F, 0.0F, false, false, false);
+    nt_pointer_t f = ui_fx_pointer(0.0F, 0.0F, false, false, false);
     preview_im_frame(&f, 30.0F, 30.0F, &st, &open);
     preview_im_frame(&f, 30.0F, 30.0F, &st, &open);
 
@@ -567,7 +557,7 @@ static void test_dropdown_preview_chevron_size_zero_opts_out(void) {
     st.chevron_size = 0U; /* opt out of the affordance even with a ref set */
     bool open = false;
 
-    nt_pointer_t f = pointer_at(0.0F, 0.0F, false, false, false);
+    nt_pointer_t f = ui_fx_pointer(0.0F, 0.0F, false, false, false);
     preview_im_frame(&f, 30.0F, 30.0F, &st, &open);
     preview_im_frame(&f, 30.0F, 30.0F, &st, &open);
 
@@ -593,13 +583,13 @@ static void test_dropdown_preview_trigger_toggles_open(void) {
     bool open = false;
 
     /* Warm frame so the trigger (DD_A) bbox bakes; the preview trigger anchors at (30,30). */
-    nt_pointer_t f1 = pointer_at(0.0F, 0.0F, false, false, false);
+    nt_pointer_t f1 = ui_fx_pointer(0.0F, 0.0F, false, false, false);
     preview_im_frame(&f1, 30.0F, 30.0F, &st, &open);
 
     /* Press then release inside the trigger -> click toggles *open true. */
-    nt_pointer_t pr = pointer_at(40.0F, 38.0F, true, true, false);
+    nt_pointer_t pr = ui_fx_pointer(40.0F, 38.0F, true, true, false);
     preview_im_frame(&pr, 30.0F, 30.0F, &st, &open);
-    nt_pointer_t rl = pointer_at(40.0F, 38.0F, false, false, true);
+    nt_pointer_t rl = ui_fx_pointer(40.0F, 38.0F, false, false, true);
     preview_im_frame(&rl, 30.0F, 30.0F, &st, &open);
     TEST_ASSERT_TRUE_MESSAGE(open, "custom preview trigger click must toggle *open (combo_preview_end step)");
 }
@@ -632,7 +622,7 @@ static nt_ui_bbox_t combo_im_frame_skip_first(const nt_pointer_t *p, bool hide_f
  *      row. The probe id mix(combo_id,key) is row_idx-independent, and the live row registers at exactly
  *      that id whether or not an earlier sibling row is hidden (so press/release identity never shifts). ---- */
 static void test_dropdown_combo_row_id_stable_across_reorder(void) {
-    nt_pointer_t f = pointer_at(0.0F, 0.0F, false, false, false);
+    nt_pointer_t f = ui_fx_pointer(0.0F, 0.0F, false, false, false);
     /* Frame with all 3 rows, then a frame with row 0 hidden: ROW_KEY(2) goes from position 2 to position 1,
      * but its interactive row must register at the SAME id (bbox found at the key-stable id both frames). */
     combo_im_frame_skip_first(&f, false);
@@ -648,7 +638,7 @@ static void test_dropdown_combo_row_id_stable_across_reorder(void) {
 static void test_dropdown_combo_duplicate_key_asserts(void) {
     nt_ui_dropdown_style_t st = nt_ui_dropdown_style_defaults();
     bool open = true;
-    nt_pointer_t p = pointer_at(0.0F, 0.0F, false, false, false);
+    nt_pointer_t p = ui_fx_pointer(0.0F, 0.0F, false, false, false);
 
     bool tripped = false;
     nt_test_assert_armed = true;
@@ -712,7 +702,7 @@ static void test_dropdown_custom_selectable_click_selects(void) {
     const uint32_t row_id = nt_ui_dropdown_test_combo_row_id(DD_A, ROW_KEY(0));
 
     /* Two warm frames bake the custom row's bbox (1-frame IM lag on the trigger anchor + the row geometry). */
-    nt_pointer_t w = pointer_at(0.0F, 0.0F, false, false, false);
+    nt_pointer_t w = ui_fx_pointer(0.0F, 0.0F, false, false, false);
     combo_im_frame_custom(&w, &open, NULL, false);
     combo_im_frame_custom(&w, &open, NULL, false);
 
@@ -722,10 +712,10 @@ static void test_dropdown_custom_selectable_click_selects(void) {
     const float cy = bb.y + (bb.height * 0.5F);
 
     /* Press over the row, then release over it -> combo_selectable_end returns clicked, *open cleared. */
-    nt_pointer_t pr = pointer_at(cx, cy, true, true, false);
+    nt_pointer_t pr = ui_fx_pointer(cx, cy, true, true, false);
     combo_im_frame_custom(&pr, &open, NULL, false);
     bool clicked = false;
-    nt_pointer_t rl = pointer_at(cx, cy, false, false, true);
+    nt_pointer_t rl = ui_fx_pointer(cx, cy, false, false, true);
     combo_im_frame_custom(&rl, &open, &clicked, false);
     TEST_ASSERT_TRUE_MESSAGE(clicked, "combo_selectable_end must return true on the click frame");
     TEST_ASSERT_FALSE_MESSAGE(open, "a custom-row click must clear *open (the combo closes the list)");
@@ -752,7 +742,7 @@ static bool combo_custom_row_hover_lit(void) {
 static void test_dropdown_custom_row_interactive_child_takes_the_press(void) {
     bool open = true;
     bool clicked = false;
-    nt_pointer_t w = pointer_at(0.0F, 0.0F, false, false, false);
+    nt_pointer_t w = ui_fx_pointer(0.0F, 0.0F, false, false, false);
     combo_im_frame_custom(&w, &open, &clicked, true);
     combo_im_frame_custom(&w, &open, &clicked, true);
     const nt_ui_bbox_t bb = nt_ui_get_bbox(s_fx.ctx, DD_ROW_CHILD_ID);
@@ -760,10 +750,10 @@ static void test_dropdown_custom_row_interactive_child_takes_the_press(void) {
     const float cx = bb.x + (bb.width * 0.5F);
     const float cy = bb.y + (bb.height * 0.5F);
     TEST_ASSERT_FALSE(combo_custom_row_hover_lit());
-    nt_pointer_t pr = pointer_at(cx, cy, true, true, false);
+    nt_pointer_t pr = ui_fx_pointer(cx, cy, true, true, false);
     combo_im_frame_custom(&pr, &open, &clicked, true);
     TEST_ASSERT_TRUE(combo_custom_row_hover_lit());
-    nt_pointer_t rl = pointer_at(cx, cy, false, false, true);
+    nt_pointer_t rl = ui_fx_pointer(cx, cy, false, false, true);
     TEST_ASSERT_TRUE(combo_im_frame_custom(&rl, &open, &clicked, true));
     TEST_ASSERT_FALSE(clicked);
     TEST_ASSERT_TRUE(open);

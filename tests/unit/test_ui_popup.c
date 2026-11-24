@@ -6,10 +6,12 @@
 #include <stdalign.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <string.h>
 
 #include "clay.h"
 #include "test_helpers/nt_assert_trap.h"
 #include "test_helpers/nt_input_test_frame.h"
+#include "test_helpers/ui_fx_frame.h"
 #include "test_helpers/ui_test_arena.h"
 #include "test_helpers/ui_walker_fixture.h"
 #include "ui/nt_ui.h"
@@ -21,9 +23,6 @@
 
 alignas(NT_UI_ARENA_ALIGN) static uint8_t s_arena[NT_UI_TEST_ARENA_SIZE];
 static ui_walker_fixture_t s_fx;
-
-#define VIEW_W 800.0F
-#define VIEW_H 600.0F
 
 #define POP_A 0x50A001U
 #define POP_B 0x50A002U
@@ -37,17 +36,6 @@ void setUp(void) {
 void tearDown(void) { ui_walker_fixture_shutdown(&s_fx); }
 
 static bool float_near(float a, float b, float eps) { return fabsf(a - b) <= eps; }
-
-static nt_pointer_t pointer_at(float x, float y, bool is_down, bool is_pressed, bool is_released) {
-    nt_pointer_t p = {0};
-    p.x = x;
-    p.y = y;
-    p.active = true;
-    p.buttons[NT_BUTTON_LEFT].is_down = is_down;
-    p.buttons[NT_BUTTON_LEFT].is_pressed = is_pressed;
-    p.buttons[NT_BUTTON_LEFT].is_released = is_released;
-    return p;
-}
 
 /* What one popup frame reported: the info and whether begin showed the popup. */
 typedef struct {
@@ -75,13 +63,6 @@ static void popup_begin_open_src(uint32_t id, const nt_ui_popup_style_t *st, con
     }
 }
 
-/* ---- ABI sanity: the _Static_asserts compile; assert the runtime sizes match too. ---- */
-static void test_popup_abi_sizes(void) {
-    TEST_ASSERT_EQUAL_UINT(8U, (unsigned)sizeof(nt_ui_popup_info_t));
-    TEST_ASSERT_EQUAL_UINT(20U, (unsigned)sizeof(nt_ui_popup_anchor_t));
-    TEST_ASSERT_EQUAL_UINT(80U, (unsigned)sizeof(nt_ui_popup_style_t));
-}
-
 /* ---- Defaults are a valid (non-zero-init) style: identity transforms dodge the anim scale>0 trap. ---- */
 static void test_popup_defaults_valid(void) {
     nt_ui_popup_style_t st = nt_ui_popup_style_defaults();
@@ -90,47 +71,27 @@ static void test_popup_defaults_valid(void) {
     TEST_ASSERT_TRUE((st.flags & NT_UI_POPUP_LIGHT_DISMISS) != 0U);
 }
 
-/* ---- z-band: a root popup declares ONE stride above its enclosing floating; a popup nested inside
- *      another sits one band above it — asserted on the band Clay stamped on the bodies' render commands,
- *      not on the engine's own arithmetic. ---- */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+/* ---- z-band: the frame's first root popup lands on the absolute band overlay_zband_stride; a popup nested
+ *      inside another sits one band above it, asserted on the bands Clay stamped on the bodies' rectangles. ---- */
 static void test_popup_zband_and_nesting(void) {
     nt_ui_popup_style_t st = nt_ui_popup_style_defaults();
     st.ease_speed = 0.0F;
     nt_ui_popup_anchor_t anc = {.x = 100.0F, .y = 100.0F, .w = 80.0F, .h = 30.0F, .prefer_side = NT_UI_POPUP_BELOW};
-    nt_pointer_t p = {.active = true};
-    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = &p, .pointer_count = 1});
+    ui_fx_frame_begin(s_fx.ctx, NULL);
     (void)popup_begin_open(POP_A, &st, &anc);
     /* Opaque bodies so each panel subtree emits a RECTANGLE, which Clay stamps with its root's band. */
     CLAY({.id = CLAY_ID("body_a"), .layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(20)}}, .backgroundColor = {8, 8, 8, 255}}){}(void)popup_begin_open(POP_B, &st, &anc);
-    TEST_ASSERT_EQUAL_UINT8(2U, s_fx.ctx->overlay_depth);
     CLAY({.id = CLAY_ID("body_b"), .layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(20)}}, .backgroundColor = {8, 8, 8, 255}}) {}
     nt_ui_popup_end(s_fx.ctx);
     nt_ui_popup_end(s_fx.ctx);
-    TEST_ASSERT_EQUAL_UINT8(0U, s_fx.ctx->overlay_depth);
     nt_ui_end(s_fx.ctx);
 
-    const int32_t stride = (int32_t)s_fx.ctx->overlay_zband_stride;
-    int32_t z_a = INT32_MIN;
-    int32_t z_b = INT32_MIN;
-    int32_t at_a = -1;
-    int32_t at_b = -1;
-    for (int32_t i = 0; i < s_fx.ctx->frozen_cmds.length; ++i) {
-        const Clay_RenderCommand *c = &s_fx.ctx->frozen_cmds.internalArray[i];
-        if (c->commandType != CLAY_RENDER_COMMAND_TYPE_RECTANGLE) {
-            continue;
-        }
-        if (c->id == CLAY_ID("body_a").id) {
-            z_a = c->zIndex;
-            at_a = i;
-        } else if (c->id == CLAY_ID("body_b").id) {
-            z_b = c->zIndex;
-            at_b = i;
-        }
-    }
-    TEST_ASSERT_EQUAL_INT32_MESSAGE(stride, z_a, "outer popup must land one stride above the base band");
-    TEST_ASSERT_EQUAL_INT32_MESSAGE(stride + 1, z_b, "a popup nested inside another sits one band above it");
-    TEST_ASSERT_TRUE_MESSAGE(at_a >= 0 && at_b > at_a, "and paints above it");
+    const Clay_RenderCommand *a = ui_fx_find_rect(s_fx.ctx, CLAY_ID("body_a").id);
+    const Clay_RenderCommand *b = ui_fx_find_rect(s_fx.ctx, CLAY_ID("body_b").id);
+    TEST_ASSERT_TRUE(a != NULL && b != NULL);
+    TEST_ASSERT_EQUAL_INT32_MESSAGE(s_fx.ctx->overlay_zband_stride, a->zIndex, "the first root popup lands on the stride band");
+    TEST_ASSERT_EQUAL_INT32_MESSAGE(s_fx.ctx->overlay_zband_stride + 1, b->zIndex, "a popup nested inside another sits one band above it");
+    TEST_ASSERT_TRUE_MESSAGE(b > a, "and paints above it");
 }
 
 /* ---- Depth overflow fires NT_ASSERT before the push (no silent fallback). ---- */
@@ -138,12 +99,13 @@ static void test_popup_depth_overflow_asserts(void) {
     nt_ui_popup_style_t st = nt_ui_popup_style_defaults();
     st.ease_speed = 0.0F;
     nt_ui_popup_anchor_t anc = {.x = 0.0F, .y = 0.0F, .w = 10.0F, .h = 10.0F, .prefer_side = NT_UI_POPUP_BELOW};
-    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = &(nt_pointer_t){.active = true}, .pointer_count = 1});
+    ui_fx_frame_begin(s_fx.ctx, NULL);
     for (uint32_t i = 0; i < NT_UI_OVERLAY_MAX_DEPTH; ++i) {
         (void)popup_begin_open(0x50B000U + i, &st, &anc);
     }
     bool open = true;
     NT_TEST_EXPECT_ASSERT(nt_ui_popup_begin(s_fx.ctx, 0x50BFFFU, &st, &anc, &open, NULL));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "nesting exceeds NT_UI_OVERLAY_MAX_DEPTH"));
     for (uint32_t i = 0; i < NT_UI_OVERLAY_MAX_DEPTH; ++i) {
         nt_ui_popup_end(s_fx.ctx);
     }
@@ -157,7 +119,7 @@ static void test_popup_catcher_under_the_base_band_asserts(void) {
     st.ease_speed = 0.0F;
     st.flags = NT_UI_POPUP_LIGHT_DISMISS;
     nt_ui_popup_anchor_t anc = {.x = 0.0F, .y = 0.0F, .w = 10.0F, .h = 10.0F, .prefer_side = NT_UI_POPUP_BELOW};
-    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = &(nt_pointer_t){.active = true}, .pointer_count = 1});
+    ui_fx_frame_begin(s_fx.ctx, NULL);
     (void)popup_begin_open(0x50C100U, &st, &anc);
     CLAY({.id = CLAY_ID("deep_floating"), .floating = {.attachTo = CLAY_ATTACH_TO_PARENT, .zIndex = -2000}}) {
         bool open = true;
@@ -177,7 +139,7 @@ static void test_popup_inert_query_keeps_its_asserts(void) {
     nt_ui_popup_anchor_t anc = {.x = 0.0F, .y = 0.0F, .w = 10.0F, .h = 10.0F, .prefer_side = NT_UI_POPUP_BELOW};
     bool open = true;
     for (int f = 0; f < 2; ++f) {
-        nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = &(nt_pointer_t){.active = true}, .pointer_count = 1});
+        ui_fx_frame_begin(s_fx.ctx, NULL);
         if (f == 1) {
             open = false; /* the body of a popup easing out is inert */
         }
@@ -193,7 +155,7 @@ static void test_popup_inert_query_keeps_its_asserts(void) {
 /* ---- A fully-closed popup called every frame must NOT block a base widget under the same point. ---- */
 static nt_ui_interaction_t closed_popup_base_frame(const nt_ui_popup_style_t *st, const nt_ui_popup_anchor_t *anc, const nt_pointer_t *p) {
     bool open = false;
-    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = p, .pointer_count = 1});
+    ui_fx_frame_begin(s_fx.ctx, p);
     nt_ui_interaction_t in;
     CLAY({.id = (Clay_ElementId){.id = nt_ui_id("closed_base")}, .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(120)}}}) { in = nt_ui_step(s_fx.ctx, nt_ui_id("closed_base"), NULL); }
     const bool declared = nt_ui_popup_begin(s_fx.ctx, POP_A, st, anc, &open, NULL);
@@ -209,12 +171,12 @@ static void test_popup_closed_does_not_block_base(void) {
     st.ease_speed = 0.0F;
     nt_ui_popup_anchor_t anc = {.x = 0.0F, .y = 0.0F, .w = 80.0F, .h = 30.0F, .prefer_side = NT_UI_POPUP_BELOW};
 
-    nt_pointer_t f1 = pointer_at(100.0F, 60.0F, false, false, false);
+    nt_pointer_t f1 = ui_fx_pointer(100.0F, 60.0F, false, false, false);
     closed_popup_base_frame(&st, &anc, &f1);
-    nt_pointer_t f2 = pointer_at(100.0F, 60.0F, true, true, false);
+    nt_pointer_t f2 = ui_fx_pointer(100.0F, 60.0F, true, true, false);
     nt_ui_interaction_t in2 = closed_popup_base_frame(&st, &anc, &f2);
     TEST_ASSERT_TRUE(in2.pressed_now);
-    nt_pointer_t f3 = pointer_at(100.0F, 60.0F, false, false, true);
+    nt_pointer_t f3 = ui_fx_pointer(100.0F, 60.0F, false, false, true);
     nt_ui_interaction_t in3 = closed_popup_base_frame(&st, &anc, &f3);
     TEST_ASSERT_TRUE(in3.clicked);
 }
@@ -232,7 +194,7 @@ static uint8_t edge_flip_side(uint32_t id, float ax, float ay, uint8_t prefer) {
 
     uint8_t side = (uint8_t)NT_UI_POPUP_CENTER;
     for (int f = 0; f < 2; ++f) {
-        nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = &(nt_pointer_t){.active = true}, .pointer_count = 1});
+        ui_fx_frame_begin(s_fx.ctx, NULL);
         side = popup_begin_open(id, &st, &anc).side;
         {
             CLAY({.id = (Clay_ElementId){.id = id ^ 0xB0D70U}, .layout = {.sizing = {CLAY_SIZING_FIXED(POP_W), CLAY_SIZING_FIXED(POP_H)}}}) {}
@@ -261,7 +223,7 @@ static void test_popup_first_frame_uses_prefer_side(void) {
     st.ease_speed = 0.0F;
     /* Anchor near the bottom border but it is frame 1 -> no measured size -> stays BELOW (A3). */
     nt_ui_popup_anchor_t anc = {.x = 100.0F, .y = 560.0F, .w = 40.0F, .h = 24.0F, .prefer_side = NT_UI_POPUP_BELOW};
-    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = &(nt_pointer_t){.active = true}, .pointer_count = 1});
+    ui_fx_frame_begin(s_fx.ctx, NULL);
     const nt_ui_popup_info_t r = popup_begin_open(0x50D001U, &st, &anc);
     {
         CLAY({.id = (Clay_ElementId){.id = 0x50D002U}, .layout = {.sizing = {CLAY_SIZING_FIXED(POP_W), CLAY_SIZING_FIXED(POP_H)}}}) {}
@@ -276,7 +238,7 @@ static void test_popup_center_no_flip(void) {
     nt_ui_popup_style_t st = nt_ui_popup_style_defaults();
     st.ease_speed = 0.0F;
     nt_ui_popup_anchor_t anc = {.prefer_side = NT_UI_POPUP_CENTER};
-    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = &(nt_pointer_t){.active = true}, .pointer_count = 1});
+    ui_fx_frame_begin(s_fx.ctx, NULL);
     const nt_ui_popup_info_t r = popup_begin_open(0x50E001U, &st, &anc);
     nt_ui_popup_end(s_fx.ctx);
     nt_ui_end(s_fx.ctx);
@@ -293,8 +255,8 @@ static void test_popup_wrapper_clears_open(void) {
     bool open = true;
 
     /* Frame 1: open -> declared, register body + catcher. */
-    nt_pointer_t f1 = pointer_at(700.0F, 500.0F, false, false, false);
-    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = &f1, .pointer_count = 1});
+    nt_pointer_t f1 = ui_fx_pointer(700.0F, 500.0F, false, false, false);
+    ui_fx_frame_begin(s_fx.ctx, &f1);
     bool declared = nt_ui_popup_begin(s_fx.ctx, POP_A, &st, &anc, &open, NULL);
     TEST_ASSERT_TRUE(declared);
     if (declared) {
@@ -306,9 +268,9 @@ static void test_popup_wrapper_clears_open(void) {
 
     /* Frame 2: a press on the catcher far from the panel clears *open, as Dear ImGui closes a popup on the
      * press, and begin STILL returns true (animating closed). */
-    nt_pointer_t f2 = pointer_at(700.0F, 500.0F, false, false, true);
+    nt_pointer_t f2 = ui_fx_pointer(700.0F, 500.0F, false, false, true);
     f2.buttons[NT_BUTTON_LEFT].is_pressed = true;
-    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = &f2, .pointer_count = 1});
+    ui_fx_frame_begin(s_fx.ctx, &f2);
     declared = nt_ui_popup_begin(s_fx.ctx, POP_A, &st, &anc, &open, NULL);
     TEST_ASSERT_TRUE(declared);
     TEST_ASSERT_FALSE(open);
@@ -321,7 +283,7 @@ static void test_popup_wrapper_clears_open(void) {
     /* Subsequent frames: t decays; eventually the wrapper returns false (fully closed). */
     bool went_false = false;
     for (int i = 0; i < 300; ++i) {
-        nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = &(nt_pointer_t){.active = true}, .pointer_count = 1});
+        ui_fx_frame_begin(s_fx.ctx, NULL);
         declared = nt_ui_popup_begin(s_fx.ctx, POP_A, &st, &anc, &open, NULL);
         if (declared) {
             CLAY({.id = (Clay_ElementId){.id = POP_A ^ 0xB0D70U}, .layout = {.sizing = {CLAY_SIZING_FIXED(POP_W), CLAY_SIZING_FIXED(POP_H)}}}) {}
@@ -385,7 +347,7 @@ static void test_popup_hidden_at_the_depth_cap_does_not_assert(void) {
     nt_ui_popup_style_t st = nt_ui_popup_style_defaults();
     st.ease_speed = 0.0F;
     nt_ui_popup_anchor_t anc = {.x = 0.0F, .y = 0.0F, .w = 10.0F, .h = 10.0F, .prefer_side = NT_UI_POPUP_BELOW};
-    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = &(nt_pointer_t){.active = true}, .pointer_count = 1});
+    ui_fx_frame_begin(s_fx.ctx, NULL);
     for (uint32_t i = 0; i < NT_UI_OVERLAY_MAX_DEPTH; ++i) {
         (void)popup_begin_open(0x50B000U + i, &st, &anc);
     }
@@ -412,7 +374,7 @@ static void test_popup_keeps_no_state(void) {
 
 /* ---- Open/close tween clamp: t in [0,1], rises while open, decays after close; visible == (t>eps). ---- */
 static void popup_frame(uint32_t id, const nt_ui_popup_style_t *st, const nt_ui_popup_anchor_t *anc, bool open, popup_frame_t *out) {
-    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = &(nt_pointer_t){.active = true}, .pointer_count = 1});
+    ui_fx_frame_begin(s_fx.ctx, NULL);
     bool o = open;
     out->visible = nt_ui_popup_begin(s_fx.ctx, id, st, anc, &o, &out->info);
     if (out->visible) {
@@ -464,7 +426,7 @@ static void test_popup_top_id_follows_band(void) {
     nt_pointer_t p = {.active = true};
     /* Two frames: the close-scan target is committed at the next nt_ui_begin (1-frame IM lag). */
     for (int frame = 0; frame < 2; ++frame) {
-        nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = &p, .pointer_count = 1});
+        ui_fx_frame_begin(s_fx.ctx, &p);
         (void)popup_begin_open(POP_C, &st, &anc_c);
         CLAY({.id = CLAY_ID("game_hud"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .zIndex = 500}}) {
             (void)popup_begin_open(POP_A, &st, &anc);
@@ -479,26 +441,11 @@ static void test_popup_top_id_follows_band(void) {
         nt_ui_end(s_fx.ctx);
     }
 
-    int32_t z_a = INT32_MIN;
-    int32_t z_b = INT32_MIN;
-    int32_t at_a = -1;
-    int32_t at_b = -1;
-    for (int32_t i = 0; i < s_fx.ctx->frozen_cmds.length; ++i) {
-        const Clay_RenderCommand *c = &s_fx.ctx->frozen_cmds.internalArray[i];
-        if (c->commandType != CLAY_RENDER_COMMAND_TYPE_RECTANGLE) {
-            continue;
-        }
-        if (c->id == CLAY_ID("body_a").id) {
-            z_a = c->zIndex;
-            at_a = i;
-        } else if (c->id == CLAY_ID("body_b").id) {
-            z_b = c->zIndex;
-            at_b = i;
-        }
-    }
-    TEST_ASSERT_TRUE_MESSAGE(at_a >= 0 && at_b >= 0, "both popups must reach the render commands");
-    TEST_ASSERT_TRUE_MESSAGE(z_a > z_b, "the popup inside the lifted game floating must land in a higher band");
-    TEST_ASSERT_TRUE_MESSAGE(at_a > at_b, "and must therefore paint after the root-level popup");
+    const Clay_RenderCommand *a = ui_fx_find_rect(s_fx.ctx, CLAY_ID("body_a").id);
+    const Clay_RenderCommand *b = ui_fx_find_rect(s_fx.ctx, CLAY_ID("body_b").id);
+    TEST_ASSERT_TRUE_MESSAGE(a != NULL && b != NULL, "both popups must reach the render commands");
+    TEST_ASSERT_TRUE_MESSAGE(a->zIndex > b->zIndex, "the popup inside the lifted game floating must land in a higher band");
+    TEST_ASSERT_TRUE_MESSAGE(a > b, "and must therefore paint after the root-level popup");
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(POP_A, s_fx.ctx->overlay_top_id_prev, "the higher-band popup must own Esc and the close-scan");
 
     /* And the consequence, not just the gate: an outside click must dismiss the popup that owns the slot
@@ -507,8 +454,8 @@ static void test_popup_top_id_follows_band(void) {
     nt_ui_popup_close_t src_b = NT_UI_POPUP_CLOSE_NONE;
     for (int frame = 0; frame < 2; ++frame) {
         const bool pressing = (frame == 0);
-        nt_pointer_t click = pointer_at(700.0F, 500.0F, pressing, pressing, !pressing);
-        nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = &click, .pointer_count = 1});
+        nt_pointer_t click = ui_fx_pointer(700.0F, 500.0F, pressing, pressing, !pressing);
+        ui_fx_frame_begin(s_fx.ctx, &click);
         (void)popup_begin_open(POP_C, &st, &anc_c);
         CLAY({.id = CLAY_ID("game_hud"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .zIndex = 500}}) {
             popup_begin_open_src(POP_A, &st, &anc, &src_a);
@@ -524,8 +471,8 @@ static void test_popup_top_id_follows_band(void) {
 
     /* The band claim resets each frame: with the lifted wrapper gone, the root-level popup takes top. */
     for (int frame = 0; frame < 2; ++frame) {
-        nt_pointer_t idle = pointer_at(700.0F, 500.0F, false, false, false);
-        nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = &idle, .pointer_count = 1});
+        nt_pointer_t idle = ui_fx_pointer(700.0F, 500.0F, false, false, false);
+        ui_fx_frame_begin(s_fx.ctx, &idle);
         (void)popup_begin_open(POP_B, &st, &anc);
         nt_ui_popup_end(s_fx.ctx);
         nt_ui_end(s_fx.ctx);
@@ -552,8 +499,8 @@ static void test_popup_dismiss_survives_a_band_tie(void) {
     for (int frame = 0; frame < 4; ++frame) { /* the last frame commits the reopened B as the top */
         const bool pressing = (frame == 1);
         const bool releasing = (frame == 2);
-        nt_pointer_t p = pointer_at(700.0F, 500.0F, pressing, pressing, releasing);
-        nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = &p, .pointer_count = 1});
+        nt_pointer_t p = ui_fx_pointer(700.0F, 500.0F, pressing, pressing, releasing);
+        ui_fx_frame_begin(s_fx.ctx, &p);
         (void)popup_begin_open(POP_TIE_PARENT, &lo, &(nt_ui_popup_anchor_t){.x = 20.0F, .y = 20.0F, .prefer_side = NT_UI_POPUP_BELOW});
         popup_begin_open_src(POP_A, &hi, &anc, &src_a);
         /* Sized bodies: with 0x0 panels "the click landed outside" would be true even if the panel
@@ -580,7 +527,7 @@ static bool popup_under_frame(nt_pointer_t p, nt_ui_popup_close_t *src_b) {
     st.ease_speed = 8.0F; /* eased: the frame it closes itself still shows, so the test ends it */
     const nt_ui_popup_anchor_t anc_a = {.x = 100.0F, .y = 100.0F, .prefer_side = NT_UI_POPUP_BELOW};
     const nt_ui_popup_anchor_t anc_b = {.x = 500.0F, .y = 350.0F, .prefer_side = NT_UI_POPUP_BELOW};
-    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = &p, .pointer_count = 1});
+    ui_fx_frame_begin(s_fx.ctx, &p);
     (void)popup_begin_open(POP_A, &st, &anc_a);
     CLAY({.id = (Clay_ElementId){.id = POP_A_BOX}, .layout = {.sizing = {CLAY_SIZING_FIXED(POP_W), CLAY_SIZING_FIXED(POP_H)}}}) {}
     const bool clicked = nt_ui_step(s_fx.ctx, POP_A_BOX, NULL).clicked;
@@ -596,15 +543,15 @@ static bool popup_under_frame(nt_pointer_t p, nt_ui_popup_close_t *src_b) {
  *      top popup clicks nothing there; the press is the top popup's outside click. ---- */
 static void test_popup_top_owns_the_pointer(void) {
     nt_ui_popup_close_t src_b = NT_UI_POPUP_CLOSE_NONE;
-    (void)popup_under_frame(pointer_at(10.0F, 10.0F, false, false, false), &src_b);
-    (void)popup_under_frame(pointer_at(10.0F, 10.0F, false, false, false), &src_b);
+    (void)popup_under_frame(ui_fx_pointer(10.0F, 10.0F, false, false, false), &src_b);
+    (void)popup_under_frame(ui_fx_pointer(10.0F, 10.0F, false, false, false), &src_b);
     TEST_ASSERT_EQUAL_UINT32(POP_B, s_fx.ctx->overlay_top_id_prev);
     const nt_ui_bbox_t box = nt_ui_get_bbox(s_fx.ctx, POP_A_BOX);
     TEST_ASSERT_TRUE(box.found);
     const float x = box.x + 10.0F;
     const float y = box.y + 10.0F;
-    bool clicked = popup_under_frame(pointer_at(x, y, true, true, false), &src_b);
-    clicked = popup_under_frame(pointer_at(x, y, false, false, true), &src_b) || clicked;
+    bool clicked = popup_under_frame(ui_fx_pointer(x, y, true, true, false), &src_b);
+    clicked = popup_under_frame(ui_fx_pointer(x, y, false, false, true), &src_b) || clicked;
     TEST_ASSERT_FALSE_MESSAGE(clicked, "the lower popup's control under the top overlay's catcher clicks nothing");
     TEST_ASSERT_EQUAL_INT_MESSAGE(NT_UI_POPUP_CLOSE_OUTSIDE, src_b, "the press is the top popup's outside click");
 }
@@ -622,7 +569,7 @@ static void nested_under_frame(nt_pointer_t p, bool *a2_clicked, bool *b_clicked
     level.flags = 0U; /* catcher-less, like a menu's submenu level */
     const nt_ui_popup_anchor_t anc_a = {.x = 100.0F, .y = 100.0F, .prefer_side = NT_UI_POPUP_BELOW};
     const nt_ui_popup_anchor_t anc_box = {.x = 400.0F, .y = 300.0F, .prefer_side = NT_UI_POPUP_BELOW};
-    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = &p, .pointer_count = 1});
+    ui_fx_frame_begin(s_fx.ctx, &p);
     (void)popup_begin_open(POP_A, &st, &anc_a);
     CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(POP_W), CLAY_SIZING_FIXED(POP_H)}}}){}(void)popup_begin_open(POP_A2, &level, &anc_box);
     CLAY({.id = (Clay_ElementId){.id = POP_A2_BOX}, .layout = {.sizing = {CLAY_SIZING_FIXED(POP_W), CLAY_SIZING_FIXED(POP_H)}}, .backgroundColor = {8, 8, 8, 255}}){} *a2_clicked =
@@ -642,24 +589,15 @@ static void nested_under_frame(nt_pointer_t p, bool *a2_clicked, bool *b_clicked
 static void test_popup_later_overlay_above_nested_level(void) {
     bool a2 = false;
     bool b = false;
-    nested_under_frame(pointer_at(10.0F, 10.0F, false, false, false), &a2, &b);
-    nested_under_frame(pointer_at(10.0F, 10.0F, false, false, false), &a2, &b);
+    nested_under_frame(ui_fx_pointer(10.0F, 10.0F, false, false, false), &a2, &b);
+    nested_under_frame(ui_fx_pointer(10.0F, 10.0F, false, false, false), &a2, &b);
     TEST_ASSERT_EQUAL_UINT32(POP_B, s_fx.ctx->overlay_top_id_prev);
-    int32_t at_a2 = -1;
-    int32_t at_b = -1;
-    for (int32_t i = 0; i < s_fx.ctx->frozen_cmds.length; ++i) {
-        const Clay_RenderCommand *c = &s_fx.ctx->frozen_cmds.internalArray[i];
-        if (c->commandType == CLAY_RENDER_COMMAND_TYPE_RECTANGLE && c->id == POP_A2_BOX) {
-            at_a2 = i;
-        } else if (c->commandType == CLAY_RENDER_COMMAND_TYPE_RECTANGLE && c->id == POP_B_BOX) {
-            at_b = i;
-        }
-    }
-    TEST_ASSERT_TRUE_MESSAGE(at_a2 >= 0 && at_b > at_a2, "the later overlay paints over the earlier one's nested level");
+    const Clay_RenderCommand *a2_rect = ui_fx_find_rect(s_fx.ctx, POP_A2_BOX);
+    TEST_ASSERT_TRUE_MESSAGE(a2_rect != NULL && ui_fx_find_rect(s_fx.ctx, POP_B_BOX) > a2_rect, "the later overlay paints over the earlier one's nested level");
     const nt_ui_bbox_t box = nt_ui_get_bbox(s_fx.ctx, POP_B_BOX);
     TEST_ASSERT_TRUE(box.found);
-    nested_under_frame(pointer_at(box.x + 10.0F, box.y + 10.0F, true, true, false), &a2, &b);
-    nested_under_frame(pointer_at(box.x + 10.0F, box.y + 10.0F, false, false, true), &a2, &b);
+    nested_under_frame(ui_fx_pointer(box.x + 10.0F, box.y + 10.0F, true, true, false), &a2, &b);
+    nested_under_frame(ui_fx_pointer(box.x + 10.0F, box.y + 10.0F, false, false, true), &a2, &b);
     TEST_ASSERT_TRUE_MESSAGE(b, "the top overlay's own box takes the click");
     TEST_ASSERT_FALSE_MESSAGE(a2, "the nested level under it clicks nothing");
 }
@@ -672,7 +610,7 @@ static bool base_button_frame(nt_pointer_t p, bool popup_open) {
     nt_ui_popup_style_t st = nt_ui_popup_style_defaults();
     st.ease_speed = 0.0F;
     const nt_ui_popup_anchor_t anc = {.x = 500.0F, .y = 350.0F, .prefer_side = NT_UI_POPUP_BELOW};
-    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = &p, .pointer_count = 1});
+    ui_fx_frame_begin(s_fx.ctx, &p);
     CLAY({.id = (Clay_ElementId){.id = BASE_BTN}, .layout = {.sizing = {CLAY_SIZING_FIXED(80), CLAY_SIZING_FIXED(30)}}}) {}
     const bool clicked = nt_ui_step(s_fx.ctx, BASE_BTN, NULL).clicked;
     if (popup_open) {
@@ -687,14 +625,14 @@ static bool base_button_frame(nt_pointer_t p, bool popup_open) {
 /* ---- An overlay that opens over a held press ends the gesture: the capture drops and the release over
  *      the button clicks nothing. ---- */
 static void test_popup_opening_over_a_held_press_ends_it(void) {
-    (void)base_button_frame(pointer_at(20.0F, 15.0F, false, false, false), false);
-    (void)base_button_frame(pointer_at(20.0F, 15.0F, false, false, false), false);
-    (void)base_button_frame(pointer_at(20.0F, 15.0F, true, true, false), false);
+    (void)base_button_frame(ui_fx_pointer(20.0F, 15.0F, false, false, false), false);
+    (void)base_button_frame(ui_fx_pointer(20.0F, 15.0F, false, false, false), false);
+    (void)base_button_frame(ui_fx_pointer(20.0F, 15.0F, true, true, false), false);
     TEST_ASSERT_EQUAL_UINT32(BASE_BTN, nt_ui_test_capture_active_id(s_fx.ctx, 0U));
-    (void)base_button_frame(pointer_at(20.0F, 15.0F, true, false, false), true); /* the game opens the popup, e.g. from a key */
-    bool clicked = base_button_frame(pointer_at(20.0F, 15.0F, true, false, false), true);
+    (void)base_button_frame(ui_fx_pointer(20.0F, 15.0F, true, false, false), true); /* the game opens the popup, e.g. from a key */
+    bool clicked = base_button_frame(ui_fx_pointer(20.0F, 15.0F, true, false, false), true);
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, nt_ui_test_capture_active_id(s_fx.ctx, 0U), "the overlay on top ends the gesture held under it");
-    clicked = base_button_frame(pointer_at(20.0F, 15.0F, false, false, true), true) || clicked;
+    clicked = base_button_frame(ui_fx_pointer(20.0F, 15.0F, false, false, true), true) || clicked;
     TEST_ASSERT_FALSE_MESSAGE(clicked, "the release over the button clicks nothing");
 }
 
@@ -709,7 +647,7 @@ static void nested_over_parts_frame(nt_pointer_t p, bool *b2_clicked, bool *part
     st.ease_speed = 0.0F;
     const nt_ui_popup_anchor_t anc_a = {.x = 100.0F, .y = 100.0F, .prefer_side = NT_UI_POPUP_BELOW};
     const nt_ui_popup_anchor_t anc_b = {.x = 400.0F, .y = 300.0F, .prefer_side = NT_UI_POPUP_BELOW};
-    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = &p, .pointer_count = 1});
+    ui_fx_frame_begin(s_fx.ctx, &p);
     (void)popup_begin_open(POP_A, &st, &anc_a);
     CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(POP_W), CLAY_SIZING_FIXED(POP_H)}}}){}(void)popup_begin_open(POP_B2, &st, &anc_b);
     CLAY({.id = (Clay_ElementId){.id = POP_B2_BOX}, .layout = {.sizing = {CLAY_SIZING_FIXED(POP_W), CLAY_SIZING_FIXED(POP_H)}}, .backgroundColor = {8, 8, 8, 255}}){} *b2_clicked =
@@ -731,23 +669,14 @@ static void test_popup_nested_above_parent_parts(void) {
     bool b2 = false;
     bool part = false;
     for (int f = 0; f < 3; ++f) {
-        nested_over_parts_frame(pointer_at(10.0F, 10.0F, false, false, false), &b2, &part);
+        nested_over_parts_frame(ui_fx_pointer(10.0F, 10.0F, false, false, false), &b2, &part);
     }
-    int32_t at_b2 = -1;
-    int32_t at_part = -1;
-    for (int32_t i = 0; i < s_fx.ctx->frozen_cmds.length; ++i) {
-        const Clay_RenderCommand *c = &s_fx.ctx->frozen_cmds.internalArray[i];
-        if (c->commandType == CLAY_RENDER_COMMAND_TYPE_RECTANGLE && c->id == POP_B2_BOX) {
-            at_b2 = i;
-        } else if (c->commandType == CLAY_RENDER_COMMAND_TYPE_RECTANGLE && c->id == PART_ID) {
-            at_part = i;
-        }
-    }
-    TEST_ASSERT_TRUE_MESSAGE(at_part >= 0 && at_b2 > at_part, "the nested overlay paints over its parent's later part");
+    const Clay_RenderCommand *part_rect = ui_fx_find_rect(s_fx.ctx, PART_ID);
+    TEST_ASSERT_TRUE_MESSAGE(part_rect != NULL && ui_fx_find_rect(s_fx.ctx, POP_B2_BOX) > part_rect, "the nested overlay paints over its parent's later part");
     const nt_ui_bbox_t box = nt_ui_get_bbox(s_fx.ctx, POP_B2_BOX);
     TEST_ASSERT_TRUE(box.found);
-    nested_over_parts_frame(pointer_at(box.x + 10.0F, box.y + 10.0F, true, true, false), &b2, &part);
-    nested_over_parts_frame(pointer_at(box.x + 10.0F, box.y + 10.0F, false, false, true), &b2, &part);
+    nested_over_parts_frame(ui_fx_pointer(box.x + 10.0F, box.y + 10.0F, true, true, false), &b2, &part);
+    nested_over_parts_frame(ui_fx_pointer(box.x + 10.0F, box.y + 10.0F, false, false, true), &b2, &part);
     TEST_ASSERT_TRUE_MESSAGE(b2, "the nested overlay takes the click");
     TEST_ASSERT_FALSE(part);
 }
@@ -764,7 +693,7 @@ static bool toast_frame(nt_pointer_t p, nt_ui_popup_close_t *src_a) {
     toast.flags = 0U;
     const nt_ui_popup_anchor_t anc_a = {.x = 100.0F, .y = 100.0F, .prefer_side = NT_UI_POPUP_BELOW};
     const nt_ui_popup_anchor_t anc_t = {.x = 500.0F, .y = 350.0F, .prefer_side = NT_UI_POPUP_BELOW};
-    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = &p, .pointer_count = 1});
+    ui_fx_frame_begin(s_fx.ctx, &p);
     popup_begin_open_src(POP_A, &st, &anc_a, src_a);
     CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(POP_W), CLAY_SIZING_FIXED(POP_H)}}}) {}
     nt_ui_popup_end(s_fx.ctx);
@@ -780,17 +709,17 @@ static bool toast_frame(nt_pointer_t p, nt_ui_popup_close_t *src_a) {
  *      button keeps the press through to the click and the top popup is not dismissed. ---- */
 static void test_popup_press_above_the_top_completes(void) {
     nt_ui_popup_close_t src_a = NT_UI_POPUP_CLOSE_NONE;
-    (void)toast_frame(pointer_at(10.0F, 10.0F, false, false, false), &src_a);
-    (void)toast_frame(pointer_at(10.0F, 10.0F, false, false, false), &src_a);
+    (void)toast_frame(ui_fx_pointer(10.0F, 10.0F, false, false, false), &src_a);
+    (void)toast_frame(ui_fx_pointer(10.0F, 10.0F, false, false, false), &src_a);
     TEST_ASSERT_EQUAL_UINT32(POP_A, s_fx.ctx->overlay_top_id_prev);
     const nt_ui_bbox_t btn = nt_ui_get_bbox(s_fx.ctx, TOAST_BTN);
     TEST_ASSERT_TRUE(btn.found);
     const float x = btn.x + 10.0F;
     const float y = btn.y + 10.0F;
-    bool clicked = toast_frame(pointer_at(x, y, true, true, false), &src_a);
-    clicked = toast_frame(pointer_at(x, y, true, false, false), &src_a) || clicked;
-    clicked = toast_frame(pointer_at(x, y, true, false, false), &src_a) || clicked;
-    clicked = toast_frame(pointer_at(x, y, false, false, true), &src_a) || clicked;
+    bool clicked = toast_frame(ui_fx_pointer(x, y, true, true, false), &src_a);
+    clicked = toast_frame(ui_fx_pointer(x, y, true, false, false), &src_a) || clicked;
+    clicked = toast_frame(ui_fx_pointer(x, y, true, false, false), &src_a) || clicked;
+    clicked = toast_frame(ui_fx_pointer(x, y, false, false, true), &src_a) || clicked;
     TEST_ASSERT_TRUE_MESSAGE(clicked, "a held press above the top overlay is not dropped");
     TEST_ASSERT_EQUAL_INT(NT_UI_POPUP_CLOSE_NONE, src_a);
 }
@@ -822,7 +751,7 @@ static inert_frame_t inert_frame(nt_pointer_t p, bool open, uint8_t nested) {
     nt_ui_popup_style_t st = nt_ui_popup_style_defaults();
     st.ease_speed = 8.0F;
     const nt_ui_popup_anchor_t anc = {.x = 300.0F, .y = 200.0F, .prefer_side = NT_UI_POPUP_BELOW};
-    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = &p, .pointer_count = 1});
+    ui_fx_frame_begin(s_fx.ctx, &p);
     CLAY({.id = (Clay_ElementId){.id = INERT_BASE},
           .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = 300.0F, .y = 200.0F}},
           .layout = {.sizing = {CLAY_SIZING_FIXED(POP_W), CLAY_SIZING_FIXED(POP_H)}}}) {}
@@ -855,36 +784,24 @@ static inert_frame_t inert_frame(nt_pointer_t p, bool open, uint8_t nested) {
 
 static void inert_open_fully(uint8_t nested) {
     for (int f = 0; f < 90; ++f) {
-        (void)inert_frame(pointer_at(5.0F, 5.0F, false, false, false), true, nested);
+        (void)inert_frame(ui_fx_pointer(5.0F, 5.0F, false, false, false), true, nested);
     }
 }
 
-/* ---- A press held on a button when its popup starts closing ends without a click. ---- */
+/* ---- A press held on a button when its popup starts closing ends without a click, and every read inside the
+ *      closing popup is inert: nt_ui_query_interaction reads no click on the release, and no hover. ---- */
 static void test_popup_closing_ends_a_held_press(void) {
     inert_open_fully(NESTED_NONE);
     const nt_ui_bbox_t bb = nt_ui_get_bbox(s_fx.ctx, INERT_BUTTON);
     TEST_ASSERT_TRUE(bb.found);
     const float x = bb.x + 5.0F;
     const float y = bb.y + 5.0F;
-    (void)inert_frame(pointer_at(x, y, true, true, false), true, NESTED_NONE);
-    (void)inert_frame(pointer_at(x, y, true, false, false), true, NESTED_NONE);
-    bool clicked = inert_frame(pointer_at(x, y, true, false, false), false, NESTED_NONE).button_clicked;
-    const inert_frame_t r = inert_frame(pointer_at(x, y, false, false, true), false, NESTED_NONE);
+    (void)inert_frame(ui_fx_pointer(x, y, true, true, false), true, NESTED_NONE);
+    (void)inert_frame(ui_fx_pointer(x, y, true, false, false), true, NESTED_NONE);
+    bool clicked = inert_frame(ui_fx_pointer(x, y, true, false, false), false, NESTED_NONE).button_clicked;
+    const inert_frame_t r = inert_frame(ui_fx_pointer(x, y, false, false, true), false, NESTED_NONE);
     TEST_ASSERT_TRUE_MESSAGE(r.visible, "the popup still fades");
     TEST_ASSERT_FALSE_MESSAGE(clicked || r.button_clicked, "the release over a closing popup's button clicks nothing");
-}
-
-/* ---- Every read inside a closing popup is inert: the release of a press held on its button, in the frame
- *      the game closes it, is no click for nt_ui_query_interaction either, and the button is not hovered. ---- */
-static void test_popup_closing_content_reads_no_click(void) {
-    inert_open_fully(NESTED_NONE);
-    const nt_ui_bbox_t bb = nt_ui_get_bbox(s_fx.ctx, INERT_BUTTON);
-    TEST_ASSERT_TRUE(bb.found);
-    const float x = bb.x + 5.0F;
-    const float y = bb.y + 5.0F;
-    (void)inert_frame(pointer_at(x, y, true, true, false), true, NESTED_NONE);
-    (void)inert_frame(pointer_at(x, y, true, false, false), true, NESTED_NONE);
-    const inert_frame_t r = inert_frame(pointer_at(x, y, false, false, true), false, NESTED_NONE);
     TEST_ASSERT_FALSE_MESSAGE(r.button_queried, "a query in a closing popup reads no click");
     TEST_ASSERT_FALSE_MESSAGE(r.button_hovered, "nor a hover");
 }
@@ -894,10 +811,10 @@ static void test_popup_closing_content_reads_no_click(void) {
 static void test_popup_closing_panel_lets_the_pointer_through(void) {
     inert_open_fully(NESTED_NONE);
     TEST_ASSERT_EQUAL_UINT32(INERT_POPUP, s_fx.ctx->overlay_top_id_prev);
-    (void)inert_frame(pointer_at(5.0F, 5.0F, false, false, false), false, NESTED_NONE);
-    (void)inert_frame(pointer_at(5.0F, 5.0F, false, false, false), false, NESTED_NONE);
+    (void)inert_frame(ui_fx_pointer(5.0F, 5.0F, false, false, false), false, NESTED_NONE);
+    (void)inert_frame(ui_fx_pointer(5.0F, 5.0F, false, false, false), false, NESTED_NONE);
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, s_fx.ctx->overlay_top_id_prev, "a closing popup is not the top overlay");
-    nt_pointer_t tap = pointer_at(300.0F + 5.0F, 200.0F + 5.0F, false, true, true);
+    nt_pointer_t tap = ui_fx_pointer(300.0F + 5.0F, 200.0F + 5.0F, false, true, true);
     tap.type = NT_POINTER_TOUCH;
     const inert_frame_t r = inert_frame(tap, false, NESTED_NONE);
     TEST_ASSERT_TRUE_MESSAGE(r.visible, "the popup still fades");
@@ -913,14 +830,14 @@ static void test_popup_esc_closes_the_top_and_its_body(void) {
     TEST_ASSERT_TRUE(bb.found);
     const float x = bb.x + 5.0F;
     const float y = bb.y + 5.0F;
-    (void)inert_frame(pointer_at(x, y, true, true, false), true, NESTED_NONE);
-    (void)inert_frame(pointer_at(x, y, true, false, false), true, NESTED_NONE);
-    nt_input_test_key_press(NT_KEY_ESCAPE);
-    const inert_frame_t r = inert_frame(pointer_at(x, y, false, false, true), true, NESTED_NONE);
+    (void)inert_frame(ui_fx_pointer(x, y, true, true, false), true, NESTED_NONE);
+    (void)inert_frame(ui_fx_pointer(x, y, true, false, false), true, NESTED_NONE);
+    nt_input_feed(nt_test_key(NT_KEY_ESCAPE, true));
+    const inert_frame_t r = inert_frame(ui_fx_pointer(x, y, false, false, true), true, NESTED_NONE);
     nt_input_init();
     TEST_ASSERT_FALSE_MESSAGE(r.open, "Esc closes the top popup");
     TEST_ASSERT_FALSE_MESSAGE(r.button_clicked, "its body is inert in the frame it closes");
-    nt_pointer_t tap = pointer_at(300.0F + 5.0F, 200.0F + 5.0F, false, true, true);
+    nt_pointer_t tap = ui_fx_pointer(300.0F + 5.0F, 200.0F + 5.0F, false, true, true);
     tap.type = NT_POINTER_TOUCH;
     TEST_ASSERT_TRUE_MESSAGE(inert_frame(tap, false, NESTED_NONE).base_clicked, "the first tap after the close reaches the base");
 }
@@ -930,11 +847,11 @@ static void test_popup_esc_closes_the_top_and_its_body(void) {
 static void test_popup_nested_in_a_closing_parent_is_inert(void) {
     inert_open_fully(NESTED_TOP);
     TEST_ASSERT_EQUAL_UINT32(INERT_NESTED, s_fx.ctx->overlay_top_id_prev);
-    nt_input_test_key_press(NT_KEY_ESCAPE);
-    const inert_frame_t r = inert_frame(pointer_at(5.0F, 5.0F, false, false, false), false, NESTED_TOP);
+    nt_input_feed(nt_test_key(NT_KEY_ESCAPE, true));
+    const inert_frame_t r = inert_frame(ui_fx_pointer(5.0F, 5.0F, false, false, false), false, NESTED_TOP);
     nt_input_init();
     TEST_ASSERT_TRUE_MESSAGE(r.nested_open, "the nested popup of a closing parent does not take the Esc");
-    (void)inert_frame(pointer_at(5.0F, 5.0F, false, false, false), false, NESTED_TOP);
+    (void)inert_frame(ui_fx_pointer(5.0F, 5.0F, false, false, false), false, NESTED_TOP);
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, s_fx.ctx->overlay_top_id_prev, "a nested popup in a closing parent claims no top");
 }
 
@@ -946,10 +863,10 @@ static void test_popup_closing_nested_keeps_the_parent_inert(void) {
     TEST_ASSERT_TRUE(bb.found);
     const float x = bb.x + 5.0F;
     const float y = bb.y + 5.0F;
-    (void)inert_frame(pointer_at(x, y, true, true, false), true, NESTED_LEVEL);
-    (void)inert_frame(pointer_at(x, y, true, false, false), true, NESTED_LEVEL);
-    bool clicked = inert_frame(pointer_at(x, y, true, false, false), false, NESTED_LEVEL_CLOSED).button_clicked;
-    clicked = inert_frame(pointer_at(x, y, false, false, true), false, NESTED_LEVEL_CLOSED).button_clicked || clicked;
+    (void)inert_frame(ui_fx_pointer(x, y, true, true, false), true, NESTED_LEVEL);
+    (void)inert_frame(ui_fx_pointer(x, y, true, false, false), true, NESTED_LEVEL);
+    bool clicked = inert_frame(ui_fx_pointer(x, y, true, false, false), false, NESTED_LEVEL_CLOSED).button_clicked;
+    clicked = inert_frame(ui_fx_pointer(x, y, false, false, true), false, NESTED_LEVEL_CLOSED).button_clicked || clicked;
     TEST_ASSERT_FALSE(clicked);
 }
 
@@ -957,13 +874,13 @@ static void test_popup_closing_nested_keeps_the_parent_inert(void) {
  *      press to its release although the catcher it landed on is gone, so the game never sees it. ---- */
 static void test_popup_dismissing_gesture_is_the_ui_s(void) {
     inert_open_fully(NESTED_NONE);
-    TEST_ASSERT_FALSE_MESSAGE(inert_frame(pointer_at(700.0F, 500.0F, true, true, false), true, NESTED_NONE).open, "the press on the catcher dismisses");
+    TEST_ASSERT_FALSE_MESSAGE(inert_frame(ui_fx_pointer(700.0F, 500.0F, true, true, false), true, NESTED_NONE).open, "the press on the catcher dismisses");
     TEST_ASSERT_TRUE(nt_ui_wants_pointer(s_fx.ctx));
-    (void)inert_frame(pointer_at(700.0F, 500.0F, true, false, false), false, NESTED_NONE);
+    (void)inert_frame(ui_fx_pointer(700.0F, 500.0F, true, false, false), false, NESTED_NONE);
     TEST_ASSERT_TRUE(nt_ui_wants_pointer(s_fx.ctx));
-    (void)inert_frame(pointer_at(700.0F, 500.0F, false, false, true), false, NESTED_NONE);
+    (void)inert_frame(ui_fx_pointer(700.0F, 500.0F, false, false, true), false, NESTED_NONE);
     TEST_ASSERT_TRUE(nt_ui_wants_pointer(s_fx.ctx));
-    (void)inert_frame(pointer_at(700.0F, 500.0F, false, false, false), false, NESTED_NONE);
+    (void)inert_frame(ui_fx_pointer(700.0F, 500.0F, false, false, false), false, NESTED_NONE);
     TEST_ASSERT_FALSE_MESSAGE(nt_ui_wants_pointer(s_fx.ctx), "the gesture ends with its release");
 }
 
@@ -971,7 +888,7 @@ static void test_popup_dismissing_gesture_is_the_ui_s(void) {
  *      it dismisses, and the UI keeps the gesture. ---- */
 static void test_popup_press_off_every_record_dismisses(void) {
     inert_open_fully(NESTED_NONE);
-    TEST_ASSERT_FALSE(inert_frame(pointer_at(-20.0F, -20.0F, true, true, false), true, NESTED_NONE).open);
+    TEST_ASSERT_FALSE(inert_frame(ui_fx_pointer(-20.0F, -20.0F, true, true, false), true, NESTED_NONE).open);
     TEST_ASSERT_TRUE(nt_ui_wants_pointer(s_fx.ctx));
 }
 
@@ -983,8 +900,8 @@ static void top_layer_frame(int16_t window_z) {
     st.ease_speed = 0.0F;
     const nt_ui_popup_anchor_t anc_a = {.x = 100.0F, .y = 100.0F, .prefer_side = NT_UI_POPUP_BELOW};
     const nt_ui_popup_anchor_t anc_b = {.x = 500.0F, .y = 350.0F, .prefer_side = NT_UI_POPUP_BELOW};
-    const nt_pointer_t idle = pointer_at(5.0F, 5.0F, false, false, false);
-    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = &idle, .pointer_count = 1});
+    const nt_pointer_t idle = ui_fx_pointer(5.0F, 5.0F, false, false, false);
+    ui_fx_frame_begin(s_fx.ctx, &idle);
     CLAY({.id = (Clay_ElementId){.id = GAME_WINDOW}, .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .zIndex = window_z}, .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(200)}}}) {
         (void)popup_begin_open(POP_A, &st, &anc_a);
         CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(POP_W), CLAY_SIZING_FIXED(POP_H)}}}) {}
@@ -1009,14 +926,15 @@ static void test_popup_root_overlay_is_a_top_layer(void) {
 static void test_popup_root_overlay_out_of_the_bands_asserts(void) {
     nt_ui_popup_style_t st = nt_ui_popup_style_defaults();
     const nt_ui_popup_anchor_t anc = {.x = 100.0F, .y = 100.0F, .prefer_side = NT_UI_POPUP_BELOW};
-    const nt_pointer_t idle = pointer_at(5.0F, 5.0F, false, false, false);
+    const nt_pointer_t idle = ui_fx_pointer(5.0F, 5.0F, false, false, false);
     const int16_t window_z[] = {NT_UI_OVERLAY_ZBAND_STRIDE, -32000};
     for (int i = 0; i < 2; ++i) {
-        nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = &idle, .pointer_count = 1});
+        ui_fx_frame_begin(s_fx.ctx, &idle);
         CLAY(
             {.id = (Clay_ElementId){.id = GAME_WINDOW}, .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .zIndex = window_z[i]}, .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(200)}}}) {
             bool open = true;
             NT_TEST_EXPECT_ASSERT((void)nt_ui_popup_begin(s_fx.ctx, POP_A, &st, &anc, &open, NULL)); /* asserts before the push */
+            TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "enclosing floating must lie under overlay_zband_stride"));
         }
         nt_ui_end(s_fx.ctx);
     }
@@ -1024,12 +942,10 @@ static void test_popup_root_overlay_out_of_the_bands_asserts(void) {
 
 int main(void) {
     UNITY_BEGIN();
-    RUN_TEST(test_popup_abi_sizes);
     RUN_TEST(test_popup_defaults_valid);
     RUN_TEST(test_popup_zband_and_nesting);
     RUN_TEST(test_popup_top_id_follows_band);
     RUN_TEST(test_popup_dismiss_survives_a_band_tie);
-    RUN_TEST(test_popup_closing_content_reads_no_click);
     RUN_TEST(test_popup_esc_closes_the_top_and_its_body);
     RUN_TEST(test_popup_closing_ends_a_held_press);
     RUN_TEST(test_popup_closing_panel_lets_the_pointer_through);

@@ -8,6 +8,7 @@
 #include "clay.h"
 #include "memory/nt_mem_scratch.h"
 #include "test_helpers/nt_assert_trap.h"
+#include "test_helpers/ui_fx_frame.h"
 #include "test_helpers/ui_test_arena.h"
 #include "test_helpers/ui_walker_fixture.h"
 #include "ui/nt_ui.h"
@@ -34,17 +35,6 @@ void setUp(void) {
 }
 
 void tearDown(void) { ui_walker_fixture_shutdown(&s_fx); }
-
-static nt_pointer_t pointer_at(float x, float y, bool is_down, bool is_pressed, bool is_released) {
-    nt_pointer_t p = {0};
-    p.x = x;
-    p.y = y;
-    p.active = true;
-    p.buttons[NT_BUTTON_LEFT].is_down = is_down;
-    p.buttons[NT_BUTTON_LEFT].is_pressed = is_pressed;
-    p.buttons[NT_BUTTON_LEFT].is_released = is_released;
-    return p;
-}
 
 /* One tab-bar frame with an OPTIONAL parallel icons[] array: a FIXED-width vertical bar floated at the
  * top-left so each tab's bbox is known. Returns the clicked index (-1 if none). */
@@ -127,7 +117,7 @@ static void two_tabbars_with_content_frame(const ui_walker_fixture_t *fx, const 
  * trip Clay's DUPLICATE_ID. nt_ui_end runs the Clay layout headlessly; a duplicate id would route
  * through nt_ui_clay_error_cb -> NT_ASSERT (the trap). A clean return == no duplicate. ---- */
 static void test_tabbar_two_bars_with_content_no_duplicate_id(void) {
-    nt_pointer_t idle = pointer_at(400.0F, 400.0F, false, false, false);
+    nt_pointer_t idle = ui_fx_pointer(400.0F, 400.0F, false, false, false);
     two_tabbars_with_content_frame(&s_fx, &idle);
     TEST_PASS();
 }
@@ -157,11 +147,11 @@ static void test_tabbar_core_click_sets_active(void) {
     const float x = 80.0F;
     const float y2 = tab_center_y(&st, 2);
 
-    nt_pointer_t w = pointer_at(x, y2, false, false, false);
+    nt_pointer_t w = ui_fx_pointer(x, y2, false, false, false);
     tabbar_core_frame(&w, 4, &active, &st);
-    nt_pointer_t pr = pointer_at(x, y2, true, true, false);
+    nt_pointer_t pr = ui_fx_pointer(x, y2, true, true, false);
     tabbar_core_frame(&pr, 4, &active, &st);
-    nt_pointer_t rl = pointer_at(x, y2, false, false, true);
+    nt_pointer_t rl = ui_fx_pointer(x, y2, false, false, true);
     const int clicked = tabbar_core_frame(&rl, 4, &active, &st);
     TEST_ASSERT_EQUAL_INT(2, active);
     TEST_ASSERT_EQUAL_INT(2, clicked);
@@ -172,7 +162,7 @@ static void test_tabbar_accent_none_ok(void) {
     nt_ui_tabbar_style_t st = nt_ui_tabbar_style_defaults();
     st.accent_side = (uint8_t)NT_UI_TABBAR_ACCENT_NONE;
     int active = 0;
-    nt_pointer_t idle = pointer_at(400.0F, 400.0F, false, false, false);
+    nt_pointer_t idle = ui_fx_pointer(400.0F, 400.0F, false, false, false);
     const int clicked = tabbar_core_frame(&idle, 4, &active, &st);
     TEST_ASSERT_EQUAL_INT(-1, clicked);
 }
@@ -195,24 +185,24 @@ static void test_tabbar_click_sets_active(void) {
     const float y2 = tab_center_y(&st, 2);
 
     /* Warm so the tab bboxes are baked. */
-    nt_pointer_t w = pointer_at(x, y2, false, false, false);
+    nt_pointer_t w = ui_fx_pointer(x, y2, false, false, false);
     tabbar_frame(&w, 4, &active, &st);
 
     /* Press + release on tab 2 -> active = 2. */
-    nt_pointer_t pr = pointer_at(x, y2, true, true, false);
+    nt_pointer_t pr = ui_fx_pointer(x, y2, true, true, false);
     tabbar_frame(&pr, 4, &active, &st);
-    nt_pointer_t rl = pointer_at(x, y2, false, false, true);
+    nt_pointer_t rl = ui_fx_pointer(x, y2, false, false, true);
     const int clicked = tabbar_frame(&rl, 4, &active, &st);
     TEST_ASSERT_EQUAL_INT(2, active);
     TEST_ASSERT_EQUAL_INT(2, clicked);
 
     /* Now click tab 0 -> active updates to 0. */
     const float y0 = tab_center_y(&st, 0);
-    nt_pointer_t w0 = pointer_at(x, y0, false, false, false);
+    nt_pointer_t w0 = ui_fx_pointer(x, y0, false, false, false);
     tabbar_frame(&w0, 4, &active, &st);
-    nt_pointer_t pr0 = pointer_at(x, y0, true, true, false);
+    nt_pointer_t pr0 = ui_fx_pointer(x, y0, true, true, false);
     tabbar_frame(&pr0, 4, &active, &st);
-    nt_pointer_t rl0 = pointer_at(x, y0, false, false, true);
+    nt_pointer_t rl0 = ui_fx_pointer(x, y0, false, false, true);
     tabbar_frame(&rl0, 4, &active, &st);
     TEST_ASSERT_EQUAL_INT(0, active);
 }
@@ -221,7 +211,7 @@ static void test_tabbar_click_sets_active(void) {
 static void test_tabbar_no_click_returns_negative(void) {
     nt_ui_tabbar_style_t st = nt_ui_tabbar_style_defaults();
     int active = 1;
-    nt_pointer_t idle = pointer_at(400.0F, 400.0F, false, false, false);
+    nt_pointer_t idle = ui_fx_pointer(400.0F, 400.0F, false, false, false);
     const int clicked = tabbar_frame(&idle, 4, &active, &st);
     TEST_ASSERT_EQUAL_INT(-1, clicked);
     TEST_ASSERT_EQUAL_INT(1, active);
@@ -246,7 +236,7 @@ static float tab_label_x(const nt_pointer_t *p, nt_ui_tabbar_style_t *st, const 
 /* ---- icon_size opens a leading gutter: the tab label shifts RIGHT vs the text-only (icon_size=0) tab.
  *      Mirrors test_dropdown_icon_size_gutter_shifts_label (identical gutter semantics). ---- */
 static void test_tabbar_icon_size_gutter_shifts_label(void) {
-    nt_pointer_t idle = pointer_at(400.0F, 400.0F, false, false, false);
+    nt_pointer_t idle = ui_fx_pointer(400.0F, 400.0F, false, false, false);
 
     nt_ui_tabbar_style_t no_gut = nt_ui_tabbar_style_defaults();
     no_gut.icon_size = 0U; /* text-only: no gutter */
@@ -264,7 +254,7 @@ static void test_tabbar_icon_size_gutter_shifts_label(void) {
  *      absent both keep the SAME label x (the gutter holds alignment either way). Mirrors
  *      test_dropdown_null_icon_aligns (identical aligned-empty-gutter semantics). ---- */
 static void test_tabbar_null_icon_aligns(void) {
-    nt_pointer_t idle = pointer_at(400.0F, 400.0F, false, false, false);
+    nt_pointer_t idle = ui_fx_pointer(400.0F, 400.0F, false, false, false);
 
     nt_ui_tabbar_style_t st = nt_ui_tabbar_style_defaults();
     st.icon_size = 24U;

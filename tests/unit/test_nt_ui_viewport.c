@@ -18,6 +18,7 @@
 #include "clay.h"
 #include "input/nt_input.h"
 #include "test_helpers/nt_assert_trap.h"
+#include "test_helpers/ui_fx_frame.h"
 #include "test_helpers/ui_test_arena.h"
 #include "test_helpers/ui_walker_fixture.h"
 #include "ui/nt_ui.h"
@@ -58,16 +59,6 @@ void tearDown(void) { ui_walker_fixture_shutdown(&s_fx); }
 
 static bool float_near(float a, float b, float eps) { return fabsf(a - b) <= eps; }
 
-static nt_pointer_t make_pointer(float x, float y, bool is_down, bool is_pressed) {
-    nt_pointer_t p = {0};
-    p.x = x;
-    p.y = y;
-    p.active = true;
-    p.buttons[NT_BUTTON_LEFT].is_down = is_down;
-    p.buttons[NT_BUTTON_LEFT].is_pressed = is_pressed;
-    return p;
-}
-
 static void declare_btn_element(void) {
     CLAY({.id = CLAY_ID("btn"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = BTN_X, .y = BTN_Y}}, .layout = {.sizing = {CLAY_SIZING_FIXED(BTN_W), CLAY_SIZING_FIXED(BTN_H)}}}) {}
 }
@@ -98,9 +89,9 @@ static nt_ui_interaction_t query_btn_frame(const nt_pointer_t *p, bool set_vp) {
 
 /* ---- 1: default viewport is identity (a LAYOUT-space pointer still hits, unscaled unchanged) ---- */
 static void test_default_viewport_identity_hit(void) {
-    nt_pointer_t f1 = make_pointer(BTN_CX, BTN_CY, false, false);
+    nt_pointer_t f1 = ui_fx_pointer(BTN_CX, BTN_CY, false, false, false);
     warm_btn_frame(&f1, false);
-    nt_pointer_t f2 = make_pointer(BTN_CX, BTN_CY, true, true);
+    nt_pointer_t f2 = ui_fx_pointer(BTN_CX, BTN_CY, true, true, false);
     nt_ui_interaction_t in = query_btn_frame(&f2, false);
     TEST_ASSERT_TRUE(in.hovered);
     TEST_ASSERT_TRUE(in.pressed_now);
@@ -115,9 +106,9 @@ static void test_scaled_viewport_device_pointer_hits(void) {
     const float dev_cx = VP_OFF_X + (BTN_CX * VP_SCALE);
     const float dev_cy = VP_OFF_Y + (BTN_CY * VP_SCALE);
 
-    nt_pointer_t f1 = make_pointer(dev_cx, dev_cy, false, false);
+    nt_pointer_t f1 = ui_fx_pointer(dev_cx, dev_cy, false, false, false);
     warm_btn_frame(&f1, true);
-    nt_pointer_t f2 = make_pointer(dev_cx, dev_cy, true, true);
+    nt_pointer_t f2 = ui_fx_pointer(dev_cx, dev_cy, true, true, false);
     nt_ui_interaction_t in = query_btn_frame(&f2, true);
     TEST_ASSERT_TRUE(in.hovered);
     TEST_ASSERT_TRUE(in.pressed_now);
@@ -131,17 +122,17 @@ static void test_scaled_viewport_outside_misses(void) {
     const float dev_cx = VP_OFF_X + (BTN_CX * VP_SCALE);
     const float dev_cy = VP_OFF_Y + (BTN_CY * VP_SCALE);
 
-    nt_pointer_t f1 = make_pointer(dev_cx, dev_cy, false, false);
+    nt_pointer_t f1 = ui_fx_pointer(dev_cx, dev_cy, false, false, false);
     warm_btn_frame(&f1, true);
     /* Shift device pointer far past the widget's device extent (BTN_W*scale wide). */
-    nt_pointer_t f2 = make_pointer(dev_cx + (BTN_W * VP_SCALE), dev_cy, true, true);
+    nt_pointer_t f2 = ui_fx_pointer(dev_cx + (BTN_W * VP_SCALE), dev_cy, true, true, false);
     nt_ui_interaction_t in = query_btn_frame(&f2, true);
     TEST_ASSERT_FALSE(in.hovered);
 }
 
 /* ---- 3: converter round-trip + default identity ---- */
 static void test_converters_roundtrip_and_default_identity(void) {
-    nt_pointer_t p = make_pointer(0.0F, 0.0F, false, false);
+    nt_pointer_t p = ui_fx_pointer(0.0F, 0.0F, false, false, false);
 
     /* Default (no set_viewport): screen_to_layout is identity. */
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = SCREEN_W, .layout_h = SCREEN_H, .pointers = &p, .pointer_count = 1});
@@ -195,9 +186,9 @@ static void test_anisotropic_viewport_device_pointer_hits(void) {
     const float dev_cx = ANISO_OFF_X + (BTN_CX * ANISO_SCALE_X);
     const float dev_cy = ANISO_OFF_Y + (BTN_CY * ANISO_SCALE_Y);
 
-    nt_pointer_t f1 = make_pointer(dev_cx, dev_cy, false, false);
+    nt_pointer_t f1 = ui_fx_pointer(dev_cx, dev_cy, false, false, false);
     warm_btn_frame_aniso(&f1);
-    nt_pointer_t f2 = make_pointer(dev_cx, dev_cy, true, true);
+    nt_pointer_t f2 = ui_fx_pointer(dev_cx, dev_cy, true, true, false);
     nt_ui_interaction_t in = query_btn_frame_aniso(&f2);
     TEST_ASSERT_TRUE(in.hovered);
     TEST_ASSERT_TRUE(in.pressed_now);
@@ -206,7 +197,7 @@ static void test_anisotropic_viewport_device_pointer_hits(void) {
     TEST_ASSERT_TRUE(float_near(in.pos[1], BTN_CY, 0.5F));
 
     /* layout -> screen -> layout round-trip under the anisotropic viewport. */
-    nt_pointer_t p = make_pointer(0.0F, 0.0F, false, false);
+    nt_pointer_t p = ui_fx_pointer(0.0F, 0.0F, false, false, false);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = SCREEN_W, .layout_h = SCREEN_H, .pointers = &p, .pointer_count = 1, .viewport = aniso_vp()});
     const float layout_in[2] = {BTN_CX, BTN_CY};
     float screen[2];
@@ -244,7 +235,7 @@ static void test_scaled_inspector_uses_layout_pointer(void) {
     const float dev_cy = VP_OFF_Y + (ins_cy * VP_SCALE);
 
     /* Frame 1: declare widget on the scaled ctx so frame 2's pointer-over tests against this tree. */
-    nt_pointer_t f1 = make_pointer(dev_cx, dev_cy, false, false);
+    nt_pointer_t f1 = ui_fx_pointer(dev_cx, dev_cy, false, false, false);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = SCREEN_W, .layout_h = SCREEN_H, .pointers = &f1, .pointer_count = 1, .viewport = letterbox_vp()});
     CLAY({.id = CLAY_ID("insp_target"),
           .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = ins_btn_x, .y = ins_btn_y}},
@@ -253,7 +244,7 @@ static void test_scaled_inspector_uses_layout_pointer(void) {
 
     /* Frame 2: same device pointer. The gate is recomputed in layout space at the hot resolve, so a
      * step here forces the conversion before reading the consumed flag. */
-    nt_pointer_t f2 = make_pointer(dev_cx, dev_cy, false, false);
+    nt_pointer_t f2 = ui_fx_pointer(dev_cx, dev_cy, false, false, false);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = SCREEN_W, .layout_h = SCREEN_H, .pointers = &f2, .pointer_count = 1, .viewport = letterbox_vp()});
     CLAY({.id = CLAY_ID("insp_target"),
           .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = ins_btn_x, .y = ins_btn_y}},

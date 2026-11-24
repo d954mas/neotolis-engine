@@ -11,6 +11,7 @@
 #include "graphics/nt_gfx.h"
 #include "input/nt_input.h"
 #include "test_helpers/nt_assert_trap.h"
+#include "test_helpers/ui_fx_frame.h"
 #include "test_helpers/ui_test_arena.h"
 #include "test_helpers/ui_walker_fixture.h"
 #include "ui/nt_ui.h"
@@ -59,17 +60,9 @@ void setUp(void) {
 
 void tearDown(void) { ui_walker_fixture_shutdown(&s_fx); }
 
-static nt_pointer_t make_pointer(float x, float y) {
-    nt_pointer_t p = {0};
-    p.x = x;
-    p.y = y;
-    p.active = true;
-    return p;
-}
-
 /* ---- Test 1: register + lookup roundtrip on a single id ---- */
 static void test_registry_register_lookup(void) {
-    nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
+    nt_pointer_t mouse = ui_fx_pointer(0.0F, 0.0F, false, false, false);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &mouse, .pointer_count = 1});
     /* Empty by default. */
     TEST_ASSERT_NULL(nt_ui_widget_lookup(s_fx.ctx, nt_ui_id("foo")));
@@ -83,7 +76,7 @@ static void test_registry_register_lookup(void) {
 
 /* ---- Test 2: registry resets each nt_ui_begin (no stale tags) ---- */
 static void test_registry_resets_each_begin(void) {
-    nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
+    nt_pointer_t mouse = ui_fx_pointer(0.0F, 0.0F, false, false, false);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &mouse, .pointer_count = 1});
     nt_ui_widget_register(s_fx.ctx, nt_ui_id("foo"), &NT_UI_BUTTON_DEF, NULL, true);
     TEST_ASSERT_EQUAL_PTR(&NT_UI_BUTTON_DEF, nt_ui_widget_lookup(s_fx.ctx, nt_ui_id("foo")));
@@ -97,7 +90,7 @@ static void test_registry_resets_each_begin(void) {
 
 /* ---- Test 3: linear probing resolves bucket collisions correctly ---- */
 static void test_registry_collision_linear_probe(void) {
-    nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
+    nt_pointer_t mouse = ui_fx_pointer(0.0F, 0.0F, false, false, false);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &mouse, .pointer_count = 1});
     /* Synthesize two ids landing in the same bucket: id_b = id_a + cap → same id & mask. */
     const uint32_t base_id = nt_ui_id("collide_a");
@@ -112,7 +105,7 @@ static void test_registry_collision_linear_probe(void) {
 
 /* ---- Test 4: id=0 (sentinel) is silently dropped on register + lookup ---- */
 static void test_registry_id_zero_dropped(void) {
-    nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
+    nt_pointer_t mouse = ui_fx_pointer(0.0F, 0.0F, false, false, false);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &mouse, .pointer_count = 1});
     nt_ui_widget_register(s_fx.ctx, 0U, &NT_UI_BUTTON_DEF, NULL, true); /* must not assert */
     TEST_ASSERT_NULL(nt_ui_widget_lookup(s_fx.ctx, 0U));
@@ -127,7 +120,7 @@ static const nt_ui_widget_def_t TEST_GAME_INV_SLOT_DEF = {
     ._reserved = 0U,
 };
 static void test_registry_engine_and_game_defs_coexist(void) {
-    nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
+    nt_pointer_t mouse = ui_fx_pointer(0.0F, 0.0F, false, false, false);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &mouse, .pointer_count = 1});
     nt_ui_widget_register(s_fx.ctx, nt_ui_id("a_btn"), &NT_UI_BUTTON_DEF, NULL, true);
     nt_ui_widget_register(s_fx.ctx, nt_ui_id("a_slot"), &TEST_GAME_INV_SLOT_DEF, NULL, true);
@@ -150,7 +143,7 @@ static void test_registry_engine_and_game_defs_coexist(void) {
 /* ---- Test 4b: registering the same id twice in one frame traps (duplicate-id death-test) ----
  * Catches the cryptic Clay "element already declared" class at the registration site instead. */
 static void test_registry_duplicate_id_traps(void) {
-    nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
+    nt_pointer_t mouse = ui_fx_pointer(0.0F, 0.0F, false, false, false);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &mouse, .pointer_count = 1});
     nt_ui_widget_register(s_fx.ctx, nt_ui_id("dupe"), &NT_UI_BUTTON_DEF, NULL, true);
     /* Second register of the SAME id this frame must fire NT_ASSERT. */
@@ -160,7 +153,7 @@ static void test_registry_duplicate_id_traps(void) {
 
 /* ---- Test 5: nt_ui_button declaration auto-tags BUTTON ---- */
 static void test_button_widget_auto_tagged(void) {
-    nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
+    nt_pointer_t mouse = ui_fx_pointer(0.0F, 0.0F, false, false, false);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &mouse, .pointer_count = 1});
     CLAY({.id = CLAY_ID("root")}) {
         nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn"), &s_btn_style, NULL, true);
@@ -174,7 +167,7 @@ static void test_button_widget_auto_tagged(void) {
 
 /* ---- Test 6: nt_ui_panel declaration auto-tags PANEL (id == Clay-assigned) ---- */
 static void test_panel_widget_tagged(void) {
-    nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
+    nt_pointer_t mouse = ui_fx_pointer(0.0F, 0.0F, false, false, false);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &mouse, .pointer_count = 1});
     /* Panel/image use Clay's auto-assigned id (no explicit id arg in API),
      * so we can't easily look it up by name. Verify by counting tags: at least
@@ -196,7 +189,7 @@ static void test_panel_widget_tagged(void) {
 
 /* ---- Test 7: nt_ui_image declaration auto-tags IMAGE ---- */
 static void test_image_widget_tagged(void) {
-    nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
+    nt_pointer_t mouse = ui_fx_pointer(0.0F, 0.0F, false, false, false);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &mouse, .pointer_count = 1});
     CLAY({.id = CLAY_ID("root")}) { nt_ui_image(s_fx.ctx, NULL, &(nt_atlas_region_ref_t){.atlas = s_fx.atlas.handle, .region = s_fx.atlas.white_region_idx}, &s_img_style, NULL); }
     uint32_t image_count = 0U;
@@ -213,7 +206,7 @@ static void test_image_widget_tagged(void) {
  * (last_emitted_element_id) — not the parent — so the pill lands on the
  * text row, not on the button/panel that opened it. */
 static void test_label_widget_tagged_on_text_leaf(void) {
-    nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
+    nt_pointer_t mouse = ui_fx_pointer(0.0F, 0.0F, false, false, false);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &mouse, .pointer_count = 1});
     CLAY({.id = CLAY_ID("root")}) { nt_ui_label(s_fx.ctx, NULL, "hello", &s_label_style); }
     /* Scan the registry for a slot pointing at NT_UI_LABEL_DEF. */
@@ -230,7 +223,7 @@ static void test_label_widget_tagged_on_text_leaf(void) {
 /* Label tag binds the TEXT leaf id; a wrapping panel keeps NT_UI_PANEL_DEF. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_label_does_not_clobber_parent_widget(void) {
-    nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
+    nt_pointer_t mouse = ui_fx_pointer(0.0F, 0.0F, false, false, false);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &mouse, .pointer_count = 1});
     /* Panel parent + label child -- common pattern from the demo. */
     CLAY({.id = CLAY_ID("root")}) {
@@ -262,7 +255,7 @@ static void test_inspector_toggle_persists(void) {
     nt_ui_inspector_set_active(s_fx.ctx, true);
     TEST_ASSERT_TRUE(nt_ui_inspector_is_active(s_fx.ctx));
 
-    nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
+    nt_pointer_t mouse = ui_fx_pointer(0.0F, 0.0F, false, false, false);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &mouse, .pointer_count = 1});
     nt_ui_end(s_fx.ctx);
 
@@ -275,7 +268,7 @@ static void test_inspector_toggle_persists(void) {
 /* ---- Test 9: inactive inspector emit_layout is a no-op (no extra Clay elems) ---- */
 static void test_inspector_inactive_emit_noop(void) {
     TEST_ASSERT_FALSE(nt_ui_inspector_is_active(s_fx.ctx));
-    nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
+    nt_pointer_t mouse = ui_fx_pointer(0.0F, 0.0F, false, false, false);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &mouse, .pointer_count = 1});
     CLAY({.id = CLAY_ID("root")}) {}
     /* Capture the layout element count BEFORE end (after user emits). */
@@ -291,7 +284,7 @@ static void test_inspector_inactive_emit_noop(void) {
  * Proves emit_layout injected the panel CLAY blocks. */
 static void test_inspector_active_grows_element_count(void) {
     nt_ui_inspector_set_active(s_fx.ctx, true);
-    nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
+    nt_pointer_t mouse = ui_fx_pointer(0.0F, 0.0F, false, false, false);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &mouse, .pointer_count = 1});
     CLAY({.id = CLAY_ID("root")}) {}
     const int32_t before = nt_ui_internal_get_layout_element_count(s_fx.ctx);
@@ -307,7 +300,7 @@ static void test_inspector_active_grows_element_count(void) {
 /* ---- Test 11: active inspector with a sidebar full of widgets is safe ---- */
 static void test_inspector_many_widgets_safe(void) {
     nt_ui_inspector_set_active(s_fx.ctx, true);
-    nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
+    nt_pointer_t mouse = ui_fx_pointer(0.0F, 0.0F, false, false, false);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &mouse, .pointer_count = 1});
     CLAY({.id = CLAY_ID("root")}) {
         for (int i = 0; i < 20; ++i) {
@@ -327,7 +320,7 @@ static void test_inspector_many_widgets_safe(void) {
 /* ---- Test 12: overlay_draw is a no-op when no highlight id is set ---- */
 static void test_overlay_noop_without_highlight(void) {
     nt_ui_inspector_set_active(s_fx.ctx, true);
-    nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
+    nt_pointer_t mouse = ui_fx_pointer(0.0F, 0.0F, false, false, false);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &mouse, .pointer_count = 1});
     CLAY({.id = CLAY_ID("root")}) {}
     /* No widget hovered, no sidebar row clicked -> highlight stays 0 after end. */
@@ -358,7 +351,7 @@ static void test_inspector_intercepts_pointer_over_sidebar(void) {
     const float btn_h = 48.0F;
     const float btn_cx = btn_x + (btn_w * 0.5F);
     const float btn_cy = btn_y + (btn_h * 0.5F);
-    nt_pointer_t f1 = make_pointer(0.0F, 0.0F);
+    nt_pointer_t f1 = ui_fx_pointer(0.0F, 0.0F, false, false, false);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = screen_w, .layout_h = screen_h, .pointers = &f1, .pointer_count = 1});
     CLAY({.id = CLAY_ID("hidden_btn"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = btn_x, .y = btn_y}}, .layout = {.sizing = {CLAY_SIZING_FIXED(btn_w), CLAY_SIZING_FIXED(btn_h)}}}) {
         (void)nt_ui_step(s_fx.ctx, nt_ui_id("hidden_btn"), NULL); /* a record, so frame 2 resolves it hot */
@@ -425,7 +418,7 @@ static void test_inspector_pointer_outside_sidebar_normal(void) {
 
     /* Frame 1: declare bbox + step so the button registers (front-most arbitration reads the
      * prev-frame interactive registry; a widget reacts only once registered). */
-    nt_pointer_t f1 = make_pointer(0.0F, 0.0F);
+    nt_pointer_t f1 = ui_fx_pointer(0.0F, 0.0F, false, false, false);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = screen_w, .layout_h = screen_h, .pointers = &f1, .pointer_count = 1});
     CLAY(
         {.id = CLAY_ID("visible_btn"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = btn_x, .y = btn_y}}, .layout = {.sizing = {CLAY_SIZING_FIXED(btn_w), CLAY_SIZING_FIXED(btn_h)}}}) {
@@ -463,7 +456,7 @@ static void test_inspector_pointer_outside_sidebar_normal(void) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_inspector_walker_enumerates_user_tree(void) {
     nt_ui_inspector_set_active(s_fx.ctx, true);
-    nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
+    nt_pointer_t mouse = ui_fx_pointer(0.0F, 0.0F, false, false, false);
 
     /* Baseline: empty user root -> inspector wraps {RC + user_root} = 2 walker rows. */
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &mouse, .pointer_count = 1});
@@ -497,7 +490,7 @@ static void test_inspector_walker_enumerates_user_tree(void) {
 /* hit_padding_lrtb survives into the registry slot so the overlay can outline
  * the touch-target distinct from the visual bbox. */
 static void test_widget_register_padded_roundtrip(void) {
-    nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
+    nt_pointer_t mouse = ui_fx_pointer(0.0F, 0.0F, false, false, false);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &mouse, .pointer_count = 1});
     const int16_t pad[4] = {12, 14, 16, 18};
     nt_ui_widget_register(s_fx.ctx, nt_ui_id("btn_padded"), &NT_UI_BUTTON_DEF, pad, true);
@@ -516,7 +509,7 @@ static void test_widget_register_padded_roundtrip(void) {
 /* Plain image/panel register with NULL pad_lrtb and must NOT show a padded
  * hit zone in the inspector overlay. */
 static void test_widget_unpadded_no_hit_padding(void) {
-    nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
+    nt_pointer_t mouse = ui_fx_pointer(0.0F, 0.0F, false, false, false);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &mouse, .pointer_count = 1});
     nt_ui_widget_register(s_fx.ctx, nt_ui_id("img"), &NT_UI_IMAGE_DEF, NULL, true);
     int16_t out[4] = {99, 99, 99, 99};
@@ -532,7 +525,7 @@ static void test_widget_unpadded_no_hit_padding(void) {
 /* Declaring a button with non-zero style.hit_padding_lrtb makes the inspector
  * see the padding via the widget_registry. */
 static void test_button_auto_records_hit_padding(void) {
-    nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
+    nt_pointer_t mouse = ui_fx_pointer(0.0F, 0.0F, false, false, false);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &mouse, .pointer_count = 1});
     nt_ui_button_style_t padded_style = s_btn_style;
     padded_style.hit_padding_lrtb[0] = 8;
@@ -558,7 +551,7 @@ static void test_button_auto_records_hit_padding(void) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_inspector_filter_skips_anonymous(void) {
     nt_ui_inspector_set_active(s_fx.ctx, true);
-    nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
+    nt_pointer_t mouse = ui_fx_pointer(0.0F, 0.0F, false, false, false);
 
     /* Named-only tree: 3 children all with CLAY_ID. */
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &mouse, .pointer_count = 1});
@@ -599,7 +592,7 @@ static void test_inspector_filter_skips_anonymous(void) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_inspector_filter_keeps_text_leaves(void) {
     nt_ui_inspector_set_active(s_fx.ctx, true);
-    nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
+    nt_pointer_t mouse = ui_fx_pointer(0.0F, 0.0F, false, false, false);
 
     /* Baseline: container, no text leaf. */
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &mouse, .pointer_count = 1});
@@ -633,7 +626,7 @@ static void test_inspector_filter_keeps_text_leaves(void) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_inspector_text_with_siblings_no_union_misread(void) {
     nt_ui_inspector_set_active(s_fx.ctx, true);
-    nt_pointer_t mouse = make_pointer(-100.0F, -100.0F);
+    nt_pointer_t mouse = ui_fx_pointer(-100.0F, -100.0F, false, false, false);
 
     nt_ui_inspector_tree_row_t rows[64];
     int32_t text_rows = 0;
@@ -693,7 +686,7 @@ static void test_inspector_text_with_siblings_no_union_misread(void) {
  * fallback); the layout element count must grow. */
 static void test_inspector_emits_hex_for_unnamed_widget(void) {
     nt_ui_inspector_set_active(s_fx.ctx, true);
-    nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
+    nt_pointer_t mouse = ui_fx_pointer(0.0F, 0.0F, false, false, false);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &mouse, .pointer_count = 1});
     CLAY({.id = CLAY_ID("root_unnamed_panel")}) {
         nt_ui_panel_begin(s_fx.ctx, NULL, &(nt_atlas_region_ref_t){.atlas = s_fx.atlas.handle, .region = s_fx.atlas.white_region_idx}, &s_img_style, NULL);
@@ -748,7 +741,7 @@ static void test_inspector_collapse_hides_children(void) {
      * does NOT fire (which would emit the
      * floating ElementHighlight rect and skew the inspector growth count
      * between walks). Test focus is collapse vs full DFS, not hover. */
-    nt_pointer_t mouse = make_pointer(-100.0F, -100.0F);
+    nt_pointer_t mouse = ui_fx_pointer(-100.0F, -100.0F, false, false, false);
 
     /* Walk 1: full tree (parent + 4 children). */
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &mouse, .pointer_count = 1});
@@ -806,7 +799,7 @@ static void test_inspector_collapse_hides_children(void) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_inspector_root_emitted_on_debug_layer(void) {
     nt_ui_inspector_set_active(s_fx.ctx, true);
-    nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
+    nt_pointer_t mouse = ui_fx_pointer(0.0F, 0.0F, false, false, false);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &mouse, .pointer_count = 1});
     CLAY({.id = CLAY_ID("root")}) {}
     nt_ui_end(s_fx.ctx);
@@ -862,7 +855,7 @@ static void test_inspector_click_text_content_row_selects_leaf(void) {
     const float screen_h = 600.0F;
 
     /* Frame 1: prime released state + capture the text-leaf's id. */
-    nt_pointer_t f1 = make_pointer(0.0F, 0.0F);
+    nt_pointer_t f1 = ui_fx_pointer(0.0F, 0.0F, false, false, false);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = screen_w, .layout_h = screen_h, .pointers = &f1, .pointer_count = 1});
     uint32_t text_leaf_id = 0U;
     CLAY({.id = CLAY_ID("root_label")}) {
@@ -890,7 +883,7 @@ static void test_inspector_click_text_content_row_selects_leaf(void) {
 
     /* Reset selected_id, prime released state again for the next press-this-frame. */
     s_fx.ctx->inspector_selected_id = 0U;
-    nt_pointer_t f3_released = make_pointer(600.0F, 95.0F);
+    nt_pointer_t f3_released = ui_fx_pointer(600.0F, 95.0F, false, false, false);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = screen_w, .layout_h = screen_h, .pointers = &f3_released, .pointer_count = 1});
     CLAY({.id = CLAY_ID("root_label")}) { nt_ui_label(s_fx.ctx, NULL, "hello", &s_label_style); }
     nt_ui_end(s_fx.ctx);
@@ -924,7 +917,7 @@ static void test_overlay_fallback_chain_with_padded_button(void) {
 
     /* Frame 1: emit button + set selected_id directly. Pointer is offscreen
      * (-100,-100) so viewport-hover propagation doesn't fire. */
-    nt_pointer_t mouse = make_pointer(-100.0F, -100.0F);
+    nt_pointer_t mouse = ui_fx_pointer(-100.0F, -100.0F, false, false, false);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &mouse, .pointer_count = 1});
     CLAY({.id = CLAY_ID("root")}) {
         nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("padded_btn"), &padded_style, NULL, true);
@@ -981,7 +974,7 @@ static void test_overlay_skips_padded_zone_for_zero_padding(void) {
     zero_pad_style.hit_padding_lrtb[2] = 0;
     zero_pad_style.hit_padding_lrtb[3] = 0;
 
-    nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
+    nt_pointer_t mouse = ui_fx_pointer(0.0F, 0.0F, false, false, false);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &mouse, .pointer_count = 1});
     CLAY({.id = CLAY_ID("root")}) {
         nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("nopad_btn"), &zero_pad_style, NULL, true);
@@ -1010,7 +1003,7 @@ static void test_overlay_skips_padded_zone_for_zero_padding(void) {
  * Label sets userData on the TEXT config (no SHARED). */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_inspector_reads_layer_from_text_config_userdata(void) {
-    nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
+    nt_pointer_t mouse = ui_fx_pointer(0.0F, 0.0F, false, false, false);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &mouse, .pointer_count = 1});
     uint32_t leaf_id = 0U;
     const nt_ui_element_data_t *data_with_layer = NT_UI_DATA_LAYER((nt_ui_layer_t)5);
@@ -1029,7 +1022,7 @@ static void test_inspector_reads_layer_from_text_config_userdata(void) {
  * Clay auto-routes Clay_ElementDeclaration.userData into a SHARED config. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_inspector_reads_layer_from_shared_config_userdata(void) {
-    nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
+    nt_pointer_t mouse = ui_fx_pointer(0.0F, 0.0F, false, false, false);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &mouse, .pointer_count = 1});
     const nt_ui_element_data_t *data_with_layer = NT_UI_DATA_LAYER((nt_ui_layer_t)3);
     CLAY({.id = CLAY_ID("root_shared_layer")}) {
@@ -1063,7 +1056,7 @@ static void test_overlay_projects_through_accum_for_transformed_id(void) {
 
     /* Frame 1: declare with the transform so tree_baked carries it. nt_ui_step
      * in frame 2 reads PREV-frame tree_baked → must include the rotation already. */
-    nt_pointer_t f1 = make_pointer(0.0F, 0.0F);
+    nt_pointer_t f1 = ui_fx_pointer(0.0F, 0.0F, false, false, false);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = screen_w, .layout_h = screen_h, .pointers = &f1, .pointer_count = 1});
     CLAY({.id = CLAY_ID("xform_btn"),
           .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = btn_x, .y = btn_y}},
@@ -1071,7 +1064,7 @@ static void test_overlay_projects_through_accum_for_transformed_id(void) {
           .userData = (void *)NT_UI_DATA_XFORM(0U, &baked, 1.0F)}) {}
     nt_ui_end(s_fx.ctx);
 
-    nt_pointer_t f2 = make_pointer(0.0F, 0.0F);
+    nt_pointer_t f2 = ui_fx_pointer(0.0F, 0.0F, false, false, false);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = screen_w, .layout_h = screen_h, .pointers = &f2, .pointer_count = 1});
     CLAY({.id = CLAY_ID("xform_btn"),
           .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = btn_x, .y = btn_y}},
@@ -1110,13 +1103,13 @@ static void test_overlay_falls_back_to_axis_aligned_when_no_zone(void) {
     nt_ui_inspector_set_active(s_fx.ctx, true);
 
     /* Frame 1: declare a plain Clay container (no widget tag, no interaction). */
-    nt_pointer_t f1 = make_pointer(0.0F, 0.0F);
+    nt_pointer_t f1 = ui_fx_pointer(0.0F, 0.0F, false, false, false);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &f1, .pointer_count = 1});
     CLAY({.id = CLAY_ID("plain_box"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = 100.0F, .y = 100.0F}}, .layout = {.sizing = {CLAY_SIZING_FIXED(60), CLAY_SIZING_FIXED(60)}}}) {}
     nt_ui_end(s_fx.ctx);
 
     /* Frame 2: declare again so bbox is stable; do NOT query interaction. */
-    nt_pointer_t f2 = make_pointer(0.0F, 0.0F);
+    nt_pointer_t f2 = ui_fx_pointer(0.0F, 0.0F, false, false, false);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &f2, .pointer_count = 1});
     CLAY({.id = CLAY_ID("plain_box"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = 100.0F, .y = 100.0F}}, .layout = {.sizing = {CLAY_SIZING_FIXED(60), CLAY_SIZING_FIXED(60)}}}) {}
     s_fx.ctx->inspector_selected_id = nt_ui_id("plain_box");
@@ -1151,7 +1144,7 @@ static void test_inspector_highlight_from_viewport_hover(void) {
     const float btn_cy = btn_y + (btn_h * 0.5F);
 
     /* Frame 1: declare widget; pointer (0,0). */
-    nt_pointer_t f1 = make_pointer(0.0F, 0.0F);
+    nt_pointer_t f1 = ui_fx_pointer(0.0F, 0.0F, false, false, false);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = screen_w, .layout_h = screen_h, .pointers = &f1, .pointer_count = 1});
     CLAY({.id = CLAY_ID("hover_target"),
           .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = btn_x, .y = btn_y}},
@@ -1159,7 +1152,7 @@ static void test_inspector_highlight_from_viewport_hover(void) {
     nt_ui_end(s_fx.ctx);
 
     /* Frame 2: pointer at widget center; SetPointerState fills pointerOverIds. */
-    nt_pointer_t f2 = make_pointer(btn_cx, btn_cy);
+    nt_pointer_t f2 = ui_fx_pointer(btn_cx, btn_cy, false, false, false);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = screen_w, .layout_h = screen_h, .pointers = &f2, .pointer_count = 1});
     /* Sanity: pointer is NOT inside the sidebar footprint. */
     TEST_ASSERT_FALSE(nt_ui_inspector_pointer_consumed(s_fx.ctx));
@@ -1185,7 +1178,7 @@ static void pick_parent_child_frame(const nt_pointer_t *p) {
 
 static void test_inspector_viewport_pick_prefers_child_stepped_first(void) {
     nt_ui_inspector_set_active(s_fx.ctx, true);
-    nt_pointer_t p = make_pointer(120.0F, 120.0F);
+    nt_pointer_t p = ui_fx_pointer(120.0F, 120.0F, false, false, false);
     pick_parent_child_frame(&p);
     pick_parent_child_frame(&p);
     pick_parent_child_frame(&p);
@@ -1208,7 +1201,7 @@ static void test_inspector_highlight_ignores_panel_hover(void) {
     const float btn_h = 48.0F;
     const float btn_cx = btn_x + (btn_w * 0.5F);
     const float btn_cy = btn_y + (btn_h * 0.5F);
-    nt_pointer_t f1 = make_pointer(0.0F, 0.0F);
+    nt_pointer_t f1 = ui_fx_pointer(0.0F, 0.0F, false, false, false);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = screen_w, .layout_h = screen_h, .pointers = &f1, .pointer_count = 1});
     CLAY({.id = CLAY_ID("in_panel_widget"),
           .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = btn_x, .y = btn_y}},
@@ -1216,7 +1209,7 @@ static void test_inspector_highlight_ignores_panel_hover(void) {
     nt_ui_end(s_fx.ctx);
 
     /* Frame 2: pointer in sidebar; pointer_consumed gates the propagation off. */
-    nt_pointer_t f2 = make_pointer(btn_cx, btn_cy);
+    nt_pointer_t f2 = ui_fx_pointer(btn_cx, btn_cy, false, false, false);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = screen_w, .layout_h = screen_h, .pointers = &f2, .pointer_count = 1});
     /* Sanity: pointer IS inside the sidebar footprint. */
     TEST_ASSERT_TRUE(nt_ui_inspector_pointer_consumed(s_fx.ctx));
@@ -1237,13 +1230,13 @@ static void test_inspector_highlight_zero_when_no_pointer_over(void) {
     const float screen_h = 600.0F;
 
     /* Frame 1: declare nothing extra (empty root). */
-    nt_pointer_t f1 = make_pointer(0.0F, 0.0F);
+    nt_pointer_t f1 = ui_fx_pointer(0.0F, 0.0F, false, false, false);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = screen_w, .layout_h = screen_h, .pointers = &f1, .pointer_count = 1});
     CLAY({.id = CLAY_ID("empty_root")}) {}
     nt_ui_end(s_fx.ctx);
 
     /* Pointer at empty area; require no inspector-owned id leaks into highlight. */
-    nt_pointer_t f2 = make_pointer(50.0F, 50.0F);
+    nt_pointer_t f2 = ui_fx_pointer(50.0F, 50.0F, false, false, false);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = screen_w, .layout_h = screen_h, .pointers = &f2, .pointer_count = 1});
     TEST_ASSERT_FALSE(nt_ui_inspector_pointer_consumed(s_fx.ctx));
     CLAY({.id = CLAY_ID("empty_root")}) {}
@@ -1273,7 +1266,7 @@ static void test_inspector_viewport_hover_prefers_widget_over_child(void) {
     const float child_cy = panel_y + (panel_h * 0.5F);
 
     /* Frame 1: registered widget wrapping anonymous CLAY child filling the parent. */
-    nt_pointer_t f1 = make_pointer(0.0F, 0.0F);
+    nt_pointer_t f1 = ui_fx_pointer(0.0F, 0.0F, false, false, false);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = screen_w, .layout_h = screen_h, .pointers = &f1, .pointer_count = 1});
     CLAY({.id = CLAY_ID("widget_floater"),
           .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = panel_x, .y = panel_y}},
@@ -1285,7 +1278,7 @@ static void test_inspector_viewport_hover_prefers_widget_over_child(void) {
     nt_ui_end(s_fx.ctx);
 
     /* Frame 2: hover center; the registered widget must win over the anonymous child. */
-    nt_pointer_t f2 = make_pointer(child_cx, child_cy);
+    nt_pointer_t f2 = ui_fx_pointer(child_cx, child_cy, false, false, false);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = screen_w, .layout_h = screen_h, .pointers = &f2, .pointer_count = 1});
     TEST_ASSERT_FALSE(nt_ui_inspector_pointer_consumed(s_fx.ctx));
     CLAY({.id = CLAY_ID("widget_floater"),
@@ -1310,7 +1303,7 @@ static void test_inspector_inner_emits_carry_debug_layer(void) {
     const float panel_left_x = screen_w - 400.0F; /* NT_UI_INSPECTOR_PANEL_WIDTH = 400 */
 
     /* Pre-select so the info pane emits too. */
-    nt_pointer_t f1 = make_pointer(0.0F, 0.0F);
+    nt_pointer_t f1 = ui_fx_pointer(0.0F, 0.0F, false, false, false);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = screen_w, .layout_h = screen_h, .pointers = &f1, .pointer_count = 1});
     CLAY({.id = CLAY_ID("inspect_root")}) {
         nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("inspect_btn"), &s_btn_style, NULL, true);
@@ -1322,7 +1315,7 @@ static void test_inspector_inner_emits_carry_debug_layer(void) {
     nt_ui_end(s_fx.ctx);
 
     /* Second frame: stable bbox, info pane renders, full emit surface. */
-    nt_pointer_t f2 = make_pointer(0.0F, 0.0F);
+    nt_pointer_t f2 = ui_fx_pointer(0.0F, 0.0F, false, false, false);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = screen_w, .layout_h = screen_h, .pointers = &f2, .pointer_count = 1});
     CLAY({.id = CLAY_ID("inspect_root")}) {
         nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("inspect_btn"), &s_btn_style, NULL, true);
@@ -1384,7 +1377,7 @@ static void test_inspector_alternations_capped_after_strategy_a(void) {
     const float panel_left_x = screen_w - 400.0F; /* NT_UI_INSPECTOR_PANEL_WIDTH = 400 */
 
     /* Frame 1: declare so prev-frame bbox exists. */
-    nt_pointer_t f1 = make_pointer(0.0F, 0.0F);
+    nt_pointer_t f1 = ui_fx_pointer(0.0F, 0.0F, false, false, false);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = screen_w, .layout_h = screen_h, .pointers = &f1, .pointer_count = 1});
     CLAY({.id = CLAY_ID("perf_root"), .layout = {.padding = CLAY_PADDING_ALL(20)}, .backgroundColor = {30, 30, 30, 255}}) {
         nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("perf_btn"), &s_btn_style, NULL, true);
@@ -1396,7 +1389,7 @@ static void test_inspector_alternations_capped_after_strategy_a(void) {
     nt_ui_end(s_fx.ctx);
 
     /* Frame 2: full inspector emit -- tree rows + info pane. */
-    nt_pointer_t f2 = make_pointer(0.0F, 0.0F);
+    nt_pointer_t f2 = ui_fx_pointer(0.0F, 0.0F, false, false, false);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = screen_w, .layout_h = screen_h, .pointers = &f2, .pointer_count = 1});
     CLAY({.id = CLAY_ID("perf_root"), .layout = {.padding = CLAY_PADDING_ALL(20)}, .backgroundColor = {30, 30, 30, 255}}) {
         nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("perf_btn"), &s_btn_style, NULL, true);
@@ -1461,7 +1454,7 @@ static void test_inspector_tree_pane_clip_emits_static_bg(void) {
     nt_ui_inspector_set_active(s_fx.ctx, true);
     const float screen_w = 1280.0F;
     const float screen_h = 800.0F;
-    nt_pointer_t mouse = make_pointer(-100.0F, -100.0F);
+    nt_pointer_t mouse = ui_fx_pointer(-100.0F, -100.0F, false, false, false);
 
     /* Two frames so the clip element's bbox is solved. */
     for (int rep = 0; rep < 2; ++rep) {
@@ -1513,7 +1506,7 @@ static void test_inspector_alternations_bulk_scene_after_strategy_a(void) {
     const float panel_left_x = screen_w - 400.0F;
 
     /* Frame 1: declare 20 buttons; frame 2 has settled bboxes. */
-    nt_pointer_t f1 = make_pointer(0.0F, 0.0F);
+    nt_pointer_t f1 = ui_fx_pointer(0.0F, 0.0F, false, false, false);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = screen_w, .layout_h = screen_h, .pointers = &f1, .pointer_count = 1});
     CLAY({.id = CLAY_ID("bulk_root"), .layout = {.padding = CLAY_PADDING_ALL(20), .childGap = 8}, .backgroundColor = {30, 30, 30, 255}}) {
         for (int i = 0; i < 20; ++i) {
@@ -1528,7 +1521,7 @@ static void test_inspector_alternations_bulk_scene_after_strategy_a(void) {
     nt_ui_end(s_fx.ctx);
 
     /* Frame 2: full surface. */
-    nt_pointer_t f2 = make_pointer(0.0F, 0.0F);
+    nt_pointer_t f2 = ui_fx_pointer(0.0F, 0.0F, false, false, false);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = screen_w, .layout_h = screen_h, .pointers = &f2, .pointer_count = 1});
     CLAY({.id = CLAY_ID("bulk_root"), .layout = {.padding = CLAY_PADDING_ALL(20), .childGap = 8}, .backgroundColor = {30, 30, 30, 255}}) {
         for (int i = 0; i < 20; ++i) {
@@ -1588,7 +1581,7 @@ static void test_inspector_alternations_bulk_scene_after_strategy_a(void) {
  * helper. Tall content overflows so wheel can scroll. The pointer sits at (ptr_x,100) so a
  * caller can aim it on/off the pane. */
 static void emit_scroll_pane_frame(float screen_w, float screen_h, float ptr_x, float wheel_dy) {
-    nt_pointer_t p = make_pointer(ptr_x, 100.0F);
+    nt_pointer_t p = ui_fx_pointer(ptr_x, 100.0F, false, false, false);
     p.wheel_dy = wheel_dy;
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = screen_w, .layout_h = screen_h, .dt = 1.0F / 60.0F, .pointers = &p, .pointer_count = 1});
     CLAY({.id = CLAY_ID("scroll_pane_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(200)}}}) {
@@ -1641,7 +1634,7 @@ static void test_inspector_layer_split_collapses_dispatch(void) {
     const float panel_left_x = screen_w - 400.0F;
 
     /* Frame 1: declare so prev-frame bbox exists for the info pane. */
-    nt_pointer_t f1 = make_pointer(0.0F, 0.0F);
+    nt_pointer_t f1 = ui_fx_pointer(0.0F, 0.0F, false, false, false);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = screen_w, .layout_h = screen_h, .pointers = &f1, .pointer_count = 1});
     CLAY({.id = CLAY_ID("split_root"), .layout = {.padding = CLAY_PADDING_ALL(20)}, .backgroundColor = {30, 30, 30, 255}}) {
         nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("split_btn"), &s_btn_style, NULL, true);
@@ -1653,7 +1646,7 @@ static void test_inspector_layer_split_collapses_dispatch(void) {
     nt_ui_end(s_fx.ctx);
 
     /* Frame 2: full surface. */
-    nt_pointer_t f2 = make_pointer(0.0F, 0.0F);
+    nt_pointer_t f2 = ui_fx_pointer(0.0F, 0.0F, false, false, false);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = screen_w, .layout_h = screen_h, .pointers = &f2, .pointer_count = 1});
     CLAY({.id = CLAY_ID("split_root"), .layout = {.padding = CLAY_PADDING_ALL(20)}, .backgroundColor = {30, 30, 30, 255}}) {
         nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("split_btn"), &s_btn_style, NULL, true);
@@ -1810,7 +1803,7 @@ static void test_inspector_hover_transformed_widget(void) {
     const float btn_cy = btn_y + (btn_h * 0.5F);
 
     /* Frame 1: declare under transform; bbox cached + accum recorded. */
-    nt_pointer_t f1 = make_pointer(0.0F, 0.0F);
+    nt_pointer_t f1 = ui_fx_pointer(0.0F, 0.0F, false, false, false);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = screen_w, .layout_h = screen_h, .pointers = &f1, .pointer_count = 1});
     nt_ui_transform_t baked = nt_ui_transform_defaults();
     baked.rotation_z = 25.0F * 0.017453292F;
@@ -1838,7 +1831,7 @@ static void test_inspector_hover_transformed_widget(void) {
     /* Sanity: this coord is OUTSIDE the axis-aligned layout AABB. */
     TEST_ASSERT_TRUE(ry > btn_y + btn_h);
 
-    nt_pointer_t f2 = make_pointer(rx, ry);
+    nt_pointer_t f2 = ui_fx_pointer(rx, ry, false, false, false);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = screen_w, .layout_h = screen_h, .pointers = &f2, .pointer_count = 1});
     TEST_ASSERT_FALSE(nt_ui_inspector_pointer_consumed(s_fx.ctx));
     CLAY({.id = CLAY_ID("xf_btn"),
@@ -1868,7 +1861,7 @@ static void test_inspector_overlay_scissor_clips_highlight_outside_panel(void) {
     const float btn_h = 48.0F;
 
     /* Frame 1: declare so Clay records the bbox. */
-    nt_pointer_t f1 = make_pointer(0.0F, 0.0F);
+    nt_pointer_t f1 = ui_fx_pointer(0.0F, 0.0F, false, false, false);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = screen_w, .layout_h = screen_h, .pointers = &f1, .pointer_count = 1});
     CLAY({.id = CLAY_ID("scissor_target"),
           .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = btn_x, .y = btn_y}},
@@ -1877,7 +1870,7 @@ static void test_inspector_overlay_scissor_clips_highlight_outside_panel(void) {
     nt_ui_end(s_fx.ctx);
 
     /* Frame 2: stable bbox; selected_id propagates to highlight_id. */
-    nt_pointer_t f2 = make_pointer(0.0F, 0.0F);
+    nt_pointer_t f2 = ui_fx_pointer(0.0F, 0.0F, false, false, false);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = screen_w, .layout_h = screen_h, .pointers = &f2, .pointer_count = 1});
     CLAY({.id = CLAY_ID("scissor_target"),
           .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = btn_x, .y = btn_y}},
@@ -1917,7 +1910,7 @@ static void test_inspector_inactive_no_interception(void) {
 
     const float screen_w = 800.0F;
     const float screen_h = 600.0F;
-    nt_pointer_t mouse = make_pointer(600.0F, 200.0F); /* would be in sidebar if active */
+    nt_pointer_t mouse = ui_fx_pointer(600.0F, 200.0F, false, false, false); /* would be in sidebar if active */
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = screen_w, .layout_h = screen_h, .pointers = &mouse, .pointer_count = 1});
     /* Even with the pointer "in sidebar coords", pointer_consumed must be false. */
     TEST_ASSERT_FALSE(nt_ui_inspector_pointer_consumed(s_fx.ctx));
@@ -1953,7 +1946,7 @@ static void test_inspector_metrics_set_changes_input_consume_gate(void) {
     const float screen_h = 600.0F;
 
     /* Default panel_width = 400 -> sidebar covers x=400..800. x=420 is INSIDE. */
-    nt_pointer_t p_default = make_pointer(420.0F, 100.0F);
+    nt_pointer_t p_default = ui_fx_pointer(420.0F, 100.0F, false, false, false);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = screen_w, .layout_h = screen_h, .pointers = &p_default, .pointer_count = 1});
     TEST_ASSERT_TRUE_MESSAGE(nt_ui_inspector_pointer_consumed(s_fx.ctx), "default 400 panel: pointer at x=420 must be consumed");
     nt_ui_end(s_fx.ctx);
@@ -1964,14 +1957,14 @@ static void test_inspector_metrics_set_changes_input_consume_gate(void) {
     nt_ui_inspector_set_metrics(s_fx.ctx, &narrow);
     TEST_ASSERT_TRUE(fabsf(s_fx.ctx->inspector_metrics.panel_width - 320.0F) <= 1e-3F);
 
-    nt_pointer_t p_after = make_pointer(420.0F, 100.0F);
+    nt_pointer_t p_after = ui_fx_pointer(420.0F, 100.0F, false, false, false);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = screen_w, .layout_h = screen_h, .pointers = &p_after, .pointer_count = 1});
     TEST_ASSERT_FALSE_MESSAGE(nt_ui_inspector_pointer_consumed(s_fx.ctx), "after set_metrics(panel_width=320): pointer at x=420 must NOT be consumed");
     nt_ui_end(s_fx.ctx);
 
     /* Sanity: a pointer INSIDE the narrowed panel still triggers. x=600 is
      * inside 320 (covers 480..800) and was already inside default 400. */
-    nt_pointer_t p_in_narrow = make_pointer(600.0F, 100.0F);
+    nt_pointer_t p_in_narrow = ui_fx_pointer(600.0F, 100.0F, false, false, false);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = screen_w, .layout_h = screen_h, .pointers = &p_in_narrow, .pointer_count = 1});
     TEST_ASSERT_TRUE_MESSAGE(nt_ui_inspector_pointer_consumed(s_fx.ctx), "narrowed 320 panel: pointer at x=600 must be consumed");
     nt_ui_end(s_fx.ctx);
@@ -2019,7 +2012,7 @@ static void test_inspector_metrics_set_changes_overlay_scissor(void) {
     const float btn_h = 48.0F;
 
     /* Frame 1: declare so Clay records the bbox. */
-    nt_pointer_t f1 = make_pointer(0.0F, 0.0F);
+    nt_pointer_t f1 = ui_fx_pointer(0.0F, 0.0F, false, false, false);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = screen_w, .layout_h = screen_h, .pointers = &f1, .pointer_count = 1});
     CLAY({.id = CLAY_ID("metric_scissor_target"),
           .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = btn_x, .y = btn_y}},
@@ -2028,7 +2021,7 @@ static void test_inspector_metrics_set_changes_overlay_scissor(void) {
     nt_ui_end(s_fx.ctx);
 
     /* Frame 2: stable bbox; selected_id propagates to highlight_id. */
-    nt_pointer_t f2 = make_pointer(0.0F, 0.0F);
+    nt_pointer_t f2 = ui_fx_pointer(0.0F, 0.0F, false, false, false);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = screen_w, .layout_h = screen_h, .pointers = &f2, .pointer_count = 1});
     CLAY({.id = CLAY_ID("metric_scissor_target"),
           .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = btn_x, .y = btn_y}},
@@ -2082,7 +2075,7 @@ static void test_inspector_over_disabled_widget_and_scroll(void) {
 
     /* Pointer parked over the disabled checkbox so the viewport-hover scan picks the blocked
      * id and the inspector reads its def for the pill/selected-info pane. */
-    nt_pointer_t mouse = make_pointer(60.0F, 60.0F);
+    nt_pointer_t mouse = ui_fx_pointer(60.0F, 60.0F, false, false, false);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &mouse, .pointer_count = 1});
     CLAY({.id = CLAY_ID("root")}) {
         nt_ui_checkbox(s_fx.ctx, NULL, 0U, nt_ui_id("locked"), "Locked (disabled)", &locked, &cb, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(40)}}},
@@ -2126,7 +2119,7 @@ static void test_inspector_over_disabled_widget_and_scroll(void) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_inspector_budget_capped_on_large_scene(void) {
     nt_ui_inspector_set_active(s_fx.ctx, true);
-    nt_pointer_t mouse = make_pointer(-100.0F, -100.0F);
+    nt_pointer_t mouse = ui_fx_pointer(-100.0F, -100.0F, false, false, false);
     const int32_t cap = (int32_t)s_fx.ctx->max_elements; /* Clay layoutElements capacity == max_elements */
     /* 600 named leaves: unguarded, the inspector emit blows ~4x past the 1024 cap and traps. */
     for (int rep = 0; rep < 3; ++rep) {
@@ -2171,7 +2164,7 @@ static bool inspector_frozen_has_text(const nt_ui_context_t *ctx, const char *ne
 }
 
 static void inspector_emit_leaf_scene(int leaf_count) {
-    nt_pointer_t mouse = make_pointer(-100.0F, -100.0F);
+    nt_pointer_t mouse = ui_fx_pointer(-100.0F, -100.0F, false, false, false);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &mouse, .pointer_count = 1});
     CLAY({.id = CLAY_ID("trunc_root")}) {
         for (int i = 0; i < leaf_count; ++i) {
@@ -2207,7 +2200,7 @@ static void test_inspector_selected_unresolvable_id_no_crash(void) {
     nt_ui_inspector_set_active(s_fx.ctx, true);
     const float screen_w = 800.0F;
     const float screen_h = 600.0F;
-    nt_pointer_t mouse = make_pointer(-100.0F, -100.0F);
+    nt_pointer_t mouse = ui_fx_pointer(-100.0F, -100.0F, false, false, false);
 
     /* An id never declared in this Clay context's lifetime resolves to the DEFAULT sentinel. */
     s_fx.ctx->inspector_selected_id = nt_ui_id("never_declared_widget");
@@ -2251,7 +2244,7 @@ static void test_inspector_truncated_pane_scroll_press_safe(void) {
     const float ptr_y = 200.0F;
 
     /* Warm-up so the pane solves its bbox + content height (wheel ownership has a 1-frame lag). */
-    nt_pointer_t warm = make_pointer(ptr_x, ptr_y);
+    nt_pointer_t warm = ui_fx_pointer(ptr_x, ptr_y, false, false, false);
     inspector_marker_scene(screen_w, screen_h, &warm);
     inspector_marker_scene(screen_w, screen_h, &warm);
 
@@ -2271,7 +2264,7 @@ static void test_inspector_truncated_pane_scroll_press_safe(void) {
     /* Wheel down hard while a selection is live; the offset clamps at the natural bottom. The marker +
      * info pane re-emit every frame and resolve the (possibly unhashed) selection -> must not crash. */
     for (int i = 0; i < 60; ++i) {
-        nt_pointer_t w = make_pointer(ptr_x, ptr_y);
+        nt_pointer_t w = ui_fx_pointer(ptr_x, ptr_y, false, false, false);
         w.wheel_dy = 1.0F;
         inspector_marker_scene(screen_w, screen_h, &w);
     }
@@ -2283,7 +2276,7 @@ static void test_inspector_truncated_pane_scroll_press_safe(void) {
  * that path: inspector ON, a named scene tall enough to overflow the tree pane, the pointer parked
  * in the pane, a wheel notch every frame. Pane state lives under the ntInsp_OuterScrollPane id. */
 static void inspector_scene_frame(float screen_w, float screen_h, float ptr_x, float ptr_y, float wheel_dy) {
-    nt_pointer_t p = make_pointer(ptr_x, ptr_y);
+    nt_pointer_t p = ui_fx_pointer(ptr_x, ptr_y, false, false, false);
     p.wheel_dy = wheel_dy;
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = screen_w, .layout_h = screen_h, .dt = 1.0F / 60.0F, .pointers = &p, .pointer_count = 1});
     /* Enough named leaves that the inspector's ~5-6x per-row element multiplier trips its own Clay
@@ -2348,7 +2341,7 @@ static void inspector_over_game_scroll_pointer_frame(float screen_w, float scree
 }
 
 static void inspector_over_game_scroll_frame(float screen_w, float screen_h, float ptr_x, float ptr_y, float wheel_dy) {
-    nt_pointer_t p = make_pointer(ptr_x, ptr_y);
+    nt_pointer_t p = ui_fx_pointer(ptr_x, ptr_y, false, false, false);
     p.wheel_dy = wheel_dy;
     inspector_over_game_scroll_pointer_frame(screen_w, screen_h, &p);
 }
@@ -2359,7 +2352,7 @@ static void test_inspector_sidebar_drops_pending_game_drag(void) {
     nt_ui_inspector_set_active(s_fx.ctx, true);
     const float screen_w = 1280.0F;
     const float screen_h = 800.0F;
-    nt_pointer_t p = make_pointer(500.0F, 400.0F);
+    nt_pointer_t p = ui_fx_pointer(500.0F, 400.0F, false, false, false);
     inspector_over_game_scroll_pointer_frame(screen_w, screen_h, &p);
     inspector_over_game_scroll_pointer_frame(screen_w, screen_h, &p);
     p.buttons[NT_BUTTON_LEFT].is_down = true;
@@ -2411,13 +2404,6 @@ static void emit_scroll_pane_drag_frame(float screen_w, float screen_h, const nt
 }
 
 /* Build a left-pressed pointer at (x,y) with the press/hold edge flags set explicitly. */
-static nt_pointer_t make_drag_pointer(float x, float y, bool is_pressed, bool is_down) {
-    nt_pointer_t p = make_pointer(x, y);
-    p.buttons[NT_BUTTON_LEFT].is_pressed = is_pressed;
-    p.buttons[NT_BUTTON_LEFT].is_down = is_down;
-    return p;
-}
-
 /* ---- Pointer/touch drag past the threshold tracks the pane 1:1 (the wheel-only bug repro). ---- */
 static void test_inspector_pane_drag_tracks_1to1(void) {
     const float screen_w = 1280.0F;
@@ -2426,16 +2412,16 @@ static void test_inspector_pane_drag_tracks_1to1(void) {
     const float px = 100.0F; /* inside the 200-wide pane */
 
     /* Frame 1: idle, establishes prev-frame bbox + content dims. */
-    nt_pointer_t f1 = make_pointer(px, 100.0F);
+    nt_pointer_t f1 = ui_fx_pointer(px, 100.0F, false, false, false);
     emit_scroll_pane_drag_frame(screen_w, screen_h, &f1);
 
     /* Frame 2: fresh press inside the pane -> the press starts a pending gesture on the pane. */
-    nt_pointer_t f2 = make_drag_pointer(px, 100.0F, true, true);
+    nt_pointer_t f2 = ui_fx_pointer(px, 100.0F, true, true, false);
     emit_scroll_pane_drag_frame(screen_w, screen_h, &f2);
 
     /* Frame 3: held, dragged 30px up -> crosses the 8px threshold and latches. The latch frame
      * strips the threshold radius, so pos moves up by (30 - 8) = 22px in Clay's negative-down sign. */
-    nt_pointer_t f3 = make_drag_pointer(px, 70.0F, false, true);
+    nt_pointer_t f3 = ui_fx_pointer(px, 70.0F, true, false, false);
     emit_scroll_pane_drag_frame(screen_w, screen_h, &f3);
     const nt_ui_scroll_state_t *s3 = (const nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, pane_id);
     TEST_ASSERT_NOT_NULL(s3);
@@ -2445,7 +2431,7 @@ static void test_inspector_pane_drag_tracks_1to1(void) {
     TEST_ASSERT_TRUE_MESSAGE(fabsf(after_latch - (-22.0F)) < 0.5F, "latch frame must route (drag - threshold) 1:1");
 
     /* Frame 4: held, dragged a further 40px up -> latched, full per-frame delta routes 1:1. */
-    nt_pointer_t f4 = make_drag_pointer(px, 30.0F, false, true);
+    nt_pointer_t f4 = ui_fx_pointer(px, 30.0F, true, false, false);
     emit_scroll_pane_drag_frame(screen_w, screen_h, &f4);
     const nt_ui_scroll_state_t *s4 = (const nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, pane_id);
     TEST_ASSERT_NOT_NULL(s4);
@@ -2460,17 +2446,17 @@ static void test_inspector_pane_drag_release_flings(void) {
     const float px = 100.0F;
 
     /* Frame 1: idle bbox. */
-    nt_pointer_t f1 = make_pointer(px, 150.0F);
+    nt_pointer_t f1 = ui_fx_pointer(px, 150.0F, false, false, false);
     emit_scroll_pane_drag_frame(screen_w, screen_h, &f1);
 
     /* Frame 2: press arms. */
-    nt_pointer_t f2 = make_drag_pointer(px, 150.0F, true, true);
+    nt_pointer_t f2 = ui_fx_pointer(px, 150.0F, true, true, false);
     emit_scroll_pane_drag_frame(screen_w, screen_h, &f2);
 
     /* Frames 3-4: fast drag up (60px/frame) so the release-fling velocity sampler charges. */
-    nt_pointer_t f3 = make_drag_pointer(px, 90.0F, false, true);
+    nt_pointer_t f3 = ui_fx_pointer(px, 90.0F, true, false, false);
     emit_scroll_pane_drag_frame(screen_w, screen_h, &f3);
-    nt_pointer_t f4 = make_drag_pointer(px, 30.0F, false, true);
+    nt_pointer_t f4 = ui_fx_pointer(px, 30.0F, true, false, false);
     emit_scroll_pane_drag_frame(screen_w, screen_h, &f4);
     const nt_ui_scroll_state_t *sdrag = (const nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, pane_id);
     TEST_ASSERT_NOT_NULL(sdrag);
@@ -2478,7 +2464,7 @@ static void test_inspector_pane_drag_release_flings(void) {
 
     /* Frame 5: release (button up) -> drag ends, fling owns the rest. One coast frame must move past
      * the release point (momentum carried), proving the fling exists (not just a hard stop). */
-    nt_pointer_t f5 = make_pointer(px, 30.0F);
+    nt_pointer_t f5 = ui_fx_pointer(px, 30.0F, false, false, false);
     emit_scroll_pane_drag_frame(screen_w, screen_h, &f5);
     const nt_ui_scroll_state_t *s5 = (const nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, pane_id);
     TEST_ASSERT_NOT_NULL(s5);
@@ -2487,7 +2473,7 @@ static void test_inspector_pane_drag_release_flings(void) {
 
     /* Frames 6+: no input -> friction decays the fling; it must eventually settle (vel -> 0). */
     for (int i = 0; i < 240; ++i) {
-        nt_pointer_t fi = make_pointer(px, 30.0F);
+        nt_pointer_t fi = ui_fx_pointer(px, 30.0F, false, false, false);
         emit_scroll_pane_drag_frame(screen_w, screen_h, &fi);
     }
     const nt_ui_scroll_state_t *sN = (const nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, pane_id);
@@ -2507,7 +2493,7 @@ static void test_inspector_pane_tap_still_selects_row(void) {
     const float ptr_y = 130.0F;
 
     /* Frame 1: build the tree (named leaves -> scrollable rows) so prev-frame bboxes exist. */
-    nt_pointer_t f1 = make_pointer(ptr_x, ptr_y);
+    nt_pointer_t f1 = ui_fx_pointer(ptr_x, ptr_y, false, false, false);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = screen_w, .layout_h = screen_h, .dt = 1.0F / 60.0F, .pointers = &f1, .pointer_count = 1});
     CLAY({.id = CLAY_ID("tap_root")}) {
         for (int i = 0; i < 40; ++i) {
@@ -2518,7 +2504,7 @@ static void test_inspector_pane_tap_still_selects_row(void) {
     s_fx.ctx->inspector_selected_id = 0U;
 
     /* Frame 2: a tap (press, no movement -> below threshold) over a tree row must set a selection. */
-    nt_pointer_t f2 = make_drag_pointer(ptr_x, ptr_y, true, true);
+    nt_pointer_t f2 = ui_fx_pointer(ptr_x, ptr_y, true, true, false);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = screen_w, .layout_h = screen_h, .dt = 1.0F / 60.0F, .pointers = &f2, .pointer_count = 1});
     CLAY({.id = CLAY_ID("tap_root")}) {
         for (int i = 0; i < 40; ++i) {
@@ -2560,19 +2546,19 @@ static void test_inspector_pane_drag_does_not_scroll_game(void) {
     const uint32_t pane_id = Clay__HashString(CLAY_STRING("ntInsp_OuterScrollPane"), 0, 0).id;
 
     /* Frames 1-2: idle so both panes solve their bbox + content dims. */
-    nt_pointer_t f1 = make_pointer(ptr_x, ptr_y);
+    nt_pointer_t f1 = ui_fx_pointer(ptr_x, ptr_y, false, false, false);
     inspector_drag_over_game_scroll_frame(screen_w, screen_h, &f1);
-    nt_pointer_t f2 = make_pointer(ptr_x, ptr_y);
+    nt_pointer_t f2 = ui_fx_pointer(ptr_x, ptr_y, false, false, false);
     inspector_drag_over_game_scroll_frame(screen_w, screen_h, &f2);
 
     /* Frame 3: press starts the pane gesture. */
-    nt_pointer_t f3 = make_drag_pointer(ptr_x, ptr_y, true, true);
+    nt_pointer_t f3 = ui_fx_pointer(ptr_x, ptr_y, true, true, false);
     inspector_drag_over_game_scroll_frame(screen_w, screen_h, &f3);
 
     /* Frames 4-5: drag up well past the threshold so the pane latches + scrolls. */
-    nt_pointer_t f4 = make_drag_pointer(ptr_x, ptr_y - 40.0F, false, true);
+    nt_pointer_t f4 = ui_fx_pointer(ptr_x, ptr_y - 40.0F, true, false, false);
     inspector_drag_over_game_scroll_frame(screen_w, screen_h, &f4);
-    nt_pointer_t f5 = make_drag_pointer(ptr_x, ptr_y - 90.0F, false, true);
+    nt_pointer_t f5 = ui_fx_pointer(ptr_x, ptr_y - 90.0F, true, false, false);
     inspector_drag_over_game_scroll_frame(screen_w, screen_h, &f5);
 
     const nt_ui_scroll_state_t *pane = (const nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, pane_id);
@@ -2609,7 +2595,7 @@ static float inspector_frozen_text_y(const nt_ui_context_t *ctx, const char *nee
 /* A named scene tall enough to overflow the inspector tree pane; the pointer is parked in the pane.
  * Each leaf gets a UNIQUE id string so a single tracked row's TEXT bbox can be followed across scroll. */
 static void inspector_named_scroll_frame(float screen_w, float screen_h, float ptr_x, float ptr_y, float wheel_dy) {
-    nt_pointer_t p = make_pointer(ptr_x, ptr_y);
+    nt_pointer_t p = ui_fx_pointer(ptr_x, ptr_y, false, false, false);
     p.wheel_dy = wheel_dy;
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = screen_w, .layout_h = screen_h, .dt = 1.0F / 60.0F, .pointers = &p, .pointer_count = 1});
     /* Static so the id-string pointers outlive the layout solve (Clay stores the pointer, not a copy). */
@@ -2677,7 +2663,7 @@ static void test_inspector_row_click_after_scroll_selects_scrolled_row(void) {
 
     /* Click at offset 0 -> capture the element selected when the rows are unscrolled. */
     s_fx.ctx->inspector_selected_id = 0U;
-    nt_pointer_t click0 = make_drag_pointer(ptr_x, ptr_y, true, true);
+    nt_pointer_t click0 = ui_fx_pointer(ptr_x, ptr_y, true, true, false);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = screen_w, .layout_h = screen_h, .dt = 1.0F / 60.0F, .pointers = &click0, .pointer_count = 1});
     CLAY({.id = CLAY_ID("scrolltext_root")}) {
         for (int i = 0; i < 60; ++i) {
@@ -2699,7 +2685,7 @@ static void test_inspector_row_click_after_scroll_selects_scrolled_row(void) {
     /* Click at the SAME pointer y after scrolling -> a DIFFERENT element (the row that scrolled under
      * the cursor) must be selected. On the old pinned architecture the same row id would re-select. */
     s_fx.ctx->inspector_selected_id = 0U;
-    nt_pointer_t click1 = make_drag_pointer(ptr_x, ptr_y, true, true);
+    nt_pointer_t click1 = ui_fx_pointer(ptr_x, ptr_y, true, true, false);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = screen_w, .layout_h = screen_h, .dt = 1.0F / 60.0F, .pointers = &click1, .pointer_count = 1});
     CLAY({.id = CLAY_ID("scrolltext_root")}) {
         for (int i = 0; i < 60; ++i) {

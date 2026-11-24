@@ -342,7 +342,7 @@ static void test_popup_over_a_held_press_keeps_the_3d_capture(void) {
         }
         nt_ui_end(s_fx.ctx);
     }
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(id, s_fx.ctx->captures[0].active_id, "the 3D press under a new overlay keeps its capture");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(id, nt_ui_test_capture_active_id(s_fx.ctx, 0U), "the 3D press under a new overlay keeps its capture");
 }
 
 int main(void) {

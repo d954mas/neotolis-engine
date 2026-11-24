@@ -11,6 +11,7 @@
 #include "clay.h"
 #include "input/nt_input.h"
 #include "test_helpers/nt_assert_trap.h"
+#include "test_helpers/ui_fx_frame.h"
 #include "test_helpers/ui_test_arena.h"
 #include "test_helpers/ui_walker_fixture.h"
 #include "ui/nt_ui.h"
@@ -39,21 +40,10 @@ void tearDown(void) { ui_walker_fixture_shutdown(&s_fx); }
 
 static bool float_near(float a, float b) { return fabsf(a - b) <= 0.001F; }
 
-static nt_pointer_t make_pointer(float x, float y, bool is_down, bool is_pressed, bool is_released) {
-    nt_pointer_t p = {0};
-    p.x = x;
-    p.y = y;
-    p.active = true;
-    p.buttons[NT_BUTTON_LEFT].is_down = is_down;
-    p.buttons[NT_BUTTON_LEFT].is_pressed = is_pressed;
-    p.buttons[NT_BUTTON_LEFT].is_released = is_released;
-    return p;
-}
-
-static nt_pointer_t idle_at(float y) { return make_pointer(BTN_CX, y, false, false, false); }
-static nt_pointer_t press_at(float y) { return make_pointer(BTN_CX, y, true, true, false); }
-static nt_pointer_t hold_at(float y) { return make_pointer(BTN_CX, y, true, false, false); }
-static nt_pointer_t release_at(float y) { return make_pointer(BTN_CX, y, false, false, true); }
+static nt_pointer_t idle_at(float y) { return ui_fx_pointer(BTN_CX, y, false, false, false); }
+static nt_pointer_t press_at(float y) { return ui_fx_pointer(BTN_CX, y, true, true, false); }
+static nt_pointer_t hold_at(float y) { return ui_fx_pointer(BTN_CX, y, true, false, false); }
+static nt_pointer_t release_at(float y) { return ui_fx_pointer(BTN_CX, y, false, false, true); }
 
 static void declare_btn_element(void) {
     CLAY({.id = CLAY_ID("btn"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = BTN_X, .y = BTN_Y}}, .layout = {.sizing = {CLAY_SIZING_FIXED(BTN_W), CLAY_SIZING_FIXED(BTN_H)}}}) {}

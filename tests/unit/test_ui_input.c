@@ -23,6 +23,7 @@
 #include "input/nt_input_feed.h"
 #include "test_helpers/nt_assert_trap.h"
 #include "test_helpers/nt_input_test_frame.h"
+#include "test_helpers/ui_fx_frame.h"
 #include "test_helpers/ui_test_arena.h"
 #include "test_helpers/ui_walker_fixture.h"
 #include "ui/nt_ui.h"
@@ -37,11 +38,6 @@
 alignas(NT_UI_ARENA_ALIGN) static uint8_t s_arena[NT_UI_TEST_ARENA_SIZE];
 static ui_walker_fixture_t s_fx;
 
-/* One UI frame: publish the input fed since the last frame, then begin. */
-static void ui_frame_begin(nt_ui_context_t *ctx, float w, float h, float dt, const nt_pointer_t *p, uint32_t count, uint32_t primary) {
-    nt_input_poll();
-    nt_ui_begin(ctx, &(nt_ui_frame_desc_t){.layout_w = w, .layout_h = h, .dt = dt, .pointers = p, .pointer_count = count, .primary = primary});
-}
 static nt_ui_input_style_t s_style;
 static nt_ui_input_props_t s_props; /* per-field behaviour; tests set allow/password/keyboard here */
 
@@ -50,7 +46,7 @@ static nt_ui_input_props_t s_props; /* per-field behaviour; tests set allow/pass
 static nt_ui_interaction_t s_e2e_a;
 static nt_ui_interaction_t s_e2e_b;
 static void e2e_frame(void) {
-    ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, g_nt_input.pointers, NT_INPUT_MAX_POINTERS, g_nt_input.primary);
+    ui_fx_frame_begin_ex(s_fx.ctx, 1.0F / 60.0F, g_nt_input.pointers, NT_INPUT_MAX_POINTERS, g_nt_input.primary);
     CLAY({.id = CLAY_ID("e2e_root"), .layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(100)}}}) {
         CLAY({.id = CLAY_ID("e2e_a"), .layout = {.sizing = {CLAY_SIZING_FIXED(100), CLAY_SIZING_FIXED(100)}}}) { s_e2e_a = nt_ui_step(s_fx.ctx, CLAY_ID("e2e_a").id, NULL); }
         CLAY({.id = CLAY_ID("e2e_b"), .layout = {.sizing = {CLAY_SIZING_FIXED(100), CLAY_SIZING_FIXED(100)}}}) { s_e2e_b = nt_ui_step(s_fx.ctx, CLAY_ID("e2e_b").id, NULL); }
@@ -126,17 +122,6 @@ void tearDown(void) {
     nt_input_shutdown();
 }
 
-static nt_pointer_t make_pointer(float x, float y, bool down, bool pressed, bool released) {
-    nt_pointer_t p = {0};
-    p.x = x;
-    p.y = y;
-    p.active = true;
-    p.buttons[NT_BUTTON_LEFT].is_down = down;
-    p.buttons[NT_BUTTON_LEFT].is_pressed = pressed;
-    p.buttons[NT_BUTTON_LEFT].is_released = released;
-    return p;
-}
-
 static const nt_pointer_t IDLE_PTR = {.x = 0.0F, .y = 0.0F, .active = true};
 
 /* First IMAGE render command in the frozen list (the field's bg sprite, when bg_art is set). */
@@ -165,7 +150,7 @@ static const Clay_RenderCommand *find_field_bg_rect(const nt_ui_context_t *ctx) 
 /* One frame with a single field at the top of a 300x200 list with 1000-tall content. */
 static void field_in_scroll_frame(const nt_pointer_t *p, uint32_t id, char *buf, size_t cap) {
     const nt_ui_scroll_style_t list = nt_ui_scroll_style_defaults();
-    ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 0.016F, p, 1, 0);
+    ui_fx_frame_begin(s_fx.ctx, p);
     CLAY({.id = CLAY_ID("root"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = IN_X, .y = IN_Y}}}) {
         nt_ui_scroll_begin(s_fx.ctx, NULL, CLAY_ID("list").id, &list, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(300), CLAY_SIZING_FIXED(200)}}});
         CLAY({.id = CLAY_ID("list_content"), .layout = {.sizing = {CLAY_SIZING_FIXED(300), CLAY_SIZING_FIXED(1000)}, .layoutDirection = CLAY_TOP_TO_BOTTOM}}) {
@@ -182,13 +167,13 @@ static void test_input_in_scroll_focuses_on_tap_release(void) {
     const uint32_t id = 0x1F00D01U;
     const float x = IN_X + 50.0F;
     const float y = IN_Y + (IN_H * 0.5F);
-    nt_pointer_t p = make_pointer(x, y, false, false, false);
+    nt_pointer_t p = ui_fx_pointer(x, y, false, false, false);
     field_in_scroll_frame(&p, id, buf, sizeof buf);
     field_in_scroll_frame(&p, id, buf, sizeof buf);
-    p = make_pointer(x, y, true, true, false);
+    p = ui_fx_pointer(x, y, true, true, false);
     field_in_scroll_frame(&p, id, buf, sizeof buf);
     TEST_ASSERT_FALSE(nt_ui_input_focused(s_fx.ctx, id));
-    p = make_pointer(x, y, false, false, true);
+    p = ui_fx_pointer(x, y, false, false, true);
     field_in_scroll_frame(&p, id, buf, sizeof buf);
     TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, id));
 }
@@ -199,22 +184,22 @@ static void test_input_in_scroll_esc_during_press_stays_unfocused(void) {
     const uint32_t id = 0x1F00D03U;
     const float x = IN_X + 50.0F;
     const float y = IN_Y + (IN_H * 0.5F);
-    nt_pointer_t p = make_pointer(x, y, false, false, false);
+    nt_pointer_t p = ui_fx_pointer(x, y, false, false, false);
     field_in_scroll_frame(&p, id, buf, sizeof buf);
     field_in_scroll_frame(&p, id, buf, sizeof buf);
-    p = make_pointer(x, y, true, true, false);
+    p = ui_fx_pointer(x, y, true, true, false);
     field_in_scroll_frame(&p, id, buf, sizeof buf);
-    p = make_pointer(x, y, false, false, true);
+    p = ui_fx_pointer(x, y, false, false, true);
     field_in_scroll_frame(&p, id, buf, sizeof buf);
     TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, id));
-    p = make_pointer(x, y, true, true, false);
+    p = ui_fx_pointer(x, y, true, true, false);
     field_in_scroll_frame(&p, id, buf, sizeof buf);
     nt_input_feed(nt_test_key(NT_KEY_ESCAPE, true));
-    p = make_pointer(x, y, true, false, false);
+    p = ui_fx_pointer(x, y, true, false, false);
     field_in_scroll_frame(&p, id, buf, sizeof buf);
     nt_input_feed(nt_test_key(NT_KEY_ESCAPE, false));
     TEST_ASSERT_FALSE(nt_ui_input_focused(s_fx.ctx, id));
-    p = make_pointer(x, y, false, false, true);
+    p = ui_fx_pointer(x, y, false, false, true);
     field_in_scroll_frame(&p, id, buf, sizeof buf);
     TEST_ASSERT_FALSE(nt_ui_input_focused(s_fx.ctx, id));
 }
@@ -225,15 +210,15 @@ static void test_input_in_scroll_drag_never_focuses(void) {
     const uint32_t id = 0x1F00D02U;
     const float x = IN_X + 50.0F;
     const float y = IN_Y + (IN_H * 0.5F);
-    nt_pointer_t p = make_pointer(x, y, false, false, false);
+    nt_pointer_t p = ui_fx_pointer(x, y, false, false, false);
     field_in_scroll_frame(&p, id, buf, sizeof buf);
     field_in_scroll_frame(&p, id, buf, sizeof buf);
-    p = make_pointer(x, y, true, true, false);
+    p = ui_fx_pointer(x, y, true, true, false);
     field_in_scroll_frame(&p, id, buf, sizeof buf);
-    p = make_pointer(x, y - 40.0F, true, false, false);
+    p = ui_fx_pointer(x, y - 40.0F, true, false, false);
     field_in_scroll_frame(&p, id, buf, sizeof buf);
     TEST_ASSERT_EQUAL_UINT32(CLAY_ID("list").id, s_fx.ctx->captures[0].active_id);
-    p = make_pointer(x, y, false, false, true);
+    p = ui_fx_pointer(x, y, false, false, true);
     field_in_scroll_frame(&p, id, buf, sizeof buf);
     TEST_ASSERT_FALSE(nt_ui_input_focused(s_fx.ctx, id));
 }
@@ -241,7 +226,7 @@ static void test_input_in_scroll_drag_never_focuses(void) {
 /* One frame with a single field. Feeds the given pointer; returns the change flag. */
 static bool field_frame(const nt_pointer_t *p, uint32_t id, char *buf, size_t cap, bool enabled, bool *submitted) {
     bool changed = false;
-    ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 0.016F, p, 1, 0);
+    ui_fx_frame_begin(s_fx.ctx, p);
     CLAY({.id = CLAY_ID("root"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = IN_X, .y = IN_Y}}}) {
         changed = nt_ui_input_text(s_fx.ctx, NULL, 0, id, buf, cap, &s_props, &s_style, &s_field_decl, enabled, submitted);
     }
@@ -253,9 +238,9 @@ static bool field_frame(const nt_pointer_t *p, uint32_t id, char *buf, size_t ca
 static void warmup_focus(uint32_t id, char *buf, size_t cap) {
     (void)field_frame(&IDLE_PTR, id, buf, cap, true, NULL);
     /* Press inside the field to focus it (caret lands via hit-test on the warmed bbox). */
-    nt_pointer_t press = make_pointer(IN_X + PAD_X + 1.0F, IN_Y + (IN_H * 0.5F), true, true, false);
+    nt_pointer_t press = ui_fx_pointer(IN_X + PAD_X + 1.0F, IN_Y + (IN_H * 0.5F), true, true, false);
     (void)field_frame(&press, id, buf, cap, true, NULL);
-    nt_pointer_t rel = make_pointer(IN_X + PAD_X + 1.0F, IN_Y + (IN_H * 0.5F), false, false, true);
+    nt_pointer_t rel = ui_fx_pointer(IN_X + PAD_X + 1.0F, IN_Y + (IN_H * 0.5F), false, false, true);
     (void)field_frame(&rel, id, buf, cap, true, NULL);
 }
 
@@ -269,7 +254,7 @@ static bool key_frame(uint32_t id, char *buf, size_t cap, nt_key_t key) {
 
 /* One frame with two stacked fields (A on top, B below). Both buffers are char[32]. Feeds the pointer. */
 static void two_field_frame(const nt_pointer_t *p, uint32_t id_a, char *a, uint32_t id_b, char *b) {
-    ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 0.016F, p, 1, 0);
+    ui_fx_frame_begin(s_fx.ctx, p);
     CLAY({.id = CLAY_ID("root2"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = IN_X, .y = IN_Y}}}) {
         CLAY({.id = CLAY_ID("col2"), .layout = {.layoutDirection = CLAY_TOP_TO_BOTTOM}}) {
             (void)nt_ui_input_text(s_fx.ctx, NULL, 0, id_a, a, 32U, &s_props, &s_style, &s_field_decl, true, NULL);
@@ -281,7 +266,7 @@ static void two_field_frame(const nt_pointer_t *p, uint32_t id_a, char *a, uint3
 
 /* One frame with three stacked fields (A, B, C), each independently enabled. All buffers are char[32]. */
 static void three_field_frame(const nt_pointer_t *p, uint32_t ia, char *a, bool a_enabled, uint32_t ib, char *b, bool b_enabled, uint32_t ic, char *c, bool c_enabled) {
-    ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 0.016F, p, 1, 0);
+    ui_fx_frame_begin(s_fx.ctx, p);
     CLAY({.id = CLAY_ID("root3"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = IN_X, .y = IN_Y}}}) {
         CLAY({.id = CLAY_ID("col3"), .layout = {.layoutDirection = CLAY_TOP_TO_BOTTOM}}) {
             (void)nt_ui_input_text(s_fx.ctx, NULL, 0, ia, a, 32U, &s_props, &s_style, &s_field_decl, a_enabled, NULL);
@@ -295,7 +280,7 @@ static void three_field_frame(const nt_pointer_t *p, uint32_t ia, char *a, bool 
 /* One frame with a single GROW-width field inside a fixed-width parent: the field has a real rendered
  * width but its decl carries NO width, exercising the responsive-width (bbox-fallback) scroll path. */
 static void grow_field_frame(const nt_pointer_t *p, uint32_t id, char *buf, size_t cap) {
-    ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 0.016F, p, 1, 0);
+    ui_fx_frame_begin(s_fx.ctx, p);
     CLAY({.id = CLAY_ID("rootG"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = IN_X, .y = IN_Y}}, .layout = {.sizing = {CLAY_SIZING_FIXED(IN_W), CLAY_SIZING_FIXED(IN_H)}}}) {
         const Clay_ElementDeclaration grow_decl = {.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(IN_H)}}};
         (void)nt_ui_input_text(s_fx.ctx, NULL, 0, id, buf, cap, &s_props, &s_style, &grow_decl, true, NULL);
@@ -410,9 +395,9 @@ static void test_click_hit_test_boundary(void) {
 
     /* Click at ~2.4 glyphs from the text origin -> nearest boundary is after glyph 2 (caret=2). */
     const float click_x = IN_X + PAD_X + (GLYPH_W * 2.4F);
-    nt_pointer_t press = make_pointer(click_x, IN_Y + (IN_H * 0.5F), true, true, false);
+    nt_pointer_t press = ui_fx_pointer(click_x, IN_Y + (IN_H * 0.5F), true, true, false);
     (void)field_frame(&press, id, buf, sizeof buf, true, NULL);
-    nt_pointer_t rel = make_pointer(click_x, IN_Y + (IN_H * 0.5F), false, false, true);
+    nt_pointer_t rel = ui_fx_pointer(click_x, IN_Y + (IN_H * 0.5F), false, false, true);
     (void)field_frame(&rel, id, buf, sizeof buf, true, NULL);
 
     /* Insert 'Z' at the caret; if hit-test landed at boundary 2 it splices "abZcd". */
@@ -430,7 +415,7 @@ static void test_focus_tab_esc(void) {
     const uint32_t id_b = nt_ui_id("fb");
 
     /* One frame to register both fields + warm their bboxes. */
-    ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 0.016F, &IDLE_PTR, 1, 0);
+    ui_fx_frame_begin(s_fx.ctx, NULL);
     CLAY({.id = CLAY_ID("root"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = IN_X, .y = IN_Y}}}) {
         CLAY({.id = CLAY_ID("col"), .layout = {.layoutDirection = CLAY_TOP_TO_BOTTOM}}) {
             (void)nt_ui_input_text(s_fx.ctx, NULL, 0, id_a, a, sizeof a, &s_props, &s_style, &s_field_decl, true, NULL);
@@ -440,8 +425,8 @@ static void test_focus_tab_esc(void) {
     nt_ui_end(s_fx.ctx);
 
     /* Press inside field A to focus it. */
-    nt_pointer_t press = make_pointer(IN_X + PAD_X + 1.0F, IN_Y + (IN_H * 0.5F), true, true, false);
-    ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 0.016F, &press, 1, 0);
+    nt_pointer_t press = ui_fx_pointer(IN_X + PAD_X + 1.0F, IN_Y + (IN_H * 0.5F), true, true, false);
+    ui_fx_frame_begin(s_fx.ctx, &press);
     CLAY({.id = CLAY_ID("root"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = IN_X, .y = IN_Y}}}) {
         CLAY({.id = CLAY_ID("col"), .layout = {.layoutDirection = CLAY_TOP_TO_BOTTOM}}) {
             (void)nt_ui_input_text(s_fx.ctx, NULL, 0, id_a, a, sizeof a, &s_props, &s_style, &s_field_decl, true, NULL);
@@ -454,7 +439,7 @@ static void test_focus_tab_esc(void) {
 
     /* Tab: A keeps focus for the rest of this frame; B takes it at the next begin. */
     nt_input_feed(nt_test_key(NT_KEY_TAB, true));
-    ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 0.016F, &IDLE_PTR, 1, 0);
+    ui_fx_frame_begin(s_fx.ctx, NULL);
     CLAY({.id = CLAY_ID("root"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = IN_X, .y = IN_Y}}}) {
         CLAY({.id = CLAY_ID("col"), .layout = {.layoutDirection = CLAY_TOP_TO_BOTTOM}}) {
             (void)nt_ui_input_text(s_fx.ctx, NULL, 0, id_a, a, sizeof a, &s_props, &s_style, &s_field_decl, true, NULL);
@@ -468,7 +453,7 @@ static void test_focus_tab_esc(void) {
 
     /* A typed char next frame only edits B (now focused); A stays empty. */
     nt_input_feed(nt_test_char((uint32_t)'q'));
-    ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 0.016F, &IDLE_PTR, 1, 0);
+    ui_fx_frame_begin(s_fx.ctx, NULL);
     CLAY({.id = CLAY_ID("root"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = IN_X, .y = IN_Y}}}) {
         CLAY({.id = CLAY_ID("col"), .layout = {.layoutDirection = CLAY_TOP_TO_BOTTOM}}) {
             (void)nt_ui_input_text(s_fx.ctx, NULL, 0, id_a, a, sizeof a, &s_props, &s_style, &s_field_decl, true, NULL);
@@ -482,7 +467,7 @@ static void test_focus_tab_esc(void) {
 
     /* Esc: unfocus B. */
     nt_input_feed(nt_test_key(NT_KEY_ESCAPE, true));
-    ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 0.016F, &IDLE_PTR, 1, 0);
+    ui_fx_frame_begin(s_fx.ctx, NULL);
     CLAY({.id = CLAY_ID("root"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = IN_X, .y = IN_Y}}}) {
         CLAY({.id = CLAY_ID("col"), .layout = {.layoutDirection = CLAY_TOP_TO_BOTTOM}}) {
             (void)nt_ui_input_text(s_fx.ctx, NULL, 0, id_a, a, sizeof a, &s_props, &s_style, &s_field_decl, true, NULL);
@@ -504,13 +489,13 @@ static void test_focus_orphan_cleared(void) {
 
     /* Frame 1 without the field: begin still sees last frame's seen=1, so focus survives this begin
      * but seen stays 0 (the field never runs). */
-    ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 0.016F, &IDLE_PTR, 1, 0);
+    ui_fx_frame_begin(s_fx.ctx, NULL);
     CLAY({.id = CLAY_ID("root")}) {}
     nt_ui_end(s_fx.ctx);
 
     /* Frame 2's begin runs the orphan sweep on seen==0 -> focus is cleared so a global Esc=quit is
      * no longer gated forever. */
-    ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 0.016F, &IDLE_PTR, 1, 0);
+    ui_fx_frame_begin(s_fx.ctx, NULL);
     CLAY({.id = CLAY_ID("root")}) {}
     nt_ui_end(s_fx.ctx);
     TEST_ASSERT_FALSE(nt_ui_input_any_focused(s_fx.ctx));
@@ -558,14 +543,14 @@ static void test_field_focused_mid_frame_reads_no_key(void) {
     const uint32_t id = nt_ui_id("f");
     (void)field_frame(&IDLE_PTR, id, buf, sizeof buf, true, NULL);
     nt_input_feed(nt_test_key(NT_KEY_ENTER, true));
-    nt_pointer_t press = make_pointer(IN_X + PAD_X + 1.0F, IN_Y + (IN_H * 0.5F), true, true, false);
+    nt_pointer_t press = ui_fx_pointer(IN_X + PAD_X + 1.0F, IN_Y + (IN_H * 0.5F), true, true, false);
     bool submitted = false;
     (void)field_frame(&press, id, buf, sizeof buf, true, &submitted);
     nt_input_feed(nt_test_key(NT_KEY_ENTER, false));
     TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, id));
     TEST_ASSERT_FALSE_MESSAGE(submitted, "the Enter of the frame a press focuses the field is not its");
     nt_input_feed(nt_test_key(NT_KEY_ENTER, true));
-    nt_pointer_t held = make_pointer(IN_X + PAD_X + 1.0F, IN_Y + (IN_H * 0.5F), true, false, false);
+    nt_pointer_t held = ui_fx_pointer(IN_X + PAD_X + 1.0F, IN_Y + (IN_H * 0.5F), true, false, false);
     (void)field_frame(&held, id, buf, sizeof buf, true, &submitted);
     nt_input_feed(nt_test_key(NT_KEY_ENTER, false));
     TEST_ASSERT_TRUE(submitted);
@@ -648,11 +633,11 @@ static void test_double_click_word_select(void) {
 
     /* Two presses inside "foo" within the dbl window => double-click selects "foo". */
     const float click_x = IN_X + PAD_X + (GLYPH_W * 1.0F); /* over the 'o' of foo */
-    nt_pointer_t p1 = make_pointer(click_x, IN_Y + (IN_H * 0.5F), true, true, false);
+    nt_pointer_t p1 = ui_fx_pointer(click_x, IN_Y + (IN_H * 0.5F), true, true, false);
     (void)field_frame(&p1, id, buf, sizeof buf, true, NULL);
-    nt_pointer_t r1 = make_pointer(click_x, IN_Y + (IN_H * 0.5F), false, false, true);
+    nt_pointer_t r1 = ui_fx_pointer(click_x, IN_Y + (IN_H * 0.5F), false, false, true);
     (void)field_frame(&r1, id, buf, sizeof buf, true, NULL);
-    nt_pointer_t p2 = make_pointer(click_x, IN_Y + (IN_H * 0.5F), true, true, false);
+    nt_pointer_t p2 = ui_fx_pointer(click_x, IN_Y + (IN_H * 0.5F), true, true, false);
     (void)field_frame(&p2, id, buf, sizeof buf, true, NULL);
 
     /* Backspace now deletes the selected word "foo" (the leading space stays). */
@@ -670,11 +655,11 @@ static void test_word_select_fires_via_events(void) {
     (void)field_frame(&IDLE_PTR, id, buf, sizeof buf, true, NULL); /* warm the bbox */
 
     const float click_x = IN_X + PAD_X + (GLYPH_W * 1.0F); /* over the 'o' of foo */
-    nt_pointer_t p1 = make_pointer(click_x, IN_Y + (IN_H * 0.5F), true, true, false);
+    nt_pointer_t p1 = ui_fx_pointer(click_x, IN_Y + (IN_H * 0.5F), true, true, false);
     (void)field_frame(&p1, id, buf, sizeof buf, true, NULL);
-    nt_pointer_t r1 = make_pointer(click_x, IN_Y + (IN_H * 0.5F), false, false, true);
+    nt_pointer_t r1 = ui_fx_pointer(click_x, IN_Y + (IN_H * 0.5F), false, false, true);
     (void)field_frame(&r1, id, buf, sizeof buf, true, NULL);
-    nt_pointer_t p2 = make_pointer(click_x, IN_Y + (IN_H * 0.5F), true, true, false);
+    nt_pointer_t p2 = ui_fx_pointer(click_x, IN_Y + (IN_H * 0.5F), true, true, false);
     (void)field_frame(&p2, id, buf, sizeof buf, true, NULL);
 
     /* The events double_clicked drove word-select: the caret sits at the end of "foo" (byte 3). */
@@ -695,9 +680,9 @@ static void test_field_press_release_no_double_count(void) {
     const uint32_t after_warm = nt_ui_state_used_slots(s_fx.ctx);
 
     /* A fresh press-release cycle must not grow the pool. */
-    nt_pointer_t press = make_pointer(IN_X + PAD_X + 1.0F, IN_Y + (IN_H * 0.5F), true, true, false);
+    nt_pointer_t press = ui_fx_pointer(IN_X + PAD_X + 1.0F, IN_Y + (IN_H * 0.5F), true, true, false);
     (void)field_frame(&press, id, buf, sizeof buf, true, NULL);
-    nt_pointer_t rel = make_pointer(IN_X + PAD_X + 1.0F, IN_Y + (IN_H * 0.5F), false, false, true);
+    nt_pointer_t rel = ui_fx_pointer(IN_X + PAD_X + 1.0F, IN_Y + (IN_H * 0.5F), false, false, true);
     (void)field_frame(&rel, id, buf, sizeof buf, true, NULL);
 
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(after_warm, nt_ui_state_used_slots(s_fx.ctx), "a press-release must not grow the state pool");
@@ -851,7 +836,7 @@ static void test_clipboard_paste_replaces_selection(void) {
 static void test_password_mask_render(void) {
     /* "Аб" = 2 codepoints / 4 bytes -> the mask string is exactly 2 glyphs, not 4. */
     const char *src = "\xD0\x90\xD0\xB1";
-    ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &IDLE_PTR, 1, 0); /* scratch frame for the mask alloc */
+    ui_fx_frame_begin(s_fx.ctx, NULL); /* scratch frame for the mask alloc */
     const char *masked = nt_ui_input_build_display_text(src, (uint32_t)strlen(src));
     TEST_ASSERT_EQUAL_UINT(2U, (unsigned)strlen(masked)); /* 2 codepoints -> 2 mask chars */
     TEST_ASSERT_EQUAL_UINT8((uint8_t)'*', (uint8_t)masked[0]);
@@ -927,11 +912,11 @@ static void test_drag_select_range(void) {
     /* Press at the start (caret/anchor = 0), drag to ~3 glyphs, release: selects "abc". */
     const float x0 = IN_X + PAD_X + (GLYPH_W * 0.1F);
     const float x3 = IN_X + PAD_X + (GLYPH_W * 3.0F);
-    nt_pointer_t press = make_pointer(x0, IN_Y + (IN_H * 0.5F), true, true, false);
+    nt_pointer_t press = ui_fx_pointer(x0, IN_Y + (IN_H * 0.5F), true, true, false);
     (void)field_frame(&press, id, buf, sizeof buf, true, NULL);
-    nt_pointer_t move = make_pointer(x3, IN_Y + (IN_H * 0.5F), true, false, false);
+    nt_pointer_t move = ui_fx_pointer(x3, IN_Y + (IN_H * 0.5F), true, false, false);
     (void)field_frame(&move, id, buf, sizeof buf, true, NULL);
-    nt_pointer_t rel = make_pointer(x3, IN_Y + (IN_H * 0.5F), false, false, true);
+    nt_pointer_t rel = ui_fx_pointer(x3, IN_Y + (IN_H * 0.5F), false, false, true);
     (void)field_frame(&rel, id, buf, sizeof buf, true, NULL);
 
     /* Backspace deletes the dragged selection "abc", leaving "d". */
@@ -1128,7 +1113,7 @@ static void test_drag_abandoned_on_focus_loss(void) {
     (void)field_frame(&IDLE_PTR, id, buf, sizeof buf, true, NULL);
 
     /* A single press at the left edge focuses the field and arms a drag; caret/anchor collapse there. */
-    nt_pointer_t press = make_pointer(IN_X + PAD_X + 1.0F, IN_Y + (IN_H * 0.5F), true, true, false);
+    nt_pointer_t press = ui_fx_pointer(IN_X + PAD_X + 1.0F, IN_Y + (IN_H * 0.5F), true, true, false);
     (void)field_frame(&press, id, buf, sizeof buf, true, NULL);
     TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, id));
     uint32_t caret0 = 99U;
@@ -1139,14 +1124,14 @@ static void test_drag_abandoned_on_focus_loss(void) {
     /* Esc while still holding -> the field unfocuses (Esc handler runs after the drag block; the pointer
      * did not move this frame, so the caret is unchanged here). */
     nt_input_feed(nt_test_key(NT_KEY_ESCAPE, true));
-    nt_pointer_t hold = make_pointer(IN_X + PAD_X + 1.0F, IN_Y + (IN_H * 0.5F), true, false, false);
+    nt_pointer_t hold = ui_fx_pointer(IN_X + PAD_X + 1.0F, IN_Y + (IN_H * 0.5F), true, false, false);
     (void)field_frame(&hold, id, buf, sizeof buf, true, NULL);
     nt_input_feed(nt_test_key(NT_KEY_ESCAPE, false));
     TEST_ASSERT_FALSE(nt_ui_input_focused(s_fx.ctx, id));
 
     /* Still held, drag the pointer far right while UNFOCUSED. The abandoned drag must NOT move the caret
      * (the held-drag branch is gated on focus). */
-    nt_pointer_t drag_far = make_pointer(IN_X + IN_W - PAD_X - 1.0F, IN_Y + (IN_H * 0.5F), true, false, false);
+    nt_pointer_t drag_far = ui_fx_pointer(IN_X + IN_W - PAD_X - 1.0F, IN_Y + (IN_H * 0.5F), true, false, false);
     (void)field_frame(&drag_far, id, buf, sizeof buf, true, NULL);
     uint32_t caret1 = 99U;
     uint8_t drag1 = 9U;
@@ -1182,16 +1167,16 @@ static void test_click_refocus_other_field(void) {
 
     /* Click field A (top row) -> A focused. */
     const float ay = IN_Y + (IN_H * 0.5F);
-    nt_pointer_t press_a = make_pointer(IN_X + PAD_X + 1.0F, ay, true, true, false);
+    nt_pointer_t press_a = ui_fx_pointer(IN_X + PAD_X + 1.0F, ay, true, true, false);
     two_field_frame(&press_a, id_a, a, id_b, b);
-    nt_pointer_t rel_a = make_pointer(IN_X + PAD_X + 1.0F, ay, false, false, true);
+    nt_pointer_t rel_a = ui_fx_pointer(IN_X + PAD_X + 1.0F, ay, false, false, true);
     two_field_frame(&rel_a, id_a, a, id_b, b);
     TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, id_a));
     TEST_ASSERT_FALSE(nt_ui_input_focused(s_fx.ctx, id_b));
 
     /* Click field B (second row) WITHOUT Tab -> focus moves to B, A unfocuses. */
     const float by = IN_Y + IN_H + (IN_H * 0.5F);
-    nt_pointer_t press_b = make_pointer(IN_X + PAD_X + 1.0F, by, true, true, false);
+    nt_pointer_t press_b = ui_fx_pointer(IN_X + PAD_X + 1.0F, by, true, true, false);
     two_field_frame(&press_b, id_a, a, id_b, b);
     TEST_ASSERT_FALSE(nt_ui_input_focused(s_fx.ctx, id_a));
     TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, id_b));
@@ -1209,9 +1194,9 @@ static void test_tab_skips_disabled_field(void) {
 
     /* Click field A (top row) to focus it. */
     const float ay = IN_Y + (IN_H * 0.5F);
-    nt_pointer_t press = make_pointer(IN_X + PAD_X + 1.0F, ay, true, true, false);
+    nt_pointer_t press = ui_fx_pointer(IN_X + PAD_X + 1.0F, ay, true, true, false);
     three_field_frame(&press, ia, a, true, ib, b, false, ic, c, true);
-    nt_pointer_t rel = make_pointer(IN_X + PAD_X + 1.0F, ay, false, false, true);
+    nt_pointer_t rel = ui_fx_pointer(IN_X + PAD_X + 1.0F, ay, false, false, true);
     three_field_frame(&rel, ia, a, true, ib, b, false, ic, c, true);
     TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, ia));
 
@@ -1232,9 +1217,9 @@ static void test_tab_does_not_replay_edit_or_submit(void) {
     const uint32_t ia = nt_ui_id("edit_a");
     const uint32_t ib = nt_ui_id("edit_b");
     two_field_frame(&IDLE_PTR, ia, a, ib, b);
-    nt_pointer_t press = make_pointer(IN_X + PAD_X + 1.0F, IN_Y + (IN_H * 0.5F), true, true, false);
+    nt_pointer_t press = ui_fx_pointer(IN_X + PAD_X + 1.0F, IN_Y + (IN_H * 0.5F), true, true, false);
     two_field_frame(&press, ia, a, ib, b);
-    nt_pointer_t rel = make_pointer(IN_X + PAD_X + 1.0F, IN_Y + (IN_H * 0.5F), false, false, true);
+    nt_pointer_t rel = ui_fx_pointer(IN_X + PAD_X + 1.0F, IN_Y + (IN_H * 0.5F), false, false, true);
     two_field_frame(&rel, ia, a, ib, b);
     TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, ia));
 
@@ -1243,7 +1228,7 @@ static void test_tab_does_not_replay_edit_or_submit(void) {
     nt_input_feed(nt_test_key(NT_KEY_TAB, true));
     bool submitted_a = false;
     bool submitted_b = false;
-    ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 0.016F, &IDLE_PTR, 1, 0);
+    ui_fx_frame_begin(s_fx.ctx, NULL);
     CLAY({.id = CLAY_ID("root2"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = IN_X, .y = IN_Y}}}) {
         CLAY({.id = CLAY_ID("col2"), .layout = {.layoutDirection = CLAY_TOP_TO_BOTTOM}}) {
             (void)nt_ui_input_text(s_fx.ctx, NULL, 0, ia, a, sizeof a, &s_props, &s_style, &s_field_decl, true, &submitted_a);
@@ -1272,9 +1257,9 @@ static void test_escape_cancels_tab_advance(void) {
     const uint32_t ia = nt_ui_id("escape_a");
     const uint32_t ib = nt_ui_id("escape_b");
     two_field_frame(&IDLE_PTR, ia, a, ib, b);
-    nt_pointer_t press = make_pointer(IN_X + PAD_X + 1.0F, IN_Y + (IN_H * 0.5F), true, true, false);
+    nt_pointer_t press = ui_fx_pointer(IN_X + PAD_X + 1.0F, IN_Y + (IN_H * 0.5F), true, true, false);
     two_field_frame(&press, ia, a, ib, b);
-    nt_pointer_t rel = make_pointer(IN_X + PAD_X + 1.0F, IN_Y + (IN_H * 0.5F), false, false, true);
+    nt_pointer_t rel = ui_fx_pointer(IN_X + PAD_X + 1.0F, IN_Y + (IN_H * 0.5F), false, false, true);
     two_field_frame(&rel, ia, a, ib, b);
     TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, ia));
 
@@ -1299,26 +1284,26 @@ static void test_press_and_tab_in_one_frame(void) {
     const uint32_t ic = nt_ui_id("pc");
     three_field_frame(&IDLE_PTR, ia, a, true, ib, b, true, ic, c, true);
     const float by = IN_Y + IN_H + (IN_H * 0.5F);
-    nt_pointer_t press = make_pointer(IN_X + PAD_X + 1.0F, by, true, true, false);
+    nt_pointer_t press = ui_fx_pointer(IN_X + PAD_X + 1.0F, by, true, true, false);
     three_field_frame(&press, ia, a, true, ib, b, true, ic, c, true);
-    nt_pointer_t rel = make_pointer(IN_X + PAD_X + 1.0F, by, false, false, true);
+    nt_pointer_t rel = ui_fx_pointer(IN_X + PAD_X + 1.0F, by, false, false, true);
     three_field_frame(&rel, ia, a, true, ib, b, true, ic, c, true);
     TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, ib));
 
     const float ay = IN_Y + (IN_H * 0.5F);
-    press = make_pointer(IN_X + PAD_X + 1.0F, ay, true, true, false);
+    press = ui_fx_pointer(IN_X + PAD_X + 1.0F, ay, true, true, false);
     nt_input_feed(nt_test_key(NT_KEY_TAB, true));
     nt_input_feed(nt_test_char((uint32_t)'q'));
     three_field_frame(&press, ia, a, true, ib, b, true, ic, c, true);
     nt_input_feed(nt_test_key(NT_KEY_TAB, false));
-    rel = make_pointer(IN_X + PAD_X + 1.0F, ay, false, false, true);
+    rel = ui_fx_pointer(IN_X + PAD_X + 1.0F, ay, false, false, true);
     three_field_frame(&rel, ia, a, true, ib, b, true, ic, c, true);
     TEST_ASSERT_TRUE_MESSAGE(nt_ui_input_focused(s_fx.ctx, ic), "B's Tab moves focus to C");
     TEST_ASSERT_EQUAL_STRING_MESSAGE("q", b, "the char of that frame is B's");
     TEST_ASSERT_EQUAL_STRING("", a);
 
     /* C's Esc in the frame a press focuses A unfocuses C only: A keeps the focus the press gave it. */
-    press = make_pointer(IN_X + PAD_X + 1.0F, ay, true, true, false);
+    press = ui_fx_pointer(IN_X + PAD_X + 1.0F, ay, true, true, false);
     nt_input_feed(nt_test_key(NT_KEY_ESCAPE, true));
     three_field_frame(&press, ia, a, true, ib, b, true, ic, c, true);
     nt_input_feed(nt_test_key(NT_KEY_ESCAPE, false));
@@ -1336,9 +1321,9 @@ static void test_tab_wrap_skips_disabled_first_field(void) {
     three_field_frame(&IDLE_PTR, ia, a, false, ib, b, true, ic, c, true);
 
     const float cy = IN_Y + (2.0F * IN_H) + (IN_H * 0.5F);
-    nt_pointer_t press = make_pointer(IN_X + PAD_X + 1.0F, cy, true, true, false);
+    nt_pointer_t press = ui_fx_pointer(IN_X + PAD_X + 1.0F, cy, true, true, false);
     three_field_frame(&press, ia, a, false, ib, b, true, ic, c, true);
-    nt_pointer_t rel = make_pointer(IN_X + PAD_X + 1.0F, cy, false, false, true);
+    nt_pointer_t rel = ui_fx_pointer(IN_X + PAD_X + 1.0F, cy, false, false, true);
     three_field_frame(&rel, ia, a, false, ib, b, true, ic, c, true);
     TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, ic));
 
@@ -1358,9 +1343,9 @@ static void test_scroll_responsive_width(void) {
     grow_field_frame(&IDLE_PTR, id, buf, sizeof buf); /* warm: the GROW field gets a measured bbox width */
 
     /* Click to focus. */
-    nt_pointer_t press = make_pointer(IN_X + PAD_X + 1.0F, IN_Y + (IN_H * 0.5F), true, true, false);
+    nt_pointer_t press = ui_fx_pointer(IN_X + PAD_X + 1.0F, IN_Y + (IN_H * 0.5F), true, true, false);
     grow_field_frame(&press, id, buf, sizeof buf);
-    nt_pointer_t rel = make_pointer(IN_X + PAD_X + 1.0F, IN_Y + (IN_H * 0.5F), false, false, true);
+    nt_pointer_t rel = ui_fx_pointer(IN_X + PAD_X + 1.0F, IN_Y + (IN_H * 0.5F), false, false, true);
     grow_field_frame(&rel, id, buf, sizeof buf);
     TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, id));
 
@@ -1382,7 +1367,7 @@ static void test_offscreen_clip_scissor_balanced(void) {
      * the clip's SCISSOR_START on offscreen while still emitting SCISSOR_END (closeClipElement), leaving
      * the render stream unbalanced -> a renderer scissor-stack underflow. The vendored patch forces the
      * START to emit. Count the frozen command stream to assert the pair is balanced. */
-    ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 0.016F, &IDLE_PTR, 1, 0);
+    ui_fx_frame_begin(s_fx.ctx, NULL);
     CLAY({.id = CLAY_ID("rootOff"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = IN_X, .y = 2000.0F}}}) {
         (void)nt_ui_input_text(s_fx.ctx, NULL, 0, id, buf, sizeof buf, &s_props, &s_style, &s_field_decl, true, NULL);
     }
@@ -1428,7 +1413,7 @@ static void test_state_speed_eases_bg_color(void) {
     {
         const uint32_t id = nt_ui_id("ease");
         char eb[8] = {0};
-        s_style.state_speed = 10.0F; /* k = 10 * 0.016 = 0.16 per frame -> partial step, not a full snap */
+        s_style.state_speed = 10.0F; /* k = 10 / 60 per frame -> partial step, not a full snap */
 
         /* Render unfocused frames so the cross-fade anim slot is created + settled at the idle bg. */
         (void)field_frame(&IDLE_PTR, id, eb, sizeof eb, true, NULL);
@@ -1439,7 +1424,7 @@ static void test_state_speed_eases_bg_color(void) {
         TEST_ASSERT_TRUE_MESSAGE(fabsf(r_idle->renderData.rectangle.backgroundColor.r - idle_r) <= 1.5F, "settled unfocused bg must be the idle skin color");
 
         /* Press to focus: the slot now eases from idle toward focused. */
-        nt_pointer_t press = make_pointer(IN_X + PAD_X + 1.0F, IN_Y + (IN_H * 0.5F), true, true, false);
+        nt_pointer_t press = ui_fx_pointer(IN_X + PAD_X + 1.0F, IN_Y + (IN_H * 0.5F), true, true, false);
         (void)field_frame(&press, id, eb, sizeof eb, true, NULL);
         TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, id));
         const Clay_RenderCommand *r_mid = find_field_bg_rect(s_fx.ctx);
@@ -1510,8 +1495,8 @@ static void t_from_oklab(t_oklab o, float *R, float *G, float *B) {
 static void test_state_speed_oklab_midpoint(void) {
     char buf[8] = {0};
     const uint32_t id = nt_ui_id("oklab_mid");
-    /* frame_dt is 0.016 (field_frame); state_speed*dt = 0.5 -> first eased frame == exact OKLab mid. */
-    s_style.state_speed = 0.5F / 0.016F;
+    /* field_frame runs at 60 Hz; state_speed*dt = 0.5 -> first eased frame == exact OKLab mid. */
+    s_style.state_speed = 0.5F * 60.0F;
     const uint32_t from = 0xFFE04020U; /* saturated blue (0xAABBGGRR: r=0x20 g=0x40 b=0xE0) */
     const uint32_t to = 0xFF20C0E0U;   /* saturated yellow (r=0xE0 g=0xC0 b=0x20) */
     s_style.skin[NT_UI_INPUT_IDLE].bg_color = from;
@@ -1522,7 +1507,7 @@ static void test_state_speed_oklab_midpoint(void) {
     (void)field_frame(&IDLE_PTR, id, buf, sizeof buf, true, NULL);
 
     /* Focus: the first eased frame steps cur from `from` toward `to` by k=0.5 -> exact OKLab midpoint. */
-    nt_pointer_t press = make_pointer(IN_X + PAD_X + 1.0F, IN_Y + (IN_H * 0.5F), true, true, false);
+    nt_pointer_t press = ui_fx_pointer(IN_X + PAD_X + 1.0F, IN_Y + (IN_H * 0.5F), true, true, false);
     (void)field_frame(&press, id, buf, sizeof buf, true, NULL);
     TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, id));
     const Clay_RenderCommand *rc = find_field_bg_rect(s_fx.ctx);
@@ -1568,7 +1553,7 @@ static void test_state_speed_cell_reuse(void) {
 
     /* Focus, then ease over many frames. The cell must be REUSED each frame (occupancy flat), and the
      * eased bg.r must be non-decreasing toward the focused target (monotone ease == persisted cell). */
-    nt_pointer_t press = make_pointer(IN_X + PAD_X + 1.0F, IN_Y + (IN_H * 0.5F), true, true, false);
+    nt_pointer_t press = ui_fx_pointer(IN_X + PAD_X + 1.0F, IN_Y + (IN_H * 0.5F), true, true, false);
     (void)field_frame(&press, id, buf, sizeof buf, true, NULL);
     TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, id));
 
@@ -1683,28 +1668,28 @@ static void test_scroll_step_caret_follow_fixed_width(void) {
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
 
 static void test_assert_null_buffer(void) {
-    ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &IDLE_PTR, 1, 0);
+    ui_fx_frame_begin(s_fx.ctx, NULL);
     CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT((void)nt_ui_input_text(s_fx.ctx, NULL, 0, nt_ui_id("f"), NULL, 32U, &s_props, &s_style, &s_field_decl, true, NULL)); }
     nt_ui_end(s_fx.ctx);
 }
 
 static void test_assert_zero_cap(void) {
     char buf[4] = {0};
-    ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &IDLE_PTR, 1, 0);
+    ui_fx_frame_begin(s_fx.ctx, NULL);
     CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT((void)nt_ui_input_text(s_fx.ctx, NULL, 0, nt_ui_id("f"), buf, 0U, &s_props, &s_style, &s_field_decl, true, NULL)); }
     nt_ui_end(s_fx.ctx);
 }
 
 static void test_assert_null_props(void) {
     char buf[4] = {0};
-    ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &IDLE_PTR, 1, 0);
+    ui_fx_frame_begin(s_fx.ctx, NULL);
     CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT((void)nt_ui_input_text(s_fx.ctx, NULL, 0, nt_ui_id("f"), buf, sizeof buf, NULL, &s_style, &s_field_decl, true, NULL)); }
     nt_ui_end(s_fx.ctx);
 }
 
 static void test_assert_null_style(void) {
     char buf[4] = {0};
-    ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &IDLE_PTR, 1, 0);
+    ui_fx_frame_begin(s_fx.ctx, NULL);
     CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT((void)nt_ui_input_text(s_fx.ctx, NULL, 0, nt_ui_id("f"), buf, sizeof buf, &s_props, NULL, &s_field_decl, true, NULL)); }
     nt_ui_end(s_fx.ctx);
 }
@@ -1719,7 +1704,7 @@ static void test_field_text_above_modal_band(void) {
     nt_ui_modal_style_t mst = nt_ui_modal_style_defaults();
     mst.ease_speed = 0.0F;
 
-    ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1, 0);
+    ui_fx_frame_begin(s_fx.ctx, NULL);
     bool modal_open = true;
     if (nt_ui_modal_begin(s_fx.ctx, 0x1F0001U, &mst, &modal_open, NULL)) {
         CLAY({.id = CLAY_ID("modal_panel"), .layout = {.sizing = {CLAY_SIZING_FIXED(400.0F), CLAY_SIZING_FIXED(200.0F)}}, .backgroundColor = {10, 10, 10, 255}}) {
@@ -1758,7 +1743,7 @@ static bool modal_field_frame(const nt_pointer_t *p, bool open, float ease, char
 
 /* As modal_field_frame, with the game's open bool (a modal Esc clears it). */
 static bool modal_field_frame_io(const nt_pointer_t *p, bool *open, float ease, char *base_buf, char *modal_buf) {
-    ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 0.016F, p, 1, 0);
+    ui_fx_frame_begin(s_fx.ctx, p);
     CLAY({.id = CLAY_ID("base_root"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = IN_X, .y = IN_Y}, .zIndex = s_base_z}}) {
         (void)nt_ui_input_text(s_fx.ctx, NULL, 0, BASE_FIELD, base_buf, 32U, &s_props, &s_style, &s_field_decl, true, NULL);
     }
@@ -1780,7 +1765,7 @@ static bool modal_field_frame_io(const nt_pointer_t *p, bool *open, float ease, 
 static void tap_modal_field(bool open, float ease, char *a, char *b) {
     const nt_ui_bbox_t fb = nt_ui_get_bbox(s_fx.ctx, MODAL_FIELD);
     TEST_ASSERT_TRUE(fb.found);
-    nt_pointer_t tap = make_pointer(fb.x + 10.0F, fb.y + 10.0F, false, true, true);
+    nt_pointer_t tap = ui_fx_pointer(fb.x + 10.0F, fb.y + 10.0F, false, true, true);
     tap.type = NT_POINTER_TOUCH;
     (void)modal_field_frame(&tap, open, ease, a, b);
 }
@@ -1831,7 +1816,7 @@ static void test_tab_skips_a_closing_modal(void) {
     (void)modal_field_frame(&IDLE_PTR, false, 8.0F, a, b);
     const nt_ui_bbox_t fb = nt_ui_get_bbox(s_fx.ctx, BASE_FIELD);
     TEST_ASSERT_TRUE(fb.found);
-    nt_pointer_t tap = make_pointer(fb.x + 10.0F, fb.y + 10.0F, false, true, true);
+    nt_pointer_t tap = ui_fx_pointer(fb.x + 10.0F, fb.y + 10.0F, false, true, true);
     tap.type = NT_POINTER_TOUCH;
     (void)modal_field_frame(&tap, false, 8.0F, a, b);
     (void)modal_field_frame(&IDLE_PTR, false, 8.0F, a, b);
@@ -1844,31 +1829,17 @@ static void test_tab_skips_a_closing_modal(void) {
     TEST_ASSERT_TRUE_MESSAGE(nt_ui_input_focused(s_fx.ctx, BASE_FIELD), "Tab wraps to the base field, past the inert one");
 }
 
-/* ---- Esc goes to the focused field first: it unfocuses the field inside a modal and leaves the modal open;
- *      a second Esc closes the modal. ---- */
-static void test_esc_unfocuses_a_field_before_its_modal(void) {
-    char a[32] = "base";
-    char b[32] = "modal";
-    bool open = true;
-    (void)modal_field_frame_io(&IDLE_PTR, &open, 0.0F, a, b);
-    (void)modal_field_frame_io(&IDLE_PTR, &open, 0.0F, a, b);
-    tap_modal_field(true, 0.0F, a, b);
-    (void)modal_field_frame_io(&IDLE_PTR, &open, 0.0F, a, b);
-    TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, MODAL_FIELD));
+/* One frame holding a fresh Esc press, then one with it released. */
+static void modal_field_esc(bool *open, char *a, char *b) {
     nt_input_feed(nt_test_key(NT_KEY_ESCAPE, true));
-    (void)modal_field_frame_io(&IDLE_PTR, &open, 0.0F, a, b);
+    (void)modal_field_frame_io(&IDLE_PTR, open, 0.0F, a, b);
     nt_input_feed(nt_test_key(NT_KEY_ESCAPE, false));
-    (void)modal_field_frame_io(&IDLE_PTR, &open, 0.0F, a, b);
-    TEST_ASSERT_FALSE(nt_ui_input_focused(s_fx.ctx, MODAL_FIELD));
-    TEST_ASSERT_TRUE_MESSAGE(open, "the first Esc belongs to the field");
-    nt_input_feed(nt_test_key(NT_KEY_ESCAPE, true));
-    (void)modal_field_frame_io(&IDLE_PTR, &open, 0.0F, a, b);
-    nt_input_feed(nt_test_key(NT_KEY_ESCAPE, false));
-    TEST_ASSERT_FALSE_MESSAGE(open, "the second Esc closes the modal");
+    (void)modal_field_frame_io(&IDLE_PTR, open, 0.0F, a, b);
 }
 
-/* ---- Esc has one owner per frame, chosen at nt_ui_begin: a field declared before the modal but floating
- *      above it unfocuses on Esc, and the same Esc does not also close the modal. ---- */
+/* ---- Esc has one owner per frame, chosen at nt_ui_begin, and the focused field comes first: a field
+ *      declared before the modal but floating above it, then a field inside the modal, each unfocus on Esc
+ *      and the same Esc does not also close the modal; the next Esc closes it. ---- */
 static void test_esc_owner_is_decided_once(void) {
     char a[32] = "base";
     char b[32] = "modal";
@@ -1878,16 +1849,24 @@ static void test_esc_owner_is_decided_once(void) {
     (void)modal_field_frame_io(&IDLE_PTR, &open, 0.0F, a, b);
     const nt_ui_bbox_t fb = nt_ui_get_bbox(s_fx.ctx, BASE_FIELD);
     TEST_ASSERT_TRUE(fb.found);
-    nt_pointer_t tap = make_pointer(fb.x + 10.0F, fb.y + 10.0F, false, true, true);
+    nt_pointer_t tap = ui_fx_pointer(fb.x + 10.0F, fb.y + 10.0F, false, true, true);
     tap.type = NT_POINTER_TOUCH;
     (void)modal_field_frame_io(&tap, &open, 0.0F, a, b);
     (void)modal_field_frame_io(&IDLE_PTR, &open, 0.0F, a, b);
     TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, BASE_FIELD));
-    nt_input_feed(nt_test_key(NT_KEY_ESCAPE, true));
-    (void)modal_field_frame_io(&IDLE_PTR, &open, 0.0F, a, b);
-    nt_input_feed(nt_test_key(NT_KEY_ESCAPE, false));
+    modal_field_esc(&open, a, b);
     TEST_ASSERT_FALSE(nt_ui_input_focused(s_fx.ctx, BASE_FIELD));
-    TEST_ASSERT_TRUE_MESSAGE(open, "the Esc the field took does not close the modal");
+    TEST_ASSERT_TRUE_MESSAGE(open, "the Esc the field over the modal took does not close the modal");
+
+    s_base_z = 0;
+    tap_modal_field(true, 0.0F, a, b);
+    (void)modal_field_frame_io(&IDLE_PTR, &open, 0.0F, a, b);
+    TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, MODAL_FIELD));
+    modal_field_esc(&open, a, b);
+    TEST_ASSERT_FALSE(nt_ui_input_focused(s_fx.ctx, MODAL_FIELD));
+    TEST_ASSERT_TRUE_MESSAGE(open, "the Esc the field in the modal took does not close the modal");
+    modal_field_esc(&open, a, b);
+    TEST_ASSERT_FALSE_MESSAGE(open, "the next Esc closes the modal");
 }
 
 int main(void) {
@@ -1958,7 +1937,6 @@ int main(void) {
     RUN_TEST(test_tab_stays_in_the_top_overlay);
     RUN_TEST(test_closing_modal_is_inert);
     RUN_TEST(test_tab_skips_a_closing_modal);
-    RUN_TEST(test_esc_unfocuses_a_field_before_its_modal);
     RUN_TEST(test_esc_owner_is_decided_once);
     RUN_TEST(test_release_and_press_between_frames_reach_widgets_in_order);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL

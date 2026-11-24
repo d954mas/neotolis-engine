@@ -21,6 +21,7 @@
 #include "renderers/nt_sprite_renderer.h"
 #include "test_helpers/nt_assert_trap.h"
 #include "test_helpers/nt_sprite_test_emit.h"
+#include "test_helpers/ui_fx_frame.h"
 #include "test_helpers/ui_test_arena.h"
 #include "test_helpers/ui_walker_fixture.h"
 #include "ui/nt_ui.h"
@@ -47,16 +48,6 @@ void setUp(void) {
 
 void tearDown(void) { ui_walker_fixture_shutdown(&s_fx); }
 
-static nt_pointer_t make_pointer(float x, float y, bool is_down, bool is_pressed) {
-    nt_pointer_t p = {0};
-    p.x = x;
-    p.y = y;
-    p.active = true;
-    p.buttons[NT_BUTTON_LEFT].is_down = is_down;
-    p.buttons[NT_BUTTON_LEFT].is_pressed = is_pressed;
-    return p;
-}
-
 static void declare_btn(const char *name, float x, float y) {
     /* Declared as a fresh element id each call -- callers pass distinct names. */
     Clay_ElementId eid = Clay_GetElementId((Clay_String){.length = (int32_t)strlen(name), .chars = name});
@@ -74,7 +65,7 @@ static void open_query_frame(const nt_pointer_t *p) {
 
 /* ---- Test 1: recording OFF -> zero overhead, count stays 0 ---- */
 static void test_debug_recording_off_no_capture(void) {
-    nt_pointer_t f1 = make_pointer(BTN_CX, BTN_CY, false, false);
+    nt_pointer_t f1 = ui_fx_pointer(BTN_CX, BTN_CY, false, false, false);
     open_query_frame(&f1);
     TEST_ASSERT_FALSE(nt_ui_debug_get_recording(s_fx.ctx));
     /* Many queries; none should be recorded. */
@@ -90,7 +81,7 @@ static void test_debug_recording_off_no_capture(void) {
 static void test_debug_recording_on_records_zones(void) {
     /* Frame 1: declare 3 elements + step them so they enter the interactive registry (front-most
      * arbitration reads the prev-frame registry; a widget reacts only once registered). */
-    nt_pointer_t f1 = make_pointer(0.0F, 0.0F, false, false);
+    nt_pointer_t f1 = ui_fx_pointer(0.0F, 0.0F, false, false, false);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &f1, .pointer_count = 1});
     declare_btn("btnA", BTN_X, BTN_Y);
     declare_btn("btnB", BTN_X + 200.0F, BTN_Y);
@@ -104,7 +95,7 @@ static void test_debug_recording_on_records_zones(void) {
     /* Frame 2: turn recording on, query all 3. */
     nt_ui_debug_set_recording(s_fx.ctx, true);
     TEST_ASSERT_TRUE(nt_ui_debug_get_recording(s_fx.ctx));
-    nt_pointer_t f2 = make_pointer(BTN_CX, BTN_CY, false, false); /* hovers btnA */
+    nt_pointer_t f2 = ui_fx_pointer(BTN_CX, BTN_CY, false, false, false); /* hovers btnA */
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &f2, .pointer_count = 1});
     declare_btn("btnA", BTN_X, BTN_Y);
     declare_btn("btnB", BTN_X + 200.0F, BTN_Y);
@@ -140,7 +131,7 @@ static void test_debug_recording_on_records_zones(void) {
 
 /* ---- Test 3: recording auto-clears each nt_ui_begin ---- */
 static void test_debug_recording_clears_each_begin(void) {
-    nt_pointer_t f1 = make_pointer(BTN_CX, BTN_CY, false, false);
+    nt_pointer_t f1 = ui_fx_pointer(BTN_CX, BTN_CY, false, false, false);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &f1, .pointer_count = 1});
     declare_btn("btnA", BTN_X, BTN_Y);
     nt_ui_end(s_fx.ctx);
@@ -160,7 +151,7 @@ static void test_debug_recording_clears_each_begin(void) {
 
 /* ---- Test 4: drawing with 0 zones is a silent no-op (no crash) ---- */
 static void test_debug_draw_zero_zones_safe(void) {
-    nt_pointer_t f1 = make_pointer(0.0F, 0.0F, false, false);
+    nt_pointer_t f1 = ui_fx_pointer(0.0F, 0.0F, false, false, false);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &f1, .pointer_count = 1});
     nt_ui_end(s_fx.ctx);
     /* No begin in flight, no recorded zones. Drawing must not assert/crash. */
@@ -173,7 +164,7 @@ static void test_debug_draw_zero_zones_safe(void) {
 static void test_debug_draw_off_mode_silent(void) {
     /* Even with a recorded zone, mode==OFF returns immediately. */
     nt_ui_debug_set_recording(s_fx.ctx, true);
-    nt_pointer_t f1 = make_pointer(BTN_CX, BTN_CY, false, false);
+    nt_pointer_t f1 = ui_fx_pointer(BTN_CX, BTN_CY, false, false, false);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &f1, .pointer_count = 1});
     declare_btn("btnA", BTN_X, BTN_Y);
     nt_ui_end(s_fx.ctx);
@@ -193,7 +184,7 @@ static void test_debug_draw_off_mode_silent(void) {
 static void test_debug_mode_filter(void) {
     /* Two buttons. Pointer hovers only btnA. Frame 1 steps both so they register for next-frame
      * arbitration (a widget reacts only once it is in the prev-frame interactive registry). */
-    nt_pointer_t f1 = make_pointer(0.0F, 0.0F, false, false);
+    nt_pointer_t f1 = ui_fx_pointer(0.0F, 0.0F, false, false, false);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &f1, .pointer_count = 1});
     declare_btn("btnA", BTN_X, BTN_Y);
     declare_btn("btnB", BTN_X + 300.0F, BTN_Y);
@@ -202,7 +193,7 @@ static void test_debug_mode_filter(void) {
     nt_ui_end(s_fx.ctx);
 
     nt_ui_debug_set_recording(s_fx.ctx, true);
-    nt_pointer_t f2 = make_pointer(BTN_CX, BTN_CY, false, false); /* hovers btnA only */
+    nt_pointer_t f2 = ui_fx_pointer(BTN_CX, BTN_CY, false, false, false); /* hovers btnA only */
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &f2, .pointer_count = 1});
     declare_btn("btnA", BTN_X, BTN_Y);
     declare_btn("btnB", BTN_X + 300.0F, BTN_Y);
@@ -228,7 +219,7 @@ static void test_debug_mode_filter(void) {
  * matching dispatch_command. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_debug_emit_matches_walker_coord_space(void) {
-    nt_pointer_t f1 = make_pointer(0.0F, 0.0F, false, false);
+    nt_pointer_t f1 = ui_fx_pointer(0.0F, 0.0F, false, false, false);
     /* Frame 1: declare. Frame 2: record + draw. */
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &f1, .pointer_count = 1});
     declare_btn("btnA", BTN_X, BTN_Y);
@@ -275,7 +266,7 @@ static void test_debug_emit_matches_walker_coord_space(void) {
 /* Fills before labels: with two labelled zones, every text draw follows the last sprite draw. */
 static void test_debug_labels_draw_after_all_fills(void) {
     const nt_font_t font = ui_walker_fixture_make_real_font(&s_fx);
-    nt_pointer_t f1 = make_pointer(0.0F, 0.0F, false, false);
+    nt_pointer_t f1 = ui_fx_pointer(0.0F, 0.0F, false, false, false);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &f1, .pointer_count = 1});
     declare_btn("btnA", BTN_X, BTN_Y);
     declare_btn("btnB", BTN_X + 200.0F, BTN_Y);
@@ -319,7 +310,7 @@ static void test_debug_labels_draw_after_all_fills(void) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_debug_disabled_helper_records_zone(void) {
     /* Frame 1: declare so Clay has a prev-frame bbox. */
-    nt_pointer_t f1 = make_pointer(0.0F, 0.0F, false, false);
+    nt_pointer_t f1 = ui_fx_pointer(0.0F, 0.0F, false, false, false);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &f1, .pointer_count = 1});
     declare_btn("btn_disabled", BTN_X, BTN_Y);
     nt_ui_end(s_fx.ctx);
@@ -328,7 +319,7 @@ static void test_debug_disabled_helper_records_zone(void) {
      * query (mirrors the button widget's enabled=false short-circuit). Just the
      * helper call. */
     nt_ui_debug_set_recording(s_fx.ctx, true);
-    nt_pointer_t f2 = make_pointer(BTN_CX, BTN_CY, true, true); /* over + pressed */
+    nt_pointer_t f2 = ui_fx_pointer(BTN_CX, BTN_CY, true, true, false); /* over + pressed */
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &f2, .pointer_count = 1});
     declare_btn("btn_disabled", BTN_X, BTN_Y);
     const int16_t pad[4] = {12, 12, 12, 12};
@@ -359,7 +350,7 @@ static void test_debug_disabled_helper_records_zone(void) {
 
 /* ---- Test 9: disabled-record helper is zero-overhead when recording is OFF ---- */
 static void test_debug_disabled_helper_off_no_capture(void) {
-    nt_pointer_t f1 = make_pointer(0.0F, 0.0F, false, false);
+    nt_pointer_t f1 = ui_fx_pointer(0.0F, 0.0F, false, false, false);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &f1, .pointer_count = 1});
     declare_btn("btnA", BTN_X, BTN_Y);
     nt_ui_end(s_fx.ctx);
@@ -376,7 +367,7 @@ static void test_debug_disabled_helper_off_no_capture(void) {
 
 /* ---- Test 10: stepping one widget past the registry (max_elements) is misuse and traps ---- */
 static void step_past_registry_frame(void) {
-    nt_pointer_t f1 = make_pointer(BTN_CX, BTN_CY, false, false);
+    nt_pointer_t f1 = ui_fx_pointer(BTN_CX, BTN_CY, false, false, false);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &f1, .pointer_count = 1});
     declare_btn("btnA", BTN_X, BTN_Y);
     for (uint32_t i = 0; i <= s_fx.ctx->max_elements; ++i) {

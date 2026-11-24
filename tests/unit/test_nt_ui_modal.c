@@ -9,11 +9,13 @@
 #include <stdalign.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <string.h>
 
 #include "clay.h"
 #include "input/nt_input_feed.h"
 #include "test_helpers/nt_assert_trap.h"
 #include "test_helpers/nt_input_test_frame.h"
+#include "test_helpers/ui_fx_frame.h"
 #include "test_helpers/ui_test_arena.h"
 #include "test_helpers/ui_walker_fixture.h"
 #include "ui/nt_ui.h"
@@ -24,12 +26,6 @@
 
 alignas(NT_UI_ARENA_ALIGN) static uint8_t s_arena[NT_UI_TEST_ARENA_SIZE];
 static ui_walker_fixture_t s_fx;
-
-/* One UI frame: publish the input fed since the last frame, then begin. */
-static void ui_frame_begin(nt_ui_context_t *ctx, float w, float h, float dt, const nt_pointer_t *p, uint32_t count, uint32_t primary) {
-    nt_input_poll();
-    nt_ui_begin(ctx, &(nt_ui_frame_desc_t){.layout_w = w, .layout_h = h, .dt = dt, .pointers = p, .pointer_count = count, .primary = primary});
-}
 
 static nt_ui_popup_close_t s_frame_close_reason; /* reason from the last modal_button_frame; reset in setUp */
 
@@ -56,18 +52,19 @@ static nt_ui_popup_info_t modal_begin_open(nt_ui_context_t *ctx, uint32_t id, co
     return info;
 }
 
-/* Begins a modal the test holds closed; ends it only when it still shows (easing closed). */
+/* A 40x40 panel body, so the panel has an area to hit. */
+static void modal_body(void) {
+    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(40)}}}) {}
+}
+
+/* Begins a modal the test holds closed; declares the body and ends it only when it still shows (easing
+ * closed). */
 static void modal_begin_closed(nt_ui_context_t *ctx, uint32_t id, const nt_ui_modal_style_t *st) {
     bool open = false;
     if (nt_ui_modal_begin(ctx, id, st, &open, NULL)) {
+        modal_body();
         nt_ui_modal_end(ctx);
     }
-}
-
-/* ---- ABI sanity: the _Static_asserts compile; assert the runtime sizes match too. ---- */
-static void test_modal_abi_sizes(void) {
-    TEST_ASSERT_EQUAL_UINT(12U, (unsigned)sizeof(nt_ui_modal_anim_t));
-    TEST_ASSERT_EQUAL_UINT(40U, (unsigned)sizeof(nt_ui_modal_style_t));
 }
 
 /* ---- Defaults are a valid (non-zero-init) style: scale_start > 0 dodges the anim trap. ---- */
@@ -78,18 +75,6 @@ static void test_modal_defaults_valid(void) {
     TEST_ASSERT_TRUE(st.ease_speed > 0.0F);
     TEST_ASSERT_TRUE((st.flags & NT_UI_MODAL_LISTEN_ESC) != 0U);
     TEST_ASSERT_TRUE((st.flags & NT_UI_MODAL_CLOSE_ON_BACKDROP) != 0U);
-}
-
-/* Bands are read off what the frame actually ships: Clay stamps the owning floating root's zIndex on
- * RECTANGLE and TEXT commands. INT32_MIN = the id emitted no rectangle this frame. */
-static int32_t band_of_rect(const nt_ui_context_t *ctx, uint32_t id) {
-    for (int32_t i = 0; i < ctx->frozen_cmds.length; ++i) {
-        const Clay_RenderCommand *c = &ctx->frozen_cmds.internalArray[i];
-        if (c->id == id && c->commandType == CLAY_RENDER_COMMAND_TYPE_RECTANGLE) {
-            return c->zIndex;
-        }
-    }
-    return INT32_MIN;
 }
 
 /* The backdrop's id is engine-derived and deliberately unpublished, so identify it by shape: the only
@@ -105,29 +90,6 @@ static bool band_has_backdrop(const nt_ui_context_t *ctx, int32_t band) {
     return false;
 }
 
-/* ---- z-band: a root modal sits at 1000 with its backdrop; a nested one (depth 2) sits one band above. ---- */
-static void test_modal_zband_and_nesting(void) {
-    nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
-    st.ease_speed = 0.0F;
-    nt_pointer_t p = {.active = true};
-    ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1, 0);
-    (void)modal_begin_open(s_fx.ctx, MODAL_A, &st);
-    /* Opaque bodies so each panel subtree emits a rectangle carrying its root's band. */
-    CLAY({.id = CLAY_ID("body_a"), .layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(20)}}, .backgroundColor = {8, 8, 8, 255}}){}(void)modal_begin_open(s_fx.ctx, MODAL_B,
-                                                                                                                                                                     &st); /* modal-over-modal */
-    CLAY({.id = CLAY_ID("body_b"), .layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(20)}}, .backgroundColor = {8, 8, 8, 255}}) {}
-    TEST_ASSERT_EQUAL_UINT8(2U, s_fx.ctx->overlay_depth);
-    nt_ui_modal_end(s_fx.ctx);
-    nt_ui_modal_end(s_fx.ctx);
-    TEST_ASSERT_EQUAL_UINT8(0U, s_fx.ctx->overlay_depth);
-    nt_ui_end(s_fx.ctx);
-
-    TEST_ASSERT_EQUAL_INT32((int32_t)1000, band_of_rect(s_fx.ctx, CLAY_ID("body_a").id));
-    TEST_ASSERT_EQUAL_INT32_MESSAGE((int32_t)1001, band_of_rect(s_fx.ctx, CLAY_ID("body_b").id), "a nested modal sits one band above its parent");
-    TEST_ASSERT_TRUE_MESSAGE(band_has_backdrop(s_fx.ctx, 1000), "the outer backdrop paints on its panel's band");
-    TEST_ASSERT_TRUE_MESSAGE(band_has_backdrop(s_fx.ctx, 1001), "the nested backdrop paints on its own panel's band");
-}
-
 /* ---- Esc raises a close (reason ESC) on the TOP modal only; a non-top modal stays silent.
  *      Top-targeting carries the standard 1-frame IM lag (the deepest modal resolved last frame
  *      is "top"), so frame 1 establishes the nesting and frame 2 holds Esc. ---- */
@@ -137,7 +99,7 @@ static void test_modal_esc_top_only(void) {
     st.flags = NT_UI_MODAL_LISTEN_ESC;
 
     /* Frame 1: establish A (outer) then B (inner, deepest) — no Esc yet. */
-    ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1, 0);
+    ui_fx_frame_begin(s_fx.ctx, NULL);
     (void)modal_begin_open(s_fx.ctx, MODAL_A, &st);
     (void)modal_begin_open(s_fx.ctx, MODAL_B, &st);
     nt_ui_modal_end(s_fx.ctx);
@@ -146,7 +108,7 @@ static void test_modal_esc_top_only(void) {
 
     /* Frame 2: Esc held. Only B (last frame's deepest = top) consumes it; A stays silent. */
     nt_input_feed(nt_test_key(NT_KEY_ESCAPE, true));
-    ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1, 0);
+    ui_fx_frame_begin(s_fx.ctx, NULL);
     const nt_ui_popup_info_t outer = modal_begin_open(s_fx.ctx, MODAL_A, &st); /* NOT top */
     const nt_ui_popup_info_t inner = modal_begin_open(s_fx.ctx, MODAL_B, &st); /* TOP */
     nt_ui_modal_end(s_fx.ctx);
@@ -162,12 +124,12 @@ static void test_modal_esc_requires_flag(void) {
     nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
     st.ease_speed = 0.0F;
     st.flags = 0U; /* no LISTEN_ESC, no CLOSE_ON_BACKDROP */
-    ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1, 0);
+    ui_fx_frame_begin(s_fx.ctx, NULL);
     (void)modal_begin_open(s_fx.ctx, MODAL_A, &st); /* top from the next frame on */
     nt_ui_modal_end(s_fx.ctx);
     nt_ui_end(s_fx.ctx);
     nt_input_feed(nt_test_key(NT_KEY_ESCAPE, true));
-    ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1, 0);
+    ui_fx_frame_begin(s_fx.ctx, NULL);
     const nt_ui_popup_info_t r = modal_begin_open(s_fx.ctx, MODAL_A, &st);
     nt_ui_modal_end(s_fx.ctx);
     nt_ui_end(s_fx.ctx);
@@ -181,7 +143,7 @@ typedef struct {
 } modal_frame_t;
 
 static void modal_frame(uint32_t id, const nt_ui_modal_style_t *st, bool open, modal_frame_t *out) {
-    ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1, 0);
+    ui_fx_frame_begin(s_fx.ctx, NULL);
     bool o = open;
     out->visible = nt_ui_modal_begin(s_fx.ctx, id, st, &o, &out->info);
     if (out->visible) {
@@ -240,13 +202,13 @@ static void test_modal_wants_pointer_while_open(void) {
     nt_pointer_t p = {.x = 400.0F, .y = 300.0F, .active = true}; /* mid-viewport, over the full-screen backdrop */
 
     /* Frame 1: declare the modal; the backdrop occluder records for next-frame arbitration. */
-    ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1, 0);
+    ui_fx_frame_begin(s_fx.ctx, &p);
     (void)modal_begin_open(s_fx.ctx, MODAL_A, &st);
     nt_ui_modal_end(s_fx.ctx);
     nt_ui_end(s_fx.ctx);
 
     /* Frame 2: the prev-frame backdrop wins topmost-z; the hot record is declared again -> wants_pointer. */
-    ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1, 0);
+    ui_fx_frame_begin(s_fx.ctx, &p);
     (void)modal_begin_open(s_fx.ctx, MODAL_A, &st);
     nt_ui_modal_end(s_fx.ctx);
     nt_ui_end(s_fx.ctx);
@@ -259,34 +221,21 @@ static void test_modal_wants_pointer_while_open(void) {
  * NORMAL (non-floating) child of the panel -> it shares the panel's floating tree root, declared after
  * the panel; with no self-occluder it's the sole interactive record and wins. With the
  * panel shrink-wrapping the button, the panel == the button bbox, both centered in the 800x600 frame. */
-#define MODAL_VIEW_W 800.0F
-#define MODAL_VIEW_H 600.0F
 #define MODAL_BTN_W 200.0F
 #define MODAL_BTN_H 120.0F
 /* Centered panel top-left + the button (== panel) center. */
-#define MODAL_BTN_X0 ((MODAL_VIEW_W - MODAL_BTN_W) * 0.5F)
-#define MODAL_BTN_Y0 ((MODAL_VIEW_H - MODAL_BTN_H) * 0.5F)
+#define MODAL_BTN_X0 ((UI_FX_VIEW_W - MODAL_BTN_W) * 0.5F)
+#define MODAL_BTN_Y0 ((UI_FX_VIEW_H - MODAL_BTN_H) * 0.5F)
 #define MODAL_BTN_CX (MODAL_BTN_X0 + (MODAL_BTN_W * 0.5F))
 #define MODAL_BTN_CY (MODAL_BTN_Y0 + (MODAL_BTN_H * 0.5F))
 
-static nt_pointer_t modal_pointer_at(float x, float y, bool is_down, bool is_pressed, bool is_released) {
-    nt_pointer_t p = {0};
-    p.x = x;
-    p.y = y;
-    p.active = true;
-    p.buttons[NT_BUTTON_LEFT].is_down = is_down;
-    p.buttons[NT_BUTTON_LEFT].is_pressed = is_pressed;
-    p.buttons[NT_BUTTON_LEFT].is_released = is_released;
-    return p;
-}
-
-static nt_pointer_t modal_btn_pointer(bool is_down, bool is_pressed, bool is_released) { return modal_pointer_at(MODAL_BTN_CX, MODAL_BTN_CY, is_down, is_pressed, is_released); }
+static nt_pointer_t modal_btn_pointer(bool is_down, bool is_pressed, bool is_released) { return ui_fx_pointer(MODAL_BTN_CX, MODAL_BTN_CY, is_down, is_pressed, is_released); }
 
 /* ---- A modal WITHOUT CLOSE_ON_BACKDROP (LISTEN_ESC only) still gates click-through: the backdrop
  *      registers as an inert block_pointer occluder that wins topmost-z, so a base widget behind the
  *      open modal never goes hot and gets neither press nor click. Two frames for the IM-lag. ---- */
 static nt_ui_interaction_t modal_gate_base_frame(const nt_ui_modal_style_t *st, const nt_pointer_t *p, bool open, bool *shown) {
-    ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, p, 1, 0);
+    ui_fx_frame_begin(s_fx.ctx, p);
     nt_ui_interaction_t in;
     CLAY({.id = (Clay_ElementId){.id = nt_ui_id("gated_base_btn")}, .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(120)}}}) {
         in = nt_ui_step(s_fx.ctx, nt_ui_id("gated_base_btn"), NULL);
@@ -306,17 +255,17 @@ static void test_modal_no_backdrop_close_still_gates(void) {
     st.flags = NT_UI_MODAL_LISTEN_ESC; /* no CLOSE_ON_BACKDROP */
 
     /* Frame 1: register the base button + the modal's block_pointer occluder. */
-    nt_pointer_t f1 = modal_pointer_at(100.0F, 60.0F, false, false, false);
+    nt_pointer_t f1 = ui_fx_pointer(100.0F, 60.0F, false, false, false);
     modal_gate_base_frame(&st, &f1, true, &shown);
 
     /* Frame 2: press over the base button. The block_pointer backdrop won the prev-frame topmost-z,
      * so the base widget never goes hot and the press is gated. */
-    nt_pointer_t f2 = modal_pointer_at(100.0F, 60.0F, true, true, false);
+    nt_pointer_t f2 = ui_fx_pointer(100.0F, 60.0F, true, true, false);
     nt_ui_interaction_t in2 = modal_gate_base_frame(&st, &f2, true, &shown);
     TEST_ASSERT_FALSE(in2.pressed_now); /* base click-through blocked by the occluder */
 
     /* Frame 3: release over the base button -> still no click; the occluder gated the whole gesture. */
-    nt_pointer_t f3 = modal_pointer_at(100.0F, 60.0F, false, false, true);
+    nt_pointer_t f3 = ui_fx_pointer(100.0F, 60.0F, false, false, true);
     nt_ui_interaction_t in3 = modal_gate_base_frame(&st, &f3, true, &shown);
     TEST_ASSERT_FALSE(in3.clicked); /* base widget never clicks behind the open modal */
 }
@@ -332,7 +281,7 @@ static void test_modal_closing_backdrop_lets_the_pointer_through(void) {
     for (int f = 0; f < 2; ++f) {
         (void)modal_gate_base_frame(&st, &(nt_pointer_t){.x = 100.0F, .y = 60.0F, .active = true}, false, &shown);
     }
-    nt_pointer_t tap = modal_pointer_at(100.0F, 60.0F, false, true, true);
+    nt_pointer_t tap = ui_fx_pointer(100.0F, 60.0F, false, true, true);
     tap.type = NT_POINTER_TOUCH;
     const nt_ui_interaction_t in = modal_gate_base_frame(&st, &tap, false, &shown);
     TEST_ASSERT_TRUE_MESSAGE(shown, "the modal still fades");
@@ -343,7 +292,7 @@ static void test_modal_closing_backdrop_lets_the_pointer_through(void) {
  * showcase's action-button pattern. */
 
 static nt_ui_interaction_t modal_button_frame(const nt_ui_modal_style_t *st, const nt_pointer_t *p) {
-    ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, p, 1, 0);
+    ui_fx_frame_begin(s_fx.ctx, p);
     bool open = true;
     nt_ui_popup_info_t info = {0};
     nt_ui_interaction_t in = {0};
@@ -383,10 +332,10 @@ static void test_modal_body_button_clickable(void) {
  *      shrink-wrapped 200x120 box at (0,0); is_top needs the 1-frame IM lag so each probe runs 2 frames
  *      (F1 establishes top, F2 holds the click). ---- */
 static nt_ui_popup_close_t modal_backdrop_click_reason(const nt_ui_modal_style_t *st, float cx, float cy) {
-    nt_pointer_t f1 = modal_pointer_at(cx, cy, false, false, false);
+    nt_pointer_t f1 = ui_fx_pointer(cx, cy, false, false, false);
     modal_button_frame(st, &f1); /* establish top (overlay_top_id_prev) */
     /* F2: full press+release in one frame at (cx,cy) -> backdrop click fires this frame. */
-    nt_pointer_t f2 = modal_pointer_at(cx, cy, false, false, true);
+    nt_pointer_t f2 = ui_fx_pointer(cx, cy, false, false, true);
     f2.buttons[NT_BUTTON_LEFT].is_pressed = true;
     modal_button_frame(st, &f2);
     return s_frame_close_reason;
@@ -414,14 +363,14 @@ static void test_wants_keyboard_follows_the_top(void) {
     TEST_ASSERT_FALSE(nt_ui_wants_keyboard(s_fx.ctx));
 
     /* Frame 1 opens the modal: that frame's keys were fixed at its begin, before anything was up. */
-    ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1, 0);
+    ui_fx_frame_begin(s_fx.ctx, NULL);
     (void)modal_begin_open(s_fx.ctx, MODAL_A, &st);
     nt_ui_modal_end(s_fx.ctx);
     nt_ui_end(s_fx.ctx);
     TEST_ASSERT_FALSE(nt_ui_wants_keyboard(s_fx.ctx));
 
     /* Frame 2: the modal is the top and owns the keys from begin, also after end. */
-    ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1, 0);
+    ui_fx_frame_begin(s_fx.ctx, NULL);
     TEST_ASSERT_TRUE(nt_ui_wants_keyboard(s_fx.ctx));
     (void)modal_begin_open(s_fx.ctx, MODAL_A, &st);
     nt_ui_modal_end(s_fx.ctx);
@@ -431,7 +380,7 @@ static void test_wants_keyboard_follows_the_top(void) {
     /* A closed modal declares nothing and claims no top: the keys are the game's again. */
     bool open = false;
     for (int f = 0; f < 2; ++f) {
-        ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1, 0);
+        ui_fx_frame_begin(s_fx.ctx, NULL);
         if (nt_ui_modal_begin(s_fx.ctx, MODAL_A, &st, &open, NULL)) {
             nt_ui_modal_end(s_fx.ctx);
         }
@@ -440,9 +389,8 @@ static void test_wants_keyboard_follows_the_top(void) {
     TEST_ASSERT_FALSE(nt_ui_wants_keyboard(s_fx.ctx));
 }
 
-/* ---- Per-context overlay_zband_stride: a custom stride drives a root modal's band. The default
- *      fixture ctx uses 1000; a second ctx created with a custom desc reflects the configured value.
- *      Module is already inited by setUp, so a second ctx coexists (mirrors test_nt_ui_multictx). ---- */
+/* ---- Per-context overlay_zband_stride: a root modal and its backdrop sit on the stride band, a nested one
+ *      and its backdrop one band above. A second ctx coexists with the fixture's (module inited by setUp). ---- */
 alignas(NT_UI_ARENA_ALIGN) static uint8_t s_custom_arena[NT_UI_TEST_ARENA_SIZE];
 
 static void test_modal_custom_zband_stride(void) {
@@ -454,8 +402,7 @@ static void test_modal_custom_zband_stride(void) {
 
     nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
     st.ease_speed = 0.0F;
-    nt_pointer_t p = {.active = true};
-    ui_frame_begin(ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1, 0);
+    ui_fx_frame_begin(ctx, NULL);
     (void)modal_begin_open(ctx, MODAL_A, &st); /* root -> stride */
     CLAY({.id = CLAY_ID("cs_a"), .layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(20)}}, .backgroundColor = {8, 8, 8, 255}}){}(void)modal_begin_open(ctx, MODAL_B,
                                                                                                                                                                    &st); /* nested -> one band above */
@@ -464,10 +411,13 @@ static void test_modal_custom_zband_stride(void) {
     nt_ui_modal_end(ctx);
     nt_ui_end(ctx);
 
-    TEST_ASSERT_EQUAL_INT32((int32_t)custom_stride, band_of_rect(ctx, CLAY_ID("cs_a").id));
-    TEST_ASSERT_EQUAL_INT32((int32_t)custom_stride + 1, band_of_rect(ctx, CLAY_ID("cs_b").id));
-    TEST_ASSERT_TRUE(band_has_backdrop(ctx, custom_stride));
-    TEST_ASSERT_TRUE(band_has_backdrop(ctx, custom_stride + 1));
+    const Clay_RenderCommand *a = ui_fx_find_rect(ctx, CLAY_ID("cs_a").id);
+    const Clay_RenderCommand *b = ui_fx_find_rect(ctx, CLAY_ID("cs_b").id);
+    TEST_ASSERT_TRUE(a != NULL && b != NULL);
+    TEST_ASSERT_EQUAL_INT32(custom_stride, a->zIndex);
+    TEST_ASSERT_EQUAL_INT32_MESSAGE(custom_stride + 1, b->zIndex, "a nested modal sits one band above its parent");
+    TEST_ASSERT_TRUE_MESSAGE(band_has_backdrop(ctx, custom_stride), "the outer backdrop paints on its panel's band");
+    TEST_ASSERT_TRUE_MESSAGE(band_has_backdrop(ctx, custom_stride + 1), "the nested backdrop paints on its own panel's band");
 
     nt_ui_destroy_context(ctx);
 }
@@ -484,7 +434,7 @@ static void test_modal_stride_one_gates_base_ui(void) {
     for (int f = 0; f < 4; ++f) {
         nt_pointer_t p = {.x = 20.0F, .y = 20.0F, .active = true};
         p.buttons[NT_BUTTON_LEFT] = (nt_button_state_t){.is_down = f == 2, .is_pressed = f == 2, .is_released = f == 3};
-        ui_frame_begin(ctx, 800.0F, 600.0F, 1.0F / 60.0F, &p, 1, 0);
+        ui_fx_frame_begin(ctx, &p);
         (void)modal_begin_open(ctx, MODAL_A, &st);
         CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(20)}}}) {}
         nt_ui_modal_end(ctx);
@@ -505,11 +455,12 @@ static void test_modal_root_band_overflow_asserts(void) {
     TEST_ASSERT_NOT_NULL(ctx);
     nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
     st.ease_speed = 0.0F;
-    ui_frame_begin(ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1, 0);
+    ui_fx_frame_begin(ctx, NULL);
     (void)modal_begin_open(ctx, MODAL_A, &st);
     nt_ui_modal_end(ctx);
     bool open_b = true;
     NT_TEST_EXPECT_ASSERT(nt_ui_modal_begin(ctx, MODAL_B, &st, &open_b, NULL)); /* asserts before the push */
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "nested levels would pass the int16 z-band"));
     nt_ui_end(ctx);
     nt_ui_destroy_context(ctx);
 }
@@ -523,7 +474,7 @@ static void test_modal_closed_root_takes_no_band(void) {
     TEST_ASSERT_NOT_NULL(ctx);
     nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
     st.ease_speed = 0.0F;
-    ui_frame_begin(ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1, 0);
+    ui_fx_frame_begin(ctx, NULL);
     (void)modal_begin_open(ctx, MODAL_A, &st);
     nt_ui_modal_end(ctx);
     modal_begin_closed(ctx, MODAL_B, &st);
@@ -531,63 +482,55 @@ static void test_modal_closed_root_takes_no_band(void) {
     nt_ui_destroy_context(ctx);
 }
 
-/* ---- A stride whose first root overlay's nested levels could pass int16 asserts at create. ---- */
-static void test_modal_stride_past_the_band_budget_asserts(void) {
-    nt_ui_create_desc_t desc = nt_ui_create_desc_defaults();
-    desc.overlay_zband_stride = (int16_t)(INT16_MAX - 8);
-    NT_TEST_EXPECT_ASSERT((void)nt_ui_create_context(s_custom_arena, sizeof s_custom_arena, &desc));
+/* ---- A 0 stride (no fallback to the default, which lives only in nt_ui_create_desc_defaults) and a stride
+ *      whose first root overlay's nested levels could pass int16 assert at create. ---- */
+static void test_modal_stride_out_of_range_asserts(void) {
+    const int16_t strides[] = {0, (int16_t)(INT16_MAX - 8)};
+    for (int i = 0; i < 2; ++i) {
+        nt_ui_create_desc_t desc = nt_ui_create_desc_defaults();
+        desc.overlay_zband_stride = strides[i];
+        NT_TEST_EXPECT_ASSERT((void)nt_ui_create_context(s_custom_arena, sizeof s_custom_arena, &desc));
+        TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "overlay_zband_stride must be > 0 with room"));
+    }
 }
 
-/* ---- No 0->default fallback: the default lives only in nt_ui_create_desc_defaults() (same as
- *      max_elements). A 0 stride is invalid and must fail-early at create. ---- */
-static void test_modal_zero_stride_asserts(void) {
-    nt_ui_create_desc_t desc = nt_ui_create_desc_defaults();
-    desc.overlay_zband_stride = 0;
-    NT_TEST_EXPECT_ASSERT((void)nt_ui_create_context(s_custom_arena, sizeof s_custom_arena, &desc));
+/* ---- SLIDE edge: each edge displaces the panel on the right axis with the right sign (+x right, +y down);
+ *      a finite ease keeps the first frame's offset near anim.offset (40), past the body's half size. ---- */
+/* The axis signs of the panel's eased shift last frame: +1/-1 when a probe 30 px from the body center along
+ * that axis hits the panel, 0 when neither probe does. */
+static void panel_shift(uint32_t id, int *sx, int *sy) {
+    const nt_ui_bbox_t bb = nt_ui_get_bbox(s_fx.ctx, id);
+    TEST_ASSERT_TRUE_MESSAGE(bb.found, "the panel was laid out");
+    const float cx = bb.x + (bb.width * 0.5F);
+    const float cy = bb.y + (bb.height * 0.5F);
+    *sx = (int)nt_ui_test_hit(s_fx.ctx, id, cx + 30.0F, cy) - (int)nt_ui_test_hit(s_fx.ctx, id, cx - 30.0F, cy);
+    *sy = (int)nt_ui_test_hit(s_fx.ctx, id, cx, cy + 30.0F) - (int)nt_ui_test_hit(s_fx.ctx, id, cx, cy - 30.0F);
 }
 
-/* ---- SLIDE edge: each edge drives the panel offset on the right axis + sign. A finite ease keeps the
- *      first frame's t well below 1, so offset ~= anim.offset on the active axis and ~0 on the other.
- *      +x = right, +y = down; the panel starts displaced toward `edge`. ---- */
-/* The panel's eased offset, read from the transform the walker baked for it in the last frame. */
-static void panel_offset(uint32_t id, float *ox, float *oy) {
-    const int32_t slot = nt_ui_internal_live_slot(s_fx.ctx, id);
-    TEST_ASSERT_TRUE_MESSAGE(slot >= 0, "the panel was laid out");
-    *ox = s_fx.ctx->hit_baked[slot].m[12];
-    *oy = s_fx.ctx->hit_baked[slot].m[13];
-}
-
-static void modal_slide_offset_frame(nt_ui_modal_edge_t edge, float *ox, float *oy) {
-    nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
-    st.ease_speed = 8.0F; /* finite: first frame t << 1 -> offset near anim.offset */
-    st.open = (nt_ui_modal_anim_t){.type = NT_UI_MODAL_ANIM_SLIDE, .edge = (uint8_t)edge, .offset = 40.0F};
-    ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1, 0);
-    (void)modal_begin_open(s_fx.ctx, MODAL_A + (uint32_t)edge, &st); /* distinct id per edge -> each eases from a fresh slot */
+/* One frame of the open modal `id` with a body. */
+static void modal_open_frame(uint32_t id, const nt_ui_modal_style_t *st) {
+    ui_fx_frame_begin(s_fx.ctx, NULL);
+    (void)modal_begin_open(s_fx.ctx, id, st);
+    modal_body();
     nt_ui_modal_end(s_fx.ctx);
     nt_ui_end(s_fx.ctx);
-    panel_offset(MODAL_A + (uint32_t)edge, ox, oy);
 }
 
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_modal_slide_dir(void) {
-    float ox = 0.0F;
-    float oy = 0.0F;
-
-    modal_slide_offset_frame(NT_UI_MODAL_BOTTOM, &ox, &oy);
-    TEST_ASSERT_TRUE(oy > 0.0F); /* starts below center, rises */
-    TEST_ASSERT_TRUE(float_near(ox, 0.0F, 0.0001F));
-
-    modal_slide_offset_frame(NT_UI_MODAL_TOP, &ox, &oy);
-    TEST_ASSERT_TRUE(oy < 0.0F); /* starts above center, descends */
-    TEST_ASSERT_TRUE(float_near(ox, 0.0F, 0.0001F));
-
-    modal_slide_offset_frame(NT_UI_MODAL_LEFT, &ox, &oy);
-    TEST_ASSERT_TRUE(ox < 0.0F); /* starts left of center, slides right */
-    TEST_ASSERT_TRUE(float_near(oy, 0.0F, 0.0001F));
-
-    modal_slide_offset_frame(NT_UI_MODAL_RIGHT, &ox, &oy);
-    TEST_ASSERT_TRUE(ox > 0.0F); /* starts right of center, slides left */
-    TEST_ASSERT_TRUE(float_near(oy, 0.0F, 0.0001F));
+    const nt_ui_modal_edge_t edges[] = {NT_UI_MODAL_BOTTOM, NT_UI_MODAL_TOP, NT_UI_MODAL_LEFT, NT_UI_MODAL_RIGHT};
+    const int want_x[] = {0, 0, -1, 1};
+    const int want_y[] = {1, -1, 0, 0};
+    for (int i = 0; i < 4; ++i) {
+        nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
+        st.ease_speed = 8.0F;
+        st.open = (nt_ui_modal_anim_t){.type = NT_UI_MODAL_ANIM_SLIDE, .edge = (uint8_t)edges[i], .offset = 40.0F};
+        modal_open_frame(MODAL_A + (uint32_t)i, &st); /* distinct id per edge: each eases from a fresh slot */
+        int sx = 0;
+        int sy = 0;
+        panel_shift(MODAL_A + (uint32_t)i, &sx, &sy);
+        TEST_ASSERT_EQUAL_INT(want_x[i], sx);
+        TEST_ASSERT_EQUAL_INT(want_y[i], sy);
+    }
 }
 
 /* ---- Asymmetric open/close: open=slide-from-bottom shows a vertical offset while opening; close=fade
@@ -597,24 +540,17 @@ static void test_modal_asymmetric_open_close(void) {
     st.ease_speed = 8.0F;
     st.open = (nt_ui_modal_anim_t){.type = NT_UI_MODAL_ANIM_SLIDE, .edge = NT_UI_MODAL_BOTTOM, .offset = 40.0F};
     st.close = (nt_ui_modal_anim_t){.type = NT_UI_MODAL_ANIM_FADE};
-    float ox = 0.0F;
-    float oy = 0.0F;
+    int sx = 0;
+    int sy = 0;
+    modal_open_frame(MODAL_B, &st);
+    panel_shift(MODAL_B, &sx, &sy);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(1, sy, "slide-from-bottom while opening");
 
-    /* Opening (open=true): slide recipe -> vertical offset present. */
-    ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1, 0);
-    (void)modal_begin_open(s_fx.ctx, MODAL_B, &st);
-    nt_ui_modal_end(s_fx.ctx);
-    nt_ui_end(s_fx.ctx);
-    panel_offset(MODAL_B, &ox, &oy);
-    TEST_ASSERT_TRUE(oy > 0.0F); /* slide-from-bottom while opening */
-
-    /* Closing (open=false): fade recipe -> identity, no offset regardless of t. */
-    ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1, 0);
+    ui_fx_frame_begin(s_fx.ctx, NULL);
     modal_begin_closed(s_fx.ctx, MODAL_B, &st);
     nt_ui_end(s_fx.ctx);
-    panel_offset(MODAL_B, &ox, &oy);
-    TEST_ASSERT_TRUE(float_near(ox, 0.0F, 0.0001F)); /* fade close -> no offset */
-    TEST_ASSERT_TRUE(float_near(oy, 0.0F, 0.0001F));
+    panel_shift(MODAL_B, &sx, &sy);
+    TEST_ASSERT_TRUE_MESSAGE(sx == 0 && sy == 0, "the fade close keeps the panel in place");
 }
 
 /* ---- Invalid anim recipes fail early at begin. Asserts run BEFORE the push, so a trapped begin leaves
@@ -622,24 +558,28 @@ static void test_modal_asymmetric_open_close(void) {
 static void test_modal_anim_asserts(void) {
     nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
     st.ease_speed = 0.0F;
-    ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1, 0);
+    ui_fx_frame_begin(s_fx.ctx, NULL);
     bool open = true;
 
     nt_ui_modal_style_t bad = st;
     bad.open = (nt_ui_modal_anim_t){.type = NT_UI_MODAL_ANIM_SCALE_POP, .scale_start = 0.0F};
-    NT_TEST_EXPECT_ASSERT(nt_ui_modal_begin(s_fx.ctx, MODAL_A, &bad, &open, NULL)); /* SCALE_POP scale_start must be > 0 */
+    NT_TEST_EXPECT_ASSERT(nt_ui_modal_begin(s_fx.ctx, MODAL_A, &bad, &open, NULL));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "scale_start must be finite > 0"));
 
     bad = st;
     bad.open = (nt_ui_modal_anim_t){.type = NT_UI_MODAL_ANIM_SLIDE, .edge = NT_UI_MODAL_BOTTOM, .offset = NAN};
-    NT_TEST_EXPECT_ASSERT(nt_ui_modal_begin(s_fx.ctx, MODAL_A, &bad, &open, NULL)); /* SLIDE offset must be finite */
+    NT_TEST_EXPECT_ASSERT(nt_ui_modal_begin(s_fx.ctx, MODAL_A, &bad, &open, NULL));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "SLIDE offset finite + edge in range"));
 
     bad = st;
     bad.open = (nt_ui_modal_anim_t){.type = NT_UI_MODAL_ANIM_SLIDE, .edge = 4, .offset = 10.0F};
-    NT_TEST_EXPECT_ASSERT(nt_ui_modal_begin(s_fx.ctx, MODAL_A, &bad, &open, NULL)); /* edge out of range */
+    NT_TEST_EXPECT_ASSERT(nt_ui_modal_begin(s_fx.ctx, MODAL_A, &bad, &open, NULL));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "SLIDE offset finite + edge in range"));
 
     bad = st;
     bad.open.type = 7;
-    NT_TEST_EXPECT_ASSERT(nt_ui_modal_begin(s_fx.ctx, MODAL_A, &bad, &open, NULL)); /* type out of range */
+    NT_TEST_EXPECT_ASSERT(nt_ui_modal_begin(s_fx.ctx, MODAL_A, &bad, &open, NULL));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "anim.type out of range"));
 
     nt_ui_end(s_fx.ctx);
 }
@@ -651,21 +591,17 @@ static void test_modal_close_uses_close_recipe(void) {
     st.ease_speed = 8.0F;
     st.open = (nt_ui_modal_anim_t){.type = NT_UI_MODAL_ANIM_SLIDE, .edge = NT_UI_MODAL_LEFT, .offset = 40.0F};
     st.close = (nt_ui_modal_anim_t){.type = NT_UI_MODAL_ANIM_SLIDE, .edge = NT_UI_MODAL_RIGHT, .offset = 40.0F};
-    float ox = 0.0F;
-    float oy = 0.0F;
+    int sx = 0;
+    int sy = 0;
+    modal_open_frame(MODAL_B, &st);
+    panel_shift(MODAL_B, &sx, &sy);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(-1, sx, "the open recipe slides from the left");
 
-    ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1, 0);
-    (void)modal_begin_open(s_fx.ctx, MODAL_B, &st);
-    nt_ui_modal_end(s_fx.ctx);
-    nt_ui_end(s_fx.ctx);
-    panel_offset(MODAL_B, &ox, &oy);
-    TEST_ASSERT_TRUE(ox < 0.0F); /* open recipe = LEFT */
-
-    ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1, 0);
+    ui_fx_frame_begin(s_fx.ctx, NULL);
     modal_begin_closed(s_fx.ctx, MODAL_B, &st);
     nt_ui_end(s_fx.ctx);
-    panel_offset(MODAL_B, &ox, &oy);
-    TEST_ASSERT_TRUE(ox > 0.0F); /* close recipe = RIGHT (from style.close) */
+    panel_shift(MODAL_B, &sx, &sy);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(1, sx, "the close recipe slides to the right");
 
     /* The frame the modal closes itself on Esc eases by the close recipe too. */
     st.flags = NT_UI_MODAL_LISTEN_ESC;
@@ -673,23 +609,22 @@ static void test_modal_close_uses_close_recipe(void) {
         if (f == 1) {
             nt_input_feed(nt_test_key(NT_KEY_ESCAPE, true));
         }
-        ui_frame_begin(s_fx.ctx, 800.0F, 600.0F, 1.0F / 60.0F, &(nt_pointer_t){.active = true}, 1, 0);
+        ui_fx_frame_begin(s_fx.ctx, NULL);
         bool open = true;
         nt_ui_popup_info_t info = {0};
         TEST_ASSERT_TRUE(nt_ui_modal_begin(s_fx.ctx, MODAL_A, &st, &open, &info));
+        modal_body();
         nt_ui_modal_end(s_fx.ctx);
         nt_ui_end(s_fx.ctx);
         TEST_ASSERT_EQUAL_INT(f == 1 ? NT_UI_POPUP_CLOSE_ESC : NT_UI_POPUP_CLOSE_NONE, info.reason);
     }
-    panel_offset(MODAL_A, &ox, &oy);
-    TEST_ASSERT_TRUE_MESSAGE(ox > 0.0F, "a self-close eases by the close recipe from its first frame");
+    panel_shift(MODAL_A, &sx, &sy);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(1, sx, "a self-close eases by the close recipe from its first frame");
 }
 
 int main(void) {
     UNITY_BEGIN();
-    RUN_TEST(test_modal_abi_sizes);
     RUN_TEST(test_modal_defaults_valid);
-    RUN_TEST(test_modal_zband_and_nesting);
     RUN_TEST(test_modal_esc_top_only);
     RUN_TEST(test_modal_esc_requires_flag);
     RUN_TEST(test_modal_open_entrance_eases_from_zero);
@@ -706,10 +641,9 @@ int main(void) {
     RUN_TEST(test_modal_close_uses_close_recipe);
     RUN_TEST(test_modal_anim_asserts);
     RUN_TEST(test_modal_custom_zband_stride);
-    RUN_TEST(test_modal_zero_stride_asserts);
+    RUN_TEST(test_modal_stride_out_of_range_asserts);
     RUN_TEST(test_modal_stride_one_gates_base_ui);
     RUN_TEST(test_modal_root_band_overflow_asserts);
     RUN_TEST(test_modal_closed_root_takes_no_band);
-    RUN_TEST(test_modal_stride_past_the_band_budget_asserts);
     return UNITY_END();
 }

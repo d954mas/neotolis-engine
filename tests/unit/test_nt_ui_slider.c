@@ -15,6 +15,7 @@
 #include "core/nt_assert.h"
 #include "input/nt_input.h"
 #include "test_helpers/nt_assert_trap.h"
+#include "test_helpers/ui_fx_frame.h"
 #include "test_helpers/ui_test_arena.h"
 #include "test_helpers/ui_walker_fixture.h"
 #include "ui/nt_ui.h"
@@ -71,17 +72,6 @@ void setUp(void) {
 
 void tearDown(void) { ui_walker_fixture_shutdown(&s_fx); }
 
-static nt_pointer_t make_pointer(float x, float y, bool is_down, bool is_pressed, bool is_released) {
-    nt_pointer_t p = {0};
-    p.x = x;
-    p.y = y;
-    p.active = true;
-    p.buttons[NT_BUTTON_LEFT].is_down = is_down;
-    p.buttons[NT_BUTTON_LEFT].is_pressed = is_pressed;
-    p.buttons[NT_BUTTON_LEFT].is_released = is_released;
-    return p;
-}
-
 static const Clay_ElementDeclaration s_track_decl = {
     .layout = {.sizing = {CLAY_SIZING_FIXED(SL_W), CLAY_SIZING_FIXED(SL_H)}},
 };
@@ -108,7 +98,7 @@ static bool slider_int_frame(const nt_pointer_t *p, int *value, int min, int max
 
 /* Warm-up frame so Clay caches the track bbox for next frame's hit-test + thumb rect. */
 static void warmup_float(float *value, float min, float max) {
-    nt_pointer_t f0 = make_pointer(SL_X - 50.0F, SL_CY, false, false, false);
+    nt_pointer_t f0 = ui_fx_pointer(SL_X - 50.0F, SL_CY, false, false, false);
     (void)slider_float_frame(&f0, value, min, max, 0.0F, true);
 }
 
@@ -152,7 +142,7 @@ static bool slider_vfloat_frame(const nt_pointer_t *p, float *value, float min, 
 }
 
 static void warmup_vfloat(float *value, float min, float max) {
-    nt_pointer_t f0 = make_pointer(VT_CX, VT_Y - 50.0F, false, false, false);
+    nt_pointer_t f0 = ui_fx_pointer(VT_CX, VT_Y - 50.0F, false, false, false);
     (void)slider_vfloat_frame(&f0, value, min, max, 0.0F, true);
 }
 
@@ -174,21 +164,21 @@ static void test_track_jump_value_map(void) {
     warmup_float(&value, 0.0F, 1.0F);
 
     /* Press at the far left (thumb-center anchor) -> value 0. */
-    nt_pointer_t pl = make_pointer(SL_X_AT_FRAC(0.0F), SL_CY, true, true, false);
+    nt_pointer_t pl = ui_fx_pointer(SL_X_AT_FRAC(0.0F), SL_CY, true, true, false);
     (void)slider_float_frame(&pl, &value, 0.0F, 1.0F, 0.0F, true);
     TEST_ASSERT_TRUE(float_near(value, 0.0F, 0.02F));
 
     /* Release, re-warm, press at the far right -> value 1. */
-    nt_pointer_t up = make_pointer(SL_X_AT_FRAC(0.0F), SL_CY, false, false, true);
+    nt_pointer_t up = ui_fx_pointer(SL_X_AT_FRAC(0.0F), SL_CY, false, false, true);
     (void)slider_float_frame(&up, &value, 0.0F, 1.0F, 0.0F, true);
-    nt_pointer_t pr = make_pointer(SL_X_AT_FRAC(1.0F), SL_CY, true, true, false);
+    nt_pointer_t pr = ui_fx_pointer(SL_X_AT_FRAC(1.0F), SL_CY, true, true, false);
     (void)slider_float_frame(&pr, &value, 0.0F, 1.0F, 0.0F, true);
     TEST_ASSERT_TRUE(float_near(value, 1.0F, 0.02F));
 
     /* Release, press at the midpoint -> value 0.5. */
-    nt_pointer_t up2 = make_pointer(SL_X_AT_FRAC(1.0F), SL_CY, false, false, true);
+    nt_pointer_t up2 = ui_fx_pointer(SL_X_AT_FRAC(1.0F), SL_CY, false, false, true);
     (void)slider_float_frame(&up2, &value, 0.0F, 1.0F, 0.0F, true);
-    nt_pointer_t pm = make_pointer(SL_X_AT_FRAC(0.5F), SL_CY, true, true, false);
+    nt_pointer_t pm = ui_fx_pointer(SL_X_AT_FRAC(0.5F), SL_CY, true, true, false);
     (void)slider_float_frame(&pm, &value, 0.0F, 1.0F, 0.0F, true);
     TEST_ASSERT_TRUE(float_near(value, 0.5F, 0.02F));
 }
@@ -200,14 +190,14 @@ static void test_value_clamped(void) {
     warmup_float(&value, 0.0F, 1.0F);
 
     /* Grab on the track midpoint, then drag the held pointer far LEFT -> clamps to 0. */
-    nt_pointer_t grab = make_pointer(SL_X_AT_FRAC(0.5F), SL_CY, true, true, false);
+    nt_pointer_t grab = ui_fx_pointer(SL_X_AT_FRAC(0.5F), SL_CY, true, true, false);
     (void)slider_float_frame(&grab, &value, 0.0F, 1.0F, 0.0F, true);
-    nt_pointer_t drag_l = make_pointer(SL_X - 200.0F, SL_CY, true, false, false);
+    nt_pointer_t drag_l = ui_fx_pointer(SL_X - 200.0F, SL_CY, true, false, false);
     (void)slider_float_frame(&drag_l, &value, 0.0F, 1.0F, 0.0F, true);
     TEST_ASSERT_TRUE(float_near(value, 0.0F, 0.001F));
 
     /* Same hold, drag far RIGHT -> clamps to 1. */
-    nt_pointer_t drag_r = make_pointer(SL_X + SL_W + 200.0F, SL_CY, true, false, false);
+    nt_pointer_t drag_r = ui_fx_pointer(SL_X + SL_W + 200.0F, SL_CY, true, false, false);
     (void)slider_float_frame(&drag_r, &value, 0.0F, 1.0F, 0.0F, true);
     TEST_ASSERT_TRUE(float_near(value, 1.0F, 0.001F));
 }
@@ -216,7 +206,7 @@ static void test_value_clamped(void) {
 static void test_value_map_nonunit_range(void) {
     float value = 10.0F;
     warmup_float(&value, 10.0F, 50.0F);
-    nt_pointer_t pm = make_pointer(SL_X_AT_FRAC(0.5F), SL_CY, true, true, false);
+    nt_pointer_t pm = ui_fx_pointer(SL_X_AT_FRAC(0.5F), SL_CY, true, true, false);
     (void)slider_float_frame(&pm, &value, 10.0F, 50.0F, 0.0F, true);
     TEST_ASSERT_TRUE(float_near(value, 30.0F, 0.8F));
 }
@@ -226,7 +216,7 @@ static void test_float_step_quantize(void) {
     float value = 0.0F;
     warmup_float(&value, 0.0F, 1.0F);
     /* Press at ~0.6 fraction with step 0.25 -> snaps to 0.5. */
-    nt_pointer_t p = make_pointer(SL_X_AT_FRAC(0.6F), SL_CY, true, true, false);
+    nt_pointer_t p = ui_fx_pointer(SL_X_AT_FRAC(0.6F), SL_CY, true, true, false);
     (void)slider_float_frame(&p, &value, 0.0F, 1.0F, 0.25F, true);
     TEST_ASSERT_TRUE(float_near(value, 0.5F, 0.001F));
 }
@@ -234,16 +224,16 @@ static void test_float_step_quantize(void) {
 /* ---- Test 5: int variant casts + quantizes (range 0..10, midpoint -> 5). ---- */
 static void test_int_quantize_cast(void) {
     int value = 0;
-    nt_pointer_t f0 = make_pointer(SL_X - 50.0F, SL_CY, false, false, false);
+    nt_pointer_t f0 = ui_fx_pointer(SL_X - 50.0F, SL_CY, false, false, false);
     (void)slider_int_frame(&f0, &value, 0, 10, 1, true); /* warm-up */
-    nt_pointer_t pm = make_pointer(SL_X_AT_FRAC(0.5F), SL_CY, true, true, false);
+    nt_pointer_t pm = ui_fx_pointer(SL_X_AT_FRAC(0.5F), SL_CY, true, true, false);
     (void)slider_int_frame(&pm, &value, 0, 10, 1, true);
     TEST_ASSERT_EQUAL_INT(5, value);
 
     /* step 2 -> only even values; ~0.65 fraction (6.5) rounds to 6. */
-    nt_pointer_t up = make_pointer(SL_X_AT_FRAC(0.5F), SL_CY, false, false, true);
+    nt_pointer_t up = ui_fx_pointer(SL_X_AT_FRAC(0.5F), SL_CY, false, false, true);
     (void)slider_int_frame(&up, &value, 0, 10, 2, true);
-    nt_pointer_t p2 = make_pointer(SL_X_AT_FRAC(0.65F), SL_CY, true, true, false);
+    nt_pointer_t p2 = ui_fx_pointer(SL_X_AT_FRAC(0.65F), SL_CY, true, true, false);
     (void)slider_int_frame(&p2, &value, 0, 10, 2, true);
     TEST_ASSERT_EQUAL_INT(6, value);
 }
@@ -257,19 +247,19 @@ static void test_thumb_grab_vs_track_jump(void) {
 
     /* Press exactly ON the thumb center -> value UNCHANGED this frame (grab, not jump). */
     const float thumb_center_x = SL_X_AT_FRAC(0.5F);
-    nt_pointer_t grab = make_pointer(thumb_center_x, SL_CY, true, true, false);
+    nt_pointer_t grab = ui_fx_pointer(thumb_center_x, SL_CY, true, true, false);
     (void)slider_float_frame(&grab, &value, 0.0F, 1.0F, 0.0F, true);
     TEST_ASSERT_TRUE(float_near(value, 0.5F, 0.02F));
 
     /* Drag right by a quarter of the usable width -> value moves +0.25 (relative). */
-    nt_pointer_t drag = make_pointer(thumb_center_x + (SL_USABLE * 0.25F), SL_CY, true, false, false);
+    nt_pointer_t drag = ui_fx_pointer(thumb_center_x + (SL_USABLE * 0.25F), SL_CY, true, false, false);
     (void)slider_float_frame(&drag, &value, 0.0F, 1.0F, 0.0F, true);
     TEST_ASSERT_TRUE(float_near(value, 0.75F, 0.03F));
 
     /* Release; new press on the FAR LEFT track (off the thumb) -> jumps to ~0. */
-    nt_pointer_t up = make_pointer(thumb_center_x + (SL_USABLE * 0.25F), SL_CY, false, false, true);
+    nt_pointer_t up = ui_fx_pointer(thumb_center_x + (SL_USABLE * 0.25F), SL_CY, false, false, true);
     (void)slider_float_frame(&up, &value, 0.0F, 1.0F, 0.0F, true);
-    nt_pointer_t jump = make_pointer(SL_X_AT_FRAC(0.0F), SL_CY, true, true, false);
+    nt_pointer_t jump = ui_fx_pointer(SL_X_AT_FRAC(0.0F), SL_CY, true, true, false);
     (void)slider_float_frame(&jump, &value, 0.0F, 1.0F, 0.0F, true);
     TEST_ASSERT_TRUE(float_near(value, 0.0F, 0.03F));
 }
@@ -280,7 +270,7 @@ static void test_thumb_pos_exposed(void) {
     float value = 0.5F;
     /* Two frames so the view cell + bbox are populated (thumb_pos reads prev-frame). */
     warmup_float(&value, 0.0F, 1.0F);
-    nt_pointer_t idle = make_pointer(SL_X - 50.0F, SL_CY, false, false, false);
+    nt_pointer_t idle = ui_fx_pointer(SL_X - 50.0F, SL_CY, false, false, false);
     (void)slider_float_frame(&idle, &value, 0.0F, 1.0F, 0.0F, true);
 
     const nt_ui_slider_thumb_t t = nt_ui_slider_thumb_pos(s_fx.ctx, nt_ui_id("sl"));
@@ -299,7 +289,7 @@ static void test_thumb_pos_unknown_id(void) {
 static void test_disabled_no_drag(void) {
     float value = 0.5F;
     warmup_float(&value, 0.0F, 1.0F);
-    nt_pointer_t p = make_pointer(SL_X_AT_FRAC(0.0F), SL_CY, true, true, false);
+    nt_pointer_t p = ui_fx_pointer(SL_X_AT_FRAC(0.0F), SL_CY, true, true, false);
     TEST_ASSERT_FALSE(slider_float_frame(&p, &value, 0.0F, 1.0F, 0.0F, false));
     TEST_ASSERT_TRUE(float_near(value, 0.5F, 0.001F)); /* untouched */
 }
@@ -313,19 +303,19 @@ static void test_disabled_mid_drag_no_resume_jump(void) {
 
     /* Grab ON the thumb center: value unchanged, drag cell now active with a grab offset. */
     const float thumb_center_x = SL_X_AT_FRAC(0.5F);
-    nt_pointer_t grab = make_pointer(thumb_center_x, SL_CY, true, true, false);
+    nt_pointer_t grab = ui_fx_pointer(thumb_center_x, SL_CY, true, true, false);
     (void)slider_float_frame(&grab, &value, 0.0F, 1.0F, 0.0F, true);
     TEST_ASSERT_TRUE(float_near(value, 0.5F, 0.02F));
 
     /* Disable while the pointer is held FAR from the thumb: a stale grab cell would map
      * this pointer to the value on re-enable. The value must stay put while disabled. */
-    nt_pointer_t held_far = make_pointer(SL_X_AT_FRAC(0.0F), SL_CY, true, false, false);
+    nt_pointer_t held_far = ui_fx_pointer(SL_X_AT_FRAC(0.0F), SL_CY, true, false, false);
     TEST_ASSERT_FALSE(slider_float_frame(&held_far, &value, 0.0F, 1.0F, 0.0F, false));
     TEST_ASSERT_TRUE(float_near(value, 0.5F, 0.001F)); /* untouched while disabled */
 
     /* Re-enable with the pointer still held (no fresh press_now): the cleared cell means
      * no live drag, so the value must NOT snap to the held pointer position. */
-    nt_pointer_t held_still = make_pointer(SL_X_AT_FRAC(0.0F), SL_CY, true, false, false);
+    nt_pointer_t held_still = ui_fx_pointer(SL_X_AT_FRAC(0.0F), SL_CY, true, false, false);
     TEST_ASSERT_FALSE(slider_float_frame(&held_still, &value, 0.0F, 1.0F, 0.0F, true));
     TEST_ASSERT_TRUE(float_near(value, 0.5F, 0.02F)); /* no stale-grab jump */
 }
@@ -385,7 +375,7 @@ static void test_fill_inside_track_all_ratios(void) {
     for (size_t ri = 0; ri < sizeof ratios / sizeof ratios[0]; ++ri) {
         float value = ratios[ri];
         warmup_float(&value, 0.0F, 1.0F);
-        nt_pointer_t idle = make_pointer(SL_X - 50.0F, SL_CY, false, false, false);
+        nt_pointer_t idle = ui_fx_pointer(SL_X - 50.0F, SL_CY, false, false, false);
         (void)slider_float_frame(&idle, &value, 0.0F, 1.0F, 0.0F, true);
 
         float tl = 0.0F;
@@ -421,7 +411,7 @@ static void test_hit_pad_above_track_drags(void) {
      * outside the bare track -> a drag must start and jump the value to ~0.5. */
     const float above_y = SL_Y - 10.0F;
     TEST_ASSERT_TRUE(above_y < SL_Y); /* genuinely outside the visual track */
-    nt_pointer_t p = make_pointer(SL_X_AT_FRAC(0.5F), above_y, true, true, false);
+    nt_pointer_t p = ui_fx_pointer(SL_X_AT_FRAC(0.5F), above_y, true, true, false);
     (void)slider_float_frame(&p, &value, 0.0F, 1.0F, 0.0F, true);
     TEST_ASSERT_TRUE(float_near(value, 0.5F, 0.03F));
 }
@@ -436,7 +426,7 @@ static void test_thumb_overhang_auto_pad_drags(void) {
     warmup_float(&value, 0.0F, 1.0F);
 
     /* Press 1px above the track top (inside the 2px auto-grown overhang pad). */
-    nt_pointer_t p = make_pointer(SL_X_AT_FRAC(0.5F), SL_Y - 1.0F, true, true, false);
+    nt_pointer_t p = ui_fx_pointer(SL_X_AT_FRAC(0.5F), SL_Y - 1.0F, true, true, false);
     (void)slider_float_frame(&p, &value, 0.0F, 1.0F, 0.0F, true);
     TEST_ASSERT_TRUE(float_near(value, 0.5F, 0.03F));
 }
@@ -446,16 +436,16 @@ static void test_thumb_overhang_auto_pad_drags(void) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_step_thumb_visual_snap(void) {
     int value = 0;
-    nt_pointer_t f0 = make_pointer(SL_X - 50.0F, SL_CY, false, false, false);
+    nt_pointer_t f0 = ui_fx_pointer(SL_X - 50.0F, SL_CY, false, false, false);
     (void)slider_int_frame(&f0, &value, 0, 10, 1, true); /* warm-up */
 
     /* Press at fraction 0.63 (between tick 0.6 and 0.7 on a 0..10 grid). Value snaps to 6. */
-    nt_pointer_t p = make_pointer(SL_X_AT_FRAC(0.63F), SL_CY, true, true, false);
+    nt_pointer_t p = ui_fx_pointer(SL_X_AT_FRAC(0.63F), SL_CY, true, true, false);
     (void)slider_int_frame(&p, &value, 0, 10, 1, true);
     TEST_ASSERT_EQUAL_INT(6, value);
 
     /* A second frame so the view cell + bbox latch the snapped fraction for thumb_pos. */
-    nt_pointer_t hold = make_pointer(SL_X_AT_FRAC(0.63F), SL_CY, true, false, false);
+    nt_pointer_t hold = ui_fx_pointer(SL_X_AT_FRAC(0.63F), SL_CY, true, false, false);
     (void)slider_int_frame(&hold, &value, 0, 10, 1, true);
 
     /* The emitted thumb center sits on the 0.6 tick fraction, NOT the 0.63 pointer fraction. */
@@ -471,7 +461,7 @@ static void test_step_thumb_visual_snap(void) {
 static void test_out_of_range_writeback(void) {
     /* Above max: clamps to 1.0, write-back true. */
     float hi = 5.0F;
-    nt_pointer_t idle = make_pointer(SL_X - 50.0F, SL_CY, false, false, false);
+    nt_pointer_t idle = ui_fx_pointer(SL_X - 50.0F, SL_CY, false, false, false);
     const bool changed_hi = slider_float_frame(&idle, &hi, 0.0F, 1.0F, 0.0F, true);
     TEST_ASSERT_TRUE(changed_hi);
     TEST_ASSERT_TRUE(float_near(hi, 1.0F, 0.001F));
@@ -599,16 +589,16 @@ static void slider_top_in_scroll_frame(const nt_pointer_t *p, float *value) {
 /* A vertical drag that starts on the track scrolls the list and leaves the value alone. */
 static void test_slider_in_scroll_vertical_drag_keeps_value(void) {
     float value = 0.5F;
-    nt_pointer_t p = make_pointer(TOP_SL_TRACK_X, TOP_SL_CY, false, false, false);
+    nt_pointer_t p = ui_fx_pointer(TOP_SL_TRACK_X, TOP_SL_CY, false, false, false);
     slider_top_in_scroll_frame(&p, &value);
     slider_top_in_scroll_frame(&p, &value);
-    p = make_pointer(TOP_SL_TRACK_X, TOP_SL_CY, true, true, false);
+    p = ui_fx_pointer(TOP_SL_TRACK_X, TOP_SL_CY, true, true, false);
     slider_top_in_scroll_frame(&p, &value);
     TEST_ASSERT_TRUE(float_near(value, 0.5F, 0.0001F)); /* pending: no track jump yet */
-    p = make_pointer(TOP_SL_TRACK_X, TOP_SL_CY - 30.0F, true, false, false);
+    p = ui_fx_pointer(TOP_SL_TRACK_X, TOP_SL_CY - 30.0F, true, false, false);
     slider_top_in_scroll_frame(&p, &value);
     TEST_ASSERT_EQUAL_UINT32(SCROLL_SL_ID, s_fx.ctx->captures[0].active_id);
-    p = make_pointer(TOP_SL_TRACK_X, TOP_SL_CY - 30.0F, false, false, true);
+    p = ui_fx_pointer(TOP_SL_TRACK_X, TOP_SL_CY - 30.0F, false, false, true);
     slider_top_in_scroll_frame(&p, &value);
     TEST_ASSERT_TRUE(float_near(value, 0.5F, 0.0001F));
 }
@@ -617,15 +607,15 @@ static void test_slider_in_scroll_vertical_drag_keeps_value(void) {
 static void test_slider_in_scroll_horizontal_drag_moves_value(void) {
     float value = 0.5F;
     const float thumb_x = SCROLL_X + (SL_TW * 0.5F) + (0.5F * SL_USABLE);
-    nt_pointer_t p = make_pointer(thumb_x, TOP_SL_CY, false, false, false);
+    nt_pointer_t p = ui_fx_pointer(thumb_x, TOP_SL_CY, false, false, false);
     slider_top_in_scroll_frame(&p, &value);
     slider_top_in_scroll_frame(&p, &value);
-    p = make_pointer(thumb_x + 5.0F, TOP_SL_CY, true, true, false); /* off-center grab */
+    p = ui_fx_pointer(thumb_x + 5.0F, TOP_SL_CY, true, true, false); /* off-center grab */
     slider_top_in_scroll_frame(&p, &value);
-    p = make_pointer(thumb_x + 10.0F, TOP_SL_CY, true, false, false); /* below the slop: pending */
+    p = ui_fx_pointer(thumb_x + 10.0F, TOP_SL_CY, true, false, false); /* below the slop: pending */
     slider_top_in_scroll_frame(&p, &value);
     TEST_ASSERT_TRUE(float_near(value, 0.5F, 0.0001F));
-    p = make_pointer(thumb_x + 41.0F, TOP_SL_CY + 2.0F, true, false, false);
+    p = ui_fx_pointer(thumb_x + 41.0F, TOP_SL_CY + 2.0F, true, false, false);
     slider_top_in_scroll_frame(&p, &value);
     TEST_ASSERT_EQUAL_UINT32(SCROLL_SL_ID + 1U, s_fx.ctx->captures[0].active_id);
     TEST_ASSERT_TRUE(float_near(value, 0.5F + (36.0F / SL_USABLE), 0.01F)); /* grab kept, no jump */
@@ -635,12 +625,12 @@ static void test_slider_in_scroll_horizontal_drag_moves_value(void) {
 static void test_slider_in_scroll_thumb_tap_keeps_value(void) {
     float value = 0.5F;
     const float thumb_x = SCROLL_X + (SL_TW * 0.5F) + (0.5F * SL_USABLE);
-    nt_pointer_t p = make_pointer(thumb_x + 5.0F, TOP_SL_CY, false, false, false);
+    nt_pointer_t p = ui_fx_pointer(thumb_x + 5.0F, TOP_SL_CY, false, false, false);
     slider_top_in_scroll_frame(&p, &value);
     slider_top_in_scroll_frame(&p, &value);
-    p = make_pointer(thumb_x + 5.0F, TOP_SL_CY, true, true, false);
+    p = ui_fx_pointer(thumb_x + 5.0F, TOP_SL_CY, true, true, false);
     slider_top_in_scroll_frame(&p, &value);
-    p = make_pointer(thumb_x + 5.0F, TOP_SL_CY, false, false, true);
+    p = ui_fx_pointer(thumb_x + 5.0F, TOP_SL_CY, false, false, true);
     slider_top_in_scroll_frame(&p, &value);
     TEST_ASSERT_TRUE(float_near(value, 0.5F, 0.0001F));
 }
@@ -649,13 +639,13 @@ static void test_slider_in_scroll_thumb_tap_keeps_value(void) {
 static void test_slider_in_scroll_thumb_tap_keeps_game_value(void) {
     float value = 0.5F;
     const float thumb_x = SCROLL_X + (SL_TW * 0.5F) + (0.5F * SL_USABLE);
-    nt_pointer_t p = make_pointer(thumb_x + 5.0F, TOP_SL_CY, false, false, false);
+    nt_pointer_t p = ui_fx_pointer(thumb_x + 5.0F, TOP_SL_CY, false, false, false);
     slider_top_in_scroll_frame(&p, &value);
     slider_top_in_scroll_frame(&p, &value);
-    p = make_pointer(thumb_x + 5.0F, TOP_SL_CY, true, true, false);
+    p = ui_fx_pointer(thumb_x + 5.0F, TOP_SL_CY, true, true, false);
     slider_top_in_scroll_frame(&p, &value);
     value = 0.2F;
-    p = make_pointer(thumb_x + 5.0F, TOP_SL_CY, false, false, true);
+    p = ui_fx_pointer(thumb_x + 5.0F, TOP_SL_CY, false, false, true);
     slider_top_in_scroll_frame(&p, &value);
     TEST_ASSERT_TRUE(float_near(value, 0.2F, 0.0001F));
 }
@@ -664,12 +654,12 @@ static void test_slider_in_scroll_thumb_tap_keeps_game_value(void) {
 static void test_slider_in_scroll_drag_crossing_on_release_applies(void) {
     float value = 0.5F;
     const float thumb_x = SCROLL_X + (SL_TW * 0.5F) + (0.5F * SL_USABLE);
-    nt_pointer_t p = make_pointer(thumb_x, TOP_SL_CY, false, false, false);
+    nt_pointer_t p = ui_fx_pointer(thumb_x, TOP_SL_CY, false, false, false);
     slider_top_in_scroll_frame(&p, &value);
     slider_top_in_scroll_frame(&p, &value);
-    p = make_pointer(thumb_x, TOP_SL_CY, true, true, false);
+    p = ui_fx_pointer(thumb_x, TOP_SL_CY, true, true, false);
     slider_top_in_scroll_frame(&p, &value);
-    p = make_pointer(thumb_x + 36.0F, TOP_SL_CY, false, false, true);
+    p = ui_fx_pointer(thumb_x + 36.0F, TOP_SL_CY, false, false, true);
     slider_top_in_scroll_frame(&p, &value);
     TEST_ASSERT_TRUE(float_near(value, 0.5F + (36.0F / SL_USABLE), 0.01F));
 }
@@ -677,12 +667,12 @@ static void test_slider_in_scroll_drag_crossing_on_release_applies(void) {
 /* A track tap inside a scroll released off the slider (below the slop) is cancelled. */
 static void test_slider_in_scroll_track_tap_released_outside_keeps_value(void) {
     float value = 0.5F;
-    nt_pointer_t p = make_pointer(TOP_SL_TRACK_X, SCROLL_Y + SL_H, false, false, false);
+    nt_pointer_t p = ui_fx_pointer(TOP_SL_TRACK_X, SCROLL_Y + SL_H, false, false, false);
     slider_top_in_scroll_frame(&p, &value);
     slider_top_in_scroll_frame(&p, &value);
-    p = make_pointer(TOP_SL_TRACK_X, SCROLL_Y + SL_H, true, true, false);
+    p = ui_fx_pointer(TOP_SL_TRACK_X, SCROLL_Y + SL_H, true, true, false);
     slider_top_in_scroll_frame(&p, &value);
-    p = make_pointer(TOP_SL_TRACK_X, SCROLL_Y + SL_H + 7.0F, false, false, true);
+    p = ui_fx_pointer(TOP_SL_TRACK_X, SCROLL_Y + SL_H + 7.0F, false, false, true);
     slider_top_in_scroll_frame(&p, &value);
     TEST_ASSERT_TRUE(float_near(value, 0.5F, 0.0001F));
 }
@@ -690,13 +680,13 @@ static void test_slider_in_scroll_track_tap_released_outside_keeps_value(void) {
 /* A tap on the track inside a scroll applies its jump on release. */
 static void test_slider_in_scroll_track_tap_applies_on_release(void) {
     float value = 0.5F;
-    nt_pointer_t p = make_pointer(TOP_SL_TRACK_X, TOP_SL_CY, false, false, false);
+    nt_pointer_t p = ui_fx_pointer(TOP_SL_TRACK_X, TOP_SL_CY, false, false, false);
     slider_top_in_scroll_frame(&p, &value);
     slider_top_in_scroll_frame(&p, &value);
-    p = make_pointer(TOP_SL_TRACK_X, TOP_SL_CY, true, true, false);
+    p = ui_fx_pointer(TOP_SL_TRACK_X, TOP_SL_CY, true, true, false);
     slider_top_in_scroll_frame(&p, &value);
     TEST_ASSERT_TRUE(float_near(value, 0.5F, 0.0001F));
-    p = make_pointer(TOP_SL_TRACK_X, TOP_SL_CY, false, false, true);
+    p = ui_fx_pointer(TOP_SL_TRACK_X, TOP_SL_CY, false, false, true);
     slider_top_in_scroll_frame(&p, &value);
     TEST_ASSERT_TRUE(value > 0.9F);
 }
@@ -706,7 +696,7 @@ static void test_slider_in_scroll_track_tap_applies_on_release(void) {
 static void test_thumb_clipped_in_scroll(void) {
     nt_ui_scroll_style_t scroll_style = scroll_y_style();
     float value = 0.5F;
-    nt_pointer_t idle = make_pointer(0.0F, 0.0F, false, false, false);
+    nt_pointer_t idle = ui_fx_pointer(0.0F, 0.0F, false, false, false);
 
     /* Two frames so Clay solves the scroll dims, then scroll so the slider track (local y ~=
      * SCROLL_SL_PAD_TOP) straddles the container's BOTTOM clip edge: place the track top a little
@@ -749,21 +739,21 @@ static void test_vertical_track_jump_bottom_up(void) {
     warmup_vfloat(&value, 0.0F, 1.0F);
 
     /* Press at the TOP edge -> value 1 (up = more under BOTTOM_UP). */
-    nt_pointer_t pt = make_pointer(VT_CX, VT_Y_AT_FRAC_BU(1.0F), true, true, false);
+    nt_pointer_t pt = ui_fx_pointer(VT_CX, VT_Y_AT_FRAC_BU(1.0F), true, true, false);
     (void)slider_vfloat_frame(&pt, &value, 0.0F, 1.0F, 0.0F, true);
     TEST_ASSERT_TRUE(float_near(value, 1.0F, 0.02F));
 
     /* Release, press at the BOTTOM edge -> value 0. */
-    nt_pointer_t up = make_pointer(VT_CX, VT_Y_AT_FRAC_BU(1.0F), false, false, true);
+    nt_pointer_t up = ui_fx_pointer(VT_CX, VT_Y_AT_FRAC_BU(1.0F), false, false, true);
     (void)slider_vfloat_frame(&up, &value, 0.0F, 1.0F, 0.0F, true);
-    nt_pointer_t pb = make_pointer(VT_CX, VT_Y_AT_FRAC_BU(0.0F), true, true, false);
+    nt_pointer_t pb = ui_fx_pointer(VT_CX, VT_Y_AT_FRAC_BU(0.0F), true, true, false);
     (void)slider_vfloat_frame(&pb, &value, 0.0F, 1.0F, 0.0F, true);
     TEST_ASSERT_TRUE(float_near(value, 0.0F, 0.02F));
 
     /* Release, press at the MIDDLE -> value 0.5. */
-    nt_pointer_t up2 = make_pointer(VT_CX, VT_Y_AT_FRAC_BU(0.0F), false, false, true);
+    nt_pointer_t up2 = ui_fx_pointer(VT_CX, VT_Y_AT_FRAC_BU(0.0F), false, false, true);
     (void)slider_vfloat_frame(&up2, &value, 0.0F, 1.0F, 0.0F, true);
-    nt_pointer_t pm = make_pointer(VT_CX, VT_Y_AT_FRAC_BU(0.5F), true, true, false);
+    nt_pointer_t pm = ui_fx_pointer(VT_CX, VT_Y_AT_FRAC_BU(0.5F), true, true, false);
     (void)slider_vfloat_frame(&pm, &value, 0.0F, 1.0F, 0.0F, true);
     TEST_ASSERT_TRUE(float_near(value, 0.5F, 0.02F));
 }
@@ -775,14 +765,14 @@ static void test_vertical_track_jump_top_down(void) {
     warmup_vfloat(&value, 0.0F, 1.0F);
 
     /* Press at the TOP edge -> value 0 (down = more under TOP_DOWN). */
-    nt_pointer_t pt = make_pointer(VT_CX, VT_Y_AT_FRAC_TD(0.0F), true, true, false);
+    nt_pointer_t pt = ui_fx_pointer(VT_CX, VT_Y_AT_FRAC_TD(0.0F), true, true, false);
     (void)slider_vfloat_frame(&pt, &value, 0.0F, 1.0F, 0.0F, true);
     TEST_ASSERT_TRUE(float_near(value, 0.0F, 0.02F));
 
     /* Release, press at the BOTTOM edge -> value 1. */
-    nt_pointer_t up = make_pointer(VT_CX, VT_Y_AT_FRAC_TD(0.0F), false, false, true);
+    nt_pointer_t up = ui_fx_pointer(VT_CX, VT_Y_AT_FRAC_TD(0.0F), false, false, true);
     (void)slider_vfloat_frame(&up, &value, 0.0F, 1.0F, 0.0F, true);
-    nt_pointer_t pb = make_pointer(VT_CX, VT_Y_AT_FRAC_TD(1.0F), true, true, false);
+    nt_pointer_t pb = ui_fx_pointer(VT_CX, VT_Y_AT_FRAC_TD(1.0F), true, true, false);
     (void)slider_vfloat_frame(&pb, &value, 0.0F, 1.0F, 0.0F, true);
     TEST_ASSERT_TRUE(float_near(value, 1.0F, 0.02F));
 }
@@ -794,10 +784,10 @@ static void test_vertical_thumb_grab_bottom_up(void) {
     float value = 0.5F;
     warmup_vfloat(&value, 0.0F, 1.0F);
     const float thumb_center = VT_Y_AT_FRAC_BU(0.5F);
-    nt_pointer_t grab = make_pointer(VT_CX, thumb_center, true, true, false);
+    nt_pointer_t grab = ui_fx_pointer(VT_CX, thumb_center, true, true, false);
     (void)slider_vfloat_frame(&grab, &value, 0.0F, 1.0F, 0.0F, true);
     TEST_ASSERT_TRUE(float_near(value, 0.5F, 0.02F)); /* grab keeps the value this frame */
-    nt_pointer_t up = make_pointer(VT_CX, thumb_center - (VT_USABLE * 0.25F), true, false, false);
+    nt_pointer_t up = ui_fx_pointer(VT_CX, thumb_center - (VT_USABLE * 0.25F), true, false, false);
     (void)slider_vfloat_frame(&up, &value, 0.0F, 1.0F, 0.0F, true);
     TEST_ASSERT_TRUE(float_near(value, 0.75F, 0.03F)); /* up = more */
 }
@@ -809,10 +799,10 @@ static void test_vertical_thumb_grab_top_down(void) {
     float value = 0.5F;
     warmup_vfloat(&value, 0.0F, 1.0F);
     const float thumb_center = VT_Y_AT_FRAC_TD(0.5F);
-    nt_pointer_t grab = make_pointer(VT_CX, thumb_center, true, true, false);
+    nt_pointer_t grab = ui_fx_pointer(VT_CX, thumb_center, true, true, false);
     (void)slider_vfloat_frame(&grab, &value, 0.0F, 1.0F, 0.0F, true);
     TEST_ASSERT_TRUE(float_near(value, 0.5F, 0.02F)); /* grab keeps the value this frame */
-    nt_pointer_t up = make_pointer(VT_CX, thumb_center - (VT_USABLE * 0.25F), true, false, false);
+    nt_pointer_t up = ui_fx_pointer(VT_CX, thumb_center - (VT_USABLE * 0.25F), true, false, false);
     (void)slider_vfloat_frame(&up, &value, 0.0F, 1.0F, 0.0F, true);
     TEST_ASSERT_TRUE(float_near(value, 0.25F, 0.03F)); /* up = less */
 }
@@ -830,7 +820,7 @@ static void test_vertical_hit_pad_left_right(void) {
      * middle -> a drag must start and jump the value to ~0.5. Misses the bare thin track. */
     const float left_x = VT_X - 1.0F;
     TEST_ASSERT_TRUE(left_x < VT_X); /* genuinely outside the visual track */
-    nt_pointer_t p = make_pointer(left_x, VT_Y_AT_FRAC_BU(0.5F), true, true, false);
+    nt_pointer_t p = ui_fx_pointer(left_x, VT_Y_AT_FRAC_BU(0.5F), true, true, false);
     (void)slider_vfloat_frame(&p, &value, 0.0F, 1.0F, 0.0F, true);
     TEST_ASSERT_TRUE(float_near(value, 0.5F, 0.03F));
 }
@@ -842,7 +832,7 @@ static void test_vertical_thumb_pos_exposed(void) {
     float value = 0.25F;
     /* Two frames so the view cell + bbox latch the fraction (thumb_pos reads prev-frame). */
     warmup_vfloat(&value, 0.0F, 1.0F);
-    nt_pointer_t idle = make_pointer(VT_CX, VT_Y - 50.0F, false, false, false);
+    nt_pointer_t idle = ui_fx_pointer(VT_CX, VT_Y - 50.0F, false, false, false);
     (void)slider_vfloat_frame(&idle, &value, 0.0F, 1.0F, 0.0F, true);
 
     const nt_ui_slider_thumb_t t = nt_ui_slider_thumb_pos(s_fx.ctx, nt_ui_id("vsl"));
@@ -855,10 +845,10 @@ static void test_vertical_thumb_pos_exposed(void) {
 static void test_vertical_int_track_jump_bottom_up(void) {
     init_vstyle(NT_UI_FILL_BOTTOM_UP);
     int value = 0;
-    nt_pointer_t f0 = make_pointer(VT_CX, VT_Y - 50.0F, false, false, false);
+    nt_pointer_t f0 = ui_fx_pointer(VT_CX, VT_Y - 50.0F, false, false, false);
     (void)slider_vint_frame(&f0, &value, 0, 10, 1, true); /* warm-up: cache the track bbox */
     /* Press at the screen Y for fraction 0.7 -> value 7 (BOTTOM_UP inverts; int step 1 quantizes). */
-    nt_pointer_t pj = make_pointer(VT_CX, VT_Y_AT_FRAC_BU(0.7F), true, true, false);
+    nt_pointer_t pj = ui_fx_pointer(VT_CX, VT_Y_AT_FRAC_BU(0.7F), true, true, false);
     const bool changed = slider_vint_frame(&pj, &value, 0, 10, 1, true);
     TEST_ASSERT_TRUE(changed);
     TEST_ASSERT_EQUAL_INT(7, value);
@@ -969,7 +959,7 @@ static void test_assert_orientation_invalid(void) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_thumb_above_modal_band_first_frame(void) {
     float value = 0.5F;
-    nt_pointer_t idle = make_pointer(0.0F, 0.0F, false, false, false);
+    nt_pointer_t idle = ui_fx_pointer(0.0F, 0.0F, false, false, false);
     nt_ui_modal_style_t mst = nt_ui_modal_style_defaults();
     mst.ease_speed = 0.0F; /* snap open: the panel is at full size on frame 1 */
 

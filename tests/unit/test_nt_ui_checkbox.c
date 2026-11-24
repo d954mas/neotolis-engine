@@ -14,6 +14,7 @@
 #include "core/nt_assert.h"
 #include "input/nt_input.h"
 #include "test_helpers/nt_assert_trap.h"
+#include "test_helpers/ui_fx_frame.h"
 #include "test_helpers/ui_test_arena.h"
 #include "test_helpers/ui_walker_fixture.h"
 #include "ui/nt_ui.h"
@@ -84,17 +85,6 @@ void setUp(void) {
 
 void tearDown(void) { ui_walker_fixture_shutdown(&s_fx); }
 
-static nt_pointer_t make_pointer(float x, float y, bool is_down, bool is_pressed, bool is_released) {
-    nt_pointer_t p = {0};
-    p.x = x;
-    p.y = y;
-    p.active = true;
-    p.buttons[NT_BUTTON_LEFT].is_down = is_down;
-    p.buttons[NT_BUTTON_LEFT].is_pressed = is_pressed;
-    p.buttons[NT_BUTTON_LEFT].is_released = is_released;
-    return p;
-}
-
 static uint32_t count_cmd_of_type(const nt_ui_context_t *ctx, Clay_RenderCommandType type) {
     uint32_t n = 0;
     for (int32_t i = 0; i < ctx->frozen_cmds.length; ++i) {
@@ -140,22 +130,22 @@ static void test_click_box_toggles_value(void) {
     bool value = false;
 
     /* Frame 1: warm-up so Clay caches the row bbox for next frame's hit-test. */
-    nt_pointer_t f1 = make_pointer(CB_CX, CB_CY, false, false, false);
+    nt_pointer_t f1 = ui_fx_pointer(CB_CX, CB_CY, false, false, false);
     TEST_ASSERT_FALSE(cb_frame(&f1, &value, true));
     TEST_ASSERT_FALSE(value);
 
     /* Frame 2: press-down inside the box -> NOT yet a flip. */
-    nt_pointer_t f2 = make_pointer(CB_X + 12.0F, CB_CY, true, true, false);
+    nt_pointer_t f2 = ui_fx_pointer(CB_X + 12.0F, CB_CY, true, true, false);
     TEST_ASSERT_FALSE(cb_frame(&f2, &value, true));
     TEST_ASSERT_FALSE(value);
 
     /* Frame 3: release inside -> flips exactly this frame. */
-    nt_pointer_t f3 = make_pointer(CB_X + 12.0F, CB_CY, false, false, true);
+    nt_pointer_t f3 = ui_fx_pointer(CB_X + 12.0F, CB_CY, false, false, true);
     TEST_ASSERT_TRUE(cb_frame(&f3, &value, true));
     TEST_ASSERT_TRUE(value);
 
     /* Frame 4: idle -> no re-flip. */
-    nt_pointer_t f4 = make_pointer(CB_CX, CB_CY, false, false, false);
+    nt_pointer_t f4 = ui_fx_pointer(CB_CX, CB_CY, false, false, false);
     TEST_ASSERT_FALSE(cb_frame(&f4, &value, true));
     TEST_ASSERT_TRUE(value);
 }
@@ -165,13 +155,13 @@ static void test_click_box_toggles_value(void) {
 static void test_click_label_toggles_value(void) {
     bool value = false;
 
-    nt_pointer_t f1 = make_pointer(CB_LABEL_X, CB_CY, false, false, false);
+    nt_pointer_t f1 = ui_fx_pointer(CB_LABEL_X, CB_CY, false, false, false);
     TEST_ASSERT_FALSE(cb_frame(&f1, &value, true));
 
-    nt_pointer_t f2 = make_pointer(CB_LABEL_X, CB_CY, true, true, false);
+    nt_pointer_t f2 = ui_fx_pointer(CB_LABEL_X, CB_CY, true, true, false);
     TEST_ASSERT_FALSE(cb_frame(&f2, &value, true));
 
-    nt_pointer_t f3 = make_pointer(CB_LABEL_X, CB_CY, false, false, true);
+    nt_pointer_t f3 = ui_fx_pointer(CB_LABEL_X, CB_CY, false, false, true);
     TEST_ASSERT_TRUE(cb_frame(&f3, &value, true));
     TEST_ASSERT_TRUE(value);
 }
@@ -204,13 +194,13 @@ static void test_disabled_no_click_balanced(void) {
     bool value = false;
 
     /* Warm-up + full press/release sequence, all with enabled=false. */
-    nt_pointer_t f1 = make_pointer(CB_CX, CB_CY, false, false, false);
+    nt_pointer_t f1 = ui_fx_pointer(CB_CX, CB_CY, false, false, false);
     TEST_ASSERT_FALSE(cb_frame(&f1, &value, false));
 
-    nt_pointer_t f2 = make_pointer(CB_CX, CB_CY, true, true, false);
+    nt_pointer_t f2 = ui_fx_pointer(CB_CX, CB_CY, true, true, false);
     TEST_ASSERT_FALSE(cb_frame(&f2, &value, false));
 
-    nt_pointer_t f3 = make_pointer(CB_CX, CB_CY, false, false, true);
+    nt_pointer_t f3 = ui_fx_pointer(CB_CX, CB_CY, false, false, true);
     TEST_ASSERT_FALSE(cb_frame(&f3, &value, false)); /* disabled never clicks */
     TEST_ASSERT_FALSE(value);                        /* value untouched */
 
@@ -253,10 +243,10 @@ static void test_layer_propagation(void) {
 static uint8_t pressed_box_flags(void) {
     bool value = false;
     /* Frame 1: warm-up so Clay caches the row bbox for next frame's hit-test. */
-    nt_pointer_t f1 = make_pointer(CB_CX, CB_CY, false, false, false);
+    nt_pointer_t f1 = ui_fx_pointer(CB_CX, CB_CY, false, false, false);
     (void)cb_frame(&f1, &value, true);
     /* Frame 2: pressed (down) over the row. */
-    nt_pointer_t f2 = make_pointer(CB_CX, CB_CY, true, true, false);
+    nt_pointer_t f2 = ui_fx_pointer(CB_CX, CB_CY, true, true, false);
     (void)cb_frame(&f2, &value, true);
     const Clay_RenderCommand *box = first_cmd_of_type(s_fx.ctx, CLAY_RENDER_COMMAND_TYPE_IMAGE);
     TEST_ASSERT_NOT_NULL(box);
@@ -401,15 +391,15 @@ static bool tri_frame(const nt_pointer_t *p, nt_ui_tristate_t *value, bool enabl
 
 /* Warm-up frame so Clay caches the row bbox for the next frame's hit-test. */
 static void tri_warmup(nt_ui_tristate_t *value) {
-    nt_pointer_t f = make_pointer(CB_CX, CB_CY, false, false, false);
+    nt_pointer_t f = ui_fx_pointer(CB_CX, CB_CY, false, false, false);
     (void)tri_frame(&f, value, true);
 }
 
 /* One press->release click over the row; returns changed on the release frame. */
 static bool tri_click(nt_ui_tristate_t *value) {
-    nt_pointer_t pd = make_pointer(CB_CX, CB_CY, true, true, false);
+    nt_pointer_t pd = ui_fx_pointer(CB_CX, CB_CY, true, true, false);
     (void)tri_frame(&pd, value, true);
-    nt_pointer_t pu = make_pointer(CB_CX, CB_CY, false, false, true);
+    nt_pointer_t pu = ui_fx_pointer(CB_CX, CB_CY, false, false, true);
     return tri_frame(&pu, value, true);
 }
 
@@ -472,11 +462,11 @@ static void test_tri_render_row_distinct(void) {
 /* ---- Test: bool nt_ui_checkbox still flips correctly through the widened cb_core. ---- */
 static void test_tri_bool_regression(void) {
     bool value = false;
-    nt_pointer_t f1 = make_pointer(CB_CX, CB_CY, false, false, false);
+    nt_pointer_t f1 = ui_fx_pointer(CB_CX, CB_CY, false, false, false);
     TEST_ASSERT_FALSE(cb_frame(&f1, &value, true));
-    nt_pointer_t f2 = make_pointer(CB_CX, CB_CY, true, true, false);
+    nt_pointer_t f2 = ui_fx_pointer(CB_CX, CB_CY, true, true, false);
     TEST_ASSERT_FALSE(cb_frame(&f2, &value, true));
-    nt_pointer_t f3 = make_pointer(CB_CX, CB_CY, false, false, true);
+    nt_pointer_t f3 = ui_fx_pointer(CB_CX, CB_CY, false, false, true);
     TEST_ASSERT_TRUE(cb_frame(&f3, &value, true));
     TEST_ASSERT_TRUE(value);
 }

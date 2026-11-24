@@ -16,6 +16,7 @@
 #include "core/nt_assert.h"
 #include "input/nt_input.h"
 #include "test_helpers/nt_assert_trap.h"
+#include "test_helpers/ui_fx_frame.h"
 #include "test_helpers/ui_test_arena.h"
 #include "test_helpers/ui_walker_fixture.h"
 #include "ui/nt_ui.h"
@@ -76,17 +77,6 @@ void setUp(void) {
 
 void tearDown(void) { ui_walker_fixture_shutdown(&s_fx); }
 
-static nt_pointer_t make_pointer(float x, float y, bool is_down, bool is_pressed, bool is_released) {
-    nt_pointer_t p = {0};
-    p.x = x;
-    p.y = y;
-    p.active = true;
-    p.buttons[NT_BUTTON_LEFT].is_down = is_down;
-    p.buttons[NT_BUTTON_LEFT].is_pressed = is_pressed;
-    p.buttons[NT_BUTTON_LEFT].is_released = is_released;
-    return p;
-}
-
 /* Per-row FIXED decl so each radio gets a distinct hit bbox. */
 static const Clay_ElementDeclaration s_row_decl = {
     .layout = {.sizing = {CLAY_SIZING_FIXED(RD_W), CLAY_SIZING_FIXED(RD_H)}},
@@ -108,10 +98,10 @@ static void rd_frame(const nt_pointer_t *p, int *selected, bool out[3], const bo
 static void click_radio(int idx, int *selected, bool out[3], const bool enabled[3]) {
     const float cx = RD_CX;
     const float cy = RD_CY(idx);
-    nt_pointer_t f_press = make_pointer(cx, cy, true, true, false);
+    nt_pointer_t f_press = ui_fx_pointer(cx, cy, true, true, false);
     bool ignore[3];
     rd_frame(&f_press, selected, ignore, enabled);
-    nt_pointer_t f_rel = make_pointer(cx, cy, false, false, true);
+    nt_pointer_t f_rel = ui_fx_pointer(cx, cy, false, false, true);
     rd_frame(&f_rel, selected, out, enabled);
 }
 
@@ -124,7 +114,7 @@ static void test_select_one_excludes_others(void) {
     bool out[3];
 
     /* Warm-up frame so Clay caches each row bbox for next frame's hit-test. */
-    nt_pointer_t warm = make_pointer(0.0F, 0.0F, false, false, false);
+    nt_pointer_t warm = ui_fx_pointer(0.0F, 0.0F, false, false, false);
     rd_frame(&warm, &selected, out, s_all_enabled);
 
     /* Click radio 1 -> *selected becomes 1; radio 1 returns changed, others not. */
@@ -147,7 +137,7 @@ static void test_reselect_is_noop(void) {
     int selected = 1; /* radio 1 already selected */
     bool out[3];
 
-    nt_pointer_t warm = make_pointer(0.0F, 0.0F, false, false, false);
+    nt_pointer_t warm = ui_fx_pointer(0.0F, 0.0F, false, false, false);
     rd_frame(&warm, &selected, out, s_all_enabled);
 
     click_radio(1, &selected, out, s_all_enabled);
@@ -161,7 +151,7 @@ static void test_disabled_radio_ignored(void) {
     bool out[3];
     const bool enabled[3] = {true, false, true}; /* radio 1 disabled */
 
-    nt_pointer_t warm = make_pointer(0.0F, 0.0F, false, false, false);
+    nt_pointer_t warm = ui_fx_pointer(0.0F, 0.0F, false, false, false);
     rd_frame(&warm, &selected, out, enabled);
 
     click_radio(1, &selected, out, enabled);

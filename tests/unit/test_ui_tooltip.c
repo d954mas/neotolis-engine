@@ -18,6 +18,7 @@
 #include "clay.h"
 #include "sprite_comp/nt_sprite_comp.h" /* NT_SPRITE_FLAG_FLIP_Y */
 #include "test_helpers/nt_assert_trap.h"
+#include "test_helpers/ui_fx_frame.h"
 #include "test_helpers/ui_test_arena.h"
 #include "test_helpers/ui_walker_fixture.h"
 #include "ui/nt_ui.h"
@@ -51,14 +52,6 @@ void tearDown(void) { ui_walker_fixture_shutdown(&s_fx); }
 
 static bool float_near(float a, float b, float eps) { return fabsf(a - b) <= eps; }
 
-static nt_pointer_t pointer_at(float x, float y) {
-    nt_pointer_t p = {0};
-    p.x = x;
-    p.y = y;
-    p.active = true;
-    return p;
-}
-
 static nt_ui_tooltip_style_t test_style(void) {
     nt_ui_tooltip_style_t st = nt_ui_tooltip_style_defaults();
     st.delay_secs = DELAY;
@@ -88,9 +81,6 @@ static bool tooltip_frame_at(const nt_pointer_t *p, nt_ui_tooltip_style_t *st, b
 
 static bool tooltip_frame(const nt_pointer_t *p, nt_ui_tooltip_style_t *st) { return tooltip_frame_at(p, st, false); }
 
-/* ---- ABI sanity: the _Static_assert compiles; assert the runtime size too. ---- */
-static void test_tooltip_abi_size(void) { TEST_ASSERT_EQUAL_UINT(80U, (unsigned)sizeof(nt_ui_tooltip_style_t)); }
-
 /* ---- Defaults are a valid (non-zero) style; the flat baseline declares no art/caret/border. ---- */
 static void test_tooltip_defaults_valid(void) {
     nt_ui_tooltip_style_t st = nt_ui_tooltip_style_defaults();
@@ -111,7 +101,7 @@ static void test_tooltip_delayed_reveal(void) {
 
     /* Frame 1: pointer over the target, but the arbitration registry is empty (warm frame) -> not
      * hovered yet -> no accrual, tooltip stays hidden. */
-    nt_pointer_t over = pointer_at(TGT_W * 0.5F, TGT_H * 0.5F);
+    nt_pointer_t over = ui_fx_pointer(TGT_W * 0.5F, TGT_H * 0.5F, false, false, false);
     bool shown = tooltip_frame(&over, &st);
     TEST_ASSERT_FALSE(shown);
 
@@ -149,9 +139,9 @@ static bool container_tooltip_frame(const nt_pointer_t *p, nt_ui_tooltip_style_t
 }
 
 static void test_tooltip_on_container_reveals_over_its_child(void) {
-    const nt_pointer_t on_child = pointer_at(10.0F, TGT_H * 0.5F);
-    const nt_pointer_t on_gap = pointer_at(TGT_W - 10.0F, TGT_H * 0.5F);
-    const nt_pointer_t away = pointer_at(VIEW_W - 10.0F, VIEW_H - 10.0F);
+    const nt_pointer_t on_child = ui_fx_pointer(10.0F, TGT_H * 0.5F, false, false, false);
+    const nt_pointer_t on_gap = ui_fx_pointer(TGT_W - 10.0F, TGT_H * 0.5F, false, false, false);
+    const nt_pointer_t away = ui_fx_pointer(VIEW_W - 10.0F, VIEW_H - 10.0F, false, false, false);
     for (int block = 0; block < 2; ++block) {
         nt_ui_tooltip_style_t st = test_style();
         bool shown = false;
@@ -169,7 +159,7 @@ static void test_tooltip_on_container_reveals_over_its_child(void) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_tooltip_hide_on_leave(void) {
     nt_ui_tooltip_style_t st = test_style();
-    nt_pointer_t over = pointer_at(TGT_W * 0.5F, TGT_H * 0.5F);
+    nt_pointer_t over = ui_fx_pointer(TGT_W * 0.5F, TGT_H * 0.5F, false, false, false);
 
     /* Warm + accrue past the delay until revealed. */
     tooltip_frame(&over, &st);
@@ -184,7 +174,7 @@ static void test_tooltip_hide_on_leave(void) {
     TEST_ASSERT_TRUE(nt_ui_tooltip_test_hover_secs(s_fx.ctx, TGT_ID) >= DELAY);
 
     /* Move the cursor far away: the timer resets to 0 and the tooltip hides this same frame. */
-    nt_pointer_t away = pointer_at(VIEW_W - 10.0F, VIEW_H - 10.0F);
+    nt_pointer_t away = ui_fx_pointer(VIEW_W - 10.0F, VIEW_H - 10.0F, false, false, false);
     bool shown_after = tooltip_frame(&away, &st);
     TEST_ASSERT_FALSE(shown_after);
     TEST_ASSERT_TRUE(float_near(nt_ui_tooltip_test_hover_secs(s_fx.ctx, TGT_ID), 0.0F, 0.0001F));
@@ -194,7 +184,7 @@ static void test_tooltip_hide_on_leave(void) {
  *      catcher, so base UI stays clickable. ---- */
 static void test_tooltip_declares_no_catcher(void) {
     nt_ui_tooltip_style_t st = test_style();
-    nt_pointer_t over = pointer_at(TGT_W * 0.5F, TGT_H * 0.5F);
+    nt_pointer_t over = ui_fx_pointer(TGT_W * 0.5F, TGT_H * 0.5F, false, false, false);
 
     tooltip_frame(&over, &st);
     bool shown = false;
@@ -229,18 +219,18 @@ static void test_tooltip_no_double_mutation(void) {
     const float cy = TGT_H * 0.5F;
 
     /* Frame 1: hover only (bake bbox + warm registry). */
-    nt_pointer_t f1 = pointer_at(cx, cy);
+    nt_pointer_t f1 = ui_fx_pointer(cx, cy, false, false, false);
     target_frame_with_tooltip(&f1, &st);
 
     /* Frame 2: press over the target -> pressed_now (capture latched once, not twice). */
-    nt_pointer_t f2 = pointer_at(cx, cy);
+    nt_pointer_t f2 = ui_fx_pointer(cx, cy, false, false, false);
     f2.buttons[NT_BUTTON_LEFT].is_down = true;
     f2.buttons[NT_BUTTON_LEFT].is_pressed = true;
     nt_ui_interaction_t in2 = target_frame_with_tooltip(&f2, &st);
     TEST_ASSERT_TRUE(in2.pressed_now);
 
     /* Frame 3: release over the target -> clicked exactly once. */
-    nt_pointer_t f3 = pointer_at(cx, cy);
+    nt_pointer_t f3 = ui_fx_pointer(cx, cy, false, false, false);
     f3.buttons[NT_BUTTON_LEFT].is_released = true;
     nt_ui_interaction_t in3 = target_frame_with_tooltip(&f3, &st);
     TEST_ASSERT_TRUE(in3.clicked);
@@ -337,7 +327,7 @@ static bool tooltip_caret(float caret_size, Clay_BoundingBox *out_box, uint8_t *
  *      caret on the TOP edge, unflipped (the art points up natively). ---- */
 static void test_tooltip_caret_below(void) {
     nt_ui_tooltip_style_t below = caret_style();
-    nt_pointer_t over_top = pointer_at(TGT_W * 0.5F, TGT_H * 0.5F);
+    nt_pointer_t over_top = ui_fx_pointer(TGT_W * 0.5F, TGT_H * 0.5F, false, false, false);
     reveal_at(&over_top, &below, false);
 
     Clay_BoundingBox panel = {0};
@@ -357,7 +347,7 @@ static void test_tooltip_caret_below(void) {
 /* The caret floats on a panel declared in the same frame, so it appears with the panel's first frame. */
 static void test_tooltip_caret_on_first_frame(void) {
     nt_ui_tooltip_style_t st = caret_style();
-    nt_pointer_t over = pointer_at(TGT_W * 0.5F, TGT_H * 0.5F);
+    nt_pointer_t over = ui_fx_pointer(TGT_W * 0.5F, TGT_H * 0.5F, false, false, false);
     bool shown = false;
     for (int i = 0; i < 64 && !shown; ++i) {
         shown = tooltip_frame_at(&over, &st, false);
@@ -372,7 +362,7 @@ static void test_tooltip_caret_on_first_frame(void) {
  *      moves to the BOTTOM edge pointing down (FLIP_Y). ---- */
 static void test_tooltip_caret_above_on_flip(void) {
     nt_ui_tooltip_style_t above = caret_style();
-    nt_pointer_t over_bottom = pointer_at(TGT_W * 0.5F, TGT_BOTTOM_Y + (TGT_H * 0.5F));
+    nt_pointer_t over_bottom = ui_fx_pointer(TGT_W * 0.5F, TGT_BOTTOM_Y + (TGT_H * 0.5F), false, false, false);
     reveal_at(&over_bottom, &above, true);
 
     Clay_BoundingBox panel = {0};
@@ -397,7 +387,7 @@ static void test_tooltip_panel_art_no_corner_radius(void) {
     float radius = 0.0F;
     nt_ui_tooltip_style_t flat = test_style();
     flat.corner_radius = 8U;
-    nt_pointer_t over_flat = pointer_at(TGT_W * 0.5F, TGT_H * 0.5F);
+    nt_pointer_t over_flat = ui_fx_pointer(TGT_W * 0.5F, TGT_H * 0.5F, false, false, false);
     reveal_at(&over_flat, &flat, false);
     TEST_ASSERT_TRUE_MESSAGE(tooltip_panel_rect(&panel, &radius), "the flat panel must emit its rounded rectangle");
     TEST_ASSERT_TRUE(float_near(radius, 8.0F, 0.0001F));
@@ -408,7 +398,7 @@ static void test_tooltip_panel_art_no_corner_radius(void) {
     nt_ui_tooltip_style_t art = test_style();
     art.panel_art = nt_atlas_ref_idx(s_fx.atlas.handle, 0U, s_fx.atlas.white_region_idx);
     art.corner_radius = 8U; /* set but MUST be ignored under art */
-    nt_pointer_t over_art = pointer_at(TGT_W * 0.5F, TGT_H * 0.5F);
+    nt_pointer_t over_art = ui_fx_pointer(TGT_W * 0.5F, TGT_H * 0.5F, false, false, false);
     reveal_at(&over_art, &art, false);
     Clay_BoundingBox art_panel = {0};
     TEST_ASSERT_TRUE_MESSAGE(tooltip_image_of_width(panel_w, &art_panel), "the art panel must ship as an image of the panel's size");
@@ -424,7 +414,6 @@ static void test_tooltip_timer_id_salted(void) {
 
 int main(void) {
     UNITY_BEGIN();
-    RUN_TEST(test_tooltip_abi_size);
     RUN_TEST(test_tooltip_defaults_valid);
     RUN_TEST(test_tooltip_delayed_reveal);
     RUN_TEST(test_tooltip_hide_on_leave);
