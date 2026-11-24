@@ -59,8 +59,8 @@ _Static_assert(sizeof(nt_ui_modal_style_t) == 40, "nt_ui_modal_style_t stable AB
 nt_ui_modal_style_t nt_ui_modal_style_defaults(void);
 
 /* Returns whether the modal shows this frame: open, or still easing closed after *open was cleared. Only
- * then it opens the backdrop + panel floating elements (a root modal on the frame's next root band, a
- * nested one a band above its parent); the game declares the body and calls nt_ui_modal_end. Esc and a
+ * then it opens the backdrop + panel floating elements on its overlay stack slot's band (the last opened lies
+ * on top); the game declares the body and calls nt_ui_modal_end. Esc and a
  * backdrop press (per style flags) clear *open; info->reason says which (NT_UI_POPUP_CLOSE_ESC or _OUTSIDE). The game owns *open:
  *
  *   if (clicked_show) open = true;                            // open from any site: set your bool

@@ -2349,7 +2349,7 @@ static void test_arb_overlay_takes_the_wheel(void) {
     nt_pointer_t p = ui_fx_pointer(100.0F, 50.0F, false, false, false);
     arb_warm(&p);
     arb_frame(&p, 1);
-    TEST_ASSERT_EQUAL_UINT32(ARB_POPUP, s_fx.ctx->overlay_top_id_prev);
+    TEST_ASSERT_EQUAL_UINT32(ARB_POPUP, s_fx.ctx->overlay_top);
     const float before = arb_list()->pos[1];
     p.wheel_dy = 1.0F;
     arb_frame(&p, 1);

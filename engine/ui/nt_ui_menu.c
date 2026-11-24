@@ -244,22 +244,12 @@ static uint8_t menu_read_key(const nt_ui_menu_t *menu, const nt_ui_context_t *ct
 static bool menu_key_on(const nt_ui_menu_t *menu, uint32_t row_id, uint8_t key) { return menu->frame.key == key && row_id == menu->frame.key_row; }
 
 /* Everything the frame decides from last frame's records and this frame's input runs here, before the rows
- * declare: the branch a row's popup closes, the one key and the end of keyboard mode. Returns false when the
- * menu closes (Esc or Left at the root); the outside press is the root popup's own close. */
+ * declare: the one key and the end of keyboard mode. Returns false when the menu closes (Esc or Left at the
+ * root); the outside press is the root popup's own close. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) — flat rule list in frame order
 static bool menu_frame_input(nt_ui_menu_t *menu, nt_ui_context_t *ctx, uint32_t menu_id) {
     nt_ui_menu_frame_t *f = &menu->frame;
-    /* A popup a row opened that is on top is that row's level's child: it closes the open branch below the
-     * row, so each level keeps one open child and no level lies above the popup. */
     const uint32_t root_id = menu_level_id(menu_id, 0U);
-    const uint32_t top_id = ctx->overlay_top_id_prev;
-    if (top_id != root_id && nt_ui_internal_declared_within(ctx, top_id, root_id)) {
-        uint8_t level = menu_open_depth(menu);
-        while (level > 0U && !nt_ui_internal_declared_within(ctx, top_id, menu_level_id(menu_id, level))) {
-            --level;
-        }
-        menu_set_open(menu, level, 0U);
-    }
     const uint8_t open_depth = menu_open_depth(menu);
     if (menu->focus_depth > open_depth) {
         menu->focus = 0U; /* the focused row's level closed: keys act on the deepest open one, unfocused */
@@ -432,7 +422,7 @@ static bool menu_open_level(const nt_ui_menu_t *menu, uint8_t depth, const nt_ui
     nt_ui_popup_style_t pst = nt_ui_popup_style_defaults();
     pst.ease_speed = 0.0F;
     pst.layer = f->fill_layer;
-    const nt_ui_popup_ext_t ext = {.def = &NT_UI_MENU_DEF, .catcher = (depth == 0U), .dismiss_on_click = (depth == 0U && !menu->arming)};
+    const nt_ui_popup_ext_t ext = {.def = &NT_UI_MENU_DEF, .catcher = (depth == 0U), .dismiss_on_click = (depth == 0U && !menu->arming), .transient = true};
     bool level_open = true;
     if (!nt_ui_popup_begin_internal(f->ui, menu_level_id(f->menu_id, depth), &pst, anchor, &level_open, &ext, NULL)) {
         return false; /* a snap level that closed declares nothing */
@@ -490,8 +480,7 @@ bool nt_ui_menu_begin(nt_ui_menu_t *menu, nt_ui_context_t *ctx, const nt_ui_elem
         menu->open = false;
         return false;
     }
-    menu->frame.root_top = ctx->overlay_top_id_cur; /* the top as the root leaves it; a later claim is a row's popup */
-    return true;                                    /* the root panel stays open until menu_end */
+    return true; /* the root panel stays open until menu_end */
 }
 
 /* The row's one mutating step. A menu that is not on top (its opening frame, whose hits are last frame's at
@@ -567,21 +556,21 @@ bool nt_ui_menu_submenu_begin_ex(nt_ui_menu_t *menu, uint32_t key, const char *l
         menu_set_open(menu, depth, row_id); /* the key closed any sibling's child at begin */
         f->focus_first = true;              /* the child's first enabled row takes focus */
     }
-    /* A popup an earlier row of this level opened this frame claimed the top after the root: it is that level's
-     * child and closes this one. */
-    if (row_id == menu->open_path[depth] && f->ui->overlay_top_id_cur != f->root_top) {
-        menu_set_open(menu, depth, 0U);
-    }
     if (menu->open_path[depth] != row_id) {
         return false; /* this submenu is not the open one — game skips its body */
     }
 
-    /* Open: a new level scoped to THIS row's id (ImGui PushID) flies its panel out. */
+    /* Open: a new level scoped to THIS row's id (ImGui PushID) flies its panel out, unless a popup a row opened
+     * replaced it (spec: "Input ownership", One transient child): then this branch closes. */
     const uint8_t child = (uint8_t)(depth + 1U);
+    const nt_ui_popup_anchor_t sub_anchor = menu_submenu_anchor(f->ui, row_id);
+    if (!menu_open_level(menu, child, &sub_anchor)) {
+        menu_set_open(menu, depth, 0U);
+        f->top = false; /* the popup that replaced the level is the newest overlay: no hover reopens it */
+        return false;
+    }
     f->depth = child;
     f->declared_depth = child;
-    const nt_ui_popup_anchor_t sub_anchor = menu_submenu_anchor(f->ui, row_id);
-    (void)menu_open_level(menu, child, &sub_anchor); /* a submenu level never closes itself; closed in submenu_end */
     return true;
 }
 
@@ -674,7 +663,7 @@ static void menu_resolve(nt_ui_menu_t *menu) {
         menu_set_open(menu, f->click_depth, f->click_id);
         menu->focus = f->click_id; /* focus follows the parent it opens */
         menu->focus_depth = f->click_depth;
-    } else if (!menu->kbd_mode && f->hover_id != 0U) {
+    } else if (f->top && !menu->kbd_mode && f->hover_id != 0U) {
         menu_resolve_hover(menu, f->hover_depth, f->hover_id, f->hover_opens, ours, mx, my, ctx->frame_dt);
     } else if (f->top && !menu->kbd_mode && f->focus_seen && menu->open_path[menu->focus_depth] != 0U && menu->open_path[menu->focus_depth] != menu->focus) {
         /* Off the rows, the switch the pointer left on a sibling keeps running, so the frame never freezes

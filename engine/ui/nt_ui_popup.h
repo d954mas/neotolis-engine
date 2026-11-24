@@ -2,10 +2,9 @@
 #define NT_UI_POPUP_H
 
 /* Popup-core: the shared floating-overlay primitive. One panel floating element + a
- * transparent light-dismiss catcher (block_pointer occluder) + an open/close value_t tween + a
- * top-layer z-band (a root overlay over every game floating, a nested one a band above its parent) +
- * trigger-anchoring with per-side edge-flip. The game owns the `bool open`;
- * the core clears it on an outside press or Esc (light-dismiss) and never opens it.
+ * transparent light-dismiss catcher (block_pointer occluder) + an open/close value_t tween + a slot in the
+ * overlay stack (open order = paint order) + trigger-anchoring with per-side edge-flip. The game owns the
+ * `bool open`; the core clears it on an outside press, Esc or a newer light-dismiss sibling and never opens it.
  * Conditional begin/end like the menu: end only after begin returned true. The modal is re-expressed on top of this
  * core (modal = popup-core centered + dim backdrop). Dropdown / tooltip / context-menu reuse it. */
 
@@ -42,7 +41,8 @@ _Static_assert(sizeof(nt_ui_popup_anchor_t) == 20, "nt_ui_popup_anchor_t stable 
 typedef enum {
     NT_UI_POPUP_CLOSE_NONE = 0,
     NT_UI_POPUP_CLOSE_ESC,
-    NT_UI_POPUP_CLOSE_OUTSIDE, /* a press outside the panel: on its catcher (a modal's backdrop) or on no record */
+    NT_UI_POPUP_CLOSE_OUTSIDE,  /* a press outside the panel: on its catcher (a modal's backdrop) or on no record */
+    NT_UI_POPUP_CLOSE_REPLACED, /* a newer light-dismiss overlay opened inside the same parent */
 } nt_ui_popup_close_t;
 
 /* Per-frame info of a popup or a modal (nullable out of begin): the tween, the chosen side, the close. */
@@ -73,10 +73,11 @@ _Static_assert(sizeof(nt_ui_popup_style_t) == 80, "nt_ui_popup_style_t stable AB
 nt_ui_popup_style_t nt_ui_popup_style_defaults(void);
 
 /* Returns whether the popup shows this frame: open, or still easing closed after the game cleared *open.
- * Only then it opens the catcher (light-dismiss) + panel floating elements (a root popup on the frame's
- * next root band, a nested one a band above its parent) eased toward open?1:0, placed at the anchor with
+ * Only then it opens the catcher (light-dismiss) + panel floating elements (on its overlay stack slot's band,
+ * so the last opened lies on top) eased toward open?1:0, placed at the anchor with
  * edge-flip (or centered for a CENTER anchor); the game declares the body and calls nt_ui_popup_end. A
- * hidden popup declares nothing. An outside press or Esc clears *open; info->reason says which. The game
+ * hidden popup declares nothing. An outside press, Esc or a newer light-dismiss sibling clears *open;
+ * info->reason says which. The game
  * owns *open:
  *
  *   if (clicked_trigger) open = true;
@@ -85,7 +86,7 @@ nt_ui_popup_style_t nt_ui_popup_style_defaults(void);
  *       nt_ui_popup_end(ctx);
  *   }
  *
- * id non-zero, style, anchor and open non-NULL; info nullable. Asserts depth < NT_UI_OVERLAY_MAX_DEPTH. */
+ * id non-zero, style, anchor and open non-NULL; info nullable. Asserts at most NT_UI_OVERLAY_MAX_DEPTH overlays shown. */
 bool nt_ui_popup_begin(nt_ui_context_t *ctx, uint32_t id, const nt_ui_popup_style_t *style, const nt_ui_popup_anchor_t *anchor, bool *open, nt_ui_popup_info_t *info);
 void nt_ui_popup_end(nt_ui_context_t *ctx);
 

@@ -92,7 +92,6 @@ typedef struct {
     uint32_t click_id;            /* parent a click opens in menu_end */
     uint32_t item_id;             /* the open custom row (item_begin..item_end); 0 = none */
     uint32_t key_row;             /* the row focused at begin: Enter and Right act on it */
-    uint32_t root_top;            /* overlay_top_id_cur once the root opened: a later value is a row's popup */
     uint8_t depth;                /* level being declared */
     uint8_t key;                  /* the frame's one menu key, read at begin (0 = none) */
     uint8_t declared_depth;       /* deepest level declared: open parents past it are gone */

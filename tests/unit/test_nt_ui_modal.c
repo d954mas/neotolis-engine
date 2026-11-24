@@ -333,7 +333,7 @@ static void test_modal_body_button_clickable(void) {
  *      (F1 establishes top, F2 holds the click). ---- */
 static nt_ui_popup_close_t modal_backdrop_click_reason(const nt_ui_modal_style_t *st, float cx, float cy) {
     nt_pointer_t f1 = ui_fx_pointer(cx, cy, false, false, false);
-    modal_button_frame(st, &f1); /* establish top (overlay_top_id_prev) */
+    modal_button_frame(st, &f1); /* establish top (overlay_top) */
     /* F2: full press+release in one frame at (cx,cy) -> backdrop click fires this frame. */
     nt_pointer_t f2 = ui_fx_pointer(cx, cy, false, false, true);
     f2.buttons[NT_BUTTON_LEFT].is_pressed = true;
@@ -390,7 +390,7 @@ static void test_wants_keyboard_follows_the_top(void) {
 }
 
 /* ---- Per-context overlay_zband_stride: a root modal and its backdrop sit on the stride band, a nested one
- *      and its backdrop one band above. A second ctx coexists with the fixture's (module inited by setUp). ---- */
+ *      and its backdrop on stack slot 1's band. A second ctx coexists with the fixture's (module inited by setUp). ---- */
 alignas(NT_UI_ARENA_ALIGN) static uint8_t s_custom_arena[NT_UI_TEST_ARENA_SIZE];
 
 static void test_modal_custom_zband_stride(void) {
@@ -405,7 +405,7 @@ static void test_modal_custom_zband_stride(void) {
     ui_fx_frame_begin(ctx, NULL);
     (void)modal_begin_open(ctx, MODAL_A, &st); /* root -> stride */
     CLAY({.id = CLAY_ID("cs_a"), .layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(20)}}, .backgroundColor = {8, 8, 8, 255}}){}(void)modal_begin_open(ctx, MODAL_B,
-                                                                                                                                                                   &st); /* nested -> one band above */
+                                                                                                                                                                   &st); /* nested -> slot 1 */
     CLAY({.id = CLAY_ID("cs_b"), .layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(20)}}, .backgroundColor = {8, 8, 8, 255}}) {}
     nt_ui_modal_end(ctx);
     nt_ui_modal_end(ctx);
@@ -415,9 +415,9 @@ static void test_modal_custom_zband_stride(void) {
     const Clay_RenderCommand *b = ui_fx_find_rect(ctx, CLAY_ID("cs_b").id);
     TEST_ASSERT_TRUE(a != NULL && b != NULL);
     TEST_ASSERT_EQUAL_INT32(custom_stride, a->zIndex);
-    TEST_ASSERT_EQUAL_INT32_MESSAGE(custom_stride + 1, b->zIndex, "a nested modal sits one band above its parent");
+    TEST_ASSERT_EQUAL_INT32_MESSAGE(custom_stride + NT_UI_OVERLAY_MAX_DEPTH, b->zIndex, "a nested modal sits on its stack slot's band");
     TEST_ASSERT_TRUE_MESSAGE(band_has_backdrop(ctx, custom_stride), "the outer backdrop paints on its panel's band");
-    TEST_ASSERT_TRUE_MESSAGE(band_has_backdrop(ctx, custom_stride + 1), "the nested backdrop paints on its own panel's band");
+    TEST_ASSERT_TRUE_MESSAGE(band_has_backdrop(ctx, custom_stride + NT_UI_OVERLAY_MAX_DEPTH), "the nested backdrop paints on its own panel's band");
 
     nt_ui_destroy_context(ctx);
 }
@@ -447,45 +447,36 @@ static void test_modal_stride_one_gates_base_ui(void) {
     nt_ui_destroy_context(ctx);
 }
 
-/* ---- A root overlay band past int16 asserts: the second visible root overlay would overflow. ---- */
-static void test_modal_root_band_overflow_asserts(void) {
+/* ---- A closed modal takes no stack slot: declared between the 15th and the 16th shown modals at the largest
+ *      valid stride, it neither asserts nor moves the 16th off the last slot's band. ---- */
+static void test_modal_closed_takes_no_stack_slot(void) {
     nt_ui_create_desc_t desc = nt_ui_create_desc_defaults();
-    desc.overlay_zband_stride = (int16_t)(INT16_MAX - (NT_UI_OVERLAY_MAX_DEPTH - 1));
+    desc.overlay_zband_stride = (int16_t)(INT16_MAX - ((NT_UI_OVERLAY_MAX_DEPTH - 1) * NT_UI_OVERLAY_MAX_DEPTH));
     nt_ui_context_t *ctx = nt_ui_create_context(s_custom_arena, sizeof s_custom_arena, &desc);
     TEST_ASSERT_NOT_NULL(ctx);
     nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
     st.ease_speed = 0.0F;
     ui_fx_frame_begin(ctx, NULL);
-    (void)modal_begin_open(ctx, MODAL_A, &st);
-    nt_ui_modal_end(ctx);
-    bool open_b = true;
-    NT_TEST_EXPECT_ASSERT(nt_ui_modal_begin(ctx, MODAL_B, &st, &open_b, NULL)); /* asserts before the push */
-    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "nested levels would pass the int16 z-band"));
-    nt_ui_end(ctx);
-    nt_ui_destroy_context(ctx);
-}
-
-/* ---- A closed root overlay takes no band: next to one visible root at the top of the budget it does not
- *      assert. ---- */
-static void test_modal_closed_root_takes_no_band(void) {
-    nt_ui_create_desc_t desc = nt_ui_create_desc_defaults();
-    desc.overlay_zband_stride = (int16_t)(INT16_MAX - (NT_UI_OVERLAY_MAX_DEPTH - 1));
-    nt_ui_context_t *ctx = nt_ui_create_context(s_custom_arena, sizeof s_custom_arena, &desc);
-    TEST_ASSERT_NOT_NULL(ctx);
-    nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
-    st.ease_speed = 0.0F;
-    ui_fx_frame_begin(ctx, NULL);
-    (void)modal_begin_open(ctx, MODAL_A, &st);
-    nt_ui_modal_end(ctx);
+    for (uint32_t i = 0; i + 1U < NT_UI_OVERLAY_MAX_DEPTH; ++i) {
+        (void)modal_begin_open(ctx, MODAL_A + 0x100U + i, &st);
+        nt_ui_modal_end(ctx);
+    }
     modal_begin_closed(ctx, MODAL_B, &st);
+    (void)modal_begin_open(ctx, MODAL_A, &st);
+    CLAY({.id = CLAY_ID("last_body"), .layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(20)}}, .backgroundColor = {8, 8, 8, 255}}) {}
+    nt_ui_modal_end(ctx);
     nt_ui_end(ctx);
+    TEST_ASSERT_EQUAL_UINT8(NT_UI_OVERLAY_MAX_DEPTH, ctx->overlay_count);
+    const Clay_RenderCommand *last = ui_fx_find_rect(ctx, CLAY_ID("last_body").id);
+    TEST_ASSERT_NOT_NULL(last);
+    TEST_ASSERT_EQUAL_INT32(INT16_MAX, last->zIndex);
     nt_ui_destroy_context(ctx);
 }
 
 /* ---- A 0 stride (no fallback to the default, which lives only in nt_ui_create_desc_defaults) and a stride
- *      whose first root overlay's nested levels could pass int16 assert at create. ---- */
+ *      whose last stack slot's band passes int16 by one assert at create. ---- */
 static void test_modal_stride_out_of_range_asserts(void) {
-    const int16_t strides[] = {0, (int16_t)(INT16_MAX - 8)};
+    const int16_t strides[] = {0, (int16_t)(INT16_MAX - ((NT_UI_OVERLAY_MAX_DEPTH - 1) * NT_UI_OVERLAY_MAX_DEPTH) + 1)};
     for (int i = 0; i < 2; ++i) {
         nt_ui_create_desc_t desc = nt_ui_create_desc_defaults();
         desc.overlay_zband_stride = strides[i];
@@ -643,7 +634,6 @@ int main(void) {
     RUN_TEST(test_modal_custom_zband_stride);
     RUN_TEST(test_modal_stride_out_of_range_asserts);
     RUN_TEST(test_modal_stride_one_gates_base_ui);
-    RUN_TEST(test_modal_root_band_overflow_asserts);
-    RUN_TEST(test_modal_closed_root_takes_no_band);
+    RUN_TEST(test_modal_closed_takes_no_stack_slot);
     return UNITY_END();
 }

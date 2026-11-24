@@ -23,6 +23,7 @@ typedef struct {
     bool catcher;                  /* an open popup gates the UI under it and claims the top; dismiss needs it */
     bool esc_close;                /* Escape on the top popup raises NT_UI_POPUP_CLOSE_ESC */
     bool dismiss_on_click;         /* an outside press beyond the panel+pad raises NT_UI_POPUP_CLOSE_OUTSIDE */
+    bool transient;                /* one open per parent: opening it replaces its transient siblings */
 } nt_ui_popup_ext_t;
 
 /* The shared core: tween + z-band push + catcher/backdrop + close-scan + panel decl, only for a shown popup.

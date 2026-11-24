@@ -1739,29 +1739,21 @@ static void test_menu_under_a_modal_is_not_the_top(void) {
     TEST_ASSERT_TRUE_MESSAGE(st.open, "and only the modal");
 }
 
-#define DEEP_POPUP_A 0x40DB1U
-#define DEEP_POPUP_B 0x40DB2U
-static bool s_deep_popup;
+#define DEEP_MODAL 0x40DB1U
+static bool s_deep_modal;
 
-/* A modal holding a popup pair (A, and B nested in it, a band above the menu's root when open) declared
- * before the menu tree. */
-static void menu_deep_popup_frame(nt_ui_menu_t *st, nt_ui_menu_style_t *style) {
+/* A modal holding a nested modal, shown while s_deep_modal and declared before the menu tree. */
+static void menu_deep_modal_frame(nt_ui_menu_t *st, nt_ui_menu_style_t *style) {
     menu_frame_begin(&(nt_pointer_t){.active = true});
     nt_ui_modal_style_t ms = nt_ui_modal_style_defaults();
     bool modal_open = true;
     if (nt_ui_modal_begin(s_fx.ctx, MODAL_ID, &ms, &modal_open, NULL)) {
-        nt_ui_popup_style_t ps = nt_ui_popup_style_defaults();
-        ps.ease_speed = 0.0F;
-        ps.flags = NT_UI_POPUP_LIGHT_DISMISS;
-        const nt_ui_popup_anchor_t anc = {.x = 600.0F, .y = 400.0F, .w = 10.0F, .h = 10.0F, .prefer_side = NT_UI_POPUP_BELOW};
-        bool a = s_deep_popup;
-        bool b = s_deep_popup;
-        if (nt_ui_popup_begin(s_fx.ctx, DEEP_POPUP_A, &ps, &anc, &a, NULL)) {
-            if (nt_ui_popup_begin(s_fx.ctx, DEEP_POPUP_B, &ps, &anc, &b, NULL)) {
-                CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(20), CLAY_SIZING_FIXED(20)}}}) {}
-                nt_ui_popup_end(s_fx.ctx);
-            }
-            nt_ui_popup_end(s_fx.ctx);
+        nt_ui_modal_style_t ds = ms;
+        ds.ease_speed = 0.0F;
+        bool deep = s_deep_modal;
+        if (nt_ui_modal_begin(s_fx.ctx, DEEP_MODAL, &ds, &deep, NULL)) {
+            CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(20), CLAY_SIZING_FIXED(20)}}}) {}
+            nt_ui_modal_end(s_fx.ctx);
         }
         menu_im_tree(st, style);
         nt_ui_modal_end(s_fx.ctx);
@@ -1769,25 +1761,26 @@ static void menu_deep_popup_frame(nt_ui_menu_t *st, nt_ui_menu_style_t *style) {
     nt_ui_end(s_fx.ctx);
 }
 
-/* ---- An overlay declared before a nested menu that ranks above its root is not a row's popup: the menu
- *      stays open under it with its chain instead of closing its open level every frame. ---- */
+/* ---- An overlay declared before a nested menu but opened after it covers the menu without replacing it: the
+ *      menu stays open under the nested modal with its chain instead of closing its open level. ---- */
 static void test_menu_under_an_earlier_overlay_keeps_its_chain(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
     nt_ui_menu_t st = {0};
-    s_deep_popup = false;
+    s_deep_modal = false;
     nt_ui_menu_open(&st, 120.0F, 80.0F);
-    menu_deep_popup_frame(&st, &style);
-    menu_deep_popup_frame(&st, &style);
+    menu_deep_modal_frame(&st, &style);
+    menu_deep_modal_frame(&st, &style);
     menu_key(NT_KEY_ARROW_DOWN);
-    menu_deep_popup_frame(&st, &style);
+    menu_deep_modal_frame(&st, &style);
     menu_key(NT_KEY_ARROW_RIGHT);
-    menu_deep_popup_frame(&st, &style);
+    menu_deep_modal_frame(&st, &style);
     TEST_ASSERT_TRUE(menu_level_found(1U));
-    s_deep_popup = true;
-    menu_deep_popup_frame(&st, &style);
-    menu_deep_popup_frame(&st, &style);
-    s_deep_popup = false;
-    TEST_ASSERT_EQUAL_UINT32(DEEP_POPUP_B, s_fx.ctx->overlay_top_id_prev);
+    s_deep_modal = true;
+    for (int f = 0; f < 3; ++f) {
+        menu_deep_modal_frame(&st, &style);
+    }
+    TEST_ASSERT_EQUAL_UINT32(DEEP_MODAL, s_fx.ctx->overlay_top);
+    TEST_ASSERT_TRUE(st.open);
     TEST_ASSERT_EQUAL_UINT32(nt_ui_menu_test_item_id(MENU_A, KEY_FILE), st.open_path[0]);
     TEST_ASSERT_TRUE_MESSAGE(menu_level_found(1U), "the open level stays under the overlay");
 }
@@ -1815,35 +1808,44 @@ static void test_menu_over_modal_blocks_its_button(void) {
 
 #define MENU_B 0x4E5002U
 
-/* ---- Two menus opened in one frame: a key has one owner. On the opening frame neither reads Esc; later
- *      one Esc closes exactly one of them. ---- */
-static void test_menu_one_esc_for_two_menus(void) {
+/* One frame declaring menus A and B at the base UI, A first; `esc` feeds an Esc press for it. */
+static void two_menus_frame(nt_ui_menu_t *a, nt_ui_menu_t *b, nt_ui_menu_style_t *style, bool esc) {
+    if (esc) {
+        menu_key(NT_KEY_ESCAPE);
+    } else {
+        nt_input_init();
+    }
+    menu_frame_begin(&(nt_pointer_t){.active = true});
+    if (nt_ui_menu_begin(a, s_fx.ctx, NULL, 0U, MENU_A, style)) {
+        (void)nt_ui_menu_item(a, KEY_NEW, "A");
+        nt_ui_menu_end(a);
+    }
+    if (nt_ui_menu_begin(b, s_fx.ctx, NULL, 0U, MENU_B, style)) {
+        (void)nt_ui_menu_item(b, KEY_NEW, "B");
+        nt_ui_menu_end(b);
+    }
+    nt_ui_end(s_fx.ctx);
+}
+
+/* ---- A menu is a transient overlay: opening menu B while menu A is open at the same parent closes A, and
+ *      B stays open on top. The Esc of the frame B opens is A's, the top at begin, not B's. ---- */
+static void test_menu_opening_a_second_menu_closes_the_first(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
     nt_ui_menu_t a = {0};
     nt_ui_menu_t b = {0};
     nt_ui_menu_open(&a, 120.0F, 80.0F);
+    two_menus_frame(&a, &b, &style, false);
+    two_menus_frame(&a, &b, &style, false);
+    TEST_ASSERT_TRUE(a.open);
     nt_ui_menu_open(&b, 400.0F, 300.0F);
-    for (int f = 0; f < 4; ++f) {
-        if (f == 0 || f == 3) {
-            menu_key(NT_KEY_ESCAPE);
-        } else {
-            nt_input_init();
-        }
-        menu_frame_begin(&(nt_pointer_t){.active = true});
-        if (nt_ui_menu_begin(&a, s_fx.ctx, NULL, 0U, MENU_A, &style)) {
-            (void)nt_ui_menu_item(&a, KEY_NEW, "A");
-            nt_ui_menu_end(&a);
-        }
-        if (nt_ui_menu_begin(&b, s_fx.ctx, NULL, 0U, MENU_B, &style)) {
-            (void)nt_ui_menu_item(&b, KEY_NEW, "B");
-            nt_ui_menu_end(&b);
-        }
-        nt_ui_end(s_fx.ctx);
-        if (f == 0) {
-            TEST_ASSERT_TRUE_MESSAGE(a.open && b.open, "an Esc on the opening frame has no owner yet");
-        }
-    }
-    TEST_ASSERT_TRUE_MESSAGE(a.open != b.open, "one Esc closes exactly one menu");
+    two_menus_frame(&a, &b, &style, true);
+    TEST_ASSERT_TRUE_MESSAGE(b.open, "the Esc of B's opening frame is not B's");
+    two_menus_frame(&a, &b, &style, false);
+    two_menus_frame(&a, &b, &style, false);
+    TEST_ASSERT_FALSE_MESSAGE(a.open, "opening B closes A");
+    TEST_ASSERT_TRUE(b.open);
+    two_menus_frame(&a, &b, &style, true);
+    TEST_ASSERT_FALSE_MESSAGE(b.open, "B is the top: the next Esc closes it");
 }
 
 /* ---- The outside press belongs to the pointer that pressed: a second finger resting on the menu does not
@@ -1992,7 +1994,7 @@ static void test_menu_row_popup_closes_the_branch_before_the_rows(void) {
     menu_popup_frame(&st, &style, px, py); /* the popup opens and claims the top */
     TEST_ASSERT_FALSE_MESSAGE(menu_level_found(1U), "the frame the popup opens declares no level over it");
     menu_popup_frame(&st, &style, px, py);
-    TEST_ASSERT_EQUAL_UINT32(ROW_POPUP_ID, s_fx.ctx->overlay_top_id_prev);
+    TEST_ASSERT_EQUAL_UINT32(ROW_POPUP_ID, s_fx.ctx->overlay_top);
     TEST_ASSERT_FALSE_MESSAGE(menu_level_found(1U), "the sibling's level is not declared over the row's popup");
 }
 
@@ -2387,7 +2389,7 @@ int main(void) {
     RUN_TEST(test_menu_pointer_over_child_holds_it);
     RUN_TEST(test_menu_under_a_modal_is_not_the_top);
     RUN_TEST(test_menu_over_modal_blocks_its_button);
-    RUN_TEST(test_menu_one_esc_for_two_menus);
+    RUN_TEST(test_menu_opening_a_second_menu_closes_the_first);
     RUN_TEST(test_menu_outside_press_ignores_other_pointers);
     RUN_TEST(test_menu_fresh_child_survives_a_flick);
     RUN_TEST(test_menu_key_ends_pending_switch);

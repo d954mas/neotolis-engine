@@ -17,6 +17,7 @@
 #include "ui/nt_ui.h"
 #include "ui/nt_ui_anim.h"
 #include "ui/nt_ui_internal.h"
+#include "ui/nt_ui_modal.h"
 #include "ui/nt_ui_popup.h"
 #include "ui/nt_ui_state.h"
 #include "unity.h"
@@ -71,8 +72,8 @@ static void test_popup_defaults_valid(void) {
     TEST_ASSERT_TRUE((st.flags & NT_UI_POPUP_LIGHT_DISMISS) != 0U);
 }
 
-/* ---- z-band: the frame's first root popup lands on the absolute band overlay_zband_stride; a popup nested
- *      inside another sits one band above it, asserted on the bands Clay stamped on the bodies' rectangles. ---- */
+/* ---- z-band: each overlay lands on its stack slot's absolute band, overlay_zband_stride + slot *
+ *      NT_UI_OVERLAY_MAX_DEPTH, nested or not, asserted on the bands Clay stamped on the bodies' rectangles. ---- */
 static void test_popup_zband_and_nesting(void) {
     nt_ui_popup_style_t st = nt_ui_popup_style_defaults();
     st.ease_speed = 0.0F;
@@ -89,8 +90,8 @@ static void test_popup_zband_and_nesting(void) {
     const Clay_RenderCommand *a = ui_fx_find_rect(s_fx.ctx, CLAY_ID("body_a").id);
     const Clay_RenderCommand *b = ui_fx_find_rect(s_fx.ctx, CLAY_ID("body_b").id);
     TEST_ASSERT_TRUE(a != NULL && b != NULL);
-    TEST_ASSERT_EQUAL_INT32_MESSAGE(s_fx.ctx->overlay_zband_stride, a->zIndex, "the first root popup lands on the stride band");
-    TEST_ASSERT_EQUAL_INT32_MESSAGE(s_fx.ctx->overlay_zband_stride + 1, b->zIndex, "a popup nested inside another sits one band above it");
+    TEST_ASSERT_EQUAL_INT32_MESSAGE(s_fx.ctx->overlay_zband_stride, a->zIndex, "stack slot 0 lands on the stride band");
+    TEST_ASSERT_EQUAL_INT32_MESSAGE(s_fx.ctx->overlay_zband_stride + NT_UI_OVERLAY_MAX_DEPTH, b->zIndex, "the nested popup lands on slot 1's band");
     TEST_ASSERT_TRUE_MESSAGE(b > a, "and paints above it");
 }
 
@@ -105,29 +106,10 @@ static void test_popup_depth_overflow_asserts(void) {
     }
     bool open = true;
     NT_TEST_EXPECT_ASSERT(nt_ui_popup_begin(s_fx.ctx, 0x50BFFFU, &st, &anc, &open, NULL));
-    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "nesting exceeds NT_UI_OVERLAY_MAX_DEPTH"));
+    TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "more than NT_UI_OVERLAY_MAX_DEPTH overlays shown"));
     for (uint32_t i = 0; i < NT_UI_OVERLAY_MAX_DEPTH; ++i) {
         nt_ui_popup_end(s_fx.ctx);
     }
-    nt_ui_end(s_fx.ctx);
-}
-
-/* ---- A catcher on or under the base band would stop gating while the overlay owns the keys: a light-dismiss
- *      popup nested in a game floating with a large negative zIndex asserts. ---- */
-static void test_popup_catcher_under_the_base_band_asserts(void) {
-    nt_ui_popup_style_t st = nt_ui_popup_style_defaults();
-    st.ease_speed = 0.0F;
-    st.flags = NT_UI_POPUP_LIGHT_DISMISS;
-    nt_ui_popup_anchor_t anc = {.x = 0.0F, .y = 0.0F, .w = 10.0F, .h = 10.0F, .prefer_side = NT_UI_POPUP_BELOW};
-    ui_fx_frame_begin(s_fx.ctx, NULL);
-    (void)popup_begin_open(0x50C100U, &st, &anc);
-    CLAY({.id = CLAY_ID("deep_floating"), .floating = {.attachTo = CLAY_ATTACH_TO_PARENT, .zIndex = -2000}}) {
-        bool open = true;
-        NT_TEST_EXPECT_ASSERT(nt_ui_popup_begin(s_fx.ctx, 0x50C101U, &st, &anc, &open, NULL));
-        TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "base band"));
-        nt_ui_popup_end(s_fx.ctx); /* the assert fired after the push */
-    }
-    nt_ui_popup_end(s_fx.ctx);
     nt_ui_end(s_fx.ctx);
 }
 
@@ -415,114 +397,199 @@ static void test_popup_tween_clamp(void) {
 
 #define POP_C 0x50A006U
 
-/* ---- The overlay that eats Esc / runs the close-scan is the one PAINTED on top, not the last declared. A
- *      game floating with its own zIndex inside root popup C lifts the popup A nested in it over the later
- *      root popup B, so the two answers disagree; the arbitration key must be the band Clay sorts by. ---- */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void test_popup_top_id_follows_band(void) {
-    const nt_ui_popup_anchor_t anc_c = {.x = 400.0F, .y = 50.0F, .prefer_side = NT_UI_POPUP_BELOW};
+/* One frame: modal C holding a game floating at zIndex 500 that holds popup A, then, while `declare_b`, popup B
+ * at the root, opened after A; keeps the closes A and B raise. */
+static void lifted_frame(nt_pointer_t p, bool declare_b, nt_ui_popup_close_t *src_a, nt_ui_popup_close_t *src_b) {
+    nt_ui_modal_style_t ms = nt_ui_modal_style_defaults();
+    ms.ease_speed = 0.0F;
     nt_ui_popup_style_t st = nt_ui_popup_style_defaults();
     st.ease_speed = 8.0F; /* eased: the frame it closes itself still shows, so the test ends it */
-    nt_ui_popup_anchor_t anc = {.x = 100.0F, .y = 100.0F, .w = 80.0F, .h = 30.0F, .prefer_side = NT_UI_POPUP_BELOW};
-    nt_pointer_t p = {.active = true};
-    /* Two frames: the close-scan target is committed at the next nt_ui_begin (1-frame IM lag). */
-    for (int frame = 0; frame < 2; ++frame) {
-        ui_fx_frame_begin(s_fx.ctx, &p);
-        (void)popup_begin_open(POP_C, &st, &anc_c);
-        CLAY({.id = CLAY_ID("game_hud"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .zIndex = 500}}) {
-            (void)popup_begin_open(POP_A, &st, &anc);
-            CLAY({.id = CLAY_ID("body_a"), .layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(20)}}, .backgroundColor = {8, 8, 8, 255}}) {}
-            nt_ui_popup_end(s_fx.ctx);
-        }
+    const nt_ui_popup_anchor_t anc = {.x = 100.0F, .y = 100.0F, .w = 80.0F, .h = 30.0F, .prefer_side = NT_UI_POPUP_BELOW};
+    ui_fx_frame_begin(s_fx.ctx, &p);
+    bool modal_open = true;
+    TEST_ASSERT_TRUE(nt_ui_modal_begin(s_fx.ctx, POP_C, &ms, &modal_open, NULL));
+    CLAY({.id = CLAY_ID("game_hud"),
+          .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .zIndex = 500},
+          .layout = {.sizing = {CLAY_SIZING_FIXED(60), CLAY_SIZING_FIXED(60)}},
+          .backgroundColor = {8, 8, 8, 255}}) {
+        popup_begin_open_src(POP_A, &st, &anc, src_a);
+        CLAY({.id = CLAY_ID("body_a"), .layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(20)}}, .backgroundColor = {8, 8, 8, 255}}) {}
         nt_ui_popup_end(s_fx.ctx);
-        /* A root overlay with no lifted floating inside it -> lands lower even though it is declared later. */
-        (void)popup_begin_open(POP_B, &st, &anc);
+    }
+    nt_ui_modal_end(s_fx.ctx);
+    if (declare_b) {
+        popup_begin_open_src(POP_B, &st, &anc, src_b);
         CLAY({.id = CLAY_ID("body_b"), .layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(20)}}, .backgroundColor = {8, 8, 8, 255}}) {}
         nt_ui_popup_end(s_fx.ctx);
-        nt_ui_end(s_fx.ctx);
     }
-
-    const Clay_RenderCommand *a = ui_fx_find_rect(s_fx.ctx, CLAY_ID("body_a").id);
-    const Clay_RenderCommand *b = ui_fx_find_rect(s_fx.ctx, CLAY_ID("body_b").id);
-    TEST_ASSERT_TRUE_MESSAGE(a != NULL && b != NULL, "both popups must reach the render commands");
-    TEST_ASSERT_TRUE_MESSAGE(a->zIndex > b->zIndex, "the popup inside the lifted game floating must land in a higher band");
-    TEST_ASSERT_TRUE_MESSAGE(a > b, "and must therefore paint after the root-level popup");
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(POP_A, s_fx.ctx->overlay_top_id_prev, "the higher-band popup must own Esc and the close-scan");
-
-    /* And the consequence, not just the gate: an outside click must dismiss the popup that owns the slot
-     * and leave the other alone (a non-top catcher is an inert pointer gate). */
-    nt_ui_popup_close_t src_a = NT_UI_POPUP_CLOSE_NONE;
-    nt_ui_popup_close_t src_b = NT_UI_POPUP_CLOSE_NONE;
-    for (int frame = 0; frame < 2; ++frame) {
-        const bool pressing = (frame == 0);
-        nt_pointer_t click = ui_fx_pointer(700.0F, 500.0F, pressing, pressing, !pressing);
-        ui_fx_frame_begin(s_fx.ctx, &click);
-        (void)popup_begin_open(POP_C, &st, &anc_c);
-        CLAY({.id = CLAY_ID("game_hud"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .zIndex = 500}}) {
-            popup_begin_open_src(POP_A, &st, &anc, &src_a);
-            nt_ui_popup_end(s_fx.ctx);
-        }
-        nt_ui_popup_end(s_fx.ctx);
-        popup_begin_open_src(POP_B, &st, &anc, &src_b);
-        nt_ui_popup_end(s_fx.ctx);
-        nt_ui_end(s_fx.ctx);
-    }
-    TEST_ASSERT_EQUAL_INT_MESSAGE(NT_UI_POPUP_CLOSE_OUTSIDE, src_a, "the outside click must dismiss the popup painted on top");
-    TEST_ASSERT_EQUAL_INT_MESSAGE(NT_UI_POPUP_CLOSE_NONE, src_b, "the popup underneath must stay an inert gate");
-
-    /* The band claim resets each frame: with the lifted wrapper gone, the root-level popup takes top. */
-    for (int frame = 0; frame < 2; ++frame) {
-        nt_pointer_t idle = ui_fx_pointer(700.0F, 500.0F, false, false, false);
-        ui_fx_frame_begin(s_fx.ctx, &idle);
-        (void)popup_begin_open(POP_B, &st, &anc);
-        nt_ui_popup_end(s_fx.ctx);
-        nt_ui_end(s_fx.ctx);
-    }
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(POP_B, s_fx.ctx->overlay_top_id_prev, "the top-band claim must reset per frame, not stick to the highest band ever seen");
+    nt_ui_end(s_fx.ctx);
 }
 
-/* ---- Two catcher-bearing popups on ONE band (siblings nested in one parent): whoever owns the close-scan
- *      slot must also be the one the pointer hands the click to. The slot is picked by band with ties to the
- *      last declared, which is the pointer arbiter's own key — ranking the slot by draw layer instead left
- *      the scan with a popup whose catcher never won the click, and NEITHER overlay dismissed. ---- */
-#define POP_TIE_PARENT 0x50A0F0U
-
-static void test_popup_dismiss_survives_a_band_tie(void) {
-    nt_ui_popup_style_t hi = nt_ui_popup_style_defaults();
-    hi.ease_speed = 8.0F; /* eased: the frame it closes itself still shows, so the test ends it */
-    hi.layer = 2U;        /* a draw layer that does NOT move the close-scan slot */
-    nt_ui_popup_style_t lo = nt_ui_popup_style_defaults();
-    lo.ease_speed = 8.0F;
-    nt_ui_popup_anchor_t anc = {.x = 100.0F, .y = 100.0F, .w = 80.0F, .h = 30.0F, .prefer_side = NT_UI_POPUP_BELOW};
-
+/* ---- An overlay's band ignores the floating that encloses it: a game floating at zIndex 500 inside modal C
+ *      rises over the later root popup B, yet popup A declared in it lies under B, and B owns the outside
+ *      press. With B gone, A is the top again. ---- */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_popup_band_ignores_the_enclosing_floating(void) {
     nt_ui_popup_close_t src_a = NT_UI_POPUP_CLOSE_NONE;
     nt_ui_popup_close_t src_b = NT_UI_POPUP_CLOSE_NONE;
-    for (int frame = 0; frame < 4; ++frame) { /* the last frame commits the reopened B as the top */
-        const bool pressing = (frame == 1);
-        const bool releasing = (frame == 2);
-        nt_pointer_t p = ui_fx_pointer(700.0F, 500.0F, pressing, pressing, releasing);
-        ui_fx_frame_begin(s_fx.ctx, &p);
-        (void)popup_begin_open(POP_TIE_PARENT, &lo, &(nt_ui_popup_anchor_t){.x = 20.0F, .y = 20.0F, .prefer_side = NT_UI_POPUP_BELOW});
-        popup_begin_open_src(POP_A, &hi, &anc, &src_a);
-        /* Sized bodies: with 0x0 panels "the click landed outside" would be true even if the panel
-         * vanished, and the test could not tell the two apart. */
-        CLAY({.id = CLAY_ID("tie_a"), .layout = {.sizing = {CLAY_SIZING_FIXED(POP_W), CLAY_SIZING_FIXED(POP_H)}}}) {}
-        nt_ui_popup_end(s_fx.ctx);
-        popup_begin_open_src(POP_B, &lo, &anc, &src_b); /* same band, declared last -> owns the slot */
-        CLAY({.id = CLAY_ID("tie_b"), .layout = {.sizing = {CLAY_SIZING_FIXED(POP_W), CLAY_SIZING_FIXED(POP_H)}}}) {}
-        nt_ui_popup_end(s_fx.ctx);
-        nt_ui_popup_end(s_fx.ctx);
-        nt_ui_end(s_fx.ctx);
+    lifted_frame(ui_fx_pointer(700.0F, 500.0F, false, false, false), true, &src_a, &src_b);
+    lifted_frame(ui_fx_pointer(700.0F, 500.0F, false, false, false), true, &src_a, &src_b);
+    const Clay_RenderCommand *hud = ui_fx_find_rect(s_fx.ctx, CLAY_ID("game_hud").id);
+    const Clay_RenderCommand *a = ui_fx_find_rect(s_fx.ctx, CLAY_ID("body_a").id);
+    const Clay_RenderCommand *b = ui_fx_find_rect(s_fx.ctx, CLAY_ID("body_b").id);
+    TEST_ASSERT_TRUE_MESSAGE(hud != NULL && a != NULL && b != NULL, "the floating and both popups must reach the render commands");
+    TEST_ASSERT_TRUE_MESSAGE(hud->zIndex > b->zIndex, "the game floating rises over the later overlay");
+    TEST_ASSERT_TRUE_MESSAGE(a->zIndex < b->zIndex && a < b, "the popup inside it stays under the later overlay");
+    TEST_ASSERT_EQUAL_UINT32(POP_B, s_fx.ctx->overlay_top);
+
+    lifted_frame(ui_fx_pointer(700.0F, 500.0F, true, true, false), true, &src_a, &src_b);
+    lifted_frame(ui_fx_pointer(700.0F, 500.0F, false, false, true), true, &src_a, &src_b);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(NT_UI_POPUP_CLOSE_OUTSIDE, src_b, "the outside press dismisses the later overlay");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(NT_UI_POPUP_CLOSE_NONE, src_a, "the popup under it stays open");
+
+    lifted_frame(ui_fx_pointer(700.0F, 500.0F, false, false, false), false, &src_a, &src_b);
+    lifted_frame(ui_fx_pointer(700.0F, 500.0F, false, false, false), false, &src_a, &src_b);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(POP_A, s_fx.ctx->overlay_top, "with the later overlay gone the nested popup is the top");
+}
+
+#define ORDER_X_BODY 0x50A0E1U
+#define ORDER_Y_BODY 0x50A0E2U
+
+/* One frame: modal X declared open while `x_open`, then modal Y while `y_open` (else not declared at all), each
+ * with an opaque body; returns ctx->overlay_count right after nt_ui_begin. */
+static uint8_t two_modals_frame(bool x_open, bool y_open) {
+    nt_ui_modal_style_t ms = nt_ui_modal_style_defaults();
+    ms.ease_speed = 0.0F;
+    const uint32_t ids[2] = {POP_A, POP_B};
+    const uint32_t bodies[2] = {ORDER_X_BODY, ORDER_Y_BODY};
+    const bool shown[2] = {x_open, y_open};
+    ui_fx_frame_begin(s_fx.ctx, NULL);
+    const uint8_t count = s_fx.ctx->overlay_count;
+    for (int i = 0; i < 2; ++i) {
+        bool open = true;
+        if (shown[i] && nt_ui_modal_begin(s_fx.ctx, ids[i], &ms, &open, NULL)) {
+            CLAY({.id = (Clay_ElementId){.id = bodies[i]}, .layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(20)}}, .backgroundColor = {8, 8, 8, 255}}) {}
+            nt_ui_modal_end(s_fx.ctx);
+        }
     }
-    TEST_ASSERT_EQUAL_INT_MESSAGE(NT_UI_POPUP_CLOSE_OUTSIDE, src_b, "the popup holding the close-scan slot must receive the outside click");
-    TEST_ASSERT_EQUAL_INT_MESSAGE(NT_UI_POPUP_CLOSE_NONE, src_a, "the other popup stays an inert gate");
-    TEST_ASSERT_EQUAL_UINT32(POP_B, s_fx.ctx->overlay_top_id_prev);
+    nt_ui_end(s_fx.ctx);
+    return count;
+}
+
+/* True when X's body paints above Y's in the last frame, by band and by command order. */
+static bool x_paints_above_y(void) {
+    const Clay_RenderCommand *x = ui_fx_find_rect(s_fx.ctx, ORDER_X_BODY);
+    const Clay_RenderCommand *y = ui_fx_find_rect(s_fx.ctx, ORDER_Y_BODY);
+    TEST_ASSERT_TRUE_MESSAGE(x != NULL && y != NULL, "both modals must reach the render commands");
+    return x->zIndex > y->zIndex && x > y;
+}
+
+/* ---- Open order beats declaration order: modal X, declared before Y every frame but opened a frame after
+ *      it, is the top and paints above Y. ---- */
+static void test_popup_open_order_beats_declaration_order(void) {
+    (void)two_modals_frame(false, true);
+    (void)two_modals_frame(true, true);
+    (void)two_modals_frame(true, true);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(POP_A, s_fx.ctx->overlay_top, "the overlay opened last is the top");
+    TEST_ASSERT_TRUE_MESSAGE(x_paints_above_y(), "and paints above the one declared after it");
+}
+
+/* ---- An overlay the game stops declaring leaves the stack at the next nt_ui_begin; declared open again, it
+ *      enters on top of the overlay opened after it the first time. ---- */
+static void test_popup_undeclared_overlay_reenters_on_top(void) {
+    (void)two_modals_frame(true, false);
+    (void)two_modals_frame(true, true);
+    (void)two_modals_frame(false, true);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(POP_B, s_fx.ctx->overlay_top, "Y opened after X covers it");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(1U, two_modals_frame(true, true), "the undeclared X left the stack at this begin");
+    (void)two_modals_frame(true, true);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(POP_A, s_fx.ctx->overlay_top, "X declared again enters on top");
+    TEST_ASSERT_TRUE(x_paints_above_y());
+}
+
+/* What one frame of sibling_frame reported for each overlay. */
+typedef struct {
+    nt_ui_popup_info_t combo;
+    nt_ui_popup_info_t other;
+} sibling_info_t;
+
+#define SIB_OTHER_POPUP 1 /* a light-dismiss popup, as a second combo */
+#define SIB_OTHER_TOOLTIP 2
+#define SIB_OTHER_MODAL 3
+
+/* One frame at the base UI: light-dismiss popup A (a combo list) on the game's `*a_open`, then the `other`
+ * overlay on `*other_open`. Both bools persist across frames, as a game's. */
+static sibling_info_t sibling_frame(bool *a_open, int other, bool *other_open) {
+    nt_ui_popup_style_t st = nt_ui_popup_style_defaults();
+    st.ease_speed = 0.0F;
+    const nt_ui_popup_anchor_t anc_a = {.x = 100.0F, .y = 100.0F, .prefer_side = NT_UI_POPUP_BELOW};
+    const nt_ui_popup_anchor_t anc_o = {.x = 500.0F, .y = 350.0F, .prefer_side = NT_UI_POPUP_BELOW};
+    sibling_info_t out = {0};
+    ui_fx_frame_begin(s_fx.ctx, NULL);
+    if (nt_ui_popup_begin(s_fx.ctx, POP_A, &st, &anc_a, a_open, &out.combo)) {
+        nt_ui_popup_end(s_fx.ctx);
+    }
+    if (other == SIB_OTHER_MODAL) {
+        nt_ui_modal_style_t ms = nt_ui_modal_style_defaults();
+        ms.ease_speed = 0.0F;
+        if (nt_ui_modal_begin(s_fx.ctx, POP_B, &ms, other_open, &out.other)) {
+            nt_ui_modal_end(s_fx.ctx);
+        }
+    } else {
+        nt_ui_popup_style_t os = st;
+        os.flags = (other == SIB_OTHER_TOOLTIP) ? 0U : NT_UI_POPUP_LIGHT_DISMISS;
+        if (nt_ui_popup_begin(s_fx.ctx, POP_B, &os, &anc_o, other_open, &out.other)) {
+            nt_ui_popup_end(s_fx.ctx);
+        }
+    }
+    nt_ui_end(s_fx.ctx);
+    return out;
+}
+
+/* ---- One transient child per parent: a light-dismiss popup opening at the base replaces the open one there,
+ *      which closes at its next begin with NT_UI_POPUP_CLOSE_REPLACED; the new one stays open and is the top. ---- */
+static void test_popup_light_dismiss_replaces_its_sibling(void) {
+    bool a = true;
+    bool b = false;
+    (void)sibling_frame(&a, SIB_OTHER_POPUP, &b);
+    (void)sibling_frame(&a, SIB_OTHER_POPUP, &b);
+    b = true;
+    (void)sibling_frame(&a, SIB_OTHER_POPUP, &b);
+    TEST_ASSERT_TRUE_MESSAGE(a, "A, declared before B opened, is still open in that frame");
+    const sibling_info_t r = sibling_frame(&a, SIB_OTHER_POPUP, &b);
+    TEST_ASSERT_EQUAL_INT(NT_UI_POPUP_CLOSE_REPLACED, r.combo.reason);
+    TEST_ASSERT_FALSE(a);
+    (void)sibling_frame(&a, SIB_OTHER_POPUP, &b);
+    TEST_ASSERT_TRUE(b);
+    TEST_ASSERT_EQUAL_UINT32(POP_B, s_fx.ctx->overlay_top);
+}
+
+/* ---- A tooltip or a modal is not transient: opening next to an open combo, it leaves the combo open. ---- */
+static void test_popup_tooltip_and_modal_do_not_replace(void) {
+    const int others[2] = {SIB_OTHER_TOOLTIP, SIB_OTHER_MODAL};
+    for (int i = 0; i < 2; ++i) {
+        bool a = true;
+        bool o = false;
+        (void)sibling_frame(&a, others[i], &o);
+        (void)sibling_frame(&a, others[i], &o);
+        o = true;
+        for (int f = 0; f < 3; ++f) {
+            const sibling_info_t r = sibling_frame(&a, others[i], &o);
+            TEST_ASSERT_EQUAL_INT(NT_UI_POPUP_CLOSE_NONE, r.combo.reason);
+        }
+        TEST_ASSERT_TRUE_MESSAGE(a && o, others[i] == SIB_OTHER_TOOLTIP ? "a tooltip leaves the combo open" : "a modal leaves the combo open");
+        TEST_ASSERT_EQUAL_UINT32_MESSAGE(others[i] == SIB_OTHER_MODAL ? POP_B : POP_A, s_fx.ctx->overlay_top, "a modal opened later is the top, a tooltip never");
+        o = false;
+        a = false;
+        (void)sibling_frame(&a, others[i], &o);
+        (void)sibling_frame(&a, others[i], &o);
+    }
 }
 
 #define POP_A_BOX 0x50A0B1U
 
-/* One frame: popup A at the root holding a stepped box, then popup B at the root (B on top); returns
- * whether A's box clicked and B's close source. */
+/* One frame: popup A at the root holding a stepped box and, after it, popup B (B on top, as a combo in a
+ * popup); returns whether A's box clicked and B's close source. */
 static bool popup_under_frame(nt_pointer_t p, nt_ui_popup_close_t *src_b) {
     nt_ui_popup_style_t st = nt_ui_popup_style_defaults();
     st.ease_speed = 8.0F; /* eased: the frame it closes itself still shows, so the test ends it */
@@ -532,9 +599,9 @@ static bool popup_under_frame(nt_pointer_t p, nt_ui_popup_close_t *src_b) {
     (void)popup_begin_open(POP_A, &st, &anc_a);
     CLAY({.id = (Clay_ElementId){.id = POP_A_BOX}, .layout = {.sizing = {CLAY_SIZING_FIXED(POP_W), CLAY_SIZING_FIXED(POP_H)}}}) {}
     const bool clicked = nt_ui_step(s_fx.ctx, POP_A_BOX, NULL).clicked;
-    nt_ui_popup_end(s_fx.ctx);
     popup_begin_open_src(POP_B, &st, &anc_b, src_b);
     CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(POP_W), CLAY_SIZING_FIXED(POP_H)}}}) {}
+    nt_ui_popup_end(s_fx.ctx);
     nt_ui_popup_end(s_fx.ctx);
     nt_ui_end(s_fx.ctx);
     return clicked;
@@ -546,7 +613,7 @@ static void test_popup_top_owns_the_pointer(void) {
     nt_ui_popup_close_t src_b = NT_UI_POPUP_CLOSE_NONE;
     (void)popup_under_frame(ui_fx_pointer(10.0F, 10.0F, false, false, false), &src_b);
     (void)popup_under_frame(ui_fx_pointer(10.0F, 10.0F, false, false, false), &src_b);
-    TEST_ASSERT_EQUAL_UINT32(POP_B, s_fx.ctx->overlay_top_id_prev);
+    TEST_ASSERT_EQUAL_UINT32(POP_B, s_fx.ctx->overlay_top);
     const nt_ui_bbox_t box = nt_ui_get_bbox(s_fx.ctx, POP_A_BOX);
     TEST_ASSERT_TRUE(box.found);
     const float x = box.x + 10.0F;
@@ -561,22 +628,24 @@ static void test_popup_top_owns_the_pointer(void) {
 #define POP_A2_BOX 0x50A0B2U
 #define POP_B_BOX 0x50A0B3U
 
-/* One frame: popup A holding a catcher-less nested popup A2 with a stepped box, then popup B at the root
- * holding a stepped box at the same place; ORs both boxes' clicks into the outputs. */
+/* One frame: modal A holding a catcher-less nested popup A2 (a tooltip) with a stepped box, then popup B at
+ * the root holding a stepped box at the same place; ORs both boxes' clicks into the outputs. */
 static void nested_under_frame(nt_pointer_t p, bool *a2_clicked, bool *b_clicked) {
+    nt_ui_modal_style_t ms = nt_ui_modal_style_defaults();
+    ms.ease_speed = 0.0F;
     nt_ui_popup_style_t st = nt_ui_popup_style_defaults();
     st.ease_speed = 0.0F;
     nt_ui_popup_style_t level = st;
-    level.flags = 0U; /* catcher-less, like a menu's submenu level */
-    const nt_ui_popup_anchor_t anc_a = {.x = 100.0F, .y = 100.0F, .prefer_side = NT_UI_POPUP_BELOW};
+    level.flags = 0U;
     const nt_ui_popup_anchor_t anc_box = {.x = 400.0F, .y = 300.0F, .prefer_side = NT_UI_POPUP_BELOW};
     ui_fx_frame_begin(s_fx.ctx, &p);
-    (void)popup_begin_open(POP_A, &st, &anc_a);
+    bool modal_open = true;
+    TEST_ASSERT_TRUE(nt_ui_modal_begin(s_fx.ctx, POP_A, &ms, &modal_open, NULL));
     CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(POP_W), CLAY_SIZING_FIXED(POP_H)}}}){}(void)popup_begin_open(POP_A2, &level, &anc_box);
     CLAY({.id = (Clay_ElementId){.id = POP_A2_BOX}, .layout = {.sizing = {CLAY_SIZING_FIXED(POP_W), CLAY_SIZING_FIXED(POP_H)}}, .backgroundColor = {8, 8, 8, 255}}){} *a2_clicked =
         nt_ui_step(s_fx.ctx, POP_A2_BOX, NULL).clicked || *a2_clicked;
     nt_ui_popup_end(s_fx.ctx);
-    nt_ui_popup_end(s_fx.ctx);
+    nt_ui_modal_end(s_fx.ctx);
     (void)popup_begin_open(POP_B, &st, &anc_box);
     CLAY({.id = (Clay_ElementId){.id = POP_B_BOX}, .layout = {.sizing = {CLAY_SIZING_FIXED(POP_W), CLAY_SIZING_FIXED(POP_H)}}, .backgroundColor = {8, 8, 8, 255}}){} *b_clicked =
         nt_ui_step(s_fx.ctx, POP_B_BOX, NULL).clicked || *b_clicked;
@@ -584,15 +653,15 @@ static void nested_under_frame(nt_pointer_t p, bool *a2_clicked, bool *b_clicked
     nt_ui_end(s_fx.ctx);
 }
 
-/* ---- An overlay declared later stacks above an earlier overlay's nested level: B paints over A's nested
- *      popup and its own box takes the click where the two overlap. ---- */
+/* ---- An overlay opened later stacks above an earlier overlay's nested level: B paints over the tooltip
+ *      nested in modal A and its own box takes the click where the two overlap. ---- */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_popup_later_overlay_above_nested_level(void) {
     bool a2 = false;
     bool b = false;
     nested_under_frame(ui_fx_pointer(10.0F, 10.0F, false, false, false), &a2, &b);
     nested_under_frame(ui_fx_pointer(10.0F, 10.0F, false, false, false), &a2, &b);
-    TEST_ASSERT_EQUAL_UINT32(POP_B, s_fx.ctx->overlay_top_id_prev);
+    TEST_ASSERT_EQUAL_UINT32(POP_B, s_fx.ctx->overlay_top);
     const Clay_RenderCommand *a2_rect = ui_fx_find_rect(s_fx.ctx, POP_A2_BOX);
     TEST_ASSERT_TRUE_MESSAGE(a2_rect != NULL && ui_fx_find_rect(s_fx.ctx, POP_B_BOX) > a2_rect, "the later overlay paints over the earlier one's nested level");
     const nt_ui_bbox_t box = nt_ui_get_bbox(s_fx.ctx, POP_B_BOX);
@@ -712,7 +781,7 @@ static void test_popup_press_above_the_top_completes(void) {
     nt_ui_popup_close_t src_a = NT_UI_POPUP_CLOSE_NONE;
     (void)toast_frame(ui_fx_pointer(10.0F, 10.0F, false, false, false), &src_a);
     (void)toast_frame(ui_fx_pointer(10.0F, 10.0F, false, false, false), &src_a);
-    TEST_ASSERT_EQUAL_UINT32(POP_A, s_fx.ctx->overlay_top_id_prev);
+    TEST_ASSERT_EQUAL_UINT32(POP_A, s_fx.ctx->overlay_top);
     const nt_ui_bbox_t btn = nt_ui_get_bbox(s_fx.ctx, TOAST_BTN);
     TEST_ASSERT_TRUE(btn.found);
     const float x = btn.x + 10.0F;
@@ -824,10 +893,10 @@ static void test_popup_closing_content_reads_no_click(void) {
  *      takes a new press, as the inert panel makes no record. ---- */
 static void test_popup_closing_panel_lets_the_pointer_through(void) {
     inert_open_fully(NESTED_NONE);
-    TEST_ASSERT_EQUAL_UINT32(INERT_POPUP, s_fx.ctx->overlay_top_id_prev);
+    TEST_ASSERT_EQUAL_UINT32(INERT_POPUP, s_fx.ctx->overlay_top);
     (void)inert_frame(ui_fx_pointer(5.0F, 5.0F, false, false, false), false, NESTED_NONE);
     (void)inert_frame(ui_fx_pointer(5.0F, 5.0F, false, false, false), false, NESTED_NONE);
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, s_fx.ctx->overlay_top_id_prev, "a closing popup is not the top overlay");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, s_fx.ctx->overlay_top, "a closing popup is not the top overlay");
     nt_pointer_t tap = ui_fx_pointer(300.0F + 5.0F, 200.0F + 5.0F, false, true, true);
     tap.type = NT_POINTER_TOUCH;
     const inert_frame_t r = inert_frame(tap, false, NESTED_NONE);
@@ -860,13 +929,13 @@ static void test_popup_esc_closes_the_top_and_its_body(void) {
  *      game closes the parent is not its close although it was the top. ---- */
 static void test_popup_nested_in_a_closing_parent_is_inert(void) {
     inert_open_fully(NESTED_TOP);
-    TEST_ASSERT_EQUAL_UINT32(INERT_NESTED, s_fx.ctx->overlay_top_id_prev);
+    TEST_ASSERT_EQUAL_UINT32(INERT_NESTED, s_fx.ctx->overlay_top);
     nt_input_feed(nt_test_key(NT_KEY_ESCAPE, true));
     const inert_frame_t r = inert_frame(ui_fx_pointer(5.0F, 5.0F, false, false, false), false, NESTED_TOP);
     nt_input_init();
     TEST_ASSERT_TRUE_MESSAGE(r.nested_open, "the nested popup of a closing parent does not take the Esc");
     (void)inert_frame(ui_fx_pointer(5.0F, 5.0F, false, false, false), false, NESTED_TOP);
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, s_fx.ctx->overlay_top_id_prev, "a nested popup in a closing parent claims no top");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, s_fx.ctx->overlay_top, "a nested popup in a closing parent claims no top");
 }
 
 /* ---- A nested popup closing with its closing parent leaves the parent's later content inert: the release
@@ -908,18 +977,20 @@ static void test_popup_press_off_every_record_dismisses(void) {
 
 #define GAME_WINDOW 0x50A0D1U
 
-/* One frame: popup A inside a game floating window at `window_z`, then popup B at the root. */
+/* One frame: modal A inside a game floating window at `window_z`, then popup B at the root. */
 static void top_layer_frame(int16_t window_z) {
+    nt_ui_modal_style_t ms = nt_ui_modal_style_defaults();
+    ms.ease_speed = 0.0F;
     nt_ui_popup_style_t st = nt_ui_popup_style_defaults();
     st.ease_speed = 0.0F;
-    const nt_ui_popup_anchor_t anc_a = {.x = 100.0F, .y = 100.0F, .prefer_side = NT_UI_POPUP_BELOW};
     const nt_ui_popup_anchor_t anc_b = {.x = 500.0F, .y = 350.0F, .prefer_side = NT_UI_POPUP_BELOW};
     const nt_pointer_t idle = ui_fx_pointer(5.0F, 5.0F, false, false, false);
     ui_fx_frame_begin(s_fx.ctx, &idle);
     CLAY({.id = (Clay_ElementId){.id = GAME_WINDOW}, .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .zIndex = window_z}, .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(200)}}}) {
-        (void)popup_begin_open(POP_A, &st, &anc_a);
+        bool modal_open = true;
+        TEST_ASSERT_TRUE(nt_ui_modal_begin(s_fx.ctx, POP_A, &ms, &modal_open, NULL));
         CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(POP_W), CLAY_SIZING_FIXED(POP_H)}}}) {}
-        nt_ui_popup_end(s_fx.ctx);
+        nt_ui_modal_end(s_fx.ctx);
     }
     (void)popup_begin_open(POP_B, &st, &anc_b);
     CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(POP_W), CLAY_SIZING_FIXED(POP_H)}}}) {}
@@ -927,12 +998,12 @@ static void top_layer_frame(int16_t window_z) {
     nt_ui_end(s_fx.ctx);
 }
 
-/* ---- Root overlays are a top layer: one declared inside a game window floating at zIndex 20 still lies
- *      under a root overlay declared after it. ---- */
+/* ---- Root overlays are a top layer: a modal declared inside a game window floating at zIndex 20 still lies
+ *      under a root overlay opened after it. ---- */
 static void test_popup_root_overlay_is_a_top_layer(void) {
     top_layer_frame(20);
     top_layer_frame(20);
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(POP_B, s_fx.ctx->overlay_top_id_prev, "the later root overlay covers the earlier one");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(POP_B, s_fx.ctx->overlay_top, "the later root overlay covers the earlier one");
 }
 
 /* ---- A root overlay inside a game floating at or above the overlay bands, or so far below them that its
@@ -958,8 +1029,11 @@ int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_popup_defaults_valid);
     RUN_TEST(test_popup_zband_and_nesting);
-    RUN_TEST(test_popup_top_id_follows_band);
-    RUN_TEST(test_popup_dismiss_survives_a_band_tie);
+    RUN_TEST(test_popup_band_ignores_the_enclosing_floating);
+    RUN_TEST(test_popup_open_order_beats_declaration_order);
+    RUN_TEST(test_popup_undeclared_overlay_reenters_on_top);
+    RUN_TEST(test_popup_light_dismiss_replaces_its_sibling);
+    RUN_TEST(test_popup_tooltip_and_modal_do_not_replace);
     RUN_TEST(test_popup_esc_closes_the_top_and_its_body);
     RUN_TEST(test_popup_closing_ends_a_held_press);
     RUN_TEST(test_popup_closing_content_reads_no_click);
@@ -971,7 +1045,6 @@ int main(void) {
     RUN_TEST(test_popup_root_overlay_is_a_top_layer);
     RUN_TEST(test_popup_root_overlay_out_of_the_bands_asserts);
     RUN_TEST(test_popup_depth_overflow_asserts);
-    RUN_TEST(test_popup_catcher_under_the_base_band_asserts);
     RUN_TEST(test_popup_inert_query_keeps_its_asserts);
     RUN_TEST(test_popup_closed_does_not_block_base);
     RUN_TEST(test_popup_edge_flip_four_borders);

@@ -71,9 +71,9 @@
 #define NT_UI_DEFAULT_MAX_ELEMENT_COUNT 1024
 #endif
 
-/* Default overlay z-band stride: the first root overlay of a frame sits at this band, each later one
- * NT_UI_OVERLAY_MAX_DEPTH bands higher, whatever game floating encloses it (spec: "Floating zIndex is
- * relative"). Per-context override via nt_ui_create_desc_t.overlay_zband_stride. */
+/* Default overlay z-band stride: overlay stack slot i sits at stride + i * NT_UI_OVERLAY_MAX_DEPTH, whatever
+ * floating encloses it (spec: "Floating zIndex is relative"). Per-context override via
+ * nt_ui_create_desc_t.overlay_zband_stride. */
 #define NT_UI_OVERLAY_ZBAND_STRIDE 1000
 
 /* Bare uint8_t[N] is 1-byte aligned; create_context asserts otherwise. */
@@ -269,7 +269,7 @@ typedef struct {
      * slightly closer in NDC Z; hit-test keeps using the unbiased widget plane. Panels whose
      * backgrounds write depth need it above 0, or their children are coplanar with the background. */
     float element_depth_bias_ndc;
-    /* Absolute z-band of the frame's first root overlay (> 0); default from nt_ui_create_desc_defaults. */
+    /* Absolute z-band of overlay stack slot 0 (> 0); default from nt_ui_create_desc_defaults. */
     int16_t overlay_zband_stride;
     /* Per-id retained-state pool size; MUST be power-of-2. 0 = default NT_UI_STATE_SLOTS. */
     uint32_t state_slots;

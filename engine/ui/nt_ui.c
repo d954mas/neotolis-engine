@@ -237,8 +237,8 @@ nt_ui_context_t *nt_ui_create_context(void *arena, size_t arena_size, const nt_u
     ctx->element_depth_bias_ndc = desc->element_depth_bias_ndc;
     /* Used as-is; the default comes solely from nt_ui_create_desc_defaults() (same convention as max_elements). */
     ctx->overlay_zband_stride = desc->overlay_zband_stride;
-    NT_ASSERT(ctx->overlay_zband_stride > 0 && ctx->overlay_zband_stride + NT_UI_OVERLAY_MAX_DEPTH - 1 <= INT16_MAX &&
-              "nt_ui_create_context: overlay_zband_stride must be > 0 with room for a root overlay's nested levels");
+    NT_ASSERT(ctx->overlay_zband_stride > 0 && (int32_t)ctx->overlay_zband_stride + ((NT_UI_OVERLAY_MAX_DEPTH - 1) * NT_UI_OVERLAY_MAX_DEPTH) <= INT16_MAX &&
+              "nt_ui_create_context: overlay_zband_stride must be > 0 with room for every overlay stack slot's band");
     /* Touch-friendly baseline, looser than ImGui's mouse 6px/0.3s: the engine targets mobile/WASM. */
     ctx->gesture_dbl_window_secs = 0.50F;
     ctx->gesture_move_radius_dp = 16.0F;
@@ -408,7 +408,7 @@ static void resolve_hot(nt_ui_context_t *ctx);
 /* A record is the top's when it lies at or above the top's catcher in last frame's paint/hit order; with no
  * top, in a 3D ctx (no band ranking) and for an inspector pane, every record is. */
 bool nt_ui_internal_owned_by_top(nt_ui_context_t *ctx, uint32_t id) {
-    const uint32_t top = ctx->overlay_top_id_prev;
+    const uint32_t top = ctx->overlay_top;
     if (id == 0U || top == 0U || ctx->use_raycast_input) {
         return true;
     }
@@ -546,12 +546,23 @@ void nt_ui_begin(nt_ui_context_t *ctx, const nt_ui_frame_desc_t *frame) {
     }
     ctx->last_press_age += dt;
     ctx->overlay_depth = 0U; /* overlay begin++/end-- balance across the frame (asserted == 0 at end) */
-    ctx->overlay_root_count = 0U;
     ctx->inert_from = 0U;
-    /* Commit last frame's top overlay as the close-scan target (1-frame IM lag), then reset. */
-    ctx->overlay_top_id_prev = ctx->overlay_top_id_cur;
-    ctx->overlay_top_id_cur = 0U;
-    ctx->overlay_top_z_cur = INT32_MIN;
+    /* An overlay last frame did not declare leaves the stack; the top is the highest live one with a catcher
+     * that no newer transient sibling replaced. */
+    uint8_t kept = 0U;
+    ctx->overlay_top = 0U;
+    for (uint8_t i = 0U; i < ctx->overlay_count; ++i) {
+        nt_ui_overlay_t o = ctx->overlays[i];
+        if (!o.seen) {
+            continue;
+        }
+        o.seen = false;
+        if (o.live && o.catcher && !o.replaced) {
+            ctx->overlay_top = o.id;
+        }
+        ctx->overlays[kept++] = o;
+    }
+    ctx->overlay_count = kept;
     /* Orphan-focus cleanup: a focused field not re-declared last frame would gate global Esc forever,
      * so drop focus before this frame runs (mirrors the capture_seen orphan sweep above). */
     if (ctx->focused_input_id != 0U && ctx->focused_input_seen == 0U) {
@@ -638,7 +649,7 @@ void nt_ui_begin(nt_ui_context_t *ctx, const nt_ui_frame_desc_t *frame) {
         ctx->focused_input_id = 0U;
     }
     /* One keyboard owner per frame (spec: "Input ownership"): the focused field, else the top overlay. */
-    ctx->keys_owner = (ctx->focused_input_id != 0U) ? ctx->focused_input_id : ctx->overlay_top_id_prev;
+    ctx->keys_owner = (ctx->focused_input_id != 0U) ? ctx->focused_input_id : ctx->overlay_top;
 
     /* Input is decided here, from last frame's layout: the front-most record per pointer, then the
      * scroll gestures. Every step and query of the frame reads the result. */
@@ -650,7 +661,7 @@ void nt_ui_begin(nt_ui_context_t *ctx, const nt_ui_frame_desc_t *frame) {
         const nt_button_state_t *r = &ctx->frame_pointers[i].buttons[NT_BUTTON_RIGHT];
         const bool joins = ((l->is_down || l->is_released) && !l->is_pressed) || ((r->is_down || r->is_released) && !r->is_pressed);
         if ((l->is_pressed || r->is_pressed) && !joins) {
-            ctx->captures[i].ui_gesture = ctx->pointer_hot[i].id != 0U || ctx->overlay_top_id_prev != 0U;
+            ctx->captures[i].ui_gesture = ctx->pointer_hot[i].id != 0U || ctx->overlay_top != 0U;
         } else if (joins && !ctx->captures[i].ui_gesture) {
             /* A press that joins the game's gesture is the game's: the UI sees no press edge. */
             ctx->frame_pointers[i].buttons[NT_BUTTON_LEFT].is_pressed = false;
@@ -3073,13 +3084,6 @@ bool nt_ui_hovered_within(const nt_ui_context_t *ctx, uint32_t id) {
     return false;
 }
 
-bool nt_ui_internal_declared_within(const nt_ui_context_t *ctx, uint32_t inner, uint32_t outer) {
-    uint32_t first = 0U;
-    uint32_t last = 0U;
-    uint32_t inner_first = 0U;
-    uint32_t inner_last = 0U;
-    return hit_range(ctx, outer, &first, &last) && hit_range(ctx, inner, &inner_first, &inner_last) && inner_first >= first && inner_first <= last;
-}
 // #endregion
 
 // #region public_metrics

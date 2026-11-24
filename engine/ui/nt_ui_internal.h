@@ -156,13 +156,22 @@ typedef struct {
     int16_t pad[4]; /* hit padding L/R/T/B */
 } nt_ui_interactive_t;
 
-/* Nested-overlay cap (fail-early assert on overflow; depth is a counter, no heap). Depth is the
- * overflow guard and tells a root overlay from a nested one; top-targeting comes from overlay_top_z_cur.
- * Build-overridable. */
+/* Overlays shown at once: the overlay stack's capacity (fail-early assert, no heap). Build-overridable. */
 #ifndef NT_UI_OVERLAY_MAX_DEPTH
 #define NT_UI_OVERLAY_MAX_DEPTH 16
 #endif
-_Static_assert(NT_UI_OVERLAY_MAX_DEPTH >= 1 && NT_UI_OVERLAY_MAX_DEPTH <= UINT8_MAX, "NT_UI_OVERLAY_MAX_DEPTH must fit the uint8_t overlay_depth counter");
+_Static_assert(NT_UI_OVERLAY_MAX_DEPTH >= 1 && NT_UI_OVERLAY_MAX_DEPTH <= UINT8_MAX, "NT_UI_OVERLAY_MAX_DEPTH must fit the uint8_t stack counters");
+
+/* One overlay stack entry (spec: "Input ownership", Overlay stack). */
+typedef struct {
+    uint32_t id;
+    uint32_t parent; /* the overlay declared around it, 0 = the base UI */
+    bool seen;       /* declared since the last nt_ui_begin */
+    bool live;       /* open and outside an inert subtree when last declared */
+    bool catcher;    /* gates the UI under it: it can be the top */
+    bool transient;  /* light dismiss: one open per parent */
+    bool replaced;   /* a newer transient sibling opened: it closes at its next begin */
+} nt_ui_overlay_t;
 
 /* Bound the storage and per-row work of NT_UI_CHECKS duplicate detection. */
 #ifndef NT_UI_COMBO_DUP_KEY_WINDOW
@@ -215,13 +224,12 @@ struct nt_ui_context {
     float pointer_occlusion[NT_INPUT_MAX_POINTERS]; /* max world ray distance; default +inf = no cutoff */
     /* Per pointer and axis (0 = x, 1 = y): the scroll allowed to consume this frame's wheel. */
     uint32_t wheel_owner[NT_INPUT_MAX_POINTERS][2];
-    /* The top overlay (spec: "Input ownership"): _cur is claimed during the frame by the highest-band live
-     * catcher-bearing popup, nt_ui_begin commits it into _prev, which every ownership rule reads. */
-    uint32_t overlay_top_id_prev;
-    uint32_t overlay_top_id_cur;
-    /* Highest band claimed this frame; ties go to the last declared, matching the pointer arbiter that
-     * delivers the dismiss click. INT32_MIN until the first claim. */
-    int32_t overlay_top_z_cur;
+    /* The top overlay read at nt_ui_begin from the stack: the highest live entry with a catcher (0 = none). */
+    uint32_t overlay_top;
+    /* The overlay stack in open order, which is also its paint and hit order (slot i takes band
+     * stride + i * NT_UI_OVERLAY_MAX_DEPTH), and the ids of the overlays open in the declaration. */
+    nt_ui_overlay_t overlays[NT_UI_OVERLAY_MAX_DEPTH];
+    uint32_t overlay_decl[NT_UI_OVERLAY_MAX_DEPTH];
     /* Keyboard-focus arbiter (0 = none): a press sets it; Esc or a disabled declaration clears it.
      * Survives frames; begin only drops an orphan and applies a pending Tab. */
     uint32_t focused_input_id;
@@ -240,13 +248,10 @@ struct nt_ui_context {
     uint32_t rich_max_runs;
     uint32_t rich_max_styles;
     uint32_t rich_max_text_bytes;
-    /* Absolute band of the first root overlay; root k takes stride + k * NT_UI_OVERLAY_MAX_DEPTH. Validated in
-     * create_context. */
+    /* Absolute band of overlay stack slot 0. Validated in create_context. */
     int16_t overlay_zband_stride;
-    /* Visible root overlays declared so far this frame: each takes the next band, so a later one covers an
-     * earlier one with all its nested levels. Reset by nt_ui_begin, like overlay_depth. */
-    uint16_t overlay_root_count;
-    uint8_t overlay_depth;
+    uint8_t overlay_count; /* entries in overlays[] */
+    uint8_t overlay_depth; /* overlays open in the declaration (begin..end) */
     /* Overlay depth of the not-open popup whose subtree is inert (0 = none); cleared by its nt_ui_popup_end. */
     uint8_t inert_from;
     uint8_t capture_seen[NT_INPUT_MAX_POINTERS];
@@ -539,8 +544,6 @@ int32_t nt_ui_internal_test_get_tree_root_for_elem(const nt_ui_context_t *ctx, i
 
 /* The hit-snapshot slot of an element declared last frame, else -1 (id 0 included). */
 int32_t nt_ui_internal_live_slot(const nt_ui_context_t *ctx, uint32_t id);
-/* `inner` was declared inside `outer` last frame. */
-bool nt_ui_internal_declared_within(const nt_ui_context_t *ctx, uint32_t inner, uint32_t outer);
 
 /* A popup's catcher id derives from the popup id (salted) so the catcher's own interaction cell never
  * aliases the panel id in the registry / capture table. */
@@ -596,7 +599,7 @@ bool nt_ui_internal_owned_by_top(nt_ui_context_t *ctx, uint32_t id);
 /* Router reads for overlays and fields (spec: "Input ownership"): `id` is the live top overlay, owns this
  * frame's keys, or gets the primary pointer (an idle one unless it is the live top and the inspector does
  * not hold the pointer). */
-static inline bool nt_ui_internal_is_top(const nt_ui_context_t *ctx, uint32_t id) { return id == ctx->overlay_top_id_prev && ctx->inert_from == 0U; }
+static inline bool nt_ui_internal_is_top(const nt_ui_context_t *ctx, uint32_t id) { return id == ctx->overlay_top && ctx->inert_from == 0U; }
 static inline bool nt_ui_internal_owns_keys(const nt_ui_context_t *ctx, uint32_t id) { return id == ctx->keys_owner && ctx->inert_from == 0U; }
 const nt_pointer_t *nt_ui_internal_top_pointer(const nt_ui_context_t *ctx, uint32_t id);
 
