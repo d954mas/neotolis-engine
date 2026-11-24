@@ -2521,7 +2521,7 @@ static void step_frame(int dir) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void handle_keys(void) {
-    if (s.file_count == 0 || nt_ui_input_any_focused(s_ctx)) {
+    if (s.file_count == 0 || nt_ui_wants_keyboard(s_ctx)) {
         return;
     }
     const bool shift = s_keys.shift;

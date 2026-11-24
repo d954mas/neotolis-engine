@@ -146,6 +146,7 @@ static void test_popup_inert_query_keeps_its_asserts(void) {
         TEST_ASSERT_TRUE(nt_ui_popup_begin(s_fx.ctx, 0x50C200U, &st, &anc, &open, NULL));
         if (f == 1) {
             NT_TEST_EXPECT_ASSERT((void)nt_ui_query_interaction(s_fx.ctx, 0U));
+            TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "id must be non-zero"));
         }
         nt_ui_popup_end(s_fx.ctx);
         nt_ui_end(s_fx.ctx);
@@ -802,6 +803,19 @@ static void test_popup_closing_ends_a_held_press(void) {
     const inert_frame_t r = inert_frame(ui_fx_pointer(x, y, false, false, true), false, NESTED_NONE);
     TEST_ASSERT_TRUE_MESSAGE(r.visible, "the popup still fades");
     TEST_ASSERT_FALSE_MESSAGE(clicked || r.button_clicked, "the release over a closing popup's button clicks nothing");
+}
+
+/* ---- A query and a hover read inside a closing popup report nothing, also for a release in the frame the
+ *      game closes it, while the capture and the hot record still point at the button. ---- */
+static void test_popup_closing_content_reads_no_click(void) {
+    inert_open_fully(NESTED_NONE);
+    const nt_ui_bbox_t bb = nt_ui_get_bbox(s_fx.ctx, INERT_BUTTON);
+    TEST_ASSERT_TRUE(bb.found);
+    const float x = bb.x + 5.0F;
+    const float y = bb.y + 5.0F;
+    (void)inert_frame(ui_fx_pointer(x, y, true, true, false), true, NESTED_NONE);
+    (void)inert_frame(ui_fx_pointer(x, y, true, false, false), true, NESTED_NONE);
+    const inert_frame_t r = inert_frame(ui_fx_pointer(x, y, false, false, true), false, NESTED_NONE);
     TEST_ASSERT_FALSE_MESSAGE(r.button_queried, "a query in a closing popup reads no click");
     TEST_ASSERT_FALSE_MESSAGE(r.button_hovered, "nor a hover");
 }
@@ -948,6 +962,7 @@ int main(void) {
     RUN_TEST(test_popup_dismiss_survives_a_band_tie);
     RUN_TEST(test_popup_esc_closes_the_top_and_its_body);
     RUN_TEST(test_popup_closing_ends_a_held_press);
+    RUN_TEST(test_popup_closing_content_reads_no_click);
     RUN_TEST(test_popup_closing_panel_lets_the_pointer_through);
     RUN_TEST(test_popup_nested_in_a_closing_parent_is_inert);
     RUN_TEST(test_popup_closing_nested_keeps_the_parent_inert);

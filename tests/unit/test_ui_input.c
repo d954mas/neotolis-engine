@@ -217,7 +217,7 @@ static void test_input_in_scroll_drag_never_focuses(void) {
     field_in_scroll_frame(&p, id, buf, sizeof buf);
     p = ui_fx_pointer(x, y - 40.0F, true, false, false);
     field_in_scroll_frame(&p, id, buf, sizeof buf);
-    TEST_ASSERT_EQUAL_UINT32(CLAY_ID("list").id, s_fx.ctx->captures[0].active_id);
+    TEST_ASSERT_EQUAL_UINT32(CLAY_ID("list").id, nt_ui_test_capture_active_id(s_fx.ctx, 0U));
     p = ui_fx_pointer(x, y, false, false, true);
     field_in_scroll_frame(&p, id, buf, sizeof buf);
     TEST_ASSERT_FALSE(nt_ui_input_focused(s_fx.ctx, id));
@@ -485,7 +485,7 @@ static void test_focus_orphan_cleared(void) {
     char buf[32] = {0};
     const uint32_t id = nt_ui_id("f");
     warmup_focus(id, buf, sizeof buf);
-    TEST_ASSERT_TRUE(nt_ui_input_any_focused(s_fx.ctx)); /* field holds focus */
+    TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, id)); /* field holds focus */
 
     /* Frame 1 without the field: begin still sees last frame's seen=1, so focus survives this begin
      * but seen stays 0 (the field never runs). */
@@ -498,7 +498,24 @@ static void test_focus_orphan_cleared(void) {
     ui_fx_frame_begin(s_fx.ctx, NULL);
     CLAY({.id = CLAY_ID("root")}) {}
     nt_ui_end(s_fx.ctx);
-    TEST_ASSERT_FALSE(nt_ui_input_any_focused(s_fx.ctx));
+    TEST_ASSERT_FALSE(nt_ui_input_focused(s_fx.ctx, id));
+}
+
+/* ---- A focused field owns the keyboard: nt_ui_wants_keyboard is true from the next nt_ui_begin, through the
+ *      frame its Esc unfocuses it (the game must not also act on that Esc), and false after. ---- */
+static void test_focused_field_wants_keyboard(void) {
+    char buf[32] = {0};
+    const uint32_t id = nt_ui_id("f");
+    warmup_focus(id, buf, sizeof buf);
+    (void)field_frame(&IDLE_PTR, id, buf, sizeof buf, true, NULL);
+    TEST_ASSERT_TRUE(nt_ui_wants_keyboard(s_fx.ctx));
+    nt_input_feed(nt_test_key(NT_KEY_ESCAPE, true));
+    (void)field_frame(&IDLE_PTR, id, buf, sizeof buf, true, NULL);
+    nt_input_feed(nt_test_key(NT_KEY_ESCAPE, false));
+    TEST_ASSERT_FALSE(nt_ui_input_focused(s_fx.ctx, id));
+    TEST_ASSERT_TRUE_MESSAGE(nt_ui_wants_keyboard(s_fx.ctx), "the Esc that unfocused the field was the field's");
+    (void)field_frame(&IDLE_PTR, id, buf, sizeof buf, true, NULL);
+    TEST_ASSERT_FALSE(nt_ui_wants_keyboard(s_fx.ctx));
 }
 
 /* ---- Test 7c: focus is dropped the frame a focused field is declared disabled. ---- */
@@ -506,12 +523,12 @@ static void test_focus_dropped_when_disabled(void) {
     char buf[32] = {0};
     const uint32_t id = nt_ui_id("f");
     warmup_focus(id, buf, sizeof buf);
-    TEST_ASSERT_TRUE(nt_ui_input_any_focused(s_fx.ctx)); /* field holds focus */
+    TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, id)); /* field holds focus */
 
     /* Re-declare the same field disabled: it can't be clicked to refocus and gates out Esc, so
-     * holding focus would soft-lock any_focused forever. The disabled declaration must drop it. */
+     * holding focus would soft-lock nt_ui_wants_keyboard forever. The disabled declaration must drop it. */
     (void)field_frame(&IDLE_PTR, id, buf, sizeof buf, false, NULL);
-    TEST_ASSERT_FALSE(nt_ui_input_any_focused(s_fx.ctx));
+    TEST_ASSERT_FALSE(nt_ui_input_focused(s_fx.ctx, id));
 }
 
 /* ---- Test 8: Enter raises submit; on_change is true the frame the buffer mutates. ---- */
@@ -1269,7 +1286,7 @@ static void test_escape_cancels_tab_advance(void) {
     nt_input_feed(nt_test_key(NT_KEY_TAB, false));
     nt_input_feed(nt_test_key(NT_KEY_ESCAPE, false));
     two_field_frame(&IDLE_PTR, ia, a, ib, b);
-    TEST_ASSERT_FALSE(nt_ui_input_any_focused(s_fx.ctx)); /* no Tab was left pending */
+    TEST_ASSERT_FALSE(nt_ui_input_focused(s_fx.ctx, ia) || nt_ui_input_focused(s_fx.ctx, ib)); /* no Tab was left pending */
 }
 
 /* B focused, then a press on A (declared before B) with a Tab and a typed char in one frame: the frame's
@@ -1496,7 +1513,7 @@ static void test_state_speed_oklab_midpoint(void) {
     char buf[8] = {0};
     const uint32_t id = nt_ui_id("oklab_mid");
     /* field_frame runs at 60 Hz; state_speed*dt = 0.5 -> first eased frame == exact OKLab mid. */
-    s_style.state_speed = 0.5F * 60.0F;
+    s_style.state_speed = 0.5F / UI_FX_DT;
     const uint32_t from = 0xFFE04020U; /* saturated blue (0xAABBGGRR: r=0x20 g=0x40 b=0xE0) */
     const uint32_t to = 0xFF20C0E0U;   /* saturated yellow (r=0xE0 g=0xC0 b=0x20) */
     s_style.skin[NT_UI_INPUT_IDLE].bg_color = from;
@@ -1715,18 +1732,16 @@ static void test_field_text_above_modal_band(void) {
     nt_ui_end(s_fx.ctx);
 
     int32_t text_at = -1;
-    int32_t panel_at = -1;
-    for (int32_t i = 0; i < s_fx.ctx->frozen_cmds.length; ++i) {
-        const Clay_RenderCommand *c = &s_fx.ctx->frozen_cmds.internalArray[i];
-        if (c->commandType == CLAY_RENDER_COMMAND_TYPE_TEXT && text_at < 0) {
+    for (int32_t i = 0; i < s_fx.ctx->frozen_cmds.length && text_at < 0; ++i) {
+        if (s_fx.ctx->frozen_cmds.internalArray[i].commandType == CLAY_RENDER_COMMAND_TYPE_TEXT) {
             text_at = i;
         }
-        if (c->commandType == CLAY_RENDER_COMMAND_TYPE_RECTANGLE && c->id == CLAY_ID("modal_panel").id) {
-            panel_at = i; /* by id: the field's caret is a floating RECTANGLE in the same band */
-        }
     }
+    /* By id: the field's caret is a floating RECTANGLE in the same band. */
+    const Clay_RenderCommand *panel = ui_fx_find_rect(s_fx.ctx, CLAY_ID("modal_panel").id);
     TEST_ASSERT_TRUE_MESSAGE(text_at >= 0, "the field must emit its text");
-    TEST_ASSERT_TRUE_MESSAGE(panel_at >= 0, "the modal panel must emit its background");
+    TEST_ASSERT_NOT_NULL_MESSAGE(panel, "the modal panel must emit its background");
+    const int32_t panel_at = (int32_t)(panel - s_fx.ctx->frozen_cmds.internalArray);
     TEST_ASSERT_TRUE_MESSAGE(text_at > panel_at, "field text must paint AFTER the modal panel, not under it");
 }
 
@@ -1830,11 +1845,14 @@ static void test_tab_skips_a_closing_modal(void) {
 }
 
 /* One frame holding a fresh Esc press, then one with it released. */
-static void modal_field_esc(bool *open, char *a, char *b) {
+/* Esc pressed for one frame, then released; returns `open` right after the press frame. */
+static bool modal_field_esc(bool *open, char *a, char *b) {
     nt_input_feed(nt_test_key(NT_KEY_ESCAPE, true));
     (void)modal_field_frame_io(&IDLE_PTR, open, 0.0F, a, b);
+    const bool after_press = *open;
     nt_input_feed(nt_test_key(NT_KEY_ESCAPE, false));
     (void)modal_field_frame_io(&IDLE_PTR, open, 0.0F, a, b);
+    return after_press;
 }
 
 /* ---- Esc has one owner per frame, chosen at nt_ui_begin, and the focused field comes first: a field
@@ -1854,7 +1872,7 @@ static void test_esc_owner_is_decided_once(void) {
     (void)modal_field_frame_io(&tap, &open, 0.0F, a, b);
     (void)modal_field_frame_io(&IDLE_PTR, &open, 0.0F, a, b);
     TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, BASE_FIELD));
-    modal_field_esc(&open, a, b);
+    (void)modal_field_esc(&open, a, b);
     TEST_ASSERT_FALSE(nt_ui_input_focused(s_fx.ctx, BASE_FIELD));
     TEST_ASSERT_TRUE_MESSAGE(open, "the Esc the field over the modal took does not close the modal");
 
@@ -1862,11 +1880,10 @@ static void test_esc_owner_is_decided_once(void) {
     tap_modal_field(true, 0.0F, a, b);
     (void)modal_field_frame_io(&IDLE_PTR, &open, 0.0F, a, b);
     TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, MODAL_FIELD));
-    modal_field_esc(&open, a, b);
+    (void)modal_field_esc(&open, a, b);
     TEST_ASSERT_FALSE(nt_ui_input_focused(s_fx.ctx, MODAL_FIELD));
     TEST_ASSERT_TRUE_MESSAGE(open, "the Esc the field in the modal took does not close the modal");
-    modal_field_esc(&open, a, b);
-    TEST_ASSERT_FALSE_MESSAGE(open, "the next Esc closes the modal");
+    TEST_ASSERT_FALSE_MESSAGE(modal_field_esc(&open, a, b), "the next Esc closes the modal in its frame");
 }
 
 int main(void) {
@@ -1883,6 +1900,7 @@ int main(void) {
     RUN_TEST(test_focus_tab_esc);
     RUN_TEST(test_focus_orphan_cleared);
     RUN_TEST(test_focus_dropped_when_disabled);
+    RUN_TEST(test_focused_field_wants_keyboard);
     RUN_TEST(test_submit_and_change);
     RUN_TEST(test_unfocused_ignores_chars);
     RUN_TEST(test_field_focused_mid_frame_reads_no_key);

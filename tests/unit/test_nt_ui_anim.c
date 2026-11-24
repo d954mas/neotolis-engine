@@ -99,9 +99,12 @@ static void test_anim_slot_untouched_last_frame_snaps(void) {
     const uint32_t id = 0x7777U;
     const nt_ui_anim_target_t small = {.scale_x = 0.5F, .scale_y = 0.5F, .scale_z = 1.0F, .opacity = 1.0F};
     const nt_ui_anim_target_t full = {.scale_x = 1.0F, .scale_y = 1.0F, .scale_z = 1.0F, .opacity = 1.0F};
-    (void)nt_ui_anim(s_fx.ctx, id, &small, 10.0F, 0.0F);
-    s_fx.ctx->current_generation += 2U;
-    TEST_ASSERT_TRUE(float_near(nt_ui_anim(s_fx.ctx, id, &full, 10.0F, 0.0F)->scale_x, 1.0F, 1e-6F));
+    const uint32_t gaps[] = {2U, 1U << 16}; /* the second is no gap for a 16-bit stamp */
+    for (int g = 0; g < 2; ++g) {
+        (void)nt_ui_anim_seed(s_fx.ctx, id, &small);
+        s_fx.ctx->current_generation += gaps[g];
+        TEST_ASSERT_TRUE(float_near(nt_ui_anim(s_fx.ctx, id, &full, 10.0F, 0.0F)->scale_x, 1.0F, 1e-6F));
+    }
 }
 
 /* ---- Test 4: open addressing coexists two ids that hash to same base ---- */

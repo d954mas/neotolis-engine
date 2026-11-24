@@ -284,11 +284,6 @@ bool nt_ui_input_focused(const nt_ui_context_t *ctx, uint32_t id) {
     return id != 0U && ctx->focused_input_id == id;
 }
 
-bool nt_ui_input_any_focused(const nt_ui_context_t *ctx) {
-    NT_ASSERT(ctx != NULL && "nt_ui_input_any_focused: ctx must be non-NULL");
-    return ctx->focused_input_id != 0U;
-}
-
 // #region edit ops
 /* Splice the UTF-8 encoding of `cp` into buffer at `caret`, clamping to buffer_size-1 and
  * max_len. A multi-byte codepoint that does not fit is dropped WHOLE (never split).
@@ -697,7 +692,7 @@ static void focus_step(input_frame_t *f) {
         nt_ui_block_pointer(ctx, id, NULL);
         nt_ui_debug_record_disabled_zone(ctx, id, NULL);
         /* A disabled field can't be clicked to refocus and gates out Esc/Tab while focused==false, so
-         * a still-declared disabled field would hold focus forever (any_focused stuck true). Drop it
+         * a still-declared disabled field would hold focus forever (nt_ui_wants_keyboard stuck true). Drop it
          * the frame it's declared disabled. */
         if (ctx->focused_input_id == id) {
             ctx->focused_input_id = 0U;

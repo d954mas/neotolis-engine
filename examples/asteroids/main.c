@@ -231,7 +231,7 @@ static char s_notice[160];
 static const char s_upstream_url[] = "https://github.com/MethanePowered/MethaneAsteroids";
 
 static bool s_ui_panel_open, s_ui_built, s_ui_atlas_bound;
-static bool s_ui_escape_consumed, s_ui_keyboard_blocked;
+static bool s_ui_modal_shown; /* the compact modal is shown (fading included): the scene takes no pointer */
 static int s_ui_level, s_ui_tab;
 static void *s_ui_arena;
 static size_t s_ui_arena_size;
@@ -1461,8 +1461,7 @@ static void ui_panel(float width, float height) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) -- declarative Clay scopes expand to loops
 static void build_ui(void) {
     s_ui_built = false;
-    s_ui_escape_consumed = false;
-    s_ui_keyboard_blocked = false;
+    s_ui_modal_shown = false;
     if (nt_program_ref_update(&s_ui_program)) {
         nt_material_set_program(s_ui_material, s_ui_program.program);
     }
@@ -1545,14 +1544,8 @@ static void build_ui(void) {
                 }
             }
             if (narrow) {
-                const bool was_open = s_ui_panel_open;
-                nt_ui_popup_info_t modal = {0};
-                const bool shown = nt_ui_modal_begin(s_ui, CLAY_ID("asteroids.compact_modal").id, &s_ui_modal, &s_ui_panel_open, &modal);
-                s_ui_keyboard_blocked = shown || was_open;
-                if (modal.reason != NT_UI_POPUP_CLOSE_NONE) {
-                    s_ui_escape_consumed = modal.reason == NT_UI_POPUP_CLOSE_ESC;
-                }
-                if (shown) {
+                s_ui_modal_shown = nt_ui_modal_begin(s_ui, CLAY_ID("asteroids.compact_modal").id, &s_ui_modal, &s_ui_panel_open, NULL);
+                if (s_ui_modal_shown) {
                     if (height > 180) {
                         ui_panel(fminf(352, width - 24), fminf(680, height - 100));
                     }
@@ -1585,7 +1578,7 @@ static nt_pointer_t scene_pointer(uint32_t index) {
         for (uint32_t b = 0; b < NT_BUTTON_MAX; b++) {
             owned_by_ui = owned_by_ui || s_pointer_owner[index][b] == 2U;
         }
-        over_ui = nt_ui_pointer_hot(s_ui, index).id != 0 || s_ui_keyboard_blocked || (owned_by_ui && nt_ui_wants_pointer(s_ui));
+        over_ui = nt_ui_pointer_hot(s_ui, index).id != 0 || s_ui_modal_shown || (owned_by_ui && nt_ui_wants_pointer(s_ui));
     }
     for (uint32_t b = 0; b < NT_BUTTON_MAX; b++) {
         if (pointer.buttons[b].is_pressed) {
@@ -1839,7 +1832,7 @@ static void handle_input(float dt) {
         return;
     }
     nt_pointer_t scene_pointers[NT_INPUT_MAX_POINTERS];
-    const bool scene_blocked = (s_ui_keyboard_blocked || s_ui_escape_consumed || g_nt_window.fb_width == 0 || g_nt_window.fb_height == 0);
+    const bool scene_blocked = (s_ui_modal_shown || g_nt_window.fb_width == 0 || g_nt_window.fb_height == 0);
     for (uint32_t p = 0; p < NT_INPUT_MAX_POINTERS; p++) {
         scene_pointers[p] = scene_pointer(p);
         if (scene_blocked) {
@@ -1869,8 +1862,8 @@ static void handle_input(float dt) {
     if (nt_input_key_is_pressed(NT_KEY_F4)) {
         s_hide_hud = !s_hide_hud;
     }
-    if (s_ui_keyboard_blocked || s_ui_escape_consumed) {
-        return;
+    if (s_ui_built && nt_ui_wants_keyboard(s_ui)) {
+        return; /* the UI owns this frame's keys: the modal, the Esc that closed it */
     }
     for (uint32_t i = 0; i < 10; i++) {
         if (!ctrl && !alt && nt_input_key_is_pressed((nt_key_t)(NT_KEY_0 + (int)i))) {

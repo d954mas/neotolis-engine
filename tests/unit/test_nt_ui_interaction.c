@@ -329,6 +329,23 @@ static void test_interaction_second_button_leaves_a_game_gesture(void) {
     TEST_ASSERT_FALSE_MESSAGE(nt_ui_wants_pointer(s_fx.ctx), "off the widget the drag is still the game's");
 }
 
+/* ---- A press joining the game's gesture reaches no widget: a left press and release over the button during
+ *      a right drag the game began clicks nothing. ---- */
+static void test_interaction_press_joining_a_game_gesture_clicks_nothing(void) {
+    nt_pointer_t p = ui_fx_pointer(BTN_CX, BTN_CY, false, false, false);
+    warm_btn_frame(&p);
+    p = ui_fx_pointer(600.0F, 500.0F, false, false, false);
+    p.buttons[NT_BUTTON_RIGHT] = (nt_button_state_t){.is_down = true, .is_pressed = true};
+    (void)query_btn_frame(&p);
+    p = ui_fx_pointer(BTN_CX, BTN_CY, true, true, false);
+    p.buttons[NT_BUTTON_RIGHT] = (nt_button_state_t){.is_down = true};
+    (void)query_btn_frame(&p);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, nt_ui_test_capture_active_id(s_fx.ctx, 0U), "the joined press captures nothing");
+    p = ui_fx_pointer(BTN_CX, BTN_CY, false, false, true);
+    p.buttons[NT_BUTTON_RIGHT] = (nt_button_state_t){.is_down = true};
+    TEST_ASSERT_FALSE(query_btn_frame(&p).clicked);
+}
+
 /* ---- Test 8: exclusive capture — while A owns capture, B sees zero ----
  * Standard UI semantics: one widget per pointer captures, others get nothing. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -818,6 +835,7 @@ int main(void) {
     RUN_TEST(test_interaction_wants_pointer);
     RUN_TEST(test_interaction_second_button_keeps_the_gesture);
     RUN_TEST(test_interaction_second_button_leaves_a_game_gesture);
+    RUN_TEST(test_interaction_press_joining_a_game_gesture_clicks_nothing);
     RUN_TEST(test_interaction_padded_hover_and_capture);
     RUN_TEST(test_interaction_disabled_with_padding_stays_disabled);
     RUN_TEST(test_interaction_capture_excludes_other_widgets);

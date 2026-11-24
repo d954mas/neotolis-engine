@@ -18,6 +18,7 @@ extern "C" {
 
 #define UI_FX_VIEW_W 800.0F
 #define UI_FX_VIEW_H 600.0F
+#define UI_FX_DT (1.0F / 60.0F) /* ui_fx_frame_begin's frame time; frame-count math derives from it */
 
 /* An active pointer at (x, y) with the given left-button state. */
 static inline nt_pointer_t ui_fx_pointer(float x, float y, bool down, bool pressed, bool released) {
@@ -35,7 +36,7 @@ static inline void ui_fx_frame_begin_ex(nt_ui_context_t *ctx, float dt, const nt
 /* ui_fx_frame_begin_ex at 60 Hz with one pointer; NULL is an idle pointer at the origin. */
 static inline void ui_fx_frame_begin(nt_ui_context_t *ctx, const nt_pointer_t *p) {
     const nt_pointer_t idle = {.active = true};
-    ui_fx_frame_begin_ex(ctx, 1.0F / 60.0F, p != NULL ? p : &idle, 1U, 0U);
+    ui_fx_frame_begin_ex(ctx, UI_FX_DT, p != NULL ? p : &idle, 1U, 0U);
 }
 
 /* The RECTANGLE command `id` emitted in the last ended frame, or NULL. Commands are in paint order, so a

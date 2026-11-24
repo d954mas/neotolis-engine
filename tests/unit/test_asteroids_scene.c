@@ -406,7 +406,7 @@ static void test_modal_and_resize_cancel_scene_drag_before_input_early_return(vo
     pointer->buttons[NT_BUTTON_LEFT] = (nt_button_state_t){.is_down = true, .is_pressed = true};
     handle_input(0);
     TEST_ASSERT_EQUAL_UINT8(1, s_pointer_owner[0][NT_BUTTON_LEFT]);
-    s_ui_keyboard_blocked = true;
+    s_ui_modal_shown = true;
     pointer->buttons[NT_BUTTON_LEFT] = (nt_button_state_t){.is_released = true};
     handle_input(0);
     TEST_ASSERT_EQUAL_UINT8(0, s_pointer_owner[0][NT_BUTTON_LEFT]);
@@ -422,7 +422,7 @@ static void test_modal_and_resize_cancel_scene_drag_before_input_early_return(vo
     TEST_ASSERT_TRUE(s_hide_hud);
     nt_input_feed(nt_test_key(NT_KEY_F4, false));
     publish_keys();
-    s_ui_keyboard_blocked = false;
+    s_ui_modal_shown = false;
     pointer->x = 200;
     pointer->dx = -700;
     handle_input(0);
@@ -499,17 +499,16 @@ static void test_keyboard_resets_win_over_already_sampled_drag(void) {
 typedef struct {
     nt_window_t window;
     camera_orientation_t camera;
-    bool paused, eye_pivot, ui_built, keyboard_blocked, escape_consumed;
+    bool paused, eye_pivot, ui_built, modal_shown;
 } touch_test_state_t;
 
 static touch_test_state_t begin_touch_test(void) {
-    const touch_test_state_t old = {g_nt_window, s_camera, s_paused, s_eye_pivot, s_ui_built, s_ui_keyboard_blocked, s_ui_escape_consumed};
+    const touch_test_state_t old = {g_nt_window, s_camera, s_paused, s_eye_pivot, s_ui_built, s_ui_modal_shown};
     nt_input_init();
     g_nt_window.fb_width = 1000;
     g_nt_window.fb_height = 1000;
     s_ui_built = false;
-    s_ui_keyboard_blocked = false;
-    s_ui_escape_consumed = false;
+    s_ui_modal_shown = false;
     s_paused = true;
     s_eye_pivot = false;
     memset(s_pointer_owner, 0, sizeof(s_pointer_owner));
@@ -522,8 +521,7 @@ static void end_touch_test(touch_test_state_t old) {
     memset(&s_touch, 0, sizeof(s_touch));
     memset(s_pointer_owner, 0, sizeof(s_pointer_owner));
     s_ui_built = old.ui_built;
-    s_ui_keyboard_blocked = old.keyboard_blocked;
-    s_ui_escape_consumed = old.escape_consumed;
+    s_ui_modal_shown = old.modal_shown;
     g_nt_window = old.window;
     s_camera = old.camera;
     s_paused = old.paused;
@@ -665,9 +663,9 @@ static void test_touch_pinch_respects_eye_pivot_and_stationary_fingers(void) {
     end_touch_test(old);
 }
 
-static void test_touch_modal_resize_reset_and_escape_cancel_gesture(void) {
+static void test_touch_modal_resize_and_reset_cancel_gesture(void) {
     const touch_test_state_t old = begin_touch_test();
-    for (uint32_t cause = 0; cause < 4; cause++) {
+    for (uint32_t cause = 0; cause < 3; cause++) {
         memset(g_nt_input.pointers, 0, sizeof(g_nt_input.pointers));
         reset_camera_input(false);
         for (uint32_t p = 0; p < 2; p++) {
@@ -679,20 +677,17 @@ static void test_touch_modal_resize_reset_and_escape_cancel_gesture(void) {
         g_nt_input.pointers[0].buttons[NT_BUTTON_LEFT].is_pressed = false;
         g_nt_input.pointers[1].buttons[NT_BUTTON_LEFT].is_pressed = false;
         if (cause == 0) {
-            s_ui_keyboard_blocked = true;
+            s_ui_modal_shown = true;
         } else if (cause == 1) {
             g_nt_window.fb_width = 0;
-        } else if (cause == 2) {
-            reset_camera_input(false);
         } else {
-            s_ui_escape_consumed = true;
+            reset_camera_input(false);
         }
         handle_input(0);
         TEST_ASSERT_EQUAL_UINT32(0, s_touch.count);
         TEST_ASSERT_EQUAL_UINT8(2, s_pointer_owner[0][NT_BUTTON_LEFT]);
         TEST_ASSERT_EQUAL_UINT8(2, s_pointer_owner[1][NT_BUTTON_LEFT]);
-        s_ui_keyboard_blocked = false;
-        s_ui_escape_consumed = false;
+        s_ui_modal_shown = false;
         g_nt_window.fb_width = 1000;
         g_nt_input.pointers[1].x = 900;
         handle_input(0);
@@ -1068,7 +1063,7 @@ int main(void) {
     RUN_TEST(test_touch_coincident_fingers_replacement_and_third_finger);
     RUN_TEST(test_touch_ui_owned_finger_does_not_join_scene_pinch);
     RUN_TEST(test_touch_pinch_respects_eye_pivot_and_stationary_fingers);
-    RUN_TEST(test_touch_modal_resize_reset_and_escape_cancel_gesture);
+    RUN_TEST(test_touch_modal_resize_and_reset_cancel_gesture);
     RUN_TEST(test_memory_labels_distinguish_pending_unavailable_and_diagnostics);
     RUN_TEST(test_content_is_generated_once_and_levels_reselect_instances);
     RUN_TEST(test_scene_options_are_portable_and_bounded);

@@ -3781,25 +3781,6 @@ static void frame(void) {
 
         nt_ui_end(s_ctx);
 
-        /* Global hotkeys yield to the UI's keyboard owner (a focused field, a modal, a menu), which nt_ui_begin
-         * fixed for this frame's keys: Esc never quits from under a menu and typing 'd'/'t' edits a field. */
-        if (!nt_ui_wants_keyboard(s_ctx)) {
-#ifndef NT_PLATFORM_WEB
-            if (nt_input_key_is_pressed(NT_KEY_ESCAPE)) {
-                nt_app_quit();
-            }
-#endif
-            if (nt_input_key_is_pressed(NT_KEY_T)) {
-                g_current = (g_current == &g_dark) ? &g_light : &g_dark;
-                nt_log_info("ui_showcase: palette -> %s", g_current->name);
-            }
-            if (nt_input_key_is_pressed(NT_KEY_D)) {
-                const bool now_on = !nt_ui_inspector_is_active(s_ctx);
-                nt_ui_inspector_set_active(s_ctx, now_on);
-                nt_log_info("ui_showcase: inspector %s", now_on ? "ON" : "OFF");
-            }
-        }
-
         /* Stash what the <obj=cube/> draw_fn needs (it has no ctx): view_proj (the frame UBO ortho) to remap
          * the cube into its box NDC (VP_box = view_proj * world_mat4) + the physical fb dims for the box->NDC
          * aspect. NO viewport/scissor touch in the draw -> nothing else to stash. */
@@ -3807,6 +3788,25 @@ static void frame(void) {
             memcpy(s_rich_obj_demo.cube_view.view_proj, vp, 64);
             s_rich_obj_demo.cube_view.fb_w = scale.fb_w;
             s_rich_obj_demo.cube_view.fb_h = scale.fb_h;
+        }
+    }
+
+    /* Global hotkeys yield to the UI's keyboard owner (a focused field, a modal, a menu) the last nt_ui_begin
+     * fixed: Esc never quits from under a menu and typing 'd'/'t' edits a field. */
+    if (!nt_ui_wants_keyboard(s_ctx)) {
+#ifndef NT_PLATFORM_WEB
+        if (nt_input_key_is_pressed(NT_KEY_ESCAPE)) {
+            nt_app_quit();
+        }
+#endif
+        if (nt_input_key_is_pressed(NT_KEY_T)) {
+            g_current = (g_current == &g_dark) ? &g_light : &g_dark;
+            nt_log_info("ui_showcase: palette -> %s", g_current->name);
+        }
+        if (nt_input_key_is_pressed(NT_KEY_D)) {
+            const bool now_on = !nt_ui_inspector_is_active(s_ctx);
+            nt_ui_inspector_set_active(s_ctx, now_on);
+            nt_log_info("ui_showcase: inspector %s", now_on ? "ON" : "OFF");
         }
     }
 

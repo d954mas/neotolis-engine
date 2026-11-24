@@ -651,6 +651,10 @@ void nt_ui_begin(nt_ui_context_t *ctx, const nt_ui_frame_desc_t *frame) {
         const bool joins = ((l->is_down || l->is_released) && !l->is_pressed) || ((r->is_down || r->is_released) && !r->is_pressed);
         if ((l->is_pressed || r->is_pressed) && !joins) {
             ctx->captures[i].ui_gesture = ctx->pointer_hot[i].id != 0U || ctx->overlay_top_id_prev != 0U;
+        } else if (joins && !ctx->captures[i].ui_gesture) {
+            /* A press that joins the game's gesture is the game's: the UI sees no press edge. */
+            ctx->frame_pointers[i].buttons[NT_BUTTON_LEFT].is_pressed = false;
+            ctx->frame_pointers[i].buttons[NT_BUTTON_RIGHT].is_pressed = false;
         } else if (!l->is_down && !l->is_released && !r->is_down && !r->is_released) {
             ctx->captures[i].ui_gesture = false;
         }

@@ -338,21 +338,25 @@ path:
 - *Gestures.* A left or right press on a record, or anywhere while a top overlay was up last
   frame, makes the gesture the UI's until both buttons of that pointer are up;
   a press while the other button is held joins that gesture, so the button
-  pressed first decides whose it is (a game drag keeps a later press over the UI),
+  pressed first decides whose it is: a press joining the game's gesture reaches
+  no widget, popup or scroll as a press (a game drag keeps a later press over the UI),
   as Dear ImGui's `MouseDownOwned`: `nt_ui_wants_pointer` stays true through
   its release even when the record it landed on goes away (the press that
   dismisses an overlay, a button hidden under a held press, a vanished scroll),
   so the game never sees the rest of it.
 - *Keys.* A context has one keyboard owner per frame, fixed at `nt_ui_begin`
   whatever the declaration order: the focused text field, else the top
-  overlay (popup-core's Esc for a modal with `NT_UI_MODAL_LISTEN_ESC` and for a
-  light-dismiss popup such as a combo list, the menu's keys), else the game.
+  overlay, any catcher-bearing one (popup-core's Esc for a modal with
+  `NT_UI_MODAL_LISTEN_ESC` and for a light-dismiss popup such as a combo list,
+  the menu's keys; a modal without Esc still holds them), else the game.
   A field a press focuses reads keys from the next frame. `nt_ui_wants_keyboard`
   reports a UI owner; the game reads it after `nt_ui_begin` and skips its
-  hotkeys while it is true, as Dear ImGui's `WantCaptureKeyboard`. Esc in a
+  hotkeys while it is true, as Dear ImGui's `WantCaptureKeyboard` (a read
+  before begin gives last frame's owner). Contexts do not arbitrate between
+  each other: a game with two contexts gates one key on both. Esc in a
   field inside a modal unfocuses the field, and a second Esc closes the modal.
-  A field focused at begin that the frame declares disabled or inert still
-  owns the keys, so that frame's Esc reaches no one. A nested popup that
+  A field focused at begin that the frame declares disabled or inert, or does
+  not declare, still owns the keys, so that frame's Esc reaches no one. A nested popup that
   closes itself does not hand the keys to the overlay under it in that frame;
   that one is the top from the next frame.
 - *Order.* Root overlays stack in declaration order, whatever encloses them
@@ -784,7 +788,7 @@ popup with a catcher, so the UI under it takes no pointer, it owns the keys
 (`nt_ui_wants_keyboard`), and the menu reads input (keys, a pending switch) only while it
 was on top last frame and not on the frame it opens,
 reopened included: one key has one owner, a menu opened over a modal takes
-Esc from its next frame, a text field under the menu loses focus, and a
+Esc from its next frame, a text field under the menu loses focus (in 2D), and a
 modal or popup opened over the menu takes its
 keys and pointer while the menu stays open under it, its pending switch
 waiting and its rows registering without taking a press or focus. A text field
@@ -841,8 +845,8 @@ binds Esc or Enter elsewhere skips them while a menu is open:
 - Up and Down step over the enabled rows of the level declared this frame and
   wrap; focus leaving the open parent closes its child.
 - Left and Esc close the deepest open level, as Dear ImGui and Win32 close the
-  top popup: the focused row's open child (one the pointer opened), else the
-  focused level, focusing its parent; at the root they close the menu, and
+  top popup: one open below the focus (the pointer opened it, or a pending
+  switch still holds it), else the focused level, focusing its parent; at the root they close the menu, and
   `nt_ui_menu_begin` returns false in that frame.
 
 A frame acts on one key, the first pressed of Esc or Left, Right, Enter, Up,
@@ -850,7 +854,8 @@ Down. `nt_ui_menu_begin` reads it before the rows declare and applies Left and
 Esc there; Enter and Right act in the call of the row focused at begin, Up and
 Down in `nt_ui_menu_end`. Any key hands focus and the open chain to the
 keyboard, Right on a focused leaf included, so it first ends a pending switch:
-a sibling's child closes before the rows declare. A click opens its parent
+a sibling's child closes before the rows declare (Left and Esc close it as the
+deepest level and do nothing more). A click opens its parent
 after the key acts, so it wins over Right; an activation, by Enter or a
 click, closes the menu, and a frame activates at most one row, the first
 declared. Before the rows declare, a popup a row opened (a dropdown, a

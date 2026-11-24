@@ -49,16 +49,9 @@ static inline uint32_t menu_hash_id(uint32_t base_id, uint32_t kind, uint32_t de
     return (h != 0U) ? h : 1U;
 }
 
-/* Row id: fmix of scope + key only, so a sibling appearing or disappearing never shifts a later row's id
- * (its anim/Clay identity and its child scope). Folds 0 to 1. */
-static inline uint32_t menu_item_id(uint32_t scope_id, uint32_t key) {
-    uint32_t h = scope_id * 0x9E3779B1U;
-    h = (h ^ ((key + 1U) * 0x85EBCA6BU));
-    h = (h ^ (h >> 13)) * 0xC2B2AE35U;
-    h = (h ^ (h >> 15)) * 0x165667B1U;
-    h = h ^ (h >> 16);
-    return (h != 0U) ? h : 1U;
-}
+/* Row id: scope + key only, so a sibling appearing or disappearing never shifts a later row's id (its anim/Clay
+ * identity and its child scope); the out-of-range depth keeps it apart from the level/panel/cell ids. */
+static inline uint32_t menu_item_id(uint32_t scope_id, uint32_t key) { return menu_hash_id(scope_id, key, NT_UI_MENU_MAX_DEPTH); }
 
 static inline uint32_t menu_level_id(uint32_t menu_id, uint8_t depth) { return menu_hash_id(menu_id, NT_UI_MENU_KIND_LEVEL, depth); }
 static inline uint32_t menu_panel_id(uint32_t menu_id, uint8_t depth) { return menu_hash_id(menu_id, NT_UI_MENU_KIND_PANEL, depth); }
@@ -82,10 +75,8 @@ static bool menu_point_in_tri(float px, float py, float ax, float ay, float bx, 
  * its parent aims at its RIGHT edge. */
 static float menu_aim_near_x(float sub_x, float sub_w, float apex_x) { return (apex_x > sub_x + (sub_w * 0.5F)) ? (sub_x + sub_w) : sub_x; }
 
-/* true KEEPS the open child `child`. The apex stays fixed while the corridor lives: a per-frame apex ~1px
- * from the cursor makes a degenerate wedge that never releases. Over the child: keep and reset the timer;
- * in the corridor: keep for at most 2x AIM_FALLBACK, so a parked cursor still releases; elsewhere, or with a
- * pointer that is not the menu's (outside the window, on the inspector): switch after AIM_FALLBACK. */
+/* true KEEPS the open child `child` (spec: "Immediate menu + combo"). The apex stays fixed while primed: a
+ * per-frame apex ~1px from the cursor makes a degenerate wedge that never releases. */
 static bool menu_hover_intent(nt_ui_menu_aim_t *c, uint8_t child, bool ours, float mouse_x, float mouse_y, float sub_x, float sub_y, float sub_w, float sub_h, float dt) {
     if (c->depth != child) {
         c->apex_x = mouse_x;
@@ -222,19 +213,11 @@ static void menu_declare_shortcut(nt_ui_context_t *ctx, uint8_t label_layer, uin
     CLAY({.id = (Clay_ElementId){.id = shortcut_id}, .layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}}}) { nt_ui_label(ctx, nt_ui_make_element_data(label_layer, NULL), shortcut, &sc); }
 }
 
-/* Resolve the anchor rect for a parent item's submenu = the item row's bbox; the submenu defaults to
- * RIGHT of the row and edge-flips per level via popup-core. found==false (the row's first frame) anchors at the
- * origin for that one frame. */
+/* A submenu anchors at its parent row's last-frame bbox, RIGHT of it, edge-flipped by popup-core. A parent
+ * opens only from a row declared last frame, so the bbox is always found. */
 static nt_ui_popup_anchor_t menu_submenu_anchor(const nt_ui_context_t *ctx, uint32_t row_id) {
-    nt_ui_popup_anchor_t a = {.prefer_side = NT_UI_POPUP_RIGHT};
     const nt_ui_bbox_t bb = nt_ui_get_bbox(ctx, row_id);
-    if (bb.found) {
-        a.x = bb.x;
-        a.y = bb.y;
-        a.w = bb.width;
-        a.h = bb.height;
-    }
-    return a;
+    return (nt_ui_popup_anchor_t){.x = bb.x, .y = bb.y, .w = bb.width, .h = bb.height, .prefer_side = NT_UI_POPUP_RIGHT};
 }
 // #endregion
 
@@ -293,7 +276,7 @@ static bool menu_frame_input(nt_ui_menu_t *menu, nt_ui_context_t *ctx, uint32_t 
     const uint8_t d = menu->focus_depth;
     if (key != MENU_KEY_NONE) {
         menu->kbd_mode = true;
-        if (menu->open_path[d] != menu->focus) {
+        if (key != MENU_KEY_BACK && menu->open_path[d] != menu->focus) {
             menu_set_open(menu, d, 0U); /* the keyboard takes no pending switch: a sibling's child closes */
         }
     } else if (menu->kbd_mode && ours && (pp->dx != 0.0F || pp->dy != 0.0F || pressed)) {
@@ -302,10 +285,10 @@ static bool menu_frame_input(nt_ui_menu_t *menu, nt_ui_context_t *ctx, uint32_t 
         menu->kbd_mode = false;
         menu->aim.depth = 0U; /* the corridor primed before the keys is stale */
     }
-    /* Back closes the deepest open level, as Dear ImGui and Win32 close the top popup: the focused row's open
-     * child first, then the focused level; at the root, the menu. */
-    if (key == MENU_KEY_BACK && menu->open_path[d] != 0U) {
-        menu_set_open(menu, d, 0U);
+    /* Back closes the deepest open level, as Dear ImGui and Win32 close the top popup: one open below the focus
+     * first (the pointer opened it, or a pending switch holds it), then the focused level; at the root, the menu. */
+    if (key == MENU_KEY_BACK && open_depth > d) {
+        menu_set_open(menu, (uint8_t)(open_depth - 1U), 0U);
     } else if (key == MENU_KEY_BACK && d == 0U) {
         return false;
     } else if (key == MENU_KEY_BACK) {
@@ -508,7 +491,8 @@ bool nt_ui_menu_begin(nt_ui_menu_t *menu, nt_ui_context_t *ctx, const nt_ui_elem
         menu->open = false;
         return false;
     }
-    return true; /* the root panel stays open until menu_end */
+    menu->frame.root_top = ctx->overlay_top_id_cur; /* the top as the root leaves it; a later claim is a row's popup */
+    return true;                                    /* the root panel stays open until menu_end */
 }
 
 /* The row's one mutating step. A menu that is not on top (its opening frame, whose hits are last frame's at
@@ -584,8 +568,9 @@ bool nt_ui_menu_submenu_begin_ex(nt_ui_menu_t *menu, uint32_t key, const char *l
         menu_set_open(menu, depth, row_id); /* the key closed any sibling's child at begin */
         f->focus_first = true;              /* the child's first enabled row takes focus */
     }
-    /* A popup an earlier row of this level opened this frame is that level's child: it closes this one. */
-    if (row_id == menu->open_path[depth] && f->ui->inert_from == 0U && f->ui->overlay_top_id_cur != menu_level_id(f->menu_id, 0U)) {
+    /* A popup an earlier row of this level opened this frame claimed the top after the root: it is that level's
+     * child and closes this one. */
+    if (row_id == menu->open_path[depth] && f->ui->overlay_top_id_cur != f->root_top) {
         menu_set_open(menu, depth, 0U);
     }
     if (menu->open_path[depth] != row_id) {
