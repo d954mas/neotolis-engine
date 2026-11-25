@@ -93,20 +93,19 @@ bool nt_ui_modal_begin(nt_ui_context_t *ctx, uint32_t id, const nt_ui_modal_styl
         .def = &NT_UI_MODAL_DEF,
         .backdrop_color = style->backdrop_color,
         .close_pad = style->backdrop_close_pad,
-        .esc_close = (style->flags & NT_UI_MODAL_LISTEN_ESC) != 0U,
-        .outside_close = (style->flags & NT_UI_MODAL_CLOSE_ON_BACKDROP) != 0U,
+        .closes = (uint8_t)((((style->flags & NT_UI_MODAL_LISTEN_ESC) != 0U) ? NT_UI_OVERLAY_ESC : 0U) | (((style->flags & NT_UI_MODAL_CLOSE_ON_BACKDROP) != 0U) ? NT_UI_OVERLAY_OUTSIDE : 0U)),
     };
     return nt_ui_popup_begin_internal(ctx, id, &pstyle, &anchor, &ext, info);
 }
 
 void nt_ui_modal_open(nt_ui_context_t *ctx, uint32_t id) {
     NT_ASSERT(ctx != NULL && id != 0U && "nt_ui_modal_open: ctx non-NULL, id non-zero");
-    /* A modal is never a light popup's child, as HTML's showModal: its parent is the innermost overlay around the call
-     * that is not light, so the menu or list it is opened from closes (S2) and the modal stays. */
+    /* A modal is never a light popup's child, as HTML's showModal: its parent is the innermost open overlay around the
+     * call that is not light, so the menu or list it is opened from closes (S2) and the modal stays. */
     uint32_t parent = 0U;
     for (uint8_t d = ctx->overlay_depth; d > 0U && parent == 0U; --d) {
         const int32_t at = nt_ui_internal_overlay_index(ctx, ctx->overlay_decl[d - 1U]);
-        parent = (at >= 0 && !ctx->overlays[at].light) ? ctx->overlays[at].id : 0U;
+        parent = (at >= 0 && ctx->overlays[at].open && (ctx->overlays[at].flags & NT_UI_OVERLAY_LIGHT) == 0U) ? ctx->overlays[at].id : 0U;
     }
     /* A modal ALWAYS gates click-through and is not light dismiss: only the game, or its style, closes it. */
     nt_ui_internal_overlay_open(ctx, id, parent, 0U, NT_UI_OVERLAY_CATCHER);

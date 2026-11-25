@@ -156,7 +156,7 @@ typedef struct {
     int16_t pad[4]; /* hit padding L/R/T/B */
 } nt_ui_interactive_t;
 
-/* Live overlays at once: the overlay stack's capacity (fail-early assert, no heap; a fading one gives way).
+/* Live overlays at once: the overlay stack's capacity (fail-early assert, no heap; nt_ui_begin keeps at most half of it fading).
  * Each stack slot also spans this many z-bands. Build-overridable. */
 #ifndef NT_UI_OVERLAY_MAX
 #define NT_UI_OVERLAY_MAX 16
@@ -166,20 +166,16 @@ _Static_assert(NT_UI_OVERLAY_MAX >= 1 && NT_UI_OVERLAY_MAX <= UINT8_MAX, "NT_UI_
 /* One overlay stack entry: the stack is the open state (spec: "Input ownership", S1). Within a frame entries are
  * only appended (a reopened one leaves a dead entry, id 0), so a slot's band never moves before nt_ui_begin. */
 typedef struct {
-    uint32_t id;        /* 0 = dead (reopened this frame), dropped by the next nt_ui_begin */
-    uint32_t parent;    /* the overlay it was opened inside (a menu level: the level under it), else 0 */
-    uint32_t opener;    /* the row that opened a menu level, else 0 */
-    uint32_t rec_first; /* last declaration's records the next nt_ui_begin drops once it is closed: its catcher, or its whole body when declared closing */
-    uint32_t rec_end;
-    int16_t close_pad;  /* px around the panel where a press is not outside (S3) */
-    bool open;          /* false while it fades out after a close */
-    bool seen;          /* declared or opened since the last nt_ui_begin: kept by the next prune */
-    bool live;          /* last declared open: its next declaration is OPEN, and it can be the top */
-    bool light;         /* light dismiss: an opening overlay that is not its descendant closes it (S2) */
-    bool catcher;       /* gates the UI under it: it can be the top */
-    bool esc_close;     /* S3 on Esc */
-    bool outside_close; /* S3 on a press outside the panel */
-    uint8_t reason;     /* nt_ui_popup_close_t not yet reported to its begin */
+    uint32_t id;          /* 0 = dead (reopened this frame), dropped by the next nt_ui_begin */
+    uint32_t parent;      /* the overlay it was opened inside (a menu level: the level under it), else 0 */
+    uint32_t opener;      /* the row that opened a menu level, else 0 */
+    uint32_t catcher_rec; /* 1 + this frame's registry index of its catcher record (0 = none): dropped once it is closed */
+    int16_t close_pad;    /* px around the panel where a press is not outside (S3) */
+    bool open;            /* false while it fades out after a close */
+    bool seen;            /* declared or opened since the last nt_ui_begin: kept by the next prune */
+    bool live;            /* last declared open: its next declaration is OPEN, and it can be the top */
+    uint8_t flags;        /* NT_UI_OVERLAY_*: its kind from the open, its own closes from the declaration */
+    uint8_t reason;       /* nt_ui_popup_close_t not yet reported to its begin */
 } nt_ui_overlay_t;
 
 /* Bound the storage and per-row work of NT_UI_CHECKS duplicate detection. */
@@ -617,10 +613,12 @@ static inline bool nt_ui_internal_live(nt_ui_context_t *ctx, uint32_t id) { retu
 
 /* The overlay stack (spec: "Input ownership", S1-S3). open pushes or reopens `id` inside `parent` (opened by
  * `opener`, a menu row, or 0) and closes the light overlays that are not its ancestors; close starts the fade of
- * `id` and of the overlays opened inside it; index returns its slot or -1; here is the innermost overlay
+ * `id` and of the overlays opened inside it; index returns its slot or -1; here is the innermost open overlay
  * declared at the call (0 = none); last_open is the last opened one still open (0 = none). */
-#define NT_UI_OVERLAY_LIGHT ((uint8_t)(1U << 0))
-#define NT_UI_OVERLAY_CATCHER ((uint8_t)(1U << 1))
+#define NT_UI_OVERLAY_LIGHT ((uint8_t)(1U << 0))   /* light dismiss: an opening overlay that is not its descendant closes it */
+#define NT_UI_OVERLAY_CATCHER ((uint8_t)(1U << 1)) /* gates the UI under it: it can be the top */
+#define NT_UI_OVERLAY_ESC ((uint8_t)(1U << 2))     /* S3 on the Esc it owns */
+#define NT_UI_OVERLAY_OUTSIDE ((uint8_t)(1U << 3)) /* S3 on a press outside its panel */
 void nt_ui_internal_overlay_open(nt_ui_context_t *ctx, uint32_t id, uint32_t parent, uint32_t opener, uint8_t flags);
 void nt_ui_internal_overlay_close(nt_ui_context_t *ctx, uint32_t id, uint8_t reason);
 int32_t nt_ui_internal_overlay_index(const nt_ui_context_t *ctx, uint32_t id);

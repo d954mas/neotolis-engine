@@ -30,9 +30,9 @@ typedef struct {
     bool wants_pointer;
 } sc_t;
 
-/* One frame with the pointer at (x, y) and a wheel delta; `press` / `release` is the button whose edge this frame
- * carries, or -1. */
-static inline void sc_step_wheel(sc_t *s, float x, float y, int press, int release, float wheel_dy) {
+/* One frame of `dt` seconds (0 pauses every tween) with the pointer at (x, y) and a wheel delta; `press` /
+ * `release` is the button whose edge this frame carries, or -1. */
+static inline void sc_step_dt(sc_t *s, float dt, float x, float y, int press, int release, float wheel_dy) {
     nt_pointer_t p = {.x = x, .y = y, .dx = x - s->x, .dy = y - s->y, .active = true, .wheel_dy = wheel_dy};
     for (int b = 0; b < NT_BUTTON_MAX; ++b) {
         s->down[b] = (b == press) || (s->down[b] && b != release);
@@ -41,12 +41,15 @@ static inline void sc_step_wheel(sc_t *s, float x, float y, int press, int relea
     s->x = x;
     s->y = y;
     nt_arena_reset(&g_nt_mem_scratch);
-    ui_fx_frame_begin_ex(s->ctx, UI_FX_DT, &p, 1U, 0U);
+    ui_fx_frame_begin_ex(s->ctx, dt, &p, 1U, 0U);
     s->frame(s->game);
     nt_ui_end(s->ctx);
     s->wants_keyboard = nt_ui_wants_keyboard(s->ctx);
     s->wants_pointer = nt_ui_wants_pointer(s->ctx);
 }
+
+/* One 60 Hz frame with the pointer at (x, y) and a wheel delta; `press` / `release` as in sc_step_dt. */
+static inline void sc_step_wheel(sc_t *s, float x, float y, int press, int release, float wheel_dy) { sc_step_dt(s, UI_FX_DT, x, y, press, release, wheel_dy); }
 
 /* One frame with the pointer at (x, y); `press` / `release` is the button whose edge this frame carries, or -1. */
 static inline void sc_step(sc_t *s, float x, float y, int press, int release) { sc_step_wheel(s, x, y, press, release, 0.0F); }
@@ -95,6 +98,19 @@ static inline void sc_move_to(sc_t *s, uint32_t id) {
 static inline void sc_click_id(sc_t *s, uint32_t id) {
     const nt_ui_bbox_t bb = sc_box(s, id);
     sc_click(s, bb.x + (bb.width * 0.5F), bb.y + (bb.height * 0.5F));
+}
+
+/* One frame that moves onto the center of `id`'s box and presses the left button there: no frame passes between
+ * the arrival and the press, for a test whose frame count is the rule. */
+static inline void sc_press_at_id(sc_t *s, uint32_t id) {
+    const nt_ui_bbox_t bb = sc_box(s, id);
+    sc_step(s, bb.x + (bb.width * 0.5F), bb.y + (bb.height * 0.5F), NT_BUTTON_LEFT, -1);
+}
+
+/* The release of sc_press_at_id, at the center of `id`'s box in the next frame. */
+static inline void sc_release_at_id(sc_t *s, uint32_t id) {
+    const nt_ui_bbox_t bb = sc_box(s, id);
+    sc_step(s, bb.x + (bb.width * 0.5F), bb.y + (bb.height * 0.5F), -1, NT_BUTTON_LEFT);
 }
 
 #endif /* NT_TEST_HELPER_UI_SCENARIO_H */

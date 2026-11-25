@@ -18,8 +18,7 @@ typedef struct {
     const nt_ui_widget_def_t *def; /* widget_register def; NULL = NT_UI_POPUP_DEF */
     uint32_t backdrop_color;       /* 0xAABBGGRR, alpha multiplied by t; 0 = no visible backdrop (transparent catcher) */
     int16_t close_pad;             /* px margin around the panel; an outside press within it does NOT close */
-    bool esc_close;                /* the top closes on the Escape it owns: NT_UI_POPUP_CLOSE_ESC */
-    bool outside_close;            /* the top closes on a press beyond the panel+pad: NT_UI_POPUP_CLOSE_OUTSIDE */
+    uint8_t closes;                /* NT_UI_OVERLAY_ESC (the Esc the top owns), NT_UI_OVERLAY_OUTSIDE (a press beyond panel+pad) */
 } nt_ui_popup_ext_t;
 
 /* The shared core for an overlay on the stack: tween + stack slot band + catcher/backdrop + panel decl, only for

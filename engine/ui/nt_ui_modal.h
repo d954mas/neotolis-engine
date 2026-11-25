@@ -56,9 +56,9 @@ _Static_assert(sizeof(nt_ui_modal_style_t) == 36, "nt_ui_modal_style_t stable AB
 /* Valid baseline: symmetric scale-pop entrance + exit. scale_start > 0 (nt_ui_anim asserts scale_* > 0). */
 nt_ui_modal_style_t nt_ui_modal_style_defaults(void);
 
-/* Opens the modal `id` on top of the overlay stack, inside the overlay being declared at the call (0 = none), and
- * closes every popup that is not its ancestor; modals stay (spec: "Input ownership"). It takes input from the
- * frame after its first declaration. */
+/* Opens the modal `id` on top of the overlay stack, inside the innermost open overlay being declared at the call
+ * that is not a popup (0 = none), and closes every popup that is not its ancestor, also the menu or list it is
+ * opened from; modals stay (spec: "Input ownership"). It takes input from the frame after its first declaration. */
 void nt_ui_modal_open(nt_ui_context_t *ctx, uint32_t id);
 
 /* Returns whether the modal shows this frame: open, or fading out after a close. Only then it declares the

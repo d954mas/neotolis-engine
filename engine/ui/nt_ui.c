@@ -535,6 +535,7 @@ void nt_ui_begin(nt_ui_context_t *ctx, const nt_ui_frame_desc_t *frame) {
         }
         if (i >= count) {
             ctx->captures[i].pending_scroll = 0U; /* a slot the game stopped passing holds no gesture when it returns */
+            ctx->captures[i].ui_gesture = false;
         }
         if (ctx->captures[i].active_id != 0U) {
             ctx->captures[i].hold_prev_secs = ctx->captures[i].hold_secs;
@@ -559,22 +560,30 @@ void nt_ui_begin(nt_ui_context_t *ctx, const nt_ui_frame_desc_t *frame) {
         }
     }
     drop_closed_overlay_records(ctx); /* before the prune clears the record ranges; closes made between frames count */
-    /* S1: an overlay neither declared nor opened since the last begin leaves; the top is the highest live one with
-     * a catcher. */
+    /* S1: an overlay neither declared nor opened since the last begin leaves, and so do the oldest fading ones past
+     * half the stack (S4: their fade ends early); the top is the highest live one with a catcher. */
+    uint8_t fading = 0U;
+    for (uint8_t i = 0U; i < ctx->overlay_count; ++i) {
+        fading += (ctx->overlays[i].seen && !ctx->overlays[i].open) ? 1U : 0U;
+    }
+    uint8_t cut = (fading > NT_UI_OVERLAY_MAX / 2U) ? (uint8_t)(fading - (NT_UI_OVERLAY_MAX / 2U)) : 0U;
     uint8_t kept = 0U;
     ctx->overlay_top = 0U;
     for (uint8_t i = 0U; i < ctx->overlay_count; ++i) {
-        nt_ui_overlay_t o = ctx->overlays[i];
-        if (!o.seen) {
+        nt_ui_overlay_t *o = &ctx->overlays[i];
+        if (!o->seen) {
             continue; /* faded out, dead, or neither declared nor opened */
         }
-        if (o.open && o.live && o.catcher) {
-            ctx->overlay_top = o.id;
+        if (!o->open && cut > 0U) {
+            --cut;
+            continue; /* an old fade cut short */
         }
-        o.seen = false;
-        o.rec_first = 0U;
-        o.rec_end = 0U;
-        ctx->overlays[kept++] = o;
+        if (o->open && o->live && (o->flags & NT_UI_OVERLAY_CATCHER) != 0U) {
+            ctx->overlay_top = o->id;
+        }
+        o->seen = false;
+        o->catcher_rec = 0U;
+        ctx->overlays[kept++] = *o;
     }
     ctx->overlay_count = kept;
     /* Orphan-focus cleanup: a focused field not re-declared last frame would gate global Esc forever,
@@ -686,9 +695,10 @@ void nt_ui_begin(nt_ui_context_t *ctx, const nt_ui_frame_desc_t *frame) {
     }
     /* S3: the top closes on the Esc it owns or on a press outside it, before anything of the frame declares. */
     const int32_t top = (ctx->overlay_top != 0U) ? nt_ui_internal_overlay_index(ctx, ctx->overlay_top) : -1;
-    if (top >= 0 && ctx->overlays[top].esc_close && ctx->keys_owner == ctx->overlay_top && nt_input_key_is_pressed(NT_KEY_ESCAPE)) {
+    const uint8_t closes = (top >= 0) ? ctx->overlays[top].flags : 0U;
+    if ((closes & NT_UI_OVERLAY_ESC) != 0U && ctx->keys_owner == ctx->overlay_top && nt_input_key_is_pressed(NT_KEY_ESCAPE)) {
         overlay_close_at(ctx, top, NT_UI_POPUP_CLOSE_ESC);
-    } else if (top >= 0 && ctx->overlays[top].outside_close && outside_press(ctx, &ctx->overlays[top])) {
+    } else if ((closes & NT_UI_OVERLAY_OUTSIDE) != 0U && outside_press(ctx, &ctx->overlays[top])) {
         overlay_close_at(ctx, top, NT_UI_POPUP_CLOSE_OUTSIDE); /* on the press, as Dear ImGui */
     }
     nt_ui_internal_scroll_arbitrate(ctx);
@@ -2924,6 +2934,9 @@ void nt_ui_block_pointer(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lr
 
 /* One record per declared element at most: a full registry is a widget stepped twice per frame. */
 void nt_ui_internal_register_interactive(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lrtb[4]) {
+    if (ctx->closing_from != 0U) {
+        return; /* a CLOSING body takes no pointer: the pointer passes through to what lies under */
+    }
     NT_ASSERT(ctx->interactive_cur_count < ctx->max_elements && "nt_ui: interactive registry full (a widget stepped twice per frame?)");
     nt_ui_interactive_t *rec = &ctx->interactive_cur[ctx->interactive_cur_count++];
     rec->id = id;
@@ -3015,7 +3028,16 @@ NT_NOINLINE int32_t nt_ui_internal_overlay_index(const nt_ui_context_t *ctx, uin
     return -1;
 }
 
-uint32_t nt_ui_internal_overlay_here(const nt_ui_context_t *ctx) { return (ctx->overlay_depth > 0U) ? ctx->overlay_decl[ctx->overlay_depth - 1U] : 0U; }
+uint32_t nt_ui_internal_overlay_here(const nt_ui_context_t *ctx) {
+    /* A closed one is skipped: what a pick or an activation opens after its menu or list closed is not its child. */
+    for (uint8_t d = ctx->overlay_depth; d > 0U; --d) {
+        const int32_t at = nt_ui_internal_overlay_index(ctx, ctx->overlay_decl[d - 1U]);
+        if (at >= 0 && ctx->overlays[at].open) {
+            return ctx->overlays[at].id;
+        }
+    }
+    return 0U;
+}
 
 uint32_t nt_ui_internal_overlay_last_open(const nt_ui_context_t *ctx) {
     for (uint8_t i = ctx->overlay_count; i > 0U; --i) {
@@ -3065,9 +3087,8 @@ NT_NOINLINE void nt_ui_internal_overlay_open(nt_ui_context_t *ctx, uint32_t id, 
     }
     if (at >= 0) {
         overlay_close_at(ctx, at, NT_UI_POPUP_CLOSE_REPLACED); /* a reopen starts a new subtree on top */
-        /* Dead until nt_ui_begin, so no band moves this frame; it keeps its records' range for nt_ui_end to drop. */
+        /* Dead until nt_ui_begin, so no band moves this frame; its catcher record is still dropped there. */
         ctx->overlays[at].id = 0U;
-        ctx->overlays[at].parent = 0U;
         ctx->overlays[at].seen = false;
     }
     NT_ASSERT(ctx->overlay_count < NT_UI_OVERLAY_MAX && "nt_ui: NT_UI_OVERLAY_MAX stack slots taken (open, fading, or reopened this frame)");
@@ -3083,7 +3104,7 @@ NT_NOINLINE void nt_ui_internal_overlay_open(nt_ui_context_t *ctx, uint32_t id, 
         for (uint8_t c = 0U; c < n && !ancestor; ++c) {
             ancestor = (ctx->overlays[k].id == anc[c]);
         }
-        if (ctx->overlays[k].open && ctx->overlays[k].light && !ancestor) {
+        if (ctx->overlays[k].open && (ctx->overlays[k].flags & NT_UI_OVERLAY_LIGHT) != 0U && !ancestor) {
             overlay_close_at(ctx, k, NT_UI_POPUP_CLOSE_REPLACED);
         }
     }
@@ -3093,8 +3114,7 @@ NT_NOINLINE void nt_ui_internal_overlay_open(nt_ui_context_t *ctx, uint32_t id, 
         .opener = opener,
         .open = true,
         .seen = true,
-        .light = (flags & NT_UI_OVERLAY_LIGHT) != 0U,
-        .catcher = (flags & NT_UI_OVERLAY_CATCHER) != 0U,
+        .flags = flags,
     };
 }
 
@@ -3111,13 +3131,14 @@ bool nt_ui_is_open(const nt_ui_context_t *ctx, uint32_t id) {
 // #endregion
 
 /* R3, at nt_ui_begin on last frame's registry: an overlay closed since its declaration (mid-frame, or between
- * frames) leaves no catcher, and a closing one no body, so the pointer reaches what lies under them. */
+ * frames) leaves no catcher, so the pointer reaches what lies under it; the panel it drew still takes the press.
+ * A closing body registers nothing. */
 static void drop_closed_overlay_records(nt_ui_context_t *ctx) {
     bool any = false;
     for (uint8_t i = 0U; i < ctx->overlay_count; ++i) {
         const nt_ui_overlay_t *o = &ctx->overlays[i];
-        for (uint32_t k = o->rec_first; !o->open && k < o->rec_end; ++k) {
-            ctx->interactive_cur[k].id = 0U;
+        if (!o->open && o->catcher_rec != 0U) {
+            ctx->interactive_cur[o->catcher_rec - 1U].id = 0U;
             any = true;
         }
     }

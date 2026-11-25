@@ -512,43 +512,6 @@ static void test_popup_undeclared_overlay_reenters_on_top(void) {
     TEST_ASSERT_TRUE_MESSAGE(x_paints_above_y(), "X declared again enters on top");
 }
 
-#define POP_A_BOX 0x50A0B1U
-
-/* One frame: popup A at the root holding a stepped box and, after it, popup B opened inside A (B on top, as a
- * combo in a popup); `open` opens them. Returns whether A's box clicked and B's close source. */
-static bool popup_under_frame(nt_pointer_t p, bool open, nt_ui_popup_close_t *src_b) {
-    nt_ui_popup_style_t st = nt_ui_popup_style_defaults();
-    st.ease_speed = 8.0F; /* eased: the frame it closes itself still shows, so the test ends it */
-    const nt_ui_popup_anchor_t anc_a = {.x = 100.0F, .y = 100.0F, .prefer_side = NT_UI_POPUP_BELOW};
-    const nt_ui_popup_anchor_t anc_b = {.x = 500.0F, .y = 350.0F, .prefer_side = NT_UI_POPUP_BELOW};
-    ui_fx_frame_begin(s_fx.ctx, &p);
-    (void)popup_begin_shown(POP_A, &st, &anc_a, open);
-    CLAY({.id = (Clay_ElementId){.id = POP_A_BOX}, .layout = {.sizing = {CLAY_SIZING_FIXED(POP_W), CLAY_SIZING_FIXED(POP_H)}}}) {}
-    const bool clicked = nt_ui_step(s_fx.ctx, POP_A_BOX, NULL).clicked;
-    popup_begin_shown_src(POP_B, &st, &anc_b, open, src_b);
-    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(POP_W), CLAY_SIZING_FIXED(POP_H)}}}) {}
-    nt_ui_popup_end(s_fx.ctx);
-    nt_ui_popup_end(s_fx.ctx);
-    nt_ui_end(s_fx.ctx);
-    return clicked;
-}
-
-/* ---- The top overlay owns the pointer: a full press and release on the lower popup's control outside the
- *      top popup clicks nothing there; the press is the top popup's outside click. ---- */
-static void test_popup_top_owns_the_pointer(void) {
-    nt_ui_popup_close_t src_b = NT_UI_POPUP_CLOSE_NONE;
-    (void)popup_under_frame(ui_fx_pointer(10.0F, 10.0F, false, false, false), true, &src_b);
-    (void)popup_under_frame(ui_fx_pointer(10.0F, 10.0F, false, false, false), false, &src_b);
-    const nt_ui_bbox_t box = nt_ui_get_bbox(s_fx.ctx, POP_A_BOX);
-    TEST_ASSERT_TRUE(box.found);
-    const float x = box.x + 10.0F;
-    const float y = box.y + 10.0F;
-    bool clicked = popup_under_frame(ui_fx_pointer(x, y, true, true, false), false, &src_b);
-    clicked = popup_under_frame(ui_fx_pointer(x, y, false, false, true), false, &src_b) || clicked;
-    TEST_ASSERT_FALSE_MESSAGE(clicked, "the lower popup's control under the top overlay's catcher clicks nothing");
-    TEST_ASSERT_EQUAL_INT_MESSAGE(NT_UI_POPUP_CLOSE_OUTSIDE, src_b, "the press is the top popup's outside click");
-}
-
 #define POP_A2 0x50A003U
 #define POP_A2_BOX 0x50A0B2U
 #define POP_B_BOX 0x50A0B3U
@@ -714,34 +677,27 @@ static void inert_open_fully(uint8_t nested) {
 }
 
 /* ---- A press held on a button when its popup starts closing ends without a click, and every read inside the
- *      closing popup is inert: nt_ui_query_interaction reads no click on the release, and no hover. ---- */
+ *      closing popup is inert: no step, query or hover reports anything, for a release in the frame the game
+ *      closes it (the capture and the hot record still point at the button) and for one a frame later. ---- */
 static void test_popup_closing_ends_a_held_press(void) {
-    inert_open_fully(NESTED_NONE);
-    const nt_ui_bbox_t bb = nt_ui_get_bbox(s_fx.ctx, INERT_BUTTON);
-    TEST_ASSERT_TRUE(bb.found);
-    const float x = bb.x + 5.0F;
-    const float y = bb.y + 5.0F;
-    (void)inert_frame(ui_fx_pointer(x, y, true, true, false), true, NESTED_NONE);
-    (void)inert_frame(ui_fx_pointer(x, y, true, false, false), true, NESTED_NONE);
-    bool clicked = inert_frame(ui_fx_pointer(x, y, true, false, false), false, NESTED_NONE).button_clicked;
-    const inert_frame_t r = inert_frame(ui_fx_pointer(x, y, false, false, true), false, NESTED_NONE);
-    TEST_ASSERT_TRUE_MESSAGE(r.visible, "the popup still fades");
-    TEST_ASSERT_FALSE_MESSAGE(clicked || r.button_clicked, "the release over a closing popup's button clicks nothing");
-}
-
-/* ---- A query and a hover read inside a closing popup report nothing, also for a release in the frame the
- *      game closes it, while the capture and the hot record still point at the button. ---- */
-static void test_popup_closing_content_reads_no_click(void) {
-    inert_open_fully(NESTED_NONE);
-    const nt_ui_bbox_t bb = nt_ui_get_bbox(s_fx.ctx, INERT_BUTTON);
-    TEST_ASSERT_TRUE(bb.found);
-    const float x = bb.x + 5.0F;
-    const float y = bb.y + 5.0F;
-    (void)inert_frame(ui_fx_pointer(x, y, true, true, false), true, NESTED_NONE);
-    (void)inert_frame(ui_fx_pointer(x, y, true, false, false), true, NESTED_NONE);
-    const inert_frame_t r = inert_frame(ui_fx_pointer(x, y, false, false, true), false, NESTED_NONE);
-    TEST_ASSERT_FALSE_MESSAGE(r.button_queried, "a query in a closing popup reads no click");
-    TEST_ASSERT_FALSE_MESSAGE(r.button_hovered, "nor a hover");
+    for (int held = 0; held < 2; ++held) {
+        inert_open_fully(NESTED_NONE);
+        const nt_ui_bbox_t bb = nt_ui_get_bbox(s_fx.ctx, INERT_BUTTON);
+        TEST_ASSERT_TRUE(bb.found);
+        const float x = bb.x + 5.0F;
+        const float y = bb.y + 5.0F;
+        (void)inert_frame(ui_fx_pointer(x, y, true, true, false), true, NESTED_NONE);
+        (void)inert_frame(ui_fx_pointer(x, y, true, false, false), true, NESTED_NONE);
+        inert_frame_t c = {0};
+        if (held != 0) {
+            c = inert_frame(ui_fx_pointer(x, y, true, false, false), false, NESTED_NONE); /* the close frame, still held */
+        }
+        const inert_frame_t r = inert_frame(ui_fx_pointer(x, y, false, false, true), false, NESTED_NONE);
+        TEST_ASSERT_TRUE_MESSAGE(r.visible, "the popup still fades");
+        TEST_ASSERT_FALSE_MESSAGE(c.button_clicked || r.button_clicked, "the release over a closing popup's button clicks nothing");
+        TEST_ASSERT_FALSE_MESSAGE(c.button_queried || r.button_queried, "a query in a closing popup reads no click");
+        TEST_ASSERT_FALSE_MESSAGE(c.button_hovered || r.button_hovered, "nor a hover");
+    }
 }
 
 /* ---- Esc closes the top popup (a combo), and its body is inert in the frame it closes: the
@@ -907,7 +863,6 @@ int main(void) {
     RUN_TEST(test_popup_undeclared_overlay_reenters_on_top);
     RUN_TEST(test_popup_esc_closes_the_top_and_its_body);
     RUN_TEST(test_popup_closing_ends_a_held_press);
-    RUN_TEST(test_popup_closing_content_reads_no_click);
     RUN_TEST(test_popup_closing_nested_keeps_the_parent_inert);
     RUN_TEST(test_popup_press_off_every_record_dismisses);
     RUN_TEST(test_popup_root_overlay_is_a_top_layer);
@@ -924,7 +879,6 @@ int main(void) {
     RUN_TEST(test_popup_snap_then_eased_keeps_what_it_showed);
     RUN_TEST(test_popup_keeps_no_state);
     RUN_TEST(test_popup_tween_clamp);
-    RUN_TEST(test_popup_top_owns_the_pointer);
     RUN_TEST(test_popup_later_overlay_above_nested_level);
     RUN_TEST(test_popup_nested_above_parent_parts);
     return UNITY_END();

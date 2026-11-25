@@ -100,11 +100,9 @@ typedef struct {
     uint8_t fill_layer;
     uint8_t label_layer;
     bool nav_passed;  /* the focused row's level has declared it */
-    bool focus_first; /* Right or Enter opened the focused row's child this frame */
     bool hover_opens; /* hover_id is a parent */
     bool focus_seen;  /* the focused row is declared and enabled this frame */
     bool focus_opens; /* the focused row is a parent */
-    bool top;         /* the menu is the top overlay and was declared last frame: it reads the keys and acts in menu_end */
     bool opening;     /* its first declaration since it opened: the rows' highlight snaps */
     bool activated;   /* a row activated: the chain closes */
     bool item_steps;  /* the open custom row is enabled and has an action of its own */

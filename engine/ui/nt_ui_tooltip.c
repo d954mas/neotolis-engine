@@ -34,7 +34,6 @@ static inline uint32_t tooltip_panel_id(uint32_t id) { return nt_ui_derived_id(i
 /* The engine-owned hover-delay cell (not a game bool). Zeroed on create -> hover starts at 0. */
 typedef struct {
     float hover; /* accumulated seconds the cursor has been over the target */
-    bool shown;  /* declared last frame: open, or fading out */
 } nt_ui_tooltip_cell_t;
 
 nt_ui_tooltip_style_t nt_ui_tooltip_style_defaults(void) {
@@ -135,8 +134,9 @@ bool nt_ui_tooltip(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8
 
     /* No overlay: it shows while the hover timer says so, then fades, above every overlay and taking no input. */
     nt_ui_popup_info_t info = {0};
-    const bool shown = (open || c->shown) && nt_ui_internal_tooltip_begin(ctx, tooltip_popup_id(target_id), &pst, &anc, open, &info);
-    c->shown = shown;
+    const uint32_t popup_id = tooltip_popup_id(target_id);
+    /* Declared last frame: still fading out after the hover left. */
+    const bool shown = (open || nt_ui_internal_live_slot(ctx, popup_id) >= 0) && nt_ui_internal_tooltip_begin(ctx, popup_id, &pst, &anc, open, &info);
     if (shown) {
         const uint32_t panel_id = tooltip_panel_id(target_id);
         const nt_ui_label_style_t lbl = {.font_id = style->font_id, .font_size = style->font_size, .color = style->text_color};

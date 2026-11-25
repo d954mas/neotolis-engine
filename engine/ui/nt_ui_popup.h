@@ -40,8 +40,8 @@ typedef enum {
     NT_UI_POPUP_CLOSE_NONE = 0,
     NT_UI_POPUP_CLOSE_ESC,
     NT_UI_POPUP_CLOSE_OUTSIDE,  /* a press outside the panel: on its catcher (a modal's backdrop) or on no record */
-    NT_UI_POPUP_CLOSE_REPLACED, /* an overlay opened that is not declared or opened inside it, or it was reopened */
-    NT_UI_POPUP_CLOSE_GAME,     /* nt_ui_close, of it or of the overlay it was opened inside */
+    NT_UI_POPUP_CLOSE_REPLACED, /* an overlay opened that is not opened inside it */
+    NT_UI_POPUP_CLOSE_GAME,     /* nt_ui_close of it or of the overlay it was opened inside, its menu's activation, or no declaration */
 } nt_ui_popup_close_t;
 
 /* Per-frame info of a popup or a modal (nullable out of begin): the chosen side, the close. */
@@ -63,7 +63,7 @@ _Static_assert(sizeof(nt_ui_popup_style_t) == 80, "nt_ui_popup_style_t stable AB
  * never trips nt_ui_anim's scale_*>0 assert. */
 nt_ui_popup_style_t nt_ui_popup_style_defaults(void);
 
-/* Opens the popup `id` on top of the overlay stack, inside the overlay being declared at the call (0 = none), and
+/* Opens the popup `id` on top of the overlay stack, inside the innermost open overlay being declared at the call (0 = none), and
  * closes every popup that is not its ancestor; opening an open one does nothing, a reopen during the fade starts
  * it again on top. It takes input from the frame after its first declaration (spec: "Input ownership"). */
 void nt_ui_popup_open(nt_ui_context_t *ctx, uint32_t id);

@@ -259,6 +259,9 @@ static uint8_t menu_read_key(const nt_ui_menu_t *menu, const nt_ui_context_t *ct
     return nt_ui_key_pressed(ctx, root_id, NT_KEY_ARROW_DOWN) ? MENU_KEY_DOWN : MENU_KEY_NONE;
 }
 
+/* The menu reads keys and acts in menu_end while it is the top and was declared last frame (not OPENING). */
+static bool menu_top(const nt_ui_menu_t *menu) { return nt_ui_internal_is_top(menu->frame.ui, menu->id) && !menu->frame.opening; }
+
 static bool menu_key_on(const nt_ui_menu_t *menu, uint32_t row_id, uint8_t key) { return menu->frame.key == key && row_id == menu->focus; }
 
 /* Everything the frame decides from last frame's records and this frame's input runs here, before the rows
@@ -277,7 +280,7 @@ static bool menu_frame_input(nt_ui_menu_t *menu, nt_ui_context_t *ctx) {
     const bool ours = pp->active; /* the top pointer is idle unless the menu is the live top */
     const bool pressed = pp->buttons[NT_BUTTON_LEFT].is_pressed || pp->buttons[NT_BUTTON_RIGHT].is_pressed;
     /* The opening frame reads nothing; a text field focused in a custom row owns the keys instead. */
-    const uint8_t key = f->top ? menu_read_key(menu, ctx, root_id) : MENU_KEY_NONE;
+    const uint8_t key = menu_top(menu) ? menu_read_key(menu, ctx, root_id) : MENU_KEY_NONE;
     f->key = key;
     const uint8_t d = menu->focus_depth;
     if (key != MENU_KEY_NONE) {
@@ -339,7 +342,8 @@ static uint32_t menu_im_row(nt_ui_menu_t *menu, uint32_t key, const char *label,
      * focus, highlight and the leaf collapse follow the row the pointer is in. The opening frame's hits are
      * last frame's, at the old place. */
     const bool pointed = enabled && nt_ui_hovered_within(ctx, row_id);
-    if (enabled && f->focus_first && f->child_first == 0U && depth == menu->focus_depth + 1U) {
+    /* Right or Enter on the focused parent opened its child: the begin closed any sibling's, so that is the open one. */
+    if (enabled && (f->key == MENU_KEY_RIGHT || f->key == MENU_KEY_ENTER) && f->child_first == 0U && depth == menu->focus_depth + 1U) {
         f->child_first = row_id;
     }
     if (enabled && row_id == menu->focus) {
@@ -433,7 +437,7 @@ static bool menu_open_level(const nt_ui_menu_t *menu, uint8_t depth, const nt_ui
     nt_ui_popup_style_t pst = nt_ui_popup_style_defaults();
     pst.ease_speed = 0.0F;
     pst.layer = f->fill_layer;
-    const nt_ui_popup_ext_t ext = {.def = &NT_UI_MENU_DEF, .outside_close = (depth == 0U)};
+    const nt_ui_popup_ext_t ext = {.def = &NT_UI_MENU_DEF, .closes = (depth == 0U) ? NT_UI_OVERLAY_OUTSIDE : 0U};
     if (!nt_ui_popup_begin_internal(f->ui, menu_level_id(menu->id, depth), &pst, anchor, &ext, NULL)) {
         return false; /* a snap level that closed declares nothing */
     }
@@ -461,7 +465,6 @@ bool nt_ui_menu_begin(nt_ui_menu_t *menu, nt_ui_context_t *ctx, const nt_ui_elem
         .style = style,
         .fill_layer = (data != NULL) ? data->layer : 0U,
         .label_layer = label_layer,
-        .top = nt_ui_internal_is_top(ctx, menu->id) && live,
         .opening = !live,
         .scope = {[0] = menu->id},
     };
@@ -490,12 +493,14 @@ bool nt_ui_menu_begin(nt_ui_menu_t *menu, nt_ui_context_t *ctx, const nt_ui_elem
 }
 
 /* A row activates on its click or on Enter while focused; a frame activates one row, the first declared (a
- * tap and Enter can land on two). */
+ * tap and Enter can land on two). M4: the menu closes with its levels before the row returns true, so what the
+ * game opens in response is not their child (Win32 and Qt send the command after the menu closed). */
 static bool menu_activate(nt_ui_menu_t *menu, uint32_t row_id, bool clicked) {
     if (menu->frame.activated || !(clicked || menu_key_on(menu, row_id, MENU_KEY_ENTER))) {
         return false;
     }
     menu->frame.activated = true;
+    nt_ui_internal_overlay_close(menu->frame.ui, menu->id, NT_UI_POPUP_CLOSE_GAME);
     return true;
 }
 
@@ -549,7 +554,6 @@ bool nt_ui_menu_submenu_begin_ex(nt_ui_menu_t *menu, uint32_t key, const char *l
     }
     if (menu_key_on(menu, row_id, MENU_KEY_RIGHT) || menu_key_on(menu, row_id, MENU_KEY_ENTER)) {
         menu_set_open(menu, depth, row_id); /* its child declares next; menu_end focuses the child's first row */
-        f->focus_first = true;
     }
     const uint8_t child = (uint8_t)(depth + 1U);
     if (menu_parent(menu, depth) != row_id) {
@@ -618,7 +622,7 @@ static void menu_resolve(nt_ui_menu_t *menu) {
     const nt_ui_menu_frame_t *f = &menu->frame;
     nt_ui_context_t *ctx = f->ui;
     /* An overlay a custom row opened this frame lies above the menu's deepest level: the pointer is its. */
-    const bool top = f->top && nt_ui_internal_overlay_last_open(ctx) == menu_level_id(menu->id, menu_open_depth(menu));
+    const bool top = menu_top(menu) && nt_ui_internal_overlay_last_open(ctx) == menu_level_id(menu->id, menu_open_depth(menu));
     // #region reconcile the kept state with this frame's declaration, before any input
     if (f->declared_depth < menu_open_depth(menu)) {
         menu_set_open(menu, f->declared_depth, 0U); /* a removed, disabled or leaf parent closes its branch */
@@ -678,10 +682,7 @@ void nt_ui_menu_end(nt_ui_menu_t *menu) {
     NT_ASSERT(menu->frame.item_id == 0U && "nt_ui_menu_end with an open custom row (missing nt_ui_menu_item_end)");
     nt_ui_clay_priv_close_element(); /* the root panel */
     menu_resolve(menu);
-    nt_ui_popup_end(ctx); /* balance menu_begin's root popup_begin */
-    if (menu->frame.activated) {
-        nt_ui_internal_overlay_close(ctx, menu->id, NT_UI_POPUP_CLOSE_GAME); /* M4: the menu closes with its levels */
-    }
+    nt_ui_popup_end(ctx);  /* balance menu_begin's root popup_begin */
     menu->frame.ui = NULL; /* clear the span handle: a between-frames inner call now traps on a NULL ctx */
 }
 // #endregion

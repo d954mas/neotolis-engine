@@ -206,14 +206,8 @@ static bool menu_im_modal(nt_ui_menu_t *st, nt_ui_menu_style_t *style) {
 }
 
 /* One frame of the menu tree and the s_modal placement; returns whether the modal reported a close. */
-static bool s_reopen_in_frame; /* menu_im_frame_ptr reopens the menu after nt_ui_begin, as a game's right-click */
-
 static bool menu_im_frame_ptr(nt_ui_menu_t *st, nt_ui_menu_style_t *style, const nt_pointer_t *p) {
     menu_frame_begin(p);
-    if (s_reopen_in_frame) {
-        s_reopen_in_frame = false;
-        nt_ui_menu_open(st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
-    }
     bool modal_close = false;
     if (s_modal == MODAL_UNDER_MENU || s_modal >= MODAL_HOLDS_MENU) {
         modal_close = menu_im_modal(st, style);
@@ -573,17 +567,39 @@ static void test_menu_lost_open_parent_closes_branch(void) {
     }
 }
 
-/* ---- Opening a submenu from the keyboard focuses its first enabled row. ---- */
+/* ---- Right on a focused parent opens its child in the key's frame, focused on its first enabled row, as Dear
+ *      ImGui's BeginMenu; Right on a leaf opens nothing. ---- */
 static void test_menu_kbd_open_focuses_first_enabled_row(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
     nt_ui_menu_t st = {0};
     nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
-    static const uint32_t p1[] = {KEY_P1};
-    const menu_dyn_tree_t t = {.keys = p1, .count = 1, .disabled_first_child = true};
-    const nt_key_t open_p1[] = {NT_KEY_ARROW_DOWN, NT_KEY_ARROW_RIGHT};
-    menu_dyn_keys(&st, &style, &t, open_p1, 2);
+    static const uint32_t keys[] = {KEY_P1, KEY_L1};
+    const menu_dyn_tree_t t = {.keys = keys, .count = 2, .disabled_first_child = true};
+    const nt_key_t down = NT_KEY_ARROW_DOWN;
+    menu_dyn_keys(&st, &style, &t, &down, 1);
+    TEST_ASSERT_FALSE(menu_level_found(1U));
+    menu_key(NT_KEY_ARROW_RIGHT);
+    menu_dyn_frame(&st, &style, &t);
+    nt_input_init();
+    TEST_ASSERT_TRUE_MESSAGE(menu_level_found(1U), "P1's child declares in the frame Right is pressed");
     const uint32_t p1_opt = nt_ui_menu_test_item_id(nt_ui_menu_test_item_id(MENU_A, KEY_P1), KEY_OPT);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(p1_opt, st.focus, "its first enabled row has the focus after that frame");
     TEST_ASSERT_TRUE_MESSAGE(menu_dyn_enter_activates(&st, &style, &t, p1_opt), "Enter must activate the first enabled child");
+
+    const uint32_t l1 = nt_ui_menu_test_item_id(MENU_A, KEY_L1);
+    nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
+    const nt_key_t up = NT_KEY_ARROW_UP; /* from no focus to the last row, the L1 leaf */
+    menu_dyn_keys(&st, &style, &t, &up, 1);
+    TEST_ASSERT_EQUAL_UINT32(l1, st.focus);
+    s_act_capture_id = l1;
+    s_act_hit = false;
+    const nt_key_t right = NT_KEY_ARROW_RIGHT;
+    menu_dyn_keys(&st, &style, &t, &right, 1);
+    menu_dyn_frame(&st, &style, &t);
+    TEST_ASSERT_FALSE_MESSAGE(menu_level_found(1U), "Right on a leaf opens no level");
+    TEST_ASSERT_EQUAL_UINT32(l1, st.focus);
+    TEST_ASSERT_TRUE(nt_ui_is_open(s_fx.ctx, MENU_A));
+    TEST_ASSERT_FALSE_MESSAGE(s_act_hit, "nor activates the leaf");
 }
 
 /* ---- Right opens an empty submenu and focus stays on its parent; Down then moves on in the parent's
@@ -1616,37 +1632,29 @@ static void test_menu_opening_frame_ignores_the_pointer(void) {
     }
 }
 
-/* ---- A menu reopened while open takes no input in that frame: a tap on a row in the frame the game reopens it
- *      at the same place activates nothing, and the same tap a frame later does. ---- */
+/* ---- A menu reopened while open takes no input in that frame: a tap on a row in the frame after the game
+ *      reopens it at the same place activates nothing, and the same tap a frame later does. ---- */
 static void test_menu_reopened_while_open_ignores_that_frames_tap(void) {
     const uint32_t edit = nt_ui_menu_test_item_id(MENU_A, KEY_EDIT);
-    for (int mid_frame = 0; mid_frame < 2; ++mid_frame) {
-        nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
-        nt_ui_menu_t st = {0};
-        s_act_capture_id = edit;
-        s_act_hit = false;
-        nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
-        menu_im_frame(&st, &style, 0.0F, 0.0F);
-        menu_im_frame(&st, &style, 0.0F, 0.0F);
-        float ex = 0.0F;
-        float ey = 0.0F;
-        menu_row_center(edit, &ex, &ey);
-        menu_im_frame(&st, &style, ex, ey);
-        nt_pointer_t tap = {.x = ex, .y = ey, .active = true};
-        tap.buttons[NT_BUTTON_LEFT] = (nt_button_state_t){.is_pressed = true, .is_released = true};
-        if (mid_frame != 0) {
-            s_reopen_in_frame = true; /* after nt_ui_begin chose the menu as the top */
-        } else {
-            nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
-        }
-        (void)menu_im_frame_ptr(&st, &style, &tap);
-        TEST_ASSERT_FALSE_MESSAGE(s_act_hit, "the frame the menu reopens takes no tap");
-        TEST_ASSERT_TRUE(nt_ui_is_open(s_fx.ctx, MENU_A));
-        (void)menu_im_frame_ptr(&st, &style, &tap);
-        TEST_ASSERT_TRUE_MESSAGE(s_act_hit, "the same tap a frame later activates the row");
-        nt_ui_close(s_fx.ctx, MENU_A);
-        menu_im_frame(&st, &style, 0.0F, 0.0F);
-    }
+    nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
+    nt_ui_menu_t st = {0};
+    s_act_capture_id = edit;
+    s_act_hit = false;
+    nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
+    menu_im_frame(&st, &style, 0.0F, 0.0F);
+    menu_im_frame(&st, &style, 0.0F, 0.0F);
+    float ex = 0.0F;
+    float ey = 0.0F;
+    menu_row_center(edit, &ex, &ey);
+    menu_im_frame(&st, &style, ex, ey);
+    nt_pointer_t tap = {.x = ex, .y = ey, .active = true};
+    tap.buttons[NT_BUTTON_LEFT] = (nt_button_state_t){.is_pressed = true, .is_released = true};
+    nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
+    (void)menu_im_frame_ptr(&st, &style, &tap);
+    TEST_ASSERT_FALSE_MESSAGE(s_act_hit, "the frame the menu reopens takes no tap");
+    TEST_ASSERT_TRUE(nt_ui_is_open(s_fx.ctx, MENU_A));
+    (void)menu_im_frame_ptr(&st, &style, &tap);
+    TEST_ASSERT_TRUE_MESSAGE(s_act_hit, "the same tap a frame later activates the row");
 }
 
 /* ---- The outside press belongs to the pointer that pressed: a second finger resting on the menu does not

@@ -124,7 +124,8 @@ static void popup_check_args(const nt_ui_context_t *ctx, uint32_t id, const nt_u
 }
 
 /* Declares a shown overlay: the panel eased toward open?1:0 on its stack slot's band, the catcher of a live one, the
- * backdrop of a closing one too; it records what nt_ui_begin reads next frame (S1, S3) and where its records start.
+ * backdrop of a closing one too, and the panel of an open one as a record (it takes the next press even if the
+ * overlay closes after this declaration); it records what nt_ui_begin reads next frame (S1, S3).
  * Its phase (spec: "Input ownership", lifecycle): OPENING (first declaration since it opened) and CLOSING bodies
  * are inert, an OPEN one takes input. A tooltip passes no `slot`: the band above every slot, no catcher, no record,
  * no declaration depth (it closes its own element). Returns false when it faded out: nothing declared, and the
@@ -179,13 +180,10 @@ static bool popup_declare(nt_ui_context_t *ctx, uint32_t id, const nt_ui_popup_s
     if (slot != NULL) {
         slot->seen = true;
         slot->live = live;
-        slot->esc_close = ext->esc_close;
-        slot->outside_close = ext->outside_close;
+        slot->flags = (uint8_t)((slot->flags & (NT_UI_OVERLAY_LIGHT | NT_UI_OVERLAY_CATCHER)) | ext->closes);
         slot->close_pad = ext->close_pad;
-        slot->rec_first = ctx->interactive_cur_count;
-        slot->rec_end = ctx->interactive_cur_count;
     }
-    const bool catcher = live && slot != NULL && slot->catcher;
+    const bool catcher = live && slot != NULL && (slot->flags & NT_UI_OVERLAY_CATCHER) != 0U;
     const int32_t at = (slot != NULL) ? (int32_t)(slot - ctx->overlays) : NT_UI_OVERLAY_MAX; /* a tooltip: above every slot */
     const int32_t band = ctx->overlay_zband_stride + (at * NT_UI_OVERLAY_MAX);
     // #region absolute band, whatever floating encloses it; the catcher shares it, declared before the panel
@@ -221,10 +219,8 @@ static bool popup_declare(nt_ui_context_t *ctx, uint32_t id, const nt_ui_popup_s
         }) {}
     }
     if (catcher) {
-        nt_ui_block_pointer(ctx, catcher_id, NULL); /* the gate; the top's outside press reads the press on it */
-    }
-    if (slot != NULL) {
-        slot->rec_end = ctx->interactive_cur_count; /* the catcher is invisible: it goes as soon as the overlay closes */
+        slot->catcher_rec = ctx->interactive_cur_count + 1U; /* invisible: nt_ui_begin drops it once the overlay closes */
+        nt_ui_block_pointer(ctx, catcher_id, NULL);          /* the gate; the top's outside press reads the press on it */
     }
     // #endregion
     // #region panel floating decl (stays OPEN until nt_ui_popup_end)
@@ -241,6 +237,9 @@ static bool popup_declare(nt_ui_context_t *ctx, uint32_t id, const nt_ui_popup_s
     nt_ui_clay_priv_open_element();
     nt_ui_clay_priv_configure_open_element(panel_decl);
     nt_ui_widget_register(ctx, id, reg_def, NULL, true);
+    if (slot != NULL && open) {
+        nt_ui_block_pointer(ctx, id, NULL); /* the drawn panel takes a press, its rows (declared later) win theirs */
+    }
     if (slot != NULL && !hears && ctx->inert_from == 0U) {
         ctx->inert_from = ctx->overlay_depth; /* an OPENING or CLOSING body, nested overlays included, is inert */
     }
@@ -277,7 +276,7 @@ void nt_ui_popup_open(nt_ui_context_t *ctx, uint32_t id) {
 
 bool nt_ui_popup_begin(nt_ui_context_t *ctx, uint32_t id, const nt_ui_popup_style_t *style, const nt_ui_popup_anchor_t *anchor, nt_ui_popup_info_t *info) {
     /* A popup closes on an outside press or Esc, as a <select>. */
-    static const nt_ui_popup_ext_t popup = {.esc_close = true, .outside_close = true};
+    static const nt_ui_popup_ext_t popup = {.closes = NT_UI_OVERLAY_ESC | NT_UI_OVERLAY_OUTSIDE};
     return nt_ui_popup_begin_internal(ctx, id, style, anchor, &popup, info);
 }
 
@@ -294,9 +293,4 @@ void nt_ui_popup_end(nt_ui_context_t *ctx) {
         ctx->closing_from = 0U;
     }
     --ctx->overlay_depth;
-    const int32_t at = nt_ui_internal_overlay_index(ctx, ctx->overlay_decl[ctx->overlay_depth]);
-    NT_ASSERT(at >= 0 && "nt_ui_popup_end: the overlay left the stack during its own declaration");
-    if (!ctx->overlays[at].live) {
-        ctx->overlays[at].rec_end = ctx->interactive_cur_count; /* a CLOSING body takes no pointer: all its records go */
-    }
 }
