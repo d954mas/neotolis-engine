@@ -8,8 +8,8 @@
  * A long list is wrapped in nt_ui_scroll_begin/end, NOT a raw Clay .clip — a raw .clip leaks a
  * scroll-container pool slot (type=7 crash).
  *
- * The GAME owns `int *selected`; the list's open state is the overlay stack's, under an id private to the combo:
- * the trigger opens it, and a pick, Esc or an outside press closes it.
+ * The GAME owns `int *selected`; the list's open state is the overlay stack's, under the combo id (nt_ui_is_open and
+ * nt_ui_close take it): the trigger opens it, and a pick, Esc or an outside press closes it.
  *
  * Customizable game UI (button/checkbox/tabbar parity): the trigger + rows are per-state visual models
  * (idle/hover/pressed, + selected for rows) with an OPTIONAL atlas-ref bg (slice9), a tint, and a flat
@@ -97,6 +97,9 @@ nt_ui_dropdown_style_t nt_ui_dropdown_style_defaults(void);
  * should be built. Call combo_selectable rows between this and nt_ui_combo_end. id non-zero; preview may
  * be NULL (empty trigger text); style non-NULL. data carries the fill layer; text on label_layer. */
 bool nt_ui_combo_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t id, const char *preview, nt_ui_dropdown_style_t *style);
+
+/* The trigger widget's id (its bbox, hover, a tooltip on it): the combo id itself is the list's overlay. */
+uint32_t nt_ui_combo_trigger_id(uint32_t combo_id);
 
 /* Custom-trigger escape hatch: leaves the TRIGGER element OPEN so the game declares arbitrary content
  * (swatch+text, icon+label) inside, between preview_begin and preview_end. preview_end closes the trigger,

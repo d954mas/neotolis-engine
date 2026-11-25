@@ -116,7 +116,7 @@ static void test_popup_cap_counts_a_fading_overlay(void) {
                 (void)popup_begin_open(0x50B000U + i, &st, &anc);
             }
             NT_TEST_EXPECT_ASSERT(nt_ui_popup_open(s_fx.ctx, 0x50BFFFU));
-            TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "more than NT_UI_OVERLAY_MAX overlays open or fading"));
+            TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "NT_UI_OVERLAY_MAX stack slots taken (open, fading, or reopened this frame)"));
             for (uint32_t i = 0; i + 1U < NT_UI_OVERLAY_MAX; ++i) {
                 nt_ui_popup_end(s_fx.ctx);
             }

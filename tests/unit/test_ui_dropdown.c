@@ -467,7 +467,7 @@ static void test_dropdown_edge_flip_up_near_bottom(void) {
     combo_im_frame(&idle, 30.0F, 540.0F, s_short, 3, &selected, &st, NULL);
     /* The flip's visible consequence: the list is ADJACENT above the trigger. Bare "somewhere higher"
      * would also accept a CENTER-placed list or a list collapsed to y=0. */
-    const nt_ui_bbox_t trigger = nt_ui_get_bbox(s_fx.ctx, DD_A);
+    const nt_ui_bbox_t trigger = nt_ui_get_bbox(s_fx.ctx, nt_ui_combo_trigger_id(DD_A));
     const nt_ui_bbox_t last_row = nt_ui_get_bbox(s_fx.ctx, nt_ui_dropdown_test_combo_row_id(DD_A, ROW_KEY(2)));
     TEST_ASSERT_TRUE(trigger.found);
     TEST_ASSERT_TRUE(last_row.found);
@@ -588,7 +588,7 @@ static void test_dropdown_preview_chevron_size_zero_opts_out(void) {
 
     /* No leftover GROW spacer: the game's GROW swatch fills the interior, so its right edge reaches the
      * trigger's right inner edge (within pad). A spacer would split the slack and pull the swatch left. */
-    const nt_ui_bbox_t trig = nt_ui_get_bbox(s_fx.ctx, DD_A);
+    const nt_ui_bbox_t trig = nt_ui_get_bbox(s_fx.ctx, nt_ui_combo_trigger_id(DD_A));
     const nt_ui_bbox_t sw = nt_ui_get_bbox(s_fx.ctx, SWATCH_ID);
     TEST_ASSERT_TRUE_MESSAGE(trig.found && sw.found, "opt-out trigger and its preview child must measure");
     const float right_inner = trig.x + trig.width - (float)st.pad;
@@ -602,7 +602,7 @@ static void test_dropdown_preview_chevron_size_zero_opts_out(void) {
 static void test_dropdown_preview_trigger_click_opens(void) {
     nt_ui_dropdown_style_t st = nt_ui_dropdown_style_defaults();
 
-    /* Warm frame so the trigger (DD_A) bbox bakes; the preview trigger anchors at (30,30). */
+    /* Warm frame so the trigger bbox bakes; the preview trigger anchors at (30,30). */
     nt_pointer_t f1 = ui_fx_pointer(0.0F, 0.0F, false, false, false);
     preview_im_frame(&f1, 30.0F, 30.0F, &st);
 

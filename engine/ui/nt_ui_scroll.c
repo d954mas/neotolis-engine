@@ -547,7 +547,7 @@ static bool scroll_gather_input(nt_ui_context_t *ctx, uint32_t id, nt_ui_scroll_
 
     out_wheel[0] = 0.0F;
     out_wheel[1] = 0.0F;
-    for (uint32_t i = 0; i < ctx->frame_pointer_count; ++i) {
+    for (uint32_t i = 0; ctx->inert_from == 0U && i < ctx->frame_pointer_count; ++i) { /* an inert body takes no new wheel */
         const nt_pointer_t *p = &ctx->frame_pointers[i];
         if (ctx->wheel_owner[i][0] == id) {
             out_wheel[0] += p->wheel_dx;

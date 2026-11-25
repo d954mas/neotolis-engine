@@ -30,9 +30,10 @@ typedef struct {
     bool wants_pointer;
 } sc_t;
 
-/* One frame with the pointer at (x, y); `press` / `release` is the button whose edge this frame carries, or -1. */
-static inline void sc_step(sc_t *s, float x, float y, int press, int release) {
-    nt_pointer_t p = {.x = x, .y = y, .dx = x - s->x, .dy = y - s->y, .active = true};
+/* One frame with the pointer at (x, y) and a wheel delta; `press` / `release` is the button whose edge this frame
+ * carries, or -1. */
+static inline void sc_step_wheel(sc_t *s, float x, float y, int press, int release, float wheel_dy) {
+    nt_pointer_t p = {.x = x, .y = y, .dx = x - s->x, .dy = y - s->y, .active = true, .wheel_dy = wheel_dy};
     for (int b = 0; b < NT_BUTTON_MAX; ++b) {
         s->down[b] = (b == press) || (s->down[b] && b != release);
         p.buttons[b] = (nt_button_state_t){.is_down = s->down[b], .is_pressed = b == press, .is_released = b == release};
@@ -46,6 +47,9 @@ static inline void sc_step(sc_t *s, float x, float y, int press, int release) {
     s->wants_keyboard = nt_ui_wants_keyboard(s->ctx);
     s->wants_pointer = nt_ui_wants_pointer(s->ctx);
 }
+
+/* One frame with the pointer at (x, y); `press` / `release` is the button whose edge this frame carries, or -1. */
+static inline void sc_step(sc_t *s, float x, float y, int press, int release) { sc_step_wheel(s, x, y, press, release, 0.0F); }
 
 static inline void sc_frames(sc_t *s, int n) {
     for (int i = 0; i < n; ++i) {

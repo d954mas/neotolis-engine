@@ -316,8 +316,10 @@ Rules for game code:
    `nt_ui_is_open(ctx, id)` asks. Open a nested overlay inside its parent's
    body, so that it closes with it. Its begin returns true while it shows
    (open, or fading out), and only then you declare its body. An overlay you
-   stop declaring is closed. `info.reason` says once what closed it, in the
-   frame its begin sees the close.
+   stop declaring is closed, with the overlays opened inside it. A modal opened
+   from a menu item or a combo row outlives them: the menu or list closes, the
+   modal stays. `info.reason` says once what closed it, in the frame its begin
+   sees the close.
 4. *The last opened overlay is on top* and takes the input, wherever it is
    declared; the overlays under it stay open and wait. An overlay takes input
    from the frame after its first declaration.
@@ -337,10 +339,11 @@ Engine rules:
   the UI's when it lands on a record or an overlay with a catcher is up, else
   the game's. A press while the other button is held joins that gesture and
   reaches no widget when the gesture is the game's, as Dear ImGui's
-  `MouseDownOwned`. `nt_ui_wants_pointer` is true for a UI gesture up to its
-  release, and over last frame's record under the pointer: decided at
-  `nt_ui_begin` like the rest of the router, so a widget that vanishes keeps
-  it one frame, as Dear ImGui's `WantCaptureMouse`.
+  `MouseDownOwned`. `nt_ui_wants_pointer` follows the gesture's owner while a
+  button is down and on its release frame, so the game keeps its own drag over
+  the UI; a free pointer is the UI's over last frame's record. Both are decided
+  at `nt_ui_begin` like the rest of the router, so a widget that vanishes keeps
+  a free pointer one frame, as Dear ImGui's `WantCaptureMouse`.
 - *R3 Live* (router). An element is live when it lies at or above the top
   overlay's catcher in last frame's paint order (always with no top, in a 3D
   ctx and for inspector panes) and outside an inert overlay body (see the
@@ -377,18 +380,22 @@ Engine rules:
   the dead ones. Opening pushes an overlay on top (opening an open one does
   nothing; a reopen leaves the old entry dead and starts it again on top, its
   subtree closed); each entry records the overlay it was opened inside, its
-  parent. A closed overlay fades and leaves when it is hidden; one neither
-  declared nor opened since the previous `nt_ui_begin` leaves at the next. The
+  parent; nothing opens inside a closing overlay, so an open overlay always
+  has an open parent. A closed overlay fades and leaves when it is hidden; an open one
+  neither declared nor opened since the previous `nt_ui_begin` closes there,
+  as `nt_ui_close` would, with the overlays opened inside it, before the
+  records are dropped and the top is chosen. The
   top is the highest overlay with a catcher (a popup, a modal, a menu's root)
   declared live last frame.
 - *S2 Opening closes popups.* Opening an overlay closes every open popup that
   is not its ancestor: its parent (the overlay being declared at the open call;
-  for a menu level, the level under it) and the overlays that one was opened
-  inside, as HTML walks a popover's invoker chain when a popover or a modal
-  dialog opens. So a second
-  menu closes the first, a modal closes an open combo, a popup a menu row opens
-  closes the sibling level, and a confirm a combo row opens keeps the list
-  open. Closing an overlay closes the overlays opened inside it.
+  for a menu level, the level under it; for a modal, the innermost such
+  overlay that is not a popup) and the overlays that one was opened inside, as
+  HTML walks a popover's invoker chain and `showModal` closes the auto
+  popovers. So a second menu closes the first, a modal closes an open combo or
+  menu (also the one whose item or row opened it), and a popup a menu row
+  opens closes the sibling level. Closing an overlay closes the overlays
+  opened inside it.
 - *S3 Own close* (`nt_ui_begin`). The top closes before anything of the frame
   declares: on Esc it owns (a popup; a modal whose style listens), or on a
   press of the primary pointer outside its panel grown by `close_pad`, on its
@@ -396,9 +403,10 @@ Engine rules:
   says so). It reads the close its declaration recorded last frame. It is
   closing that whole frame and registers no catcher, so the next press reaches
   what lies under it.
-- *S4 Limits*, asserted: more than `NT_UI_OVERLAY_MAX` overlays open or
-  fading, a stride whose tooltip band passes `int16`, and a root overlay inside
-  a game floating at or above `overlay_zband_stride`.
+- *S4 Limits*, asserted: more than `NT_UI_OVERLAY_MAX` stack slots taken (open,
+  fading, or left dead by a reopen until the next `nt_ui_begin`), a stride whose
+  tooltip band passes `int16`, and a root overlay inside a game floating at or
+  above `overlay_zband_stride`.
 
 **Overlay lifecycle.** An overlay's phase is decided at its declaration from
 whether it is open and whether it was declared open last frame:
@@ -780,8 +788,9 @@ inline (`if (nt_ui_menu_item(...)) act();`, a combo selectable returns clicked).
 then the game declares the rows and calls the matching end.
 
 Both are popups (see "Input ownership"). The combo trigger opens its list; a
-pick, Esc or an outside press closes it (the list's stack id is the combo's
-own). The game opens a menu with `nt_ui_menu_open(menu, ctx, menu_id, x, y)` at
+pick, Esc or an outside press closes it. The list is the overlay under the
+combo id (`nt_ui_is_open` and `nt_ui_close` take it); the trigger widget's id
+is `nt_ui_combo_trigger_id(id)`. The game opens a menu with `nt_ui_menu_open(menu, ctx, menu_id, x, y)` at
 a point in UI space, from anywhere outside its begin..end (`nt_ui_pointer_pos`,
 inside a UI frame, gives the primary pointer in that space of a 2D context);
 the menu keeps `menu_id`, and `nt_ui_close` and `nt_ui_is_open` take it. The

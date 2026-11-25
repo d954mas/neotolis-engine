@@ -3103,6 +3103,7 @@ static void render_menu_global(nt_ui_context_t *ctx, tab_state_t *st) {
         }
         if (nt_ui_menu_item(menu, MK_PREFS, "Preferences")) {
             st->menu.last_chosen = "Preferences";
+            nt_ui_modal_open(ctx, s_id_modal_confirm); /* a modal opened from a menu item outlives the menu (S2) */
         }
         if (nt_ui_menu_item(menu, MK_QUIT, "Quit")) {
             st->menu.last_chosen = "Quit";
@@ -3761,10 +3762,8 @@ static void frame(void) {
         }
 
         /* Modal declared at ROOT (after the scene, before nt_ui_end): no scissor ancestor, so the
-         * floating panel renders unclipped. Shows while it is open; only the Modals tab drives it. */
-        if (g_tabs[s_active_tab].render == render_modals) {
-            render_modal_overlay(s_ctx, &s_state);
-        }
+         * floating panel renders unclipped. Shows while it is open: the Modals tab and the menu's Preferences open it. */
+        render_modal_overlay(s_ctx, &s_state);
 
         nt_ui_end(s_ctx);
 

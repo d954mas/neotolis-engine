@@ -1,9 +1,11 @@
 /* Randomized invariant checker for the overlay stack and the input router (spec chapter UI, "Input ownership",
  * "Popup-core", "Immediate menu + combo"). Fixed seeds drive opens, closes, reopens and nested opens made before
- * nt_ui_begin, between and inside the declarations, a shuffled root declaration order, pointer moves, presses
- * and releases, Esc, Down, Right and Enter; every frame checks the stack, paint versus router order, catcher
- * records, the deaf OPENING/CLOSING bodies, the router answers and click-through. It reads internals on
- * purpose: it checks the engine's own bookkeeping, not one game story. */
+ * nt_ui_begin, between and inside the declarations, modals opened from menu and combo rows, a shuffled root
+ * declaration order with units left out, pointer moves, presses, releases and wheel, Esc, Down, Right and Enter;
+ * every frame checks the stack, paint versus router order, catcher records, the deaf OPENING/CLOSING bodies, the
+ * router answers, click-through, the gesture's pointer owner, the parent chain, the deaf scroll and the modal
+ * opened from a light overlay. It reads internals on purpose: it checks the engine's own bookkeeping, not one
+ * game story. */
 
 #include <stdalign.h>
 #include <stdarg.h>
@@ -24,6 +26,8 @@
 #include "ui/nt_ui_menu.h"
 #include "ui/nt_ui_modal.h"
 #include "ui/nt_ui_popup.h"
+#include "ui/nt_ui_scroll.h"
+#include "ui/nt_ui_state.h"
 #include "unity.h"
 
 /* 1 prints every frame's operations as it runs: the trace to read when an engine assert stops the run. */
@@ -31,7 +35,7 @@
 #define UI_INV_TRACE 0
 #endif
 
-#define SEEDS 12
+#define SEEDS 32
 #define FRAMES 500
 #define LOG_W 320
 #define TRACE_BACK 16
@@ -43,11 +47,20 @@ static ui_walker_fixture_t s_fx;
 // #region ids
 enum { OV_P0, OV_P1, OV_M0, OV_M1, OV_P2, OV_LIST, OV_MENU, OV_SUB, OV_N, OV_BASE = OV_N };
 enum { PH_OPENING, PH_OPEN, PH_CLOSING };
-enum { INV_STACK, INV_PAINT, INV_CATCHER, INV_OPENING, INV_ROUTER, INV_THROUGH, INV_N };
+enum { INV_STACK, INV_PAINT, INV_CATCHER, INV_OPENING, INV_ROUTER, INV_THROUGH, INV_GESTURE, INV_TREE, INV_WHEEL, INV_MODAL, INV_N };
 
 static const char *const s_ov_name[] = {"P0", "P1", "M0", "M1", "P2", "LIST", "MENU", "SUB", "BASE"};
 static const char *const s_ph_name[] = {"OPENING", "OPEN", "CLOSING"};
-static const char *const s_inv_name[] = {"1 stack", "2 paint=router order", "3 closed leaves no catcher", "4 OPENING/CLOSING deaf", "5 router fixed at begin", "6 no click through"};
+static const char *const s_inv_name[] = {"1 stack",
+                                         "2 paint=router order",
+                                         "3 closed leaves no catcher",
+                                         "4 OPENING/CLOSING deaf",
+                                         "5 router fixed at begin",
+                                         "6 no click through",
+                                         "7 gesture keeps its pointer owner",
+                                         "8 open overlay has an open parent",
+                                         "9 deaf scroll takes no wheel",
+                                         "10 modal from a light overlay closes it"};
 
 #define ID_P0 0x6A0001U
 #define ID_P1 0x6A0002U
@@ -55,8 +68,7 @@ static const char *const s_inv_name[] = {"1 stack", "2 paint=router order", "3 c
 #define ID_M1 0x6A0004U
 #define ID_P2 0x6A0005U
 #define ID_COMBO 0x6A0010U
-/* The combo list's stack id: dropdown_popup_id, nt_ui_derived_id(combo, NT_UI_DROPDOWN_POPUP_SALT). */
-#define ID_LIST (ID_COMBO ^ 0x44D90000U)
+#define ID_LIST ID_COMBO /* the list is the overlay under the combo id */
 #define ID_MENU 0x6A0020U
 #define BTN_P0 0x6A0101U
 #define BTN_P1 0x6A0102U
@@ -72,6 +84,8 @@ static const char *const s_inv_name[] = {"1 stack", "2 paint=router order", "3 c
 #define KEY_ROW 3U
 #define KEY_L1 10U
 #define KEY_L2 11U
+#define COMBO_ROWS 6       /* over max_visible_rows, so the list scrolls */
+#define COMBO_CUSTOM_ROW 1 /* the row whose body may open a modal */
 // #endregion
 
 // #region world
@@ -109,6 +123,20 @@ typedef struct {
     uint32_t opened_since[NT_UI_OVERLAY_MAX];
     uint8_t opened_since_n;
     uint32_t pre_changed; /* bit per OV_*: closed or (re)opened after the last nt_ui_end, before this nt_ui_begin */
+    uint32_t declared;    /* bit per OV_*: its begin ran this frame */
+    uint32_t orphans;     /* bit per OV_*: open at the last end, declared, its open parent was not */
+    uint32_t born_orphan; /* bit per OV_*: last opened inside a body that was already closing */
+    /* The gesture from the last press up to its release, and the owner its press frame reported. */
+    bool drag_active;
+    bool drag_ui;
+    /* The wheel of this frame and the list scroll as nt_ui_begin left it. */
+    float wheel_now;
+    bool wheel_on_list;
+    nt_ui_scroll_state_t list_scroll_before;
+    int list_phase; /* the list's phase this frame, -1 when it did not show */
+    /* A modal opened from inside a light overlay this frame, until a later op in the frame touches the stack. */
+    bool from_armed;
+    int from_opener;
     char log[FRAMES][LOG_W];
     int fail_count[INV_N];
     char fail_msg[INV_N][512];
@@ -116,6 +144,7 @@ typedef struct {
     char note_msg[512];
     /* Coverage, printed at the end: an invariant that never ran proves nothing. */
     int n_top_frames, n_paint_pairs, n_opening, n_closing, n_deaf_releases, n_clicks[OV_N + 1];
+    int n_born_orphans, n_game_drag_over_ui, n_game_release_over_ui, n_orphans, n_deaf_wheels, n_closing_wheels, n_open_wheel_moves, n_modal_from[OV_N];
 } world_t;
 
 static world_t w;
@@ -227,6 +256,79 @@ static int32_t order_of(uint32_t id) {
     const int32_t slot = nt_ui_internal_live_slot(w.ctx, id);
     return (slot >= 0) ? (int32_t)w.ctx->hit_baked[slot].order : -1;
 }
+
+static int ov_of(uint32_t id) {
+    for (int ov = 0; ov < OV_N; ++ov) {
+        if (id != 0U && ov_id(ov) == id) {
+            return ov;
+        }
+    }
+    return -1;
+}
+
+static bool open_on_stack(uint32_t id) {
+    const int32_t at = stack_index(id);
+    return at >= 0 && w.ctx->overlays[at].open;
+}
+
+/* Closing an overlay closes the overlays opened inside it, wherever they are declared (S1, S2), and nothing opens
+ * inside a closing one: an open overlay always has an open parent. */
+static void check_tree(const char *when) {
+    for (uint8_t i = 0U; i < w.ctx->overlay_count; ++i) {
+        const nt_ui_overlay_t *o = &w.ctx->overlays[i];
+        if (o->id != 0U && o->open && o->parent != 0U && !open_on_stack(o->parent)) {
+            fail(INV_TREE, "%s: %s open although %s, the overlay it was opened inside, is not", when, id_name(o->id), id_name(o->parent));
+        }
+    }
+}
+
+static uint32_t list_scroll_id(void) { return nt_ui_dropdown_test_scroll_id(ID_COMBO); }
+
+static bool list_scroll_read(nt_ui_scroll_state_t *out) {
+    const nt_ui_scroll_state_t *st = (const nt_ui_scroll_state_t *)nt_ui_state_find(w.ctx, list_scroll_id());
+    if (st != NULL) {
+        *out = *st;
+    }
+    return st != NULL;
+}
+
+#define TARGETS_N 16U
+
+/* What the pointer aims at: a widget of every overlay and of the base. */
+static uint32_t pointer_targets(uint32_t out[TARGETS_N]) {
+    const uint32_t sub_row = nt_ui_menu_test_item_id(ID_MENU, KEY_SUB);
+    const uint32_t ids[] = {BTN_P0,
+                            BTN_P1,
+                            BTN_M0,
+                            BTN_M1,
+                            BTN_P2,
+                            BTN_MROW,
+                            nt_ui_combo_trigger_id(ID_COMBO),
+                            nt_ui_dropdown_test_combo_row_id(ID_COMBO, ROW_KEY(0)),
+                            nt_ui_dropdown_test_combo_row_id(ID_COMBO, ROW_KEY(COMBO_CUSTOM_ROW)),
+                            nt_ui_dropdown_test_combo_row_id(ID_COMBO, ROW_KEY(2)),
+                            nt_ui_menu_test_item_id(ID_MENU, KEY_EDIT),
+                            sub_row,
+                            nt_ui_menu_test_item_id(sub_row, KEY_L1),
+                            BTN_BASE0,
+                            BTN_BASE1};
+    const uint32_t n = (uint32_t)(sizeof ids / sizeof ids[0]);
+    memcpy(out, ids, sizeof ids);
+    return n;
+}
+
+/* The pointer lies on a target last frame laid out. */
+static bool pointer_over_ui(void) {
+    uint32_t ids[TARGETS_N];
+    const uint32_t n = pointer_targets(ids);
+    for (uint32_t i = 0U; i < n; ++i) {
+        const nt_ui_bbox_t bb = nt_ui_get_bbox(w.ctx, ids[i]);
+        if (bb.found && w.sc.x >= bb.x && w.sc.x < bb.x + bb.width && w.sc.y >= bb.y && w.sc.y < bb.y + bb.height) {
+            return true;
+        }
+    }
+    return false;
+}
 // #endregion
 
 // #region checks at nt_ui_begin
@@ -314,6 +416,37 @@ static uint32_t allowed_by_top(void) {
     return bits;
 }
 
+/* An overlay declared last frame whose open parent was not closes at this begin with that parent (S1). */
+static void check_orphans(void) {
+    for (int ov = 0; ov < OV_N; ++ov) {
+        if ((w.orphans & (1U << (uint32_t)ov)) == 0U) {
+            continue;
+        }
+        ++w.n_orphans;
+        const uint32_t id = ov_id(ov);
+        if (nt_ui_is_open(w.ctx, id) && !in_list(w.opened_since, w.opened_since_n, id)) {
+            fail(INV_TREE, "%s stayed open at the begin after the overlay it was opened inside was left out", s_ov_name[ov]);
+        }
+    }
+}
+
+/* A gesture's owner keeps nt_ui_wants_pointer from its press to its release, over the UI too (R2). */
+static void check_gesture(void) {
+    if (w.press_now) {
+        w.drag_active = true;
+        w.drag_ui = w.wants_pointer;
+    } else if (w.drag_active && w.wants_pointer != w.drag_ui) {
+        fail(INV_GESTURE, "nt_ui_wants_pointer %d during a %s gesture%s", (int)w.wants_pointer, w.drag_ui ? "UI" : "game", w.release_now ? " on its release" : "");
+    }
+    if (w.drag_active && !w.drag_ui && pointer_over_ui()) {
+        w.n_game_drag_over_ui += 1;
+        w.n_game_release_over_ui += w.release_now ? 1 : 0;
+    }
+    if (w.release_now) {
+        w.drag_active = false;
+    }
+}
+
 static void after_begin(void) {
     w.begin_count = w.ctx->overlay_count;
     w.top = w.ctx->overlay_top;
@@ -324,6 +457,8 @@ static void after_begin(void) {
     check_stack_after_begin();
     check_paint_order();
     check_catchers();
+    check_orphans();
+    check_tree("after begin");
     w.allowed = allowed_by_top();
     w.n_top_frames += (w.top != 0U) ? 1 : 0;
     if (w.press_now) {
@@ -331,6 +466,9 @@ static void after_begin(void) {
     }
     w.wants_pointer = nt_ui_wants_pointer(w.ctx);
     w.wants_keyboard = nt_ui_wants_keyboard(w.ctx);
+    check_gesture();
+    w.wheel_on_list = w.wheel_now != 0.0F && w.ctx->wheel_owner[0][1] == list_scroll_id() && list_scroll_read(&w.list_scroll_before);
+    w.list_phase = -1;
     logf_frame(" | top %s", id_name(w.top));
 }
 // #endregion
@@ -350,6 +488,8 @@ static void op_open(int ov, const char *where) {
         return; /* an overlay is not opened inside its own declaration */
     }
     --w.opens_left;
+    w.from_armed = false;
+    const int32_t before = stack_index(ov_id(ov)); /* a (re)open appends a new entry; opening an open popup does nothing */
     switch (ov) {
     case OV_P0:
     case OV_P1:
@@ -367,6 +507,14 @@ static void op_open(int ov, const char *where) {
         break;
     }
     }
+    const int32_t at = stack_index(ov_id(ov));
+    const uint32_t parent = (at >= 0) ? w.ctx->overlays[at].parent : 0U;
+    const bool orphan = parent != 0U && !open_on_stack(parent);
+    const uint32_t bit = 1U << (uint32_t)ov;
+    if (at != before) {
+        w.born_orphan = orphan ? (w.born_orphan | bit) : (w.born_orphan & ~bit);
+        w.n_born_orphans += orphan ? 1 : 0;
+    }
     logf_frame(" %s:open %s", where, s_ov_name[ov]);
 }
 
@@ -374,8 +522,22 @@ static void op_close(int ov, const char *where) {
     const uint32_t id = ov_id(ov);
     if (id != 0U) {
         nt_ui_close(w.ctx, id);
+        w.from_armed = false;
         logf_frame(" %s:close %s", where, s_ov_name[ov]);
     }
+}
+
+/* A modal opened from inside the open light overlay `opener` (a menu level, the combo list) while it is declared:
+ * the opener closes and the modal stays (S2, as showModal). */
+static void op_modal_from(int opener, const char *where) {
+    if (w.opens_left <= 0 || nt_ui_is_open(w.ctx, ID_M0) || !nt_ui_is_open(w.ctx, ov_id(opener))) {
+        return;
+    }
+    --w.opens_left;
+    nt_ui_modal_open(w.ctx, ID_M0);
+    w.from_armed = true;
+    w.from_opener = opener;
+    logf_frame(" %s:modal M0", where);
 }
 
 /* The overlay whose body button the primary pointer holds, else a random openable one. */
@@ -482,6 +644,7 @@ static void decl_popup(int ov, uint32_t btn, float x, float y, float ease, void 
     ps.ease_speed = ease;
     const nt_ui_popup_anchor_t anc = {.x = x, .y = y, .w = 10.0F, .h = 10.0F, .prefer_side = NT_UI_POPUP_BELOW};
     const bool open_before = nt_ui_is_open(w.ctx, ov_id(ov));
+    w.declared |= 1U << (uint32_t)ov;
     if (!nt_ui_popup_begin(w.ctx, ov_id(ov), &ps, &anc, NULL)) {
         return;
     }
@@ -500,6 +663,7 @@ static void decl_modal(int ov, uint32_t btn, uint8_t flags, void (*inner)(void))
     ms.ease_speed = 14.0F;
     ms.flags = flags;
     const bool open_before = nt_ui_is_open(w.ctx, ov_id(ov));
+    w.declared |= 1U << (uint32_t)ov;
     if (!nt_ui_modal_begin(w.ctx, ov_id(ov), &ms, NULL)) {
         return;
     }
@@ -513,7 +677,8 @@ static void decl_modal(int ov, uint32_t btn, uint8_t flags, void (*inner)(void))
     nt_ui_modal_end(w.ctx);
 }
 
-/* P1's body holds M1, M0's body holds P2: each is opened inside its parent's body on some frames. */
+/* P1's body holds M1, M0's body holds P2: each is opened inside its parent's body on some frames. M0's body also
+ * opens P0, declared at the root. */
 static void inner_m1(void) {
     if (chance(15U)) {
         op_open(OV_M1, "P1body");
@@ -525,6 +690,9 @@ static void inner_p2(void) {
     if (chance(15U)) {
         op_open(OV_P2, "M0body");
     }
+    if (chance(10U)) {
+        op_open(OV_P0, "M0body"); /* declared at the root: closes with M0 though declared elsewhere */
+    }
     decl_popup(OV_P2, BTN_P2, 420.0F, 330.0F, 0.0F, NULL);
 }
 
@@ -532,10 +700,24 @@ static void decl_combo(void) {
     static const char *const rows[] = {"Alpha", "Beta", "Gamma"};
     CLAY({.id = (Clay_ElementId){.id = nt_ui_fmix_id(ID_COMBO, 1U)}, .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = 100.0F, .y = 260.0F}}}) {
         const bool open_before = nt_ui_is_open(w.ctx, ID_LIST);
+        w.declared |= 1U << (uint32_t)OV_LIST;
         if (nt_ui_combo_begin(w.ctx, NULL, 0U, ID_COMBO, "pick", &w.dd_style)) {
-            chain_push(OV_LIST, take_phase(OV_LIST, open_before));
-            for (int i = 0; i < 3; ++i) {
-                if (nt_ui_combo_selectable(w.ctx, ROW_KEY(i), rows[i], w.combo_sel == i)) {
+            const uint8_t phase = take_phase(OV_LIST, open_before);
+            w.list_phase = phase;
+            chain_push(OV_LIST, phase);
+            for (int i = 0; i < COMBO_ROWS; ++i) {
+                bool picked = false;
+                if (i == COMBO_CUSTOM_ROW) {
+                    nt_ui_combo_selectable_begin(w.ctx, ROW_KEY(i), w.combo_sel == i);
+                    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(90), CLAY_SIZING_FIXED(20)}}}) {}
+                    if (chance(4U)) {
+                        op_modal_from(OV_LIST, "LISTrow");
+                    }
+                    picked = nt_ui_combo_selectable_end(w.ctx);
+                } else {
+                    picked = nt_ui_combo_selectable(w.ctx, ROW_KEY(i), rows[i % 3], w.combo_sel == i);
+                }
+                if (picked) {
                     w.combo_sel = i;
                     on_click(OV_LIST, nt_ui_dropdown_test_combo_row_id(ID_COMBO, ROW_KEY(i)), true);
                 }
@@ -549,14 +731,19 @@ static void decl_combo(void) {
 
 static void decl_menu(void) {
     const bool open_before = nt_ui_is_open(w.ctx, ID_MENU);
+    w.declared |= 1U << (uint32_t)OV_MENU;
     if (!nt_ui_menu_begin(&w.menu, w.ctx, NULL, 0U, &w.menu_style)) {
         return;
     }
     chain_push(OV_MENU, take_phase(OV_MENU, open_before));
     const uint32_t sub_row = nt_ui_menu_test_item_id(ID_MENU, KEY_SUB);
     const bool sub_before = w.sub_id != 0U && nt_ui_is_open(w.ctx, w.sub_id);
+    w.declared |= 1U << (uint32_t)OV_SUB;
     if (nt_ui_menu_submenu_begin(&w.menu, KEY_SUB, "Sub")) {
         chain_push(OV_SUB, take_phase(OV_SUB, sub_before));
+        if (chance(4U)) {
+            op_modal_from(OV_SUB, "SUB");
+        }
         if (nt_ui_menu_item(&w.menu, KEY_L1, "Leaf1")) {
             on_click(OV_SUB, nt_ui_menu_test_item_id(sub_row, KEY_L1), true);
         }
@@ -571,6 +758,9 @@ static void decl_menu(void) {
     }
     nt_ui_menu_item_begin(&w.menu, KEY_ROW, true, false);
     button(BTN_MROW, OV_MENU);
+    if (chance(4U)) {
+        op_modal_from(OV_MENU, "MROW");
+    }
     (void)nt_ui_menu_item_end(&w.menu);
     --w.chain_n;
     nt_ui_menu_end(&w.menu);
@@ -620,6 +810,10 @@ static void frame_fn(void *game) {
     logf_frame(" | ");
     for (int i = 0; i < U_N; ++i) {
         maybe_op(2U, "mid");
+        if (chance(4U)) {
+            logf_frame(" skip%d", units[i]); /* the game leaves a unit out: its overlays close at the next begin */
+            continue;
+        }
         decl_unit(units[i]);
     }
     maybe_op(2U, "late");
@@ -634,28 +828,15 @@ static void frame_fn(void *game) {
 
 // #region driver
 static uint32_t pointer_target(void) {
-    const uint32_t sub_row = nt_ui_menu_test_item_id(ID_MENU, KEY_SUB);
-    const uint32_t targets[] = {BTN_P0,
-                                BTN_P1,
-                                BTN_M0,
-                                BTN_M1,
-                                BTN_P2,
-                                BTN_MROW,
-                                ID_COMBO,
-                                nt_ui_dropdown_test_combo_row_id(ID_COMBO, ROW_KEY(0)),
-                                nt_ui_dropdown_test_combo_row_id(ID_COMBO, ROW_KEY(2)),
-                                nt_ui_menu_test_item_id(ID_MENU, KEY_EDIT),
-                                sub_row,
-                                nt_ui_menu_test_item_id(sub_row, KEY_L1),
-                                BTN_BASE0,
-                                BTN_BASE1};
-    return targets[rnd_below((uint32_t)(sizeof targets / sizeof targets[0]))];
+    uint32_t ids[TARGETS_N];
+    return ids[rnd_below(pointer_targets(ids))];
 }
 
 static void pick_pointer(float *x, float *y) {
     const uint32_t r = rnd_below(100U);
-    for (int tries = 0; r < 70U && tries < 6; ++tries) { /* aim at what the last frame laid out */
-        const uint32_t id = pointer_target();
+    const bool at_list = nt_ui_is_open(w.ctx, ID_LIST) && chance(50U); /* so the wheel lands on its scroll */
+    for (int tries = 0; r < 70U && tries < 6; ++tries) {               /* aim at what the last frame laid out */
+        const uint32_t id = at_list ? nt_ui_dropdown_test_combo_row_id(ID_COMBO, ROW_KEY(rnd_below(3U))) : pointer_target();
         const nt_ui_bbox_t bb = nt_ui_get_bbox(w.ctx, id);
         if (bb.found) {
             *x = bb.x + (bb.width * 0.5F) + (float)rnd_below(9U) - 4.0F;
@@ -706,10 +887,50 @@ static void snapshot_end(void) {
         fail(INV_STACK, "after nt_ui_end overlay_depth %u, overlay_count %u", (unsigned)ctx->overlay_depth, (unsigned)ctx->overlay_count);
     }
     w.open_end_n = 0U;
+    w.orphans = 0U;
     for (uint8_t i = 0U; i < ctx->overlay_count; ++i) {
-        if (ctx->overlays[i].id != 0U && ctx->overlays[i].open) {
-            w.open_end[w.open_end_n++] = ctx->overlays[i].id;
+        const nt_ui_overlay_t *o = &ctx->overlays[i];
+        if (o->id == 0U || !o->open) {
+            continue;
         }
+        w.open_end[w.open_end_n++] = o->id;
+        const int ov = ov_of(o->id);
+        const int parent = ov_of(o->parent);
+        if (ov >= 0 && parent >= 0 && open_on_stack(o->parent) && (w.declared & (1U << (uint32_t)ov)) != 0U && (w.declared & (1U << (uint32_t)parent)) == 0U) {
+            w.orphans |= 1U << (uint32_t)ov;
+        }
+    }
+    check_tree("after end");
+}
+
+/* A scroll in a deaf (OPENING or CLOSING) body takes no wheel of that frame; an open one does. */
+static void check_wheel(void) {
+    nt_ui_scroll_state_t now;
+    const nt_ui_scroll_state_t *b = &w.list_scroll_before;
+    const bool settled = b->vel[1] == 0.0F && b->pos[1] == b->target[1] && (b->flags & NT_UI_SCROLL_FLAG_SCROLL_TO) == 0U;
+    if (!w.wheel_on_list || w.list_phase < 0 || !settled || !list_scroll_read(&now)) {
+        return;
+    }
+    if (w.list_phase != PH_OPEN) {
+        ++w.n_deaf_wheels;
+        w.n_closing_wheels += (w.list_phase == PH_CLOSING) ? 1 : 0;
+        if (now.pos[1] != b->pos[1]) {
+            fail(INV_WHEEL, "the %s list scrolled from %.2f to %.2f on the frame's wheel", s_ph_name[w.list_phase], (double)b->pos[1], (double)now.pos[1]);
+        }
+    } else {
+        w.n_open_wheel_moves += (now.pos[1] != b->pos[1]) ? 1 : 0;
+    }
+}
+
+/* The light overlay a modal was opened from is closed after that frame, the modal open (S2). */
+static void check_modal_from(void) {
+    if (!w.from_armed) {
+        return;
+    }
+    ++w.n_modal_from[w.from_opener];
+    const bool opener_open = nt_ui_is_open(w.ctx, ov_id(w.from_opener)) || (w.from_opener == OV_SUB && nt_ui_is_open(w.ctx, ID_MENU));
+    if (opener_open || !nt_ui_is_open(w.ctx, ID_M0)) {
+        fail(INV_MODAL, "M0 opened from %s: %s open %d, M0 open %d after the frame", s_ov_name[w.from_opener], s_ov_name[w.from_opener], (int)opener_open, (int)nt_ui_is_open(w.ctx, ID_M0));
     }
 }
 
@@ -726,6 +947,8 @@ static void snapshot_opened_since(void) {
 static void run_frame(void) {
     w.log[w.frame][0] = '\0';
     w.opens_left = OPENS_PER_FRAME;
+    w.declared = 0U;
+    w.from_armed = false;
     maybe_op(8U, "pre");
     maybe_op(3U, "pre");
     w.pre_changed = observe();
@@ -752,15 +975,21 @@ static void run_frame(void) {
     w.press_now = press >= 0;
     w.release_now = release >= 0;
     w.enter_now = key == NT_KEY_ENTER;
-    logf_frame("%s%s%s", (press >= 0) ? " PRESS" : "", (release >= 0) ? " RELEASE" : "", key_name(key));
+    w.wheel_now = 0.0F;
+    if (chance(20U)) {
+        w.wheel_now = chance(50U) ? 1.0F : -1.0F;
+    }
+    logf_frame("%s%s%s%s", (press >= 0) ? " PRESS" : "", (release >= 0) ? " RELEASE" : "", key_name(key), (w.wheel_now != 0.0F) ? " WHEEL" : "");
     if (key != NT_KEY_COUNT) {
         nt_input_feed(nt_test_key(key, true));
     }
-    sc_step(&w.sc, x, y, press, release);
+    sc_step_wheel(&w.sc, x, y, press, release, w.wheel_now);
     if (key != NT_KEY_COUNT) {
         nt_input_feed(nt_test_key(key, false));
     }
     snapshot_end();
+    check_wheel();
+    check_modal_from();
     (void)observe();
 #if UI_INV_TRACE
     printf("s%u f%03d %s\n", (unsigned)w.seed, w.frame, w.log[w.frame]);
@@ -778,7 +1007,12 @@ static void run_seed(uint32_t seed) {
     w.menu = (nt_ui_menu_t){0};
     w.menu_style = nt_ui_menu_style_defaults();
     w.dd_style = nt_ui_dropdown_style_defaults();
+    w.dd_style.max_visible_rows = 3U;
+    w.dd_style.open_ease_speed = 14.0F; /* the list fades, so a closing list still declares its scroll */
+    w.dd_style.list_scroll.wheel_ease_speed = 0.0F;
     w.combo_sel = -1;
+    w.drag_active = false;
+    w.born_orphan = 0U;
     w.sub_id = 0U;
     for (int ov = 0; ov < OV_N; ++ov) {
         w.ov_index[ov] = -1;
@@ -819,9 +1053,17 @@ static void test_overlay_invariants_hold_over_random_frames(void) {
         printf(" %s %d", s_ov_name[ov], w.n_clicks[ov]);
     }
     printf("\n");
+    printf("coverage: game drag over the UI %d frames (%d releases), %d children of a left-out parent (%d opened in a closing body), %d wheels on a deaf list (%d CLOSING), %d on an open one "
+           "moved it, modal opened from LIST %d "
+           "MENU %d SUB %d\n",
+           w.n_game_drag_over_ui, w.n_game_release_over_ui, w.n_orphans, w.n_born_orphans, w.n_deaf_wheels, w.n_closing_wheels, w.n_open_wheel_moves, w.n_modal_from[OV_LIST], w.n_modal_from[OV_MENU],
+           w.n_modal_from[OV_SUB]);
+    const bool ran = w.n_game_release_over_ui > 0 && w.n_orphans > 0 && w.n_closing_wheels > 0 && w.n_open_wheel_moves > 0 && w.n_modal_from[OV_LIST] > 0 && w.n_modal_from[OV_MENU] > 0 &&
+                     w.n_modal_from[OV_SUB] > 0;
     if (used != 0U) {
         TEST_FAIL_MESSAGE(summary);
     }
+    TEST_ASSERT_TRUE_MESSAGE(ran, "an invariant that never ran proves nothing: a coverage count above is 0");
 }
 
 void setUp(void) {}

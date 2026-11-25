@@ -552,6 +552,12 @@ void nt_ui_begin(nt_ui_context_t *ctx, const nt_ui_frame_desc_t *frame) {
     ctx->overlay_depth = 0U; /* overlay begin++/end-- balance across the frame (asserted == 0 at end) */
     ctx->inert_from = 0U;
     ctx->closing_from = 0U;
+    /* An open overlay the game stopped declaring closes like nt_ui_close: with the overlays opened inside it. */
+    for (uint8_t i = 0U; i < ctx->overlay_count; ++i) {
+        if (ctx->overlays[i].open && !ctx->overlays[i].seen) {
+            overlay_close_at(ctx, i, NT_UI_POPUP_CLOSE_GAME);
+        }
+    }
     drop_closed_overlay_records(ctx); /* before the prune clears the record ranges; closes made between frames count */
     /* S1: an overlay neither declared nor opened since the last begin leaves; the top is the highest live one with
      * a catcher. */
@@ -3009,14 +3015,7 @@ NT_NOINLINE int32_t nt_ui_internal_overlay_index(const nt_ui_context_t *ctx, uin
     return -1;
 }
 
-uint32_t nt_ui_internal_overlay_here(const nt_ui_context_t *ctx) {
-    for (uint8_t d = ctx->overlay_depth; d > 0U; --d) {
-        if (ctx->overlay_decl[d - 1U] != 0U) {
-            return ctx->overlay_decl[d - 1U];
-        }
-    }
-    return 0U;
-}
+uint32_t nt_ui_internal_overlay_here(const nt_ui_context_t *ctx) { return (ctx->overlay_depth > 0U) ? ctx->overlay_decl[ctx->overlay_depth - 1U] : 0U; }
 
 uint32_t nt_ui_internal_overlay_last_open(const nt_ui_context_t *ctx) {
     for (uint8_t i = ctx->overlay_count; i > 0U; --i) {
@@ -3060,6 +3059,10 @@ NT_NOINLINE void nt_ui_internal_overlay_open(nt_ui_context_t *ctx, uint32_t id, 
     if (at >= 0 && ctx->overlays[at].open && ctx->overlays[at].opener == opener) {
         return;
     }
+    const int32_t in = nt_ui_internal_overlay_index(ctx, parent);
+    if (in >= 0 && !ctx->overlays[in].open) {
+        return; /* inside a closing overlay nothing opens: an open overlay always has an open parent */
+    }
     if (at >= 0) {
         overlay_close_at(ctx, at, NT_UI_POPUP_CLOSE_REPLACED); /* a reopen starts a new subtree on top */
         /* Dead until nt_ui_begin, so no band moves this frame; it keeps its records' range for nt_ui_end to drop. */
@@ -3067,7 +3070,7 @@ NT_NOINLINE void nt_ui_internal_overlay_open(nt_ui_context_t *ctx, uint32_t id, 
         ctx->overlays[at].parent = 0U;
         ctx->overlays[at].seen = false;
     }
-    NT_ASSERT(ctx->overlay_count < NT_UI_OVERLAY_MAX && "nt_ui: more than NT_UI_OVERLAY_MAX overlays open or fading");
+    NT_ASSERT(ctx->overlay_count < NT_UI_OVERLAY_MAX && "nt_ui: NT_UI_OVERLAY_MAX stack slots taken (open, fading, or reopened this frame)");
     /* S2: the ancestors are `parent` and the overlays it was opened inside, as HTML walks a popover's invoker
      * chain; every other light overlay closes. */
     uint32_t anc[NT_UI_OVERLAY_MAX];
@@ -3146,11 +3149,12 @@ bool nt_ui_wants_pointer(const nt_ui_context_t *ctx) {
     }
 #endif
     for (uint32_t i = 0; i < ctx->frame_pointer_count; ++i) {
-        if (ctx->captures[i].ui_gesture) {
-            return true; /* a capture and a pending scroll start from such a press too */
-        }
-        if (ctx->pointer_hot[i].id != 0U) {
-            return true; /* over last frame's record: decided at nt_ui_begin, like the rest of the router */
+        const nt_pointer_t *p = &ctx->frame_pointers[i];
+        const bool held = p->buttons[NT_BUTTON_LEFT].is_down || p->buttons[NT_BUTTON_LEFT].is_released || p->buttons[NT_BUTTON_RIGHT].is_down || p->buttons[NT_BUTTON_RIGHT].is_released;
+        /* A gesture's owner keeps the pointer to its release, as Dear ImGui's MouseDownOwned; a free pointer is the UI's
+         * over last frame's record. Both decided at nt_ui_begin. */
+        if (held ? ctx->captures[i].ui_gesture : ctx->pointer_hot[i].id != 0U) {
+            return true;
         }
     }
     return false;
