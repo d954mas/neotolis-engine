@@ -3025,8 +3025,8 @@ static void render_tooltip(nt_ui_context_t *ctx, tab_state_t *st) {
         .cornerRadius = CLAY_CORNER_RADIUS(8)};
 
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Hover a target and wait ~0.5s for its tooltip; move away to hide. The tooltip never blocks clicks underneath.", g_current->caption);
-    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT),
-                "The panel is a slice9 frame with a caret pointing at the target + a drop-shadow; near the bottom border the caret flips to the panel's bottom edge.", g_current->caption);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "The panel is a slice9 frame with a caret pointing at the target; near the bottom border the caret flips to the panel's bottom edge.",
+                g_current->caption);
 
     /* The targets are plain buttons so they are still clickable (proving the tooltip has no catcher).
      * The tooltip is declared AFTER each target so the target carries a queryable bbox this frame. */
