@@ -25,10 +25,9 @@ nt_ui_modal_style_t nt_ui_modal_style_defaults(void) {
     const nt_ui_modal_anim_t scale_pop = {.type = NT_UI_MODAL_ANIM_SCALE_POP, .scale_start = 0.92F}; /* Material/iOS default */
     return (nt_ui_modal_style_t){
         .ease_speed = 14.0F,
-        .backdrop_alpha = 0.55F,
         .open = scale_pop,
         .close = scale_pop,            /* symmetric: the exit reverses the entrance */
-        .backdrop_color = 0xFF000000U, /* black; alpha is scaled by t*backdrop_alpha */
+        .backdrop_color = 0x8C000000U, /* black at 0.55 peak opacity; the alpha rides t */
         .layer = 0U,
         .flags = (uint8_t)(NT_UI_MODAL_LISTEN_ESC | NT_UI_MODAL_CLOSE_ON_BACKDROP),
         .backdrop_close_pad = 16,
@@ -78,7 +77,7 @@ static NT_NOINLINE nt_ui_transform_t modal_anim_start(const nt_ui_modal_anim_t *
 bool nt_ui_modal_begin(nt_ui_context_t *ctx, uint32_t id, const nt_ui_modal_style_t *style, nt_ui_popup_info_t *info) {
     NT_ASSERT(style != NULL && "nt_ui_modal_begin: style must be non-NULL");
     NT_ASSERT(isfinite(style->ease_speed) && style->ease_speed >= 0.0F && "nt_ui_modal_begin: ease_speed must be finite >= 0");
-    NT_ASSERT(isfinite(style->backdrop_alpha) && style->backdrop_alpha >= 0.0F && style->backdrop_alpha <= 1.0F && "nt_ui_modal_begin: backdrop_alpha must be in [0,1]");
+
     NT_ASSERT(style->backdrop_close_pad >= 0 && "nt_ui_modal_begin: backdrop_close_pad must be >= 0");
 
     /* Map the modal onto popup-core: centered placement + dim backdrop + Esc/backdrop close. Both recipes,
@@ -93,7 +92,6 @@ bool nt_ui_modal_begin(nt_ui_context_t *ctx, uint32_t id, const nt_ui_modal_styl
     const nt_ui_popup_ext_t ext = {
         .def = &NT_UI_MODAL_DEF,
         .backdrop_color = style->backdrop_color,
-        .backdrop_alpha = style->backdrop_alpha,
         .close_pad = style->backdrop_close_pad,
         .esc_close = (style->flags & NT_UI_MODAL_LISTEN_ESC) != 0U,
         .outside_close = (style->flags & NT_UI_MODAL_CLOSE_ON_BACKDROP) != 0U,

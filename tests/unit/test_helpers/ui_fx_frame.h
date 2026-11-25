@@ -11,6 +11,7 @@
 #include "clay.h"
 #include "input/nt_input.h"
 #include "ui/nt_ui.h"
+#include "ui/nt_ui_clay_impl.h"
 #include "ui/nt_ui_internal.h"
 
 #ifdef __cplusplus
@@ -53,6 +54,13 @@ static inline const Clay_RenderCommand *ui_fx_find_rect(const nt_ui_context_t *c
         }
     }
     return NULL;
+}
+
+/* The composed opacity element `id` rendered with in the last ended frame (an overlay panel's is its open
+ * tween), or -1 when it was not declared. */
+static inline float ui_fx_rendered_opacity(const nt_ui_context_t *ctx, uint32_t id) {
+    const int32_t idx = nt_ui_clay_priv_layout_index_for_id(ctx->clay, id);
+    return (idx < 0) ? -1.0F : nt_ui_internal_test_get_tree_baked(ctx, idx)->opacity;
 }
 
 #ifdef __cplusplus

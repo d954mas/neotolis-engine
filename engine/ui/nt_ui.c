@@ -3068,14 +3068,11 @@ NT_NOINLINE void nt_ui_internal_overlay_open(nt_ui_context_t *ctx, uint32_t id, 
         nt_ui_internal_overlay_remove(ctx, &ctx->overlays[at]);
     }
     NT_ASSERT(ctx->overlay_count < NT_UI_OVERLAY_MAX && "nt_ui: more than NT_UI_OVERLAY_MAX overlays open or fading");
-    /* S2: the ancestors are the overlays the call is declared inside and those `parent` was opened inside, as
-     * HTML takes a popover's ancestors from the DOM and from its invoker; every other light overlay closes. */
-    uint32_t anc[2 * NT_UI_OVERLAY_MAX];
+    /* S2: the ancestors are `parent` and the overlays it was opened inside, as HTML walks a popover's invoker
+     * chain; every other light overlay closes. */
+    uint32_t anc[NT_UI_OVERLAY_MAX];
     uint8_t n = 0U;
-    for (uint8_t d = 0U; d < ctx->overlay_depth; ++d) {
-        anc[n++] = ctx->overlay_decl[d];
-    }
-    for (int32_t p = nt_ui_internal_overlay_index(ctx, parent); p >= 0 && n < 2 * NT_UI_OVERLAY_MAX; p = nt_ui_internal_overlay_index(ctx, ctx->overlays[p].parent)) {
+    for (int32_t p = nt_ui_internal_overlay_index(ctx, parent); p >= 0 && n < NT_UI_OVERLAY_MAX; p = nt_ui_internal_overlay_index(ctx, ctx->overlays[p].parent)) {
         anc[n++] = ctx->overlays[p].id;
     }
     for (int32_t k = 0; k < (int32_t)ctx->overlay_count; ++k) {

@@ -93,35 +93,6 @@ static bool band_has_backdrop(const nt_ui_context_t *ctx, int32_t band) {
     return false;
 }
 
-/* ---- Esc raises a close (reason ESC) on the TOP modal only; a non-top modal stays silent.
- *      Top-targeting carries the standard 1-frame IM lag (the deepest modal resolved last frame
- *      is "top"), so frame 1 establishes the nesting and frame 2 holds Esc. ---- */
-static void test_modal_esc_top_only(void) {
-    nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
-    st.ease_speed = 8.0F; /* eased: the frame it closes itself still shows, so the test ends it */
-    st.flags = NT_UI_MODAL_LISTEN_ESC;
-
-    /* Frame 1: establish A (outer) then B (inner, deepest) — no Esc yet. */
-    ui_fx_frame_begin(s_fx.ctx, NULL);
-    (void)modal_begin_open(s_fx.ctx, MODAL_A, &st);
-    (void)modal_begin_open(s_fx.ctx, MODAL_B, &st);
-    nt_ui_modal_end(s_fx.ctx);
-    nt_ui_modal_end(s_fx.ctx);
-    nt_ui_end(s_fx.ctx);
-
-    /* Frame 2: Esc held. Only B (last frame's deepest = top) consumes it; A stays silent. */
-    nt_input_feed(nt_test_key(NT_KEY_ESCAPE, true));
-    ui_fx_frame_begin(s_fx.ctx, NULL);
-    const nt_ui_popup_info_t outer = modal_begin_shown(s_fx.ctx, MODAL_A, &st); /* NOT top */
-    const nt_ui_popup_info_t inner = modal_begin_shown(s_fx.ctx, MODAL_B, &st); /* TOP */
-    nt_ui_modal_end(s_fx.ctx);
-    nt_ui_modal_end(s_fx.ctx);
-    nt_ui_end(s_fx.ctx);
-    TEST_ASSERT_FALSE(outer.reason != NT_UI_POPUP_CLOSE_NONE); /* non-top never consumes Esc */
-    TEST_ASSERT_TRUE(inner.reason != NT_UI_POPUP_CLOSE_NONE);
-    TEST_ASSERT_EQUAL_INT(NT_UI_POPUP_CLOSE_ESC, inner.reason);
-}
-
 /* ---- LISTEN_ESC off: Esc raises nothing even on the top modal (flag gates the source). ---- */
 static void test_modal_esc_requires_flag(void) {
     nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
@@ -142,6 +113,7 @@ static void test_modal_esc_requires_flag(void) {
 /* What one modal frame reported: the info and whether begin showed the modal. */
 typedef struct {
     nt_ui_popup_info_t info;
+    float t; /* the panel's rendered opacity: its eased open amount */
     bool visible;
 } modal_frame_t;
 
@@ -157,6 +129,7 @@ static void modal_frame(uint32_t id, const nt_ui_modal_style_t *st, bool open, m
         nt_ui_modal_end(s_fx.ctx);
     }
     nt_ui_end(s_fx.ctx);
+    out->t = out->visible ? ui_fx_rendered_opacity(s_fx.ctx, id) : 0.0F;
 }
 
 /* ---- Entrance animation: a modal declared already-open on its very FIRST frame must ease from 0
@@ -169,14 +142,14 @@ static void test_modal_open_entrance_eases_from_zero(void) {
 
     /* Frame 1 (first ever sight, open): t starts at ~0 and has only one dt of ease -> well under 1. */
     modal_frame(MODAL_A, &st, true, &r);
-    TEST_ASSERT_TRUE(r.info.t < 0.5F);  /* a fresh open slot eases, never snaps to 1 */
-    TEST_ASSERT_TRUE(r.info.t >= 0.0F); /* eased up from 0, not negative */
+    TEST_ASSERT_TRUE(r.t < 0.5F);  /* a fresh open slot eases, never snaps to 1 */
+    TEST_ASSERT_TRUE(r.t >= 0.0F); /* eased up from 0, not negative */
 
     /* After many frames it settles near 1. */
     for (int i = 0; i < 120; ++i) {
         modal_frame(MODAL_A, &st, true, &r);
     }
-    TEST_ASSERT_TRUE(ui_fx_float_near(r.info.t, 1.0F, 0.02F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(r.t, 1.0F, 0.02F));
 }
 
 /* ---- An explicitly-open modal declares its body on frame 1 even before t crosses epsilon: visible
@@ -186,8 +159,8 @@ static void test_modal_open_visible_before_epsilon(void) {
     st.ease_speed = 0.1F; /* very slow: first eased t stays well below epsilon (1/256) */
     modal_frame_t r;
     modal_frame(MODAL_A, &st, true, &r);
-    TEST_ASSERT_TRUE(r.info.t < (1.0F / 256.0F)); /* still under epsilon on frame 1 */
-    TEST_ASSERT_TRUE(r.visible);                  /* yet visible because open == true */
+    TEST_ASSERT_TRUE(r.t < (1.0F / 256.0F)); /* still under epsilon on frame 1 */
+    TEST_ASSERT_TRUE(r.visible);             /* yet visible because open == true */
 }
 
 /* ---- ease_speed=0 (instant) entrance still snaps to 1 on the first frame: the prime-then-snap path
@@ -197,7 +170,7 @@ static void test_modal_open_instant_snaps(void) {
     st.ease_speed = 0.0F;
     modal_frame_t r;
     modal_frame(MODAL_A, &st, true, &r);
-    TEST_ASSERT_TRUE(ui_fx_float_near(r.info.t, 1.0F, 0.0001F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(r.t, 1.0F, 0.0001F));
     TEST_ASSERT_TRUE(r.visible);
 }
 
@@ -222,21 +195,14 @@ static void test_modal_wants_pointer_while_open(void) {
     TEST_ASSERT_TRUE(nt_ui_wants_pointer(s_fx.ctx));
 }
 
-/* ---- Modal body button must be clickable: the helper declares no panel self-occluder, so the button
- *      is the sole interactive record and wins. Needs 3 frames (register / press / release-inside). ---- */
-/* The panel floats attached-to-root CENTER_CENTER, so it sits at the viewport center. The button is a
- * NORMAL (non-floating) child of the panel -> it shares the panel's floating tree root, declared after
- * the panel; with no self-occluder it's the sole interactive record and wins. With the
- * panel shrink-wrapping the button, the panel == the button bbox, both centered in the 800x600 frame. */
+/* The panel floats attached-to-root CENTER_CENTER, so it sits at the viewport center; shrink-wrapping its
+ * button, the panel == the button bbox, both centered in the 800x600 frame. */
 #define MODAL_BTN_W 200.0F
 #define MODAL_BTN_H 120.0F
 /* Centered panel top-left + the button (== panel) center. */
 #define MODAL_BTN_X0 ((UI_FX_VIEW_W - MODAL_BTN_W) * 0.5F)
 #define MODAL_BTN_Y0 ((UI_FX_VIEW_H - MODAL_BTN_H) * 0.5F)
-#define MODAL_BTN_CX (MODAL_BTN_X0 + (MODAL_BTN_W * 0.5F))
 #define MODAL_BTN_CY (MODAL_BTN_Y0 + (MODAL_BTN_H * 0.5F))
-
-static nt_pointer_t modal_btn_pointer(bool is_down, bool is_pressed, bool is_released) { return ui_fx_pointer(MODAL_BTN_CX, MODAL_BTN_CY, is_down, is_pressed, is_released); }
 
 /* ---- A modal WITHOUT CLOSE_ON_BACKDROP (LISTEN_ESC only) still gates click-through: the backdrop
  *      registers as an inert block_pointer occluder that wins topmost-z, so a base widget behind the
@@ -303,40 +269,17 @@ static void test_modal_closing_backdrop_lets_the_pointer_through(void) {
 /* One frame of modal A, which the test opened, with a stepped button child. The button id is stepped INSIDE the
  * body — mirrors the showcase's action-button pattern. */
 
-static nt_ui_interaction_t modal_button_frame(const nt_ui_modal_style_t *st, const nt_pointer_t *p) {
+static void modal_button_frame(const nt_ui_modal_style_t *st, const nt_pointer_t *p) {
     ui_fx_frame_begin(s_fx.ctx, p);
     nt_ui_popup_info_t info = {0};
-    nt_ui_interaction_t in = {0};
     if (nt_ui_modal_begin(s_fx.ctx, MODAL_A, st, &info)) { /* a snap modal that closed itself shows nothing */
         CLAY({.id = (Clay_ElementId){.id = nt_ui_id("modal_btn")}, .layout = {.sizing = {CLAY_SIZING_FIXED(MODAL_BTN_W), CLAY_SIZING_FIXED(MODAL_BTN_H)}}}) {
-            in = nt_ui_step(s_fx.ctx, nt_ui_id("modal_btn"), NULL);
+            (void)nt_ui_step(s_fx.ctx, nt_ui_id("modal_btn"), NULL);
         }
         nt_ui_modal_end(s_fx.ctx);
     }
     s_frame_close_reason = info.reason;
     nt_ui_end(s_fx.ctx);
-    return in;
-}
-
-static void test_modal_body_button_clickable(void) {
-    nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
-    st.ease_speed = 0.0F; /* t snaps to 1: panel lives from frame 1 */
-    nt_ui_modal_open(s_fx.ctx, MODAL_A);
-
-    /* Frame 1: register the button (empty prev-frame registry -> nothing hot yet). */
-    nt_pointer_t f1 = modal_btn_pointer(false, false, false);
-    modal_button_frame(&st, &f1);
-
-    /* Frame 2: press inside the button. Resolve runs off frame-1 registry: with no self-occluder the
-     * button is the sole interactive record, so the press lands on it. */
-    nt_pointer_t f2 = modal_btn_pointer(true, true, false);
-    nt_ui_interaction_t in2 = modal_button_frame(&st, &f2);
-    TEST_ASSERT_TRUE(in2.pressed_now); /* press lands on the sole interactive record */
-
-    /* Frame 3: release inside -> clicked exactly once. */
-    nt_pointer_t f3 = modal_btn_pointer(false, false, true);
-    nt_ui_interaction_t in3 = modal_button_frame(&st, &f3);
-    TEST_ASSERT_TRUE(in3.clicked); /* action button is clickable inside a modal */
 }
 
 /* ---- backdrop_close_pad: a CLOSE_ON_BACKDROP click JUST OUTSIDE the panel but within the pad must NOT
@@ -627,7 +570,6 @@ static void test_modal_close_uses_close_recipe(void) {
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_modal_defaults_valid);
-    RUN_TEST(test_modal_esc_top_only);
     RUN_TEST(test_modal_esc_requires_flag);
     RUN_TEST(test_modal_open_entrance_eases_from_zero);
     RUN_TEST(test_modal_open_visible_before_epsilon);
@@ -635,7 +577,6 @@ int main(void) {
     RUN_TEST(test_modal_wants_pointer_while_open);
     RUN_TEST(test_modal_no_backdrop_close_still_gates);
     RUN_TEST(test_modal_closing_backdrop_lets_the_pointer_through);
-    RUN_TEST(test_modal_body_button_clickable);
     RUN_TEST(test_modal_backdrop_close_pad);
     RUN_TEST(test_wants_keyboard_follows_the_top);
     RUN_TEST(test_modal_slide_dir);

@@ -40,6 +40,7 @@ void tearDown(void) { ui_walker_fixture_shutdown(&s_fx); }
 /* What one popup frame reported: the info and whether begin showed the popup. */
 typedef struct {
     nt_ui_popup_info_t info;
+    float t; /* the panel's rendered opacity: its eased open amount */
     bool visible;
 } popup_frame_t;
 
@@ -304,7 +305,7 @@ static void test_popup_snap_to_eased_stays_open(void) {
     popup_frame(POP_A, &st, &anc, true, &r);
     st.ease_speed = 8.0F;
     popup_frame(POP_A, &st, &anc, true, &r);
-    TEST_ASSERT_TRUE_MESSAGE(r.info.t > 0.99F, "the open popup stays fully open");
+    TEST_ASSERT_TRUE_MESSAGE(r.t > 0.99F, "the open popup stays fully open");
 }
 
 /* ---- A closed popup a snap frame hid stays hidden when it eases again, and an open one a snap frame showed
@@ -335,7 +336,7 @@ static void test_popup_snap_then_eased_keeps_what_it_showed(void) {
     popup_frame(POP_B, &st, &anc, true, &r);
     st.ease_speed = 8.0F;
     popup_frame(POP_B, &st, &anc, true, &r);
-    TEST_ASSERT_TRUE_MESSAGE(r.info.t > 0.99F, "an open popup a snap frame showed stays fully open");
+    TEST_ASSERT_TRUE_MESSAGE(r.t > 0.99F, "an open popup a snap frame showed stays fully open");
 }
 
 /* ---- A popup keeps no retained state, snap or eased: opened and closed, it leaves no state cell. ---- */
@@ -364,6 +365,7 @@ static void popup_frame(uint32_t id, const nt_ui_popup_style_t *st, const nt_ui_
         nt_ui_popup_end(s_fx.ctx);
     }
     nt_ui_end(s_fx.ctx);
+    out->t = out->visible ? ui_fx_rendered_opacity(s_fx.ctx, id) : 0.0F;
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -376,17 +378,17 @@ static void test_popup_tween_clamp(void) {
     float prev = 0.0F;
     for (int i = 0; i < 120; ++i) {
         popup_frame(POP_A, &st, &anc, true, &r);
-        TEST_ASSERT_TRUE(r.info.t >= -0.0001F && r.info.t <= 1.0001F);
-        TEST_ASSERT_TRUE(r.info.t >= prev - 0.0001F);
-        prev = r.info.t;
+        TEST_ASSERT_TRUE(r.t >= -0.0001F && r.t <= 1.0001F);
+        TEST_ASSERT_TRUE(r.t >= prev - 0.0001F);
+        prev = r.t;
         TEST_ASSERT_TRUE(r.visible);
     }
-    TEST_ASSERT_TRUE(ui_fx_float_near(r.info.t, 1.0F, 0.02F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(r.t, 1.0F, 0.02F));
 
     bool saw_closed = false;
     for (int i = 0; i < 300; ++i) {
         popup_frame(POP_A, &st, &anc, false, &r);
-        TEST_ASSERT_TRUE(r.info.t >= -0.0001F && r.info.t <= 1.0001F);
+        TEST_ASSERT_TRUE(r.t >= -0.0001F && r.t <= 1.0001F);
         if (!r.visible) {
             saw_closed = true;
             break;

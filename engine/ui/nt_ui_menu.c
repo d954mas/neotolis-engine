@@ -238,9 +238,10 @@ static nt_ui_popup_anchor_t menu_submenu_anchor(const nt_ui_context_t *ctx, uint
 // #endregion
 
 // #region immediate-mode menu (begin/item/submenu/separator/end)
-/* nt_ui_menu_begin reads the frame's one key and applies Left/Esc and Right/Enter on a parent; the rows only
- * record (an Enter on the focused leaf activates it); Up/Down step in menu_end over the neighbours the rows
- * collect, and the pointer acts there on one hover and one click candidate. */
+/* nt_ui_menu_begin reads the frame's one key and applies Left/Esc; the focused row acts on Enter and Right in its
+ * own call (a parent opens its child, as Dear ImGui's BeginMenu; a leaf activates); the other rows only record.
+ * Up/Down step in menu_end over the neighbours the rows collect, and the pointer acts there on one hover and one
+ * click candidate. */
 enum { MENU_KEY_NONE = 0, MENU_KEY_BACK, MENU_KEY_RIGHT, MENU_KEY_ENTER, MENU_KEY_UP, MENU_KEY_DOWN };
 
 /* The first pressed key decides the frame, Esc and Left first; Right and Enter without a focused row are no key. */
@@ -300,11 +301,6 @@ static bool menu_frame_input(nt_ui_menu_t *menu, nt_ui_context_t *ctx) {
         menu->focus = menu_parent(menu, (uint8_t)(d - 1U)); /* back on the parent it closes */
         menu->focus_depth = (uint8_t)(d - 1U);
         menu_set_open(menu, (uint8_t)(d - 1U), 0U);
-    } else if ((key == MENU_KEY_RIGHT || key == MENU_KEY_ENTER) && nt_ui_get_bbox(ctx, menu_cell_id(menu->focus, NT_UI_MENU_KIND_ARROW)).found) {
-        /* The focused row declared its submenu arrow last frame: it is a parent, and its child declares this
-         * frame; menu_end gives focus to the child's first enabled row. */
-        menu_set_open(menu, d, menu->focus);
-        f->focus_first = true;
     }
     return true;
 }
@@ -560,6 +556,10 @@ bool nt_ui_menu_submenu_begin_ex(nt_ui_menu_t *menu, uint32_t key, const char *l
     if (menu_step_clicked(menu, row_id)) {
         f->click_id = row_id; /* committed in menu_end, over the aim corridor */
         f->click_depth = depth;
+    }
+    if (menu_key_on(menu, row_id, MENU_KEY_RIGHT) || menu_key_on(menu, row_id, MENU_KEY_ENTER)) {
+        menu_set_open(menu, depth, row_id); /* its child declares next; menu_end focuses the child's first row */
+        f->focus_first = true;
     }
     const uint8_t child = (uint8_t)(depth + 1U);
     if (menu_parent(menu, depth) != row_id) {

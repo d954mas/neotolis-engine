@@ -90,7 +90,7 @@ typedef struct {
     uint32_t hover_id;            /* row under the pointer (0 = none) */
     uint32_t click_id;            /* parent a click opens in menu_end */
     uint32_t item_id;             /* the open custom row (item_begin..item_end); 0 = none */
-    uint32_t child_first;         /* first enabled row of the child Right or Enter opened at begin */
+    uint32_t child_first;         /* first enabled row of the child Right or Enter opened this frame */
     uint8_t depth;                /* level being declared */
     uint8_t key;                  /* the frame's one menu key, read at begin (0 = none) */
     uint8_t declared_depth;       /* deepest level declared: open parents past it are gone */
@@ -99,7 +99,7 @@ typedef struct {
     uint8_t fill_layer;
     uint8_t label_layer;
     bool nav_passed;  /* the focused row's level has declared it */
-    bool focus_first; /* Right or Enter opened the focused row's child at begin */
+    bool focus_first; /* Right or Enter opened the focused row's child this frame */
     bool hover_opens; /* hover_id is a parent */
     bool focus_seen;  /* the focused row is declared and enabled this frame */
     bool focus_opens; /* the focused row is a parent */

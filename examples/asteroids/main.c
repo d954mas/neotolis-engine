@@ -1250,7 +1250,7 @@ static void init_ui_styles(void) {
     s_ui_modal = nt_ui_modal_style_defaults();
     s_ui_modal.open.type = NT_UI_MODAL_ANIM_FADE;
     s_ui_modal.close.type = NT_UI_MODAL_ANIM_FADE;
-    s_ui_modal.backdrop_alpha = 0.6F;
+    s_ui_modal.backdrop_color = 0x99000000U; /* black at 0.6 peak opacity */
     s_ui_modal.ease_speed = 18;
 }
 

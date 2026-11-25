@@ -44,15 +44,14 @@ _Static_assert(sizeof(nt_ui_modal_anim_t) == 12, "nt_ui_modal_anim_t stable ABI 
 
 typedef struct {
     float ease_speed;           /* value_speed for the open/close tween; >= 0 (0 = instant snap) */
-    float backdrop_alpha;       /* peak backdrop opacity at t==1 (0..1) */
     nt_ui_modal_anim_t open;    /* entrance recipe */
     nt_ui_modal_anim_t close;   /* exit recipe; independent (e.g. slide-in / fade-out). symmetric = close == open */
-    uint32_t backdrop_color;    /* 0xAABBGGRR; alpha multiplied by t*backdrop_alpha */
+    uint32_t backdrop_color;    /* 0xAABBGGRR; its alpha is the peak opacity at t==1, multiplied by t */
     nt_ui_layer_t layer;        /* draw layer for backdrop + panel element data */
     uint8_t flags;              /* LISTEN_ESC | CLOSE_ON_BACKDROP */
     int16_t backdrop_close_pad; /* clicks within this px margin around the panel do NOT close — avoids accidental close on near-panel taps */
 } nt_ui_modal_style_t;
-_Static_assert(sizeof(nt_ui_modal_style_t) == 40, "nt_ui_modal_style_t stable ABI (2 float + 2 anim[12] + 1 u32 + 2 u8 + 1 int16)");
+_Static_assert(sizeof(nt_ui_modal_style_t) == 36, "nt_ui_modal_style_t stable ABI (1 float + 2 anim[12] + 1 u32 + 2 u8 + 1 int16)");
 
 /* Valid baseline: symmetric scale-pop entrance + exit. scale_start > 0 (nt_ui_anim asserts scale_* > 0). */
 nt_ui_modal_style_t nt_ui_modal_style_defaults(void);

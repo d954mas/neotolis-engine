@@ -978,7 +978,7 @@ static void init_styles(void) {
     s_input_art.skin[NT_UI_INPUT_FOCUSED] = (nt_ui_input_skin_t){.bg_art = s_panel_blue_ref};
     s_input_art.border_width = 0.0F; /* frame lives in the art now, no vector border */
 
-    /* Modal: only backdrop_color flips per palette; the props panel owns backdrop_alpha. */
+    /* Modal: only backdrop_color flips per palette; the props panel sets its alpha. */
     nt_ui_modal_style_t modal_base = nt_ui_modal_style_defaults();
     modal_base.layer = LAYER_BG;
     s_modal_dark = modal_base;
@@ -1711,7 +1711,7 @@ static void render_modal_overlay(nt_ui_context_t *ctx, tab_state_t *st) {
     /* Seed the runtime style from the active palette, then overlay the props-panel values. */
     s_modal_style_runtime = *g_current->modal;
     s_modal_style_runtime.ease_speed = st->modal.ease_speed;
-    s_modal_style_runtime.backdrop_alpha = st->modal.backdrop_alpha;
+    s_modal_style_runtime.backdrop_color = (s_modal_style_runtime.backdrop_color & 0x00FFFFFFU) | ((uint32_t)lroundf(st->modal.backdrop_alpha * 255.0F) << 24U);
     s_modal_style_runtime.flags |= (uint8_t)(NT_UI_MODAL_LISTEN_ESC | NT_UI_MODAL_CLOSE_ON_BACKDROP);
     s_modal_style_runtime.open = modal_param_anim(st->modal.open_type, st->modal.open_edge, st->modal.scale_start, st->modal.slide_offset);
     s_modal_style_runtime.close = modal_param_anim(st->modal.close_type, st->modal.close_edge, st->modal.scale_start, st->modal.slide_offset);

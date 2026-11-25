@@ -44,14 +44,11 @@ typedef enum {
     NT_UI_POPUP_CLOSE_GAME,     /* nt_ui_close, of it or of the overlay it was opened inside */
 } nt_ui_popup_close_t;
 
-/* Per-frame info of a popup or a modal (nullable out of begin): the tween, the chosen side, the close. */
+/* Per-frame info of a popup or a modal (nullable out of begin): the chosen side, the close. */
 typedef struct {
-    float t;        /* eased 0..1 open amount */
     uint8_t side;   /* nt_ui_popup_side_t actually chosen (post edge-flip) */
     uint8_t reason; /* nt_ui_popup_close_t raised this frame */
-    uint8_t _pad[2];
 } nt_ui_popup_info_t;
-_Static_assert(sizeof(nt_ui_popup_info_t) == 8, "nt_ui_popup_info_t stable ABI (1 float + 2 u8 + 2 pad)");
 
 typedef struct {
     float ease_speed;                 /* value_speed for the open/close tween; >= 0 (0 = instant snap) */

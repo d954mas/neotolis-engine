@@ -372,9 +372,10 @@ Engine rules:
   leaves at the next. The top is the highest overlay with a catcher (a popup,
   a modal, a menu's root) declared open and live last frame.
 - *S2 Opening closes popups.* Opening an overlay closes every open popup that
-  is not its ancestor: an overlay the call is declared inside, or one its
-  parent chain was opened inside, as HTML takes a popover's ancestors from the
-  DOM and from its invoker when a popover or a modal dialog opens. So a second
+  is not its ancestor: its parent (the overlay being declared at the open call;
+  for a menu level, the level under it) and the overlays that one was opened
+  inside, as HTML walks a popover's invoker chain when a popover or a modal
+  dialog opens. So a second
   menu closes the first, a modal closes an open combo, a popup a menu row opens
   closes the sibling level, and a confirm a combo row opens keeps the list
   open. Closing an overlay closes the overlays opened inside it.
@@ -392,9 +393,10 @@ Engine rules:
 **When a rule runs.** A rule that needs only last frame's records and this
 frame's input runs before the declarations it governs: `nt_ui_begin` for the
 context (the router, S3) and a widget's begin for the widget (the menu's keys).
-A widget's rows only record; its end runs only what needs this frame's
-declarations (the menu's Up/Down neighbours, its click, hover and aim
-corridor). An open or close the game or a widget makes mid-frame acts from
+A widget's rows only record, except that the focused row acts on the key the
+begin read (a menu parent opens its own child); its end runs only what needs
+this frame's declarations (the menu's Up/Down neighbours, its click, hover and
+aim corridor). An open or close the game or a widget makes mid-frame acts from
 where it is made, as in Dear ImGui: what was declared earlier in that frame
 already read its input, and a reopened overlay takes input again from its next
 declaration (the key owner and the top stay those fixed at begin). Result:
@@ -770,10 +772,10 @@ declaration, so the press that opened it does not dismiss it. Menu rules:
   tween).
 - *M2 Focus and keys.* One focused row; keys act on its level, one key per
   frame, the first pressed of Esc or Left, Right, Enter, Up, Down. Enter on a
-  leaf activates it; Right or Enter on a parent (a row that declared its
-  submenu arrow last frame) opens it at begin, so its child declares that frame,
-  and focuses its first enabled row (an empty child stays open, focus stays);
-  Up and Down step over
+  leaf activates it; Right or Enter on a parent opens it in the parent row's own
+  call, as Dear ImGui's `BeginMenu`, so its child declares that frame, and
+  `nt_ui_menu_end` focuses the child's first enabled row (an empty child stays
+  open, focus stays); Up and Down step over
   the level's enabled rows and wrap (with no focus, Down starts at the first and
   Up at the last; focus leaving an open parent closes its child); Left and Esc
   close the deepest open level (at the root, the menu). Enter and Right without
@@ -789,9 +791,9 @@ declaration, so the press that opened it does not dismiss it. Menu rules:
   near edge, and after `NT_UI_MENU_AIM_FALLBACK_SECS` elsewhere, also off the
   rows or outside the window. A level highlights one row: the focused row on its
   level, the open parent on every other level.
-- *M4 Activation* (a click, or Enter) closes the whole menu; the rows only
-  record, and the pointer acts in `nt_ui_menu_end` while nothing a custom row
-  opened that frame lies over the menu. A frame activates
+- *M4 Activation* (a click, or Enter) closes the whole menu; the other rows
+  only record, and the pointer acts in `nt_ui_menu_end` while nothing a custom
+  row opened that frame lies over the menu. A frame activates
   at most one row, the first declared. A click on a parent opens it after the
   key acts, so it wins over Right.
 

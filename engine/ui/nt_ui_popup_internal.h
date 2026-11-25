@@ -16,8 +16,7 @@ typedef struct nt_ui_context nt_ui_context_t;
 /* Extended config layered onto the base popup-core. All zero = no backdrop and no own close. */
 typedef struct {
     const nt_ui_widget_def_t *def; /* widget_register def; NULL = NT_UI_POPUP_DEF */
-    uint32_t backdrop_color;       /* 0xAABBGGRR; 0 = no visible backdrop (transparent catcher) */
-    float backdrop_alpha;          /* peak backdrop opacity at t==1 (0..1); multiplied into the color alpha */
+    uint32_t backdrop_color;       /* 0xAABBGGRR, alpha multiplied by t; 0 = no visible backdrop (transparent catcher) */
     int16_t close_pad;             /* px margin around the panel; an outside press within it does NOT close */
     bool esc_close;                /* the top closes on the Escape it owns: NT_UI_POPUP_CLOSE_ESC */
     bool outside_close;            /* the top closes on a press beyond the panel+pad: NT_UI_POPUP_CLOSE_OUTSIDE */
