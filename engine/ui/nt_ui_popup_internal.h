@@ -27,7 +27,7 @@ typedef struct {
 bool nt_ui_popup_begin_internal(nt_ui_context_t *ctx, uint32_t id, const nt_ui_popup_style_t *style, const nt_ui_popup_anchor_t *anchor, const nt_ui_popup_ext_t *ext, nt_ui_popup_info_t *info);
 
 /* A tooltip: the same panel on the band above every stack slot, shown while `open` or fading out; no stack entry,
- * no catcher, no input. Ends with nt_ui_popup_end. */
+ * no catcher, no input, no declaration depth: the caller closes the panel element itself. */
 bool nt_ui_internal_tooltip_begin(nt_ui_context_t *ctx, uint32_t id, const nt_ui_popup_style_t *style, const nt_ui_popup_anchor_t *anchor, bool open, nt_ui_popup_info_t *info);
 
 #endif /* NT_UI_POPUP_INTERNAL_H */

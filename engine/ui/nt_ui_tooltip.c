@@ -166,7 +166,7 @@ bool nt_ui_tooltip(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8
         tooltip_declare_caret(fill_layer, style, info.side);
         nt_ui_label(ctx, nt_ui_make_element_data(label_layer, NULL), content, &lbl);
         nt_ui_clay_priv_close_element();
-        nt_ui_popup_end(ctx);
+        nt_ui_clay_priv_close_element(); /* a tooltip is no overlay: no declaration depth to end */
     }
     return shown;
 }

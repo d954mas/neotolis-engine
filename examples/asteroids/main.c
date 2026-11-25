@@ -1544,16 +1544,9 @@ static void build_ui(void) {
                 }
             }
             if (narrow) {
-                /* The compact layout shows the settings panel as a modal: it follows the panel flag, and its own
-                 * Esc or backdrop close clears the flag. */
+                /* The compact layout shows the settings panel as a modal. Its own Esc or backdrop close (made in
+                 * nt_ui_begin, reported by its begin) clears the panel flag first; then the flag drives it. */
                 const uint32_t modal_id = CLAY_ID("asteroids.compact_modal").id;
-                if (s_ui_panel_open != nt_ui_is_open(s_ui, modal_id)) {
-                    if (s_ui_panel_open) {
-                        nt_ui_modal_open(s_ui, modal_id);
-                    } else {
-                        nt_ui_close(s_ui, modal_id);
-                    }
-                }
                 nt_ui_popup_info_t modal = {0};
                 s_ui_modal_shown = nt_ui_modal_begin(s_ui, modal_id, &s_ui_modal, &modal);
                 if (modal.reason == NT_UI_POPUP_CLOSE_ESC || modal.reason == NT_UI_POPUP_CLOSE_OUTSIDE) {
@@ -1564,6 +1557,13 @@ static void build_ui(void) {
                         ui_panel(fminf(352, width - 24), fminf(680, height - 100));
                     }
                     nt_ui_modal_end(s_ui);
+                }
+                if (s_ui_panel_open != nt_ui_is_open(s_ui, modal_id)) {
+                    if (s_ui_panel_open) {
+                        nt_ui_modal_open(s_ui, modal_id);
+                    } else {
+                        nt_ui_close(s_ui, modal_id);
+                    }
                 }
             }
         }

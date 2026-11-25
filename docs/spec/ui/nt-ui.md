@@ -338,13 +338,21 @@ Engine rules:
   the game's. A press while the other button is held joins that gesture and
   reaches no widget when the gesture is the game's, as Dear ImGui's
   `MouseDownOwned`. `nt_ui_wants_pointer` is true for a UI gesture up to its
-  release, and over a record declared again this frame.
+  release, and over last frame's record under the pointer: decided at
+  `nt_ui_begin` like the rest of the router, so a widget that vanishes keeps
+  it one frame, as Dear ImGui's `WantCaptureMouse`.
 - *R3 Live* (router). An element is live when it lies at or above the top
   overlay's catcher in last frame's paint order (always with no top, in a 3D
-  ctx and for inspector panes) and outside a closing overlay. A closing
-  overlay's subtree makes no record, and its steps, queries,
-  `nt_ui_hovered_within` and key reads report nothing, as HTML `inert`; a
-  pointer on the top's catcher hovers nothing either. `nt_ui_begin` drops a
+  ctx and for inspector panes) and outside an inert overlay body (see the
+  lifecycle below). An inert body's steps, queries, `nt_ui_hovered_within` and
+  key reads report nothing, as HTML `inert`; a pointer on the top's catcher
+  hovers nothing either. Nothing declared in a closing body is live, an
+  overlay included: it is never the top. `nt_ui_begin`, before it resolves the
+  pointer, drops last frame's records of each overlay closed since its
+  declaration (mid-frame or between frames): its catcher at once (invisible),
+  its whole body once it was declared closing (the panel the frame drew still
+  takes the next press, so a press on a just-closed submenu does not dismiss
+  the menu). `nt_ui_begin` also drops a
   capture, a pending scroll and the text focus under the top's catcher, as a
   modal dialog cancels its owner's capture and takes focus (the release clicks
   nothing, a drag ends as if released, a scroll keeps its fling); one inside a
@@ -364,13 +372,15 @@ Engine rules:
   which is the paint and hit order (see "Floating zIndex is relative"; slot `i`
   sits on band `overlay_zband_stride + i * NT_UI_OVERLAY_MAX`, tooltips on the
   band above every slot). The stack changes only in `nt_ui_begin` (S3) and in
-  the open and close calls; a begin only reads it. Opening pushes an overlay on
-  top (opening an open one does nothing; a reopen during its fade starts it
-  again on top, its subtree closed); each entry records the overlay it was
-  opened inside, its parent. A closed overlay fades and leaves when it is
-  hidden; one neither declared nor opened since the previous `nt_ui_begin`
-  leaves at the next. The top is the highest overlay with a catcher (a popup,
-  a modal, a menu's root) declared open and live last frame.
+  the open and close calls; a begin only reads it. Within a frame entries are
+  only appended, so no band moves before the next `nt_ui_begin`, which drops
+  the dead ones. Opening pushes an overlay on top (opening an open one does
+  nothing; a reopen leaves the old entry dead and starts it again on top, its
+  subtree closed); each entry records the overlay it was opened inside, its
+  parent. A closed overlay fades and leaves when it is hidden; one neither
+  declared nor opened since the previous `nt_ui_begin` leaves at the next. The
+  top is the highest overlay with a catcher (a popup, a modal, a menu's root)
+  declared live last frame.
 - *S2 Opening closes popups.* Opening an overlay closes every open popup that
   is not its ancestor: its parent (the overlay being declared at the open call;
   for a menu level, the level under it) and the overlays that one was opened
@@ -390,18 +400,34 @@ Engine rules:
   fading, a stride whose tooltip band passes `int16`, and a root overlay inside
   a game floating at or above `overlay_zband_stride`.
 
-**When a rule runs.** A rule that needs only last frame's records and this
-frame's input runs before the declarations it governs: `nt_ui_begin` for the
-context (the router, S3) and a widget's begin for the widget (the menu's keys).
-A widget's rows only record, except that the focused row acts on the key the
-begin read (a menu parent opens its own child); its end runs only what needs
-this frame's declarations (the menu's Up/Down neighbours, its click, hover and
-aim corridor). An open or close the game or a widget makes mid-frame acts from
-where it is made, as in Dear ImGui: what was declared earlier in that frame
-already read its input, and a reopened overlay takes input again from its next
-declaration (the key owner and the top stay those fixed at begin). Result:
-1-frame IM-lag is intrinsic (current frame reads previous frame's bbox); no
-stuck input on widget disappearance.
+**Overlay lifecycle.** An overlay's phase is decided at its declaration from
+whether it is open and whether it was declared open last frame:
+
+| Phase | When | Draws | Body takes input | Records |
+|---|---|---|---|---|
+| OPENING | first declaration since it opened | yes | no | kept |
+| OPEN | open, declared open last frame | yes | yes | kept |
+| CLOSING | closed, fading | yes | no | dropped at the next `nt_ui_begin` |
+| GONE | faded out, or not declared | no | — | — |
+
+OPENING is Dear ImGui's `Appearing`: last frame's hits lie where the overlay
+was before (a reopen elsewhere), so nothing in its body (rows, a game button in
+a custom row, a field) reads them; its records for the next frame are written.
+A tooltip is no overlay: it has no phase, no record and no declaration depth.
+
+**When a rule runs.** Three rules. (1) A request acts at once: an open or close
+the game or a widget makes mid-frame, with its S2 closes and its cascade,
+changes the open state for what is declared after it, as in Dear ImGui. (2)
+Order and owners are fixed for the frame at `nt_ui_begin`: the stack slots and
+bands, the top, the pointer, gesture and key owners, and S3; every router query
+reads only those. A widget's begin runs what needs only last frame's records
+and the fixed owners (the menu's keys); its rows only record, except that the
+focused row acts on the key the begin read (a menu parent opens its own child);
+its end runs what needs this frame's declarations (the menu's Up/Down
+neighbours, its click, hover and aim corridor). (3) A declaration draws and
+writes the records the next frame hits, and the next `nt_ui_begin` drops the
+records of what closed (R3). Result: 1-frame IM-lag is intrinsic (current frame reads
+previous frame's bbox); no stuck input on widget disappearance.
 
 ## Front-most arbitration
 
@@ -425,8 +451,8 @@ after the children), paints over the child while the child gets the pointer, so 
 interactive child's layer at or above its parent's. Siblings of one root overlap only
 through a transform, overflow without a clip, or hit padding; put such interactive parts on
 one layer or make the upper one floating. `nt_ui_wants_pointer` is true
-while a pointer of the current frame is in a gesture that began on the UI (see "Input ownership"), or its front-most record is declared again this frame (a
-record that vanished this frame is not UI under the pointer). A free pointer drives a
+while a pointer of the current frame is in a gesture that began on the UI, or is over last frame's front-most record (see
+"Input ownership", R2). A free pointer drives a
 widget only if it is the resolved hot
 widget or already holds capture; `nt_ui_pointer_hot` exposes the resolved id.
 

@@ -405,6 +405,7 @@ void nt_ui_set_font(nt_ui_context_t *ctx, uint16_t font_id, nt_font_t font) {
 
 // #region begin_end
 static void resolve_hot(nt_ui_context_t *ctx);
+static void drop_closed_overlay_records(nt_ui_context_t *ctx);
 static void overlay_close_at(nt_ui_context_t *ctx, int32_t at, uint8_t reason);
 static bool outside_press(nt_ui_context_t *ctx, const nt_ui_overlay_t *o);
 
@@ -550,6 +551,8 @@ void nt_ui_begin(nt_ui_context_t *ctx, const nt_ui_frame_desc_t *frame) {
     ctx->last_press_age += dt;
     ctx->overlay_depth = 0U; /* overlay begin++/end-- balance across the frame (asserted == 0 at end) */
     ctx->inert_from = 0U;
+    ctx->closing_from = 0U;
+    drop_closed_overlay_records(ctx); /* before the prune clears the record ranges; closes made between frames count */
     /* S1: an overlay neither declared nor opened since the last begin leaves; the top is the highest live one with
      * a catcher. */
     uint8_t kept = 0U;
@@ -557,12 +560,14 @@ void nt_ui_begin(nt_ui_context_t *ctx, const nt_ui_frame_desc_t *frame) {
     for (uint8_t i = 0U; i < ctx->overlay_count; ++i) {
         nt_ui_overlay_t o = ctx->overlays[i];
         if (!o.seen) {
-            continue;
+            continue; /* faded out, dead, or neither declared nor opened */
         }
         if (o.open && o.live && o.catcher) {
             ctx->overlay_top = o.id;
         }
         o.seen = false;
+        o.rec_first = 0U;
+        o.rec_end = 0U;
         ctx->overlays[kept++] = o;
     }
     ctx->overlay_count = kept;
@@ -2780,7 +2785,8 @@ nt_ui_interaction_t nt_ui_step(nt_ui_context_t *ctx, uint32_t id, const nt_ui_st
 #endif
 
     if (ctx->inert_from != 0U) {
-        return (nt_ui_interaction_t){0}; /* inert: no record, no capture, no debug zone */
+        nt_ui_internal_register_interactive(ctx, id, pad_lrtb); /* inert: its record for next frame, no input now */
+        return (nt_ui_interaction_t){0};
     }
     bool owner_over = false;
     nt_ui_widget_pidx_state_t s;
@@ -2912,9 +2918,6 @@ void nt_ui_block_pointer(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lr
 
 /* One record per declared element at most: a full registry is a widget stepped twice per frame. */
 void nt_ui_internal_register_interactive(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lrtb[4]) {
-    if (ctx->inert_from != 0U) {
-        return; /* inert: no record, the pointer passes through to what lies under */
-    }
     NT_ASSERT(ctx->interactive_cur_count < ctx->max_elements && "nt_ui: interactive registry full (a widget stepped twice per frame?)");
     nt_ui_interactive_t *rec = &ctx->interactive_cur[ctx->interactive_cur_count++];
     rec->id = id;
@@ -2998,18 +3001,12 @@ const nt_pointer_t *nt_ui_internal_top_pointer(const nt_ui_context_t *ctx, uint3
 
 // #region overlay stack (spec: "Input ownership", S1-S3; out of line: inlined they cost ~1.2 KB wasm)
 NT_NOINLINE int32_t nt_ui_internal_overlay_index(const nt_ui_context_t *ctx, uint32_t id) {
-    for (uint8_t i = 0U; i < ctx->overlay_count; ++i) {
+    for (uint8_t i = 0U; id != 0U && i < ctx->overlay_count; ++i) {
         if (ctx->overlays[i].id == id) {
             return i;
         }
     }
     return -1;
-}
-
-NT_NOINLINE void nt_ui_internal_overlay_remove(nt_ui_context_t *ctx, nt_ui_overlay_t *o) {
-    const nt_ui_overlay_t *end = &ctx->overlays[ctx->overlay_count];
-    memmove(o, o + 1, (size_t)(end - (o + 1)) * sizeof *o);
-    --ctx->overlay_count;
 }
 
 uint32_t nt_ui_internal_overlay_here(const nt_ui_context_t *ctx) {
@@ -3037,7 +3034,7 @@ NT_NOINLINE static void overlay_close_at(nt_ui_context_t *ctx, int32_t at, uint8
     for (int32_t k = at; k < (int32_t)ctx->overlay_count; ++k) {
         nt_ui_overlay_t *o = &ctx->overlays[k];
         bool inside = (k == at);
-        for (uint8_t c = 0U; c < n && !inside; ++c) {
+        for (uint8_t c = 0U; o->id != 0U && c < n && !inside; ++c) {
             inside = (o->parent == closing[c]);
         }
         if (inside && o->open) {
@@ -3065,7 +3062,10 @@ NT_NOINLINE void nt_ui_internal_overlay_open(nt_ui_context_t *ctx, uint32_t id, 
     }
     if (at >= 0) {
         overlay_close_at(ctx, at, NT_UI_POPUP_CLOSE_REPLACED); /* a reopen starts a new subtree on top */
-        nt_ui_internal_overlay_remove(ctx, &ctx->overlays[at]);
+        /* Dead until nt_ui_begin, so no band moves this frame; it keeps its records' range for nt_ui_end to drop. */
+        ctx->overlays[at].id = 0U;
+        ctx->overlays[at].parent = 0U;
+        ctx->overlays[at].seen = false;
     }
     NT_ASSERT(ctx->overlay_count < NT_UI_OVERLAY_MAX && "nt_ui: more than NT_UI_OVERLAY_MAX overlays open or fading");
     /* S2: the ancestors are `parent` and the overlays it was opened inside, as HTML walks a popover's invoker
@@ -3107,6 +3107,26 @@ bool nt_ui_is_open(const nt_ui_context_t *ctx, uint32_t id) {
 }
 // #endregion
 
+/* R3, at nt_ui_begin on last frame's registry: an overlay closed since its declaration (mid-frame, or between
+ * frames) leaves no catcher, and a closing one no body, so the pointer reaches what lies under them. */
+static void drop_closed_overlay_records(nt_ui_context_t *ctx) {
+    bool any = false;
+    for (uint8_t i = 0U; i < ctx->overlay_count; ++i) {
+        const nt_ui_overlay_t *o = &ctx->overlays[i];
+        for (uint32_t k = o->rec_first; !o->open && k < o->rec_end; ++k) {
+            ctx->interactive_cur[k].id = 0U;
+            any = true;
+        }
+    }
+    uint32_t kept = 0U;
+    for (uint32_t k = 0U; any && k < ctx->interactive_cur_count; ++k) {
+        if (ctx->interactive_cur[k].id != 0U) {
+            ctx->interactive_cur[kept++] = ctx->interactive_cur[k];
+        }
+    }
+    ctx->interactive_cur_count = any ? kept : ctx->interactive_cur_count;
+}
+
 /* The top `o` got a primary press, either button, outside its panel grown by its close_pad, on its catcher or on
  * no record. */
 static bool outside_press(nt_ui_context_t *ctx, const nt_ui_overlay_t *o) {
@@ -3129,11 +3149,8 @@ bool nt_ui_wants_pointer(const nt_ui_context_t *ctx) {
         if (ctx->captures[i].ui_gesture) {
             return true; /* a capture and a pending scroll start from such a press too */
         }
-        /* Over a widget: the front-most record under the pointer was declared again this frame. */
-        for (uint32_t k = 0; ctx->pointer_hot[i].id != 0U && k < ctx->interactive_cur_count; ++k) {
-            if (ctx->interactive_cur[k].id == ctx->pointer_hot[i].id) {
-                return true;
-            }
+        if (ctx->pointer_hot[i].id != 0U) {
+            return true; /* over last frame's record: decided at nt_ui_begin, like the rest of the router */
         }
     }
     return false;

@@ -788,7 +788,7 @@ void nt_ui_scroll_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
     }
 
     for (uint32_t i = 0; ctx->inert_from != 0U && i < ctx->frame_pointer_count; ++i) {
-        /* Inert: the scroll drops the gesture it holds; with no record it takes no new one. */
+        /* Inert: the scroll drops the gesture it holds and takes no new one. */
         if (ctx->captures[i].active_id == id) {
             ctx->captures[i].active_id = 0U;
         }

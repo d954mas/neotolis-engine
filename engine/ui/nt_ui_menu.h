@@ -85,15 +85,16 @@ typedef struct {
 typedef struct {
     nt_ui_context_t *ui; /* the core ctx between begin and end; NULL outside */
     nt_ui_menu_style_t *style;
-    uint32_t nav_first, nav_last; /* first/last enabled row on the navigated level */
-    uint32_t nav_prev, nav_next;  /* enabled rows before/after the focused one there */
-    uint32_t hover_id;            /* row under the pointer (0 = none) */
-    uint32_t click_id;            /* parent a click opens in menu_end */
-    uint32_t item_id;             /* the open custom row (item_begin..item_end); 0 = none */
-    uint32_t child_first;         /* first enabled row of the child Right or Enter opened this frame */
-    uint8_t depth;                /* level being declared */
-    uint8_t key;                  /* the frame's one menu key, read at begin (0 = none) */
-    uint8_t declared_depth;       /* deepest level declared: open parents past it are gone */
+    uint32_t nav_first, nav_last;         /* first/last enabled row on the navigated level */
+    uint32_t nav_prev, nav_next;          /* enabled rows before/after the focused one there */
+    uint32_t hover_id;                    /* row under the pointer (0 = none) */
+    uint32_t click_id;                    /* parent a click opens in menu_end */
+    uint32_t item_id;                     /* the open custom row (item_begin..item_end); 0 = none */
+    uint32_t scope[NT_UI_MENU_MAX_DEPTH]; /* the id each level's rows are keyed under: the menu id, then the opening row */
+    uint32_t child_first;                 /* first enabled row of the child Right or Enter opened this frame */
+    uint8_t depth;                        /* level being declared */
+    uint8_t key;                          /* the frame's one menu key, read at begin (0 = none) */
+    uint8_t declared_depth;               /* deepest level declared: open parents past it are gone */
     uint8_t hover_depth;
     uint8_t click_depth;
     uint8_t fill_layer;
@@ -103,7 +104,7 @@ typedef struct {
     bool hover_opens; /* hover_id is a parent */
     bool focus_seen;  /* the focused row is declared and enabled this frame */
     bool focus_opens; /* the focused row is a parent */
-    bool top;         /* the menu is the top overlay: its rows take the pointer and it reads the keys */
+    bool top;         /* the menu is the top overlay and was declared last frame: it reads the keys and acts in menu_end */
     bool opening;     /* its first declaration since it opened: the rows' highlight snaps */
     bool activated;   /* a row activated: the chain closes */
     bool item_steps;  /* the open custom row is enabled and has an action of its own */

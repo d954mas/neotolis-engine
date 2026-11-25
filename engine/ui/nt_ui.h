@@ -617,7 +617,7 @@ void nt_ui_set_gesture_constants(nt_ui_context_t *ctx, float dbl_window_secs, fl
 void nt_ui_block_pointer(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lrtb[4]);
 
 /* True while a pointer's gesture began on the UI (a left or right press on a widget, or anywhere while an overlay is up), up
- * to its release, or a pointer is over a widget declared again this frame. */
+ * to its release, or a pointer is over last frame's record. Decided at nt_ui_begin: read it after begin. */
 bool nt_ui_wants_pointer(const nt_ui_context_t *ctx);
 
 /* True when the UI owns this frame's keys: a focused text field, else an open overlay with a catcher (a modal,

@@ -330,7 +330,7 @@ static uint32_t menu_im_row(nt_ui_menu_t *menu, uint32_t key, const char *label,
     NT_ASSERT(f->item_id == 0U && "nt_ui_menu: a row inside a custom row (missing nt_ui_menu_item_end)");
     nt_ui_context_t *ctx = f->ui;
     const uint8_t depth = f->depth;
-    const uint32_t scope = (depth == 0U) ? menu->id : menu_parent(menu, (uint8_t)(depth - 1U));
+    const uint32_t scope = f->scope[depth];
     const uint32_t row_id = menu_item_id(scope, key);
     nt_ui_menu_style_t *style = f->style;
     const bool enabled = !opts->disabled;
@@ -338,7 +338,7 @@ static uint32_t menu_im_row(nt_ui_menu_t *menu, uint32_t key, const char *label,
     /* A custom row stays under the pointer over its own interactive child (hot, declared later), so
      * focus, highlight and the leaf collapse follow the row the pointer is in. The opening frame's hits are
      * last frame's, at the old place. */
-    const bool pointed = enabled && menu->frame.top && nt_ui_hovered_within(ctx, row_id);
+    const bool pointed = enabled && nt_ui_hovered_within(ctx, row_id);
     if (enabled && f->focus_first && f->child_first == 0U && depth == menu->focus_depth + 1U) {
         f->child_first = row_id;
     }
@@ -463,6 +463,7 @@ bool nt_ui_menu_begin(nt_ui_menu_t *menu, nt_ui_context_t *ctx, const nt_ui_elem
         .label_layer = label_layer,
         .top = nt_ui_internal_is_top(ctx, menu->id) && live,
         .opening = !live,
+        .scope = {[0] = menu->id},
     };
     /* BELOW flips only vertically: shift the root left by last frame's width to stay on screen (unclamped on
      * the first frame). */
@@ -488,17 +489,6 @@ bool nt_ui_menu_begin(nt_ui_menu_t *menu, nt_ui_context_t *ctx, const nt_ui_elem
     return true; /* the root panel stays open until menu_end */
 }
 
-/* The row's one mutating step. A menu that is not on top (its opening frame, whose hits are last frame's at
- * the old place, or under another overlay) only registers the row: its press is not captured and its
- * release clicks nothing. */
-static bool menu_step_clicked(const nt_ui_menu_t *menu, uint32_t row_id) {
-    if (!menu->frame.top) {
-        nt_ui_block_pointer(menu->frame.ui, row_id, NULL);
-        return false;
-    }
-    return nt_ui_step(menu->frame.ui, row_id, NULL).clicked;
-}
-
 /* A row activates on its click or on Enter while focused; a frame activates one row, the first declared (a
  * tap and Enter can land on two). */
 static bool menu_activate(nt_ui_menu_t *menu, uint32_t row_id, bool clicked) {
@@ -515,7 +505,7 @@ bool nt_ui_menu_item_ex(nt_ui_menu_t *menu, uint32_t key, const char *label, nt_
     if (opts.disabled) {
         return false;
     }
-    return menu_activate(menu, row_id, menu_step_clicked(menu, row_id));
+    return menu_activate(menu, row_id, nt_ui_step(menu->frame.ui, row_id, NULL).clicked);
 }
 
 bool nt_ui_menu_item(nt_ui_menu_t *menu, uint32_t key, const char *label) { return nt_ui_menu_item_ex(menu, key, label, (nt_ui_menu_item_opts_t){0}); }
@@ -539,7 +529,7 @@ bool nt_ui_menu_item_end(nt_ui_menu_t *menu) {
         nt_ui_block_pointer(f->ui, row_id, NULL);
         return false;
     }
-    return menu_activate(menu, row_id, menu_step_clicked(menu, row_id));
+    return menu_activate(menu, row_id, nt_ui_step(f->ui, row_id, NULL).clicked);
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity): the leading validation assert chain inflates the count; control flow is flat
@@ -553,7 +543,7 @@ bool nt_ui_menu_submenu_begin_ex(nt_ui_menu_t *menu, uint32_t key, const char *l
     if (opts.disabled) {
         return false; /* a disabled parent never steps, never flies out, never opens */
     }
-    if (menu_step_clicked(menu, row_id)) {
+    if (nt_ui_step(f->ui, row_id, NULL).clicked) {
         f->click_id = row_id; /* committed in menu_end, over the aim corridor */
         f->click_depth = depth;
     }
@@ -568,6 +558,7 @@ bool nt_ui_menu_submenu_begin_ex(nt_ui_menu_t *menu, uint32_t key, const char *l
     /* Open: a new level scoped to THIS row's id (ImGui PushID) flies its panel out. */
     const nt_ui_popup_anchor_t sub_anchor = menu_submenu_anchor(f->ui, row_id);
     (void)menu_open_level(menu, child, &sub_anchor); /* an open level has no own close */
+    f->scope[child] = row_id;                        /* the child's rows are keyed under the row that opened it (ImGui PushID) */
     f->depth = child;
     f->declared_depth = child;
     return true;
