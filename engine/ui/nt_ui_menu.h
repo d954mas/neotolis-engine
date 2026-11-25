@@ -85,13 +85,12 @@ typedef struct {
 typedef struct {
     nt_ui_context_t *ui; /* the core ctx between begin and end; NULL outside */
     nt_ui_menu_style_t *style;
-    uint32_t menu_id;
     uint32_t nav_first, nav_last; /* first/last enabled row on the navigated level */
     uint32_t nav_prev, nav_next;  /* enabled rows before/after the focused one there */
     uint32_t hover_id;            /* row under the pointer (0 = none) */
     uint32_t click_id;            /* parent a click opens in menu_end */
     uint32_t item_id;             /* the open custom row (item_begin..item_end); 0 = none */
-    uint32_t key_row;             /* the row focused at begin: Enter and Right act on it */
+    uint32_t child_first;         /* first enabled row of the child Right or Enter opened at begin */
     uint8_t depth;                /* level being declared */
     uint8_t key;                  /* the frame's one menu key, read at begin (0 = none) */
     uint8_t declared_depth;       /* deepest level declared: open parents past it are gone */
@@ -100,7 +99,7 @@ typedef struct {
     uint8_t fill_layer;
     uint8_t label_layer;
     bool nav_passed;  /* the focused row's level has declared it */
-    bool focus_first; /* a keyboard-opened child gives focus to its first enabled row */
+    bool focus_first; /* Right or Enter opened the focused row's child at begin */
     bool hover_opens; /* hover_id is a parent */
     bool focus_seen;  /* the focused row is declared and enabled this frame */
     bool focus_opens; /* the focused row is a parent */
@@ -111,9 +110,10 @@ typedef struct {
 } nt_ui_menu_frame_t;
 
 /* One menu's navigation, owned by the game and kept across frames: one per logical menu and UI context. The open
- * state is the overlay stack's, under the menu id (nt_ui_menu_open, nt_ui_close, nt_ui_is_open); all-zero is
- * the valid closed state. */
+ * state is the overlay stack's, under the menu id nt_ui_menu_open sets (nt_ui_close and nt_ui_is_open take it);
+ * all-zero is the valid closed state. */
 typedef struct {
+    uint32_t id;              /* the menu id, from nt_ui_menu_open (0 = never opened) */
     float anchor_x, anchor_y; /* open point (UI space) — root menu top-left attaches here */
     uint32_t focus;           /* focused row id (0 = none) */
     nt_ui_menu_aim_t aim;
@@ -126,7 +126,7 @@ typedef struct {
  * sprite markers draw on data->layer (NULL = layer 0), text on label_layer. `style` is read until
  * nt_ui_menu_end. Keys must be unique among siblings; navigation rules: spec chapter UI, section
  * "Immediate menu + combo". */
-bool nt_ui_menu_begin(nt_ui_menu_t *menu, nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t menu_id, nt_ui_menu_style_t *style);
+bool nt_ui_menu_begin(nt_ui_menu_t *menu, nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, nt_ui_menu_style_t *style);
 bool nt_ui_menu_item(nt_ui_menu_t *menu, uint32_t key, const char *label);                                 /* plain item; true when activated (click or Enter) */
 bool nt_ui_menu_item_ex(nt_ui_menu_t *menu, uint32_t key, const char *label, nt_ui_menu_item_opts_t opts); /* rich row; true when activated */
 /* Custom-content row: item_begin opens the row element, the game declares its body, item_end closes it
@@ -144,9 +144,10 @@ void nt_ui_menu_separator(nt_ui_menu_t *menu);                         /* non-in
 void nt_ui_menu_separator_text(nt_ui_menu_t *menu, const char *label); /* optional section header */
 void nt_ui_menu_end(nt_ui_menu_t *menu);
 
-/* Opens the menu `menu_id` with its root at (x, y) in UI space, on top of the overlay stack, and starts its
- * navigation fresh; it takes input from the next frame, so the press that opened it does not dismiss it. When to
- * open is the game's call: a right-click (nt_ui_pointer_pos gives the point), a long-press, a button. */
+/* Opens the menu `menu_id` with its root at (x, y) in UI space, on top of the overlay stack, inside the overlay
+ * being declared at the call (0 = none), closing every popup that is not its ancestor, and starts its navigation
+ * fresh; it takes input from the frame after its first declaration, so the press that opened it does not dismiss
+ * it. When to open is the game's call: a right-click (nt_ui_pointer_pos gives the point), a long-press, a button. */
 void nt_ui_menu_open(nt_ui_menu_t *menu, nt_ui_context_t *ctx, uint32_t menu_id, float x, float y);
 
 #ifdef NT_TEST_ACCESS

@@ -3,6 +3,7 @@
 
 /* Frame, pointer and render-command helpers shared by the nt_ui tests. */
 
+#include <math.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -19,6 +20,9 @@ extern "C" {
 #define UI_FX_VIEW_W 800.0F
 #define UI_FX_VIEW_H 600.0F
 #define UI_FX_DT (1.0F / 60.0F) /* ui_fx_frame_begin's frame time; frame-count math derives from it */
+
+/* Floats within `eps` of each other (the tests build with UNITY_EXCLUDE_FLOAT). */
+static inline bool ui_fx_float_near(float a, float b, float eps) { return fabsf(a - b) <= eps; }
 
 /* An active pointer at (x, y) with the given left-button state. */
 static inline nt_pointer_t ui_fx_pointer(float x, float y, bool down, bool pressed, bool released) {

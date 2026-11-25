@@ -1549,7 +1549,7 @@ static void build_ui(void) {
                 const uint32_t modal_id = CLAY_ID("asteroids.compact_modal").id;
                 if (s_ui_panel_open != nt_ui_is_open(s_ui, modal_id)) {
                     if (s_ui_panel_open) {
-                        nt_ui_open(s_ui, modal_id);
+                        nt_ui_modal_open(s_ui, modal_id);
                     } else {
                         nt_ui_close(s_ui, modal_id);
                     }

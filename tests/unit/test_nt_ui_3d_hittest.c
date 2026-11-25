@@ -335,7 +335,7 @@ static void test_popup_over_a_held_press_keeps_the_3d_capture(void) {
               .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = BBOX_X, .y = BBOX_Y}},
               .layout = {.sizing = {CLAY_SIZING_FIXED(BBOX_W), CLAY_SIZING_FIXED(BBOX_H)}}}){}(void)nt_ui_step(s_fx.ctx, id, NULL);
         if (f >= 3) {
-            nt_ui_open(s_fx.ctx, 0x3D0001U);
+            nt_ui_popup_open(s_fx.ctx, 0x3D0001U);
             if (nt_ui_popup_begin(s_fx.ctx, 0x3D0001U, &st, &anc, NULL)) {
                 nt_ui_popup_end(s_fx.ctx);
             }

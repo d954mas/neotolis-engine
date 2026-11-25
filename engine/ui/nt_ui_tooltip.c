@@ -11,6 +11,7 @@
 #include "ui/nt_ui_internal.h"
 #include "ui/nt_ui_label.h"
 #include "ui/nt_ui_popup.h"
+#include "ui/nt_ui_popup_internal.h"
 #include "ui/nt_ui_state.h"
 
 const nt_ui_widget_def_t NT_UI_TOOLTIP_DEF = {
@@ -33,6 +34,7 @@ static inline uint32_t tooltip_panel_id(uint32_t id) { return nt_ui_derived_id(i
 /* The engine-owned hover-delay cell (not a game bool). Zeroed on create -> hover starts at 0. */
 typedef struct {
     float hover; /* accumulated seconds the cursor has been over the target */
+    bool shown;  /* declared last frame: open, or fading out */
 } nt_ui_tooltip_cell_t;
 
 nt_ui_tooltip_style_t nt_ui_tooltip_style_defaults(void) {
@@ -125,22 +127,16 @@ bool nt_ui_tooltip(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8
 
     nt_ui_popup_style_t pst = nt_ui_popup_style_defaults();
     pst.ease_speed = style->open_ease_speed; /* game-controlled open tween (0 = snap) */
-    pst.kind = NT_UI_POPUP_KIND_TOOLTIP;     /* takes no input: hover-driven, must not gate base UI */
     pst.layer = fill_layer;                  /* widget-owned: the popup panel sits on the fill layer */
 
     /* Resolve the panel slice9 once: art-or-flat decides whether the panel can round (IMAGE bg can't). */
     nt_atlas_resolve_ref(&style->panel_art);
     const bool panel_art = (style->panel_art.atlas.id != 0U && style->panel_art.region != NT_ATLAS_INVALID_REGION);
 
-    /* The hover timer opens and closes the tooltip's own stack entry. */
-    const uint32_t popup_id = tooltip_popup_id(target_id);
-    if (open && !nt_ui_is_open(ctx, popup_id)) {
-        nt_ui_open(ctx, popup_id);
-    } else if (!open) {
-        nt_ui_close(ctx, popup_id);
-    }
+    /* No overlay: it shows while the hover timer says so, then fades, above every overlay and taking no input. */
     nt_ui_popup_info_t info = {0};
-    const bool shown = nt_ui_popup_begin(ctx, popup_id, &pst, &anc, &info);
+    const bool shown = (open || c->shown) && nt_ui_internal_tooltip_begin(ctx, tooltip_popup_id(target_id), &pst, &anc, open, &info);
+    c->shown = shown;
     if (shown) {
         const uint32_t panel_id = tooltip_panel_id(target_id);
         const nt_ui_label_style_t lbl = {.font_id = style->font_id, .font_size = style->font_size, .color = style->text_color};

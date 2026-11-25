@@ -317,7 +317,7 @@ static void combo_open_trigger(nt_ui_context_t *ctx, uint8_t fill_layer, uint8_t
     dropdown_declare_chevron(ctx, fill_layer, 0U, style, a->value_t);
     nt_ui_clay_priv_close_element();
     if (nt_ui_step(ctx, id, NULL).clicked) {
-        nt_ui_open(ctx, dropdown_popup_id(id)); /* an open list's catcher covers the trigger: a click only opens */
+        nt_ui_popup_open(ctx, dropdown_popup_id(id)); /* an open list's catcher covers the trigger: a click only opens */
     }
 }
 
@@ -447,7 +447,7 @@ bool nt_ui_combo_preview_end(nt_ui_context_t *ctx) {
 
     nt_ui_clay_priv_close_element();
     if (nt_ui_step(ctx, id, NULL).clicked) {
-        nt_ui_open(ctx, dropdown_popup_id(id));
+        nt_ui_popup_open(ctx, dropdown_popup_id(id));
     }
     ctx->pending_combo.trigger_open = 0U;
     /* Open the list now that the trigger bbox is closed (matches combo_begin's order). */

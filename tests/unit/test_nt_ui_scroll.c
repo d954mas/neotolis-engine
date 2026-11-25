@@ -49,8 +49,6 @@ void setUp(void) {
 
 void tearDown(void) { ui_walker_fixture_shutdown(&s_fx); }
 
-static bool float_near(float a, float b, float eps) { return fabsf(a - b) <= eps; }
-
 /* ---- Test 1: momentum decays monotonically frame-over-frame ---- */
 static void test_scroll_momentum_decays_monotonic(void) {
     /* Long content so the whole fling stays in-bounds (no bounce interfering). */
@@ -88,7 +86,7 @@ static void test_scroll_clamp_holds(void) {
     TEST_ASSERT_TRUE(s.pos[1] >= lo - 0.5F);
     TEST_ASSERT_TRUE(s.pos[1] <= 0.0F + 0.5F);
     /* Settled at the far edge (flung well past it). */
-    TEST_ASSERT_TRUE(float_near(s.pos[1], lo, 1.0F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(s.pos[1], lo, 1.0F));
 }
 
 /* ---- Test 3: rubber-band returns a compressed magnitude < raw d ---- */
@@ -101,7 +99,7 @@ static void test_scroll_rubber_band_compresses(void) {
     /* Sign preserved for negative overscroll. */
     const float rn = nt_ui_scroll_test_rubber_band(-raw, dim);
     TEST_ASSERT_TRUE(rn < 0.0F);
-    TEST_ASSERT_TRUE(float_near(rn, -r, 0.001F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(rn, -r, 0.001F));
     /* Larger overscroll => more compression ratio (never linear). */
     const float r2 = nt_ui_scroll_test_rubber_band(2.0F * raw, dim);
     TEST_ASSERT_TRUE(r2 < 2.0F * r);
@@ -123,7 +121,7 @@ static void test_scroll_to_reaches_target(void) {
     }
     TEST_ASSERT_TRUE(frames < 600);                                     /* arrived */
     TEST_ASSERT_EQUAL_UINT8(0U, s.flags & NT_UI_SCROLL_FLAG_SCROLL_TO); /* flag cleared */
-    TEST_ASSERT_TRUE(float_near(s.pos[1], -500.0F, 1.0F));              /* near target */
+    TEST_ASSERT_TRUE(ui_fx_float_near(s.pos[1], -500.0F, 1.0F));        /* near target */
 }
 
 /* ---- Test 5: Clay sign — a positive (Clay-sign) wheel down moves childOffset negative ---- */
@@ -141,9 +139,9 @@ static void test_scroll_wheel_sign(void) {
         nt_ui_scroll_test_integrate(&s, (i == 0) ? wheel_down : none, 1.0F / 60.0F, content, container, &s_physics_style, false);
     }
     /* target moved by wheel * wheel_step = -40; pos eased toward it (negative). */
-    TEST_ASSERT_TRUE(float_near(s.target[1], -40.0F, 0.001F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(s.target[1], -40.0F, 0.001F));
     TEST_ASSERT_TRUE(s.pos[1] < 0.0F);
-    TEST_ASSERT_TRUE(float_near(s.pos[1], -40.0F, 1.0F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(s.pos[1], -40.0F, 1.0F));
 }
 
 /* ---- Container frame helper: a 200x200 scroll over 200x1000 content (y overflows). ---- */
@@ -217,10 +215,10 @@ static void test_scroll_hard_edges_stop_release_fling(void) {
     const float container[2] = {200.0F, 200.0F};
     const float wheel[2] = {0.0F, 0.0F};
     nt_ui_scroll_test_integrate(&s, wheel, 1.0F / 60.0F, content, container, &style, false);
-    TEST_ASSERT_TRUE(float_near(s.pos[0], 0.0F, 0.001F));
-    TEST_ASSERT_TRUE(float_near(s.pos[1], -800.0F, 0.001F));
-    TEST_ASSERT_TRUE(float_near(s.vel[0], 0.0F, 0.001F));
-    TEST_ASSERT_TRUE(float_near(s.vel[1], 0.0F, 0.001F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(s.pos[0], 0.0F, 0.001F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(s.pos[1], -800.0F, 0.001F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(s.vel[0], 0.0F, 0.001F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(s.vel[1], 0.0F, 0.001F));
 }
 
 static void test_scroll_takes_real_child_and_tracks_the_pointer(void) {
@@ -243,11 +241,11 @@ static void test_scroll_takes_real_child_and_tracks_the_pointer(void) {
     TEST_ASSERT_FALSE(nt_ui_hovered_within(s_fx.ctx, CLAY_ID("interactive_content").id)); /* the list holds the pointer now */
     const nt_ui_scroll_state_t *s = nt_ui_state_find(s_fx.ctx, SCROLL_ID);
     TEST_ASSERT_NOT_NULL(s);
-    TEST_ASSERT_TRUE(float_near(s->raw[1], -12.0F, 0.001F)); /* the 20 px move minus the 8 dp slop */
+    TEST_ASSERT_TRUE(ui_fx_float_near(s->raw[1], -12.0F, 0.001F)); /* the 20 px move minus the 8 dp slop */
     p.y = 60.0F;
     scroll_child_frame(&p, &style);
     s = nt_ui_state_find(s_fx.ctx, SCROLL_ID);
-    TEST_ASSERT_TRUE(float_near(s->raw[1], -32.0F, 0.001F)); /* then 1:1 */
+    TEST_ASSERT_TRUE(ui_fx_float_near(s->raw[1], -32.0F, 0.001F)); /* then 1:1 */
 }
 
 static void test_scroll_threshold_ignores_disabled_axis(void) {
@@ -264,15 +262,15 @@ static void test_scroll_threshold_ignores_disabled_axis(void) {
     scroll_frame(&p, &style);
     const nt_ui_scroll_state_t *s = nt_ui_state_find(s_fx.ctx, SCROLL_ID);
     TEST_ASSERT_NOT_NULL(s);
-    TEST_ASSERT_TRUE(float_near(s->raw[1], 0.0F, 0.001F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(s->raw[1], 0.0F, 0.001F));
     p.y = 91.0F;
     scroll_frame(&p, &style);
     s = nt_ui_state_find(s_fx.ctx, SCROLL_ID);
-    TEST_ASSERT_TRUE(float_near(s->raw[1], -1.0F, 0.001F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(s->raw[1], -1.0F, 0.001F));
     p.y = 89.0F;
     scroll_frame(&p, &style);
     s = nt_ui_state_find(s_fx.ctx, SCROLL_ID);
-    TEST_ASSERT_TRUE(float_near(s->raw[1], -3.0F, 0.001F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(s->raw[1], -3.0F, 0.001F));
 }
 
 /* ---- Test 6: wheel applied ONCE — one notch moves childOffset by the wheel contribution ---- */
@@ -294,8 +292,8 @@ static void test_scroll_wheel_applied_once(void) {
 
     const nt_ui_scroll_state_t *st = (const nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, SCROLL_ID);
     /* Exactly ONE wheel contribution (-1 * 40); a Clay double-drive would be -80. */
-    TEST_ASSERT_TRUE(float_near(st->pos[1], -40.0F, 0.5F));
-    TEST_ASSERT_TRUE(float_near(st->pos[0], 0.0F, 0.001F)); /* y-only style */
+    TEST_ASSERT_TRUE(ui_fx_float_near(st->pos[1], -40.0F, 0.5F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(st->pos[0], 0.0F, 0.001F)); /* y-only style */
 }
 
 /* ---- Test 7: childOffset fed from our pos (scroll_to drives the emitted offset) ---- */
@@ -311,13 +309,13 @@ static void test_scroll_childoffset_from_our_pos(void) {
     scroll_frame(&p, &style); /* integrate eases pos toward target, feeds childOffset */
 
     const nt_ui_bbox_t content = nt_ui_get_bbox(s_fx.ctx, CLAY_ID("content").id);
-    TEST_ASSERT_TRUE(content.found && float_near(content.y, -150.0F, 1.0F)); /* the layout got our pos */
+    TEST_ASSERT_TRUE(content.found && ui_fx_float_near(content.y, -150.0F, 1.0F)); /* the layout got our pos */
 }
 
 /* ---- a scroll claim is not a gesture press: it must not report the hold left in its pointer slot ---- */
 static void assert_scroll_claim_reports_no_hold(void) {
     TEST_ASSERT_EQUAL_UINT32(SCROLL_ID, nt_ui_test_capture_active_id(s_fx.ctx, 0U));
-    TEST_ASSERT_TRUE(float_near(nt_ui_query_interaction(s_fx.ctx, SCROLL_ID).hold_secs, 0.0F, 0.001F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(nt_ui_query_interaction(s_fx.ctx, SCROLL_ID).hold_secs, 0.0F, 0.001F));
 }
 
 static void leave_stale_hold_in_slot(void) {
@@ -464,7 +462,7 @@ static void test_scrollbar_thumb_size_ratio(void) {
         track_len = bar_probe.track_len;
     }
     TEST_ASSERT_TRUE(track_len > 0.0F);
-    TEST_ASSERT_TRUE(float_near(thumb_len, 0.25F * track_len, 2.0F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(thumb_len, 0.25F * track_len, 2.0F));
 }
 
 /* ---- Test 13: Clay sign — at rest (pos 0) the thumb sits at the TOP (offset 0); a
@@ -485,7 +483,7 @@ static void test_scrollbar_thumb_pos_clay_sign(void) {
         const ui_bar_probe_t bar_probe = ui_bar_probe(s_fx.ctx, nt_ui_scroll_test_bar_id(SCROLL_ID, 1), 1);
         off_top = bar_probe.thumb_off;
     }
-    TEST_ASSERT_TRUE(float_near(off_top, 0.0F, 0.5F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(off_top, 0.0F, 0.5F));
 
     /* Scroll to the bottom (max negative offset = -(content-container) = -600). */
     nt_ui_scroll_to(s_fx.ctx, SCROLL_ID, 0.0F, -600.0F);
@@ -501,7 +499,7 @@ static void test_scrollbar_thumb_pos_clay_sign(void) {
         track_len = bar_probe.track_len;
     }
     /* Bottom end: thumb offset == track_len - thumb_len. */
-    TEST_ASSERT_TRUE(float_near(off_bot, track_len - thumb_len, 2.0F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(off_bot, track_len - thumb_len, 2.0F));
     TEST_ASSERT_TRUE(off_bot > off_top); /* moved DOWN the track */
 }
 
@@ -615,8 +613,8 @@ static void test_scroll_to_top_from_button_sequence(void) {
     sb = (nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, SCROLL_ID_B);
     TEST_ASSERT_NOT_NULL(sa);
     TEST_ASSERT_NOT_NULL(sb);
-    TEST_ASSERT_TRUE(float_near(sa->pos[1], 0.0F, 1.0F)); /* eased back to top */
-    TEST_ASSERT_TRUE(float_near(sb->pos[1], 0.0F, 1.0F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(sa->pos[1], 0.0F, 1.0F)); /* eased back to top */
+    TEST_ASSERT_TRUE(ui_fx_float_near(sb->pos[1], 0.0F, 1.0F));
 }
 
 /* ---- Test 18: empty-area press drag (no inner widget capture) scrolls the container, and the
@@ -686,7 +684,7 @@ static void test_scroll_empty_press_tap_no_scroll(void) {
 
     nt_ui_scroll_state_t *s = (nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, SCROLL_ID);
     TEST_ASSERT_NOT_NULL(s);
-    TEST_ASSERT_TRUE(float_near(s->pos[1], 0.0F, 0.5F)); /* tap left it at rest */
+    TEST_ASSERT_TRUE(ui_fx_float_near(s->pos[1], 0.0F, 0.5F)); /* tap left it at rest */
 }
 
 /* Pointer `pidx` owns scroll `id` by its thumb on `axis`. */
@@ -794,7 +792,7 @@ static void test_scroll_empty_press_outside_bbox_ignored(void) {
     }
     nt_ui_scroll_state_t *s = (nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, SCROLL_ID);
     TEST_ASSERT_NOT_NULL(s);
-    TEST_ASSERT_TRUE(float_near(s->pos[1], 0.0F, 0.5F)); /* press-outside never scrolls */
+    TEST_ASSERT_TRUE(ui_fx_float_near(s->pos[1], 0.0F, 0.5F)); /* press-outside never scrolls */
 }
 
 /* ---- Test 22: empty-area press drag tracks the finger 1:1 — pos must equal the TOTAL finger
@@ -912,7 +910,7 @@ static void test_scroll_held_still_in_bounds_frozen(void) {
         scroll_frame(&p, &style);
         s = (nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, SCROLL_ID);
         TEST_ASSERT_NOT_NULL(s);
-        TEST_ASSERT_TRUE(float_near(s->pos[1], frozen, 0.001F));                         /* pos frozen — no creep, no drift */
+        TEST_ASSERT_TRUE(ui_fx_float_near(s->pos[1], frozen, 0.001F));                   /* pos frozen — no creep, no drift */
         TEST_ASSERT_EQUAL_UINT32(SCROLL_ID, nt_ui_test_capture_active_id(s_fx.ctx, 0U)); /* still owned */
     }
 }
@@ -935,7 +933,7 @@ static void test_scroll_held_still_past_edge_frozen(void) {
         scroll_frame(&p, &style);
         s = (nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, SCROLL_ID);
         TEST_ASSERT_NOT_NULL(s);
-        TEST_ASSERT_TRUE(float_near(s->pos[1], frozen, 0.001F)); /* compressed offset frozen */
+        TEST_ASSERT_TRUE(ui_fx_float_near(s->pos[1], frozen, 0.001F)); /* compressed offset frozen */
     }
 }
 
@@ -968,7 +966,7 @@ static void test_scroll_release_after_hold_no_fling(void) {
     }
     s = (nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, SCROLL_ID);
     TEST_ASSERT_NOT_NULL(s);
-    TEST_ASSERT_TRUE(float_near(s->pos[1], pos_at_release, 1.0F)); /* no momentum after a held-still release */
+    TEST_ASSERT_TRUE(ui_fx_float_near(s->pos[1], pos_at_release, 1.0F)); /* no momentum after a held-still release */
 }
 
 /* ---- Test 27: raw-anchored rubber — dragging N px past the edge then back M px tracks
@@ -996,7 +994,7 @@ static void test_scroll_raw_anchored_rubber_no_hysteresis(void) {
     TEST_ASSERT_TRUE(pos_near < pos_far - 1.0F); /* compressed display retraced (no stuck hysteresis) */
     /* pos is exactly the rubber-band of the current raw overdrag (pure function, recomputed from raw). */
     const float expect = nt_ui_scroll_test_rubber_band(raw_near, 200.0F); /* container height 200 */
-    TEST_ASSERT_TRUE(float_near(pos_near, expect, 1.5F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(pos_near, expect, 1.5F));
 }
 
 /* ---- Test 28: a held drag does NOT leak momentum mid-hold. Drag fast, then hold still: the
@@ -1015,7 +1013,7 @@ static void test_scroll_held_no_momentum_midhold(void) {
     scroll_frame(&p, &style);
     s = (nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, SCROLL_ID);
     TEST_ASSERT_NOT_NULL(s);
-    TEST_ASSERT_TRUE(float_near(s->pos[1], pos_after_drag, 0.001F)); /* no momentum step mid-hold */
+    TEST_ASSERT_TRUE(ui_fx_float_near(s->pos[1], pos_after_drag, 0.001F)); /* no momentum step mid-hold */
     /* A single still frame DECAYS the time-windowed velocity (never hard-zeroes — that parity-zero
      * was the flaky-fling bug); the genuine-hold drain to zero is covered by the release tests. */
     TEST_ASSERT_TRUE(fabsf(s->vel[1]) < vel_after_drag); /* still frame bleeds momentum, not a spike */
@@ -1059,8 +1057,8 @@ static void test_scroll_cross_container_no_adoption(void) {
     nt_ui_scroll_state_t *sb = (nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, SCROLL_ID_B);
     TEST_ASSERT_NOT_NULL(sa);
     TEST_ASSERT_NOT_NULL(sb);
-    TEST_ASSERT_TRUE(sa->pos[1] < -1.0F);                 /* A (the press owner) scrolled */
-    TEST_ASSERT_TRUE(float_near(sb->pos[1], 0.0F, 0.5F)); /* B never adopted the held finger */
+    TEST_ASSERT_TRUE(sa->pos[1] < -1.0F);                       /* A (the press owner) scrolled */
+    TEST_ASSERT_TRUE(ui_fx_float_near(sb->pos[1], 0.0F, 0.5F)); /* B never adopted the held finger */
     /* The single owner is A; the capture is NOT held by B. */
     TEST_ASSERT_EQUAL_UINT32(SCROLL_ID_A, nt_ui_test_capture_active_id(s_fx.ctx, 0U));
 }
@@ -1086,7 +1084,7 @@ static void test_scroll_held_entry_no_edge_no_gesture(void) {
     }
     nt_ui_scroll_state_t *s = (nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, SCROLL_ID);
     TEST_ASSERT_NOT_NULL(s);
-    TEST_ASSERT_TRUE(float_near(s->pos[1], 0.0F, 0.5F));                      /* never scrolled */
+    TEST_ASSERT_TRUE(ui_fx_float_near(s->pos[1], 0.0F, 0.5F));                /* never scrolled */
     TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_test_capture_active_id(s_fx.ctx, 0U)); /* nothing claimed */
 }
 
@@ -1325,7 +1323,7 @@ static void test_scroll_wheel_kills_fling(void) {
     const float wheel_up[2] = {0.0F, 1.0F}; /* one notch toward 0 (Clay sign up) */
     nt_ui_scroll_test_integrate(&s, wheel_up, 1.0F / 60.0F, content, container, &s_physics_style, false);
     /* Momentum killed so the easing branch picks up the new target (target moved by +step). */
-    TEST_ASSERT_TRUE(float_near(s.vel[1], 0.0F, 0.001F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(s.vel[1], 0.0F, 0.001F));
     TEST_ASSERT_TRUE(s.target[1] > target_before + 1.0F); /* the notch registered (not lost) */
 }
 
@@ -1387,7 +1385,7 @@ static void test_scroll_no_overflow_takes_no_gesture(void) {
     }
     nt_ui_scroll_state_t *s = (nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, SCROLL_ID);
     TEST_ASSERT_NOT_NULL(s);
-    TEST_ASSERT_TRUE(float_near(s->pos[1], 0.0F, 0.5F));                      /* never scrolled (no-op axis) */
+    TEST_ASSERT_TRUE(ui_fx_float_near(s->pos[1], 0.0F, 0.5F));                /* never scrolled (no-op axis) */
     TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_test_capture_active_id(s_fx.ctx, 0U)); /* never stole a capture */
 }
 
@@ -1419,7 +1417,7 @@ static void test_scroll_tap_stops_fling_and_swallows(void) {
 
     s = (nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, SCROLL_ID);
     TEST_ASSERT_NOT_NULL(s);
-    TEST_ASSERT_TRUE(float_near(s->vel[1], 0.0F, 0.001F)); /* fling stopped on tap */
+    TEST_ASSERT_TRUE(ui_fx_float_near(s->vel[1], 0.0F, 0.001F)); /* fling stopped on tap */
     const float frozen = s->pos[1];
     TEST_ASSERT_EQUAL_UINT32(SCROLL_ID, nt_ui_test_capture_active_id(s_fx.ctx, 0U)); /* tap swallowed (claimed) */
 
@@ -1427,7 +1425,7 @@ static void test_scroll_tap_stops_fling_and_swallows(void) {
     scroll_frame(&p, &style);
     s = (nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, SCROLL_ID);
     TEST_ASSERT_NOT_NULL(s);
-    TEST_ASSERT_TRUE(float_near(s->pos[1], frozen, 1.0F)); /* frozen next frame */
+    TEST_ASSERT_TRUE(ui_fx_float_near(s->pos[1], frozen, 1.0F)); /* frozen next frame */
 }
 
 /* ---- Test 40 (fix 2b): a press on a RESTING container does NOT claim the capture (no fling to
@@ -1468,7 +1466,7 @@ static void test_scrollbar_thumb_grab_offset_no_jump(void) {
         thumb_off0 = bar_probe.thumb_off;
         track_len = bar_probe.track_len;
     }
-    TEST_ASSERT_TRUE(float_near(thumb_off0, 0.0F, 1.0F)); /* thumb at the top at rest */
+    TEST_ASSERT_TRUE(ui_fx_float_near(thumb_off0, 0.0F, 1.0F)); /* thumb at the top at rest */
 
     /* over = content - container = 800 - 200 = 600; thumb travel maps pos: a thumb_off delta of D
      * corresponds to a pos delta of -D * over / (track_len - thumb_len). Read s->pos DIRECTLY (the
@@ -1499,7 +1497,7 @@ static void test_scrollbar_thumb_grab_offset_no_jump(void) {
     s = (nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, SCROLL_ID);
     TEST_ASSERT_NOT_NULL(s);
     const float thumb_off_drag = (-s->pos[1] / over) * travel;
-    TEST_ASSERT_TRUE(float_near(thumb_off_drag - thumb_off_press, 10.0F, 2.0F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(thumb_off_drag - thumb_off_press, 10.0F, 2.0F));
 }
 
 /* ---- Test 42 (fix 7): fling overscroll depth is FPS-independent — the same release velocity
@@ -1551,7 +1549,7 @@ static void test_scroll_content_shrink_clamps_pos(void) {
     s.raw[1] = -800.0F;
     s.target[1] = -800.0F;
     nt_ui_scroll_test_integrate(&s, no_wheel, 1.0F / 60.0F, content, container, &s_physics_style, false);
-    TEST_ASSERT_TRUE(float_near(s.pos[1], -800.0F, 1.0F)); /* parked at the old bottom */
+    TEST_ASSERT_TRUE(ui_fx_float_near(s.pos[1], -800.0F, 1.0F)); /* parked at the old bottom */
 
     /* Content SHRINKS to 400 -> new bottom edge is -(400-200) = -200. pos at -800 is now past it. */
     content[1] = 400.0F;
@@ -1559,7 +1557,7 @@ static void test_scroll_content_shrink_clamps_pos(void) {
         nt_ui_scroll_test_integrate(&s, no_wheel, 1.0F / 60.0F, content, container, &s_physics_style, false);
     }
     /* The offset must animate back up to the new bound (-200), not stay parked at -800. */
-    TEST_ASSERT_TRUE(float_near(s.pos[1], -200.0F, 1.0F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(s.pos[1], -200.0F, 1.0F));
 }
 
 /* ---- Test 44: at high FPS pointer events post slower than the render loop, so a fast drag
@@ -1796,8 +1794,8 @@ static void test_scroll_wheel_nested_innermost_wins(void) {
     nt_ui_scroll_state_t *inner = (nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, NEST_INNER_ID);
     TEST_ASSERT_NOT_NULL(outer);
     TEST_ASSERT_NOT_NULL(inner);
-    TEST_ASSERT_TRUE(inner->pos[1] < -1.0F);                 /* the INNER scrolled */
-    TEST_ASSERT_TRUE(float_near(outer->pos[1], 0.0F, 0.5F)); /* the OUTER stayed put (innermost won) */
+    TEST_ASSERT_TRUE(inner->pos[1] < -1.0F);                       /* the INNER scrolled */
+    TEST_ASSERT_TRUE(ui_fx_float_near(outer->pos[1], 0.0F, 0.5F)); /* the OUTER stayed put (innermost won) */
 }
 
 /* ---- Test 47 (nested, outer band): pointer over the outer but OUTSIDE the inner routes to the
@@ -1821,8 +1819,8 @@ static void test_scroll_wheel_nested_outer_band(void) {
     nt_ui_scroll_state_t *inner = (nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, NEST_INNER_ID);
     TEST_ASSERT_NOT_NULL(outer);
     TEST_ASSERT_NOT_NULL(inner);
-    TEST_ASSERT_TRUE(outer->pos[1] < -1.0F);                 /* the OUTER scrolled */
-    TEST_ASSERT_TRUE(float_near(inner->pos[1], 0.0F, 0.5F)); /* the inner never received the wheel */
+    TEST_ASSERT_TRUE(outer->pos[1] < -1.0F);                       /* the OUTER scrolled */
+    TEST_ASSERT_TRUE(ui_fx_float_near(inner->pos[1], 0.0F, 0.5F)); /* the inner never received the wheel */
 }
 
 /* Two overlapping sibling scroll containers: a BIG one, then a SMALL one FLOATING over the big's
@@ -1874,8 +1872,8 @@ static void test_scroll_wheel_front_most_sibling_wins(void) {
     nt_ui_scroll_state_t *small = (nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, TIE_SMALL_ID);
     TEST_ASSERT_NOT_NULL(big);
     TEST_ASSERT_NOT_NULL(small);
-    TEST_ASSERT_TRUE(small->pos[1] < -1.0F);               /* the front-most of the two overlapping containers took it */
-    TEST_ASSERT_TRUE(float_near(big->pos[1], 0.0F, 0.5F)); /* the bigger sibling never received it */
+    TEST_ASSERT_TRUE(small->pos[1] < -1.0F);                     /* the front-most of the two overlapping containers took it */
+    TEST_ASSERT_TRUE(ui_fx_float_near(big->pos[1], 0.0F, 0.5F)); /* the bigger sibling never received it */
 }
 
 /* ================= Scrollbar floating clipTo (clip to the attached container viewport) ================= */
@@ -1944,7 +1942,7 @@ static void test_scrollbar_standalone_renders_inside_clip(void) {
     /* clipTo did NOT collapse the bar: both images keep a sane non-zero bbox fully inside the
      * 200x200 container viewport (track == full track_len, thumb a positive slice). */
     TEST_ASSERT_TRUE(track->boundingBox.width > 0.0F && track->boundingBox.height > 0.0F);
-    TEST_ASSERT_TRUE(float_near(track->boundingBox.height, 200.0F, 1.0F)); /* full container height */
+    TEST_ASSERT_TRUE(ui_fx_float_near(track->boundingBox.height, 200.0F, 1.0F)); /* full container height */
     TEST_ASSERT_TRUE(thumb->boundingBox.width > 0.0F && thumb->boundingBox.height > 0.0F);
 
     /* Both are enclosed by a floating-clip SCISSOR == the container viewport, but the viewport
@@ -2003,12 +2001,12 @@ static void test_scrollbar_nested_clipped_to_outer(void) {
 
     const nt_ui_bbox_t inner = nt_ui_get_bbox(s_fx.ctx, EXCL_INNER_ID);
     TEST_ASSERT_TRUE(inner.found);
-    TEST_ASSERT_TRUE(float_near(inner.x, -43.0F, 0.01F));
-    TEST_ASSERT_TRUE(float_near(inner.y, -37.0F, 0.01F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(inner.x, -43.0F, 0.01F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(inner.y, -37.0F, 0.01F));
     Clay_RenderCommand *bars[2] = {NULL, NULL};
     for (int32_t i = 0; i < s_fx.ctx->frozen_cmds.length; ++i) {
         Clay_RenderCommand *c = &s_fx.ctx->frozen_cmds.internalArray[i];
-        if (c->commandType == CLAY_RENDER_COMMAND_TYPE_IMAGE && float_near(c->boundingBox.width, style.bar_thickness, 0.01F)) {
+        if (c->commandType == CLAY_RENDER_COMMAND_TYPE_IMAGE && ui_fx_float_near(c->boundingBox.width, style.bar_thickness, 0.01F)) {
             const int bar = c->id == inner_bar_id ? 0 : 1;
             TEST_ASSERT_NULL(bars[bar]);
             bars[bar] = c;
@@ -2088,7 +2086,7 @@ static void arb_popup_over(void) {
     nt_ui_popup_style_t ps = nt_ui_popup_style_defaults();
     ps.ease_speed = 0.0F;
     const nt_ui_popup_anchor_t anc = {.x = 500.0F, .y = 350.0F, .prefer_side = NT_UI_POPUP_BELOW};
-    nt_ui_open(s_fx.ctx, ARB_POPUP);
+    nt_ui_popup_open(s_fx.ctx, ARB_POPUP);
     if (nt_ui_popup_begin(s_fx.ctx, ARB_POPUP, &ps, &anc, NULL)) {
         CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(60), CLAY_SIZING_FIXED(30)}}}) {}
         nt_ui_popup_end(s_fx.ctx);
@@ -2162,7 +2160,7 @@ static void test_arb_foreground_outside_list_not_stolen(void) {
     p.y = 50.0F;
     arb_frame(&p, 1);
     TEST_ASSERT_EQUAL_UINT32(CLAY_ID("arb_fg").id, s_fx.ctx->captures[0].active_id);
-    TEST_ASSERT_TRUE(float_near(arb_list()->raw[1], 0.0F, 0.001F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(arb_list()->raw[1], 0.0F, 0.001F));
 }
 
 /* An inert modal over a flinging list: the press neither stops the fling nor scrolls the list. */
@@ -2193,7 +2191,7 @@ static void test_arb_drag_from_disabled_row_scrolls(void) {
     p.y = 0.0F;
     arb_frame(&p, 1);
     TEST_ASSERT_EQUAL_UINT32(SCROLL_ID, s_fx.ctx->captures[0].active_id);
-    TEST_ASSERT_TRUE(float_near(arb_list()->raw[1], -22.0F, 0.001F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(arb_list()->raw[1], -22.0F, 0.001F));
 }
 
 /* A thumb arc (14, 10): the list takes it once its own axis crosses the slop, despite more x. */
@@ -2291,7 +2289,7 @@ static void test_arb_slop_is_in_dp(void) {
     p.y = 120.0F; /* 30 units: past it, the excess 6 is routed */
     arb_frame(&p, 1);
     TEST_ASSERT_EQUAL_UINT32(SCROLL_ID, s_fx.ctx->captures[0].active_id);
-    TEST_ASSERT_TRUE(float_near(arb_list()->raw[1], -6.0F, 0.001F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(arb_list()->raw[1], -6.0F, 0.001F));
 }
 
 /* Nested X track inside the Y list: each axis goes to the scroll that moves on it, also for wheel. */
@@ -2349,11 +2347,11 @@ static void test_arb_overlay_takes_the_wheel(void) {
     nt_pointer_t p = ui_fx_pointer(100.0F, 50.0F, false, false, false);
     arb_warm(&p);
     arb_frame(&p, 1);
-    TEST_ASSERT_EQUAL_UINT32(ARB_POPUP, s_fx.ctx->overlay_top);
+    TEST_ASSERT_TRUE_MESSAGE(nt_ui_wants_keyboard(s_fx.ctx), "the popup is the top");
     const float before = arb_list()->pos[1];
     p.wheel_dy = 1.0F;
     arb_frame(&p, 1);
-    TEST_ASSERT_TRUE_MESSAGE(float_near(arb_list()->pos[1], before, 0.001F), "the list under the overlay takes no wheel");
+    TEST_ASSERT_TRUE_MESSAGE(ui_fx_float_near(arb_list()->pos[1], before, 0.001F), "the list under the overlay takes no wheel");
 }
 
 #define INERT_LIST_POPUP 0x5C0A11U
@@ -2366,7 +2364,7 @@ static void inert_list_frame(const nt_pointer_t *p, bool open) {
     ps.ease_speed = 8.0F;
     const nt_ui_popup_anchor_t anc = {.x = 300.0F, .y = 100.0F, .prefer_side = NT_UI_POPUP_BELOW};
     if (open) {
-        nt_ui_open(s_fx.ctx, INERT_LIST_POPUP);
+        nt_ui_popup_open(s_fx.ctx, INERT_LIST_POPUP);
     } else {
         nt_ui_close(s_fx.ctx, INERT_LIST_POPUP);
     }
@@ -2398,7 +2396,7 @@ static void test_arb_closing_popup_drops_its_scroll_gesture(void) {
     }
     TEST_ASSERT_EQUAL_UINT32(0U, s_fx.ctx->captures[0].pending_scroll);
     TEST_ASSERT_EQUAL_UINT32(0U, s_fx.ctx->captures[0].active_id);
-    TEST_ASSERT_TRUE_MESSAGE(float_near(s->raw[1], before, 0.001F), "the list in a closing popup takes no drag");
+    TEST_ASSERT_TRUE_MESSAGE(ui_fx_float_near(s->raw[1], before, 0.001F), "the list in a closing popup takes no drag");
 }
 
 /* A tap below the slop on a row inside a list clicks it and leaves the list at rest. */
@@ -2416,7 +2414,7 @@ static void test_arb_tap_below_slop_clicks(void) {
     arb_release(&p);
     arb_frame(&p, 1);
     TEST_ASSERT_TRUE(s_child_in.clicked);
-    TEST_ASSERT_TRUE(float_near(arb_list()->raw[1], 0.0F, 0.001F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(arb_list()->raw[1], 0.0F, 0.001F));
 }
 
 /* A scroll claim is not a press: it reports no hold left in its pointer slot. */
@@ -2449,7 +2447,7 @@ static void test_arb_dt_zero_drag_no_phantom_fling(void) {
     TEST_ASSERT_EQUAL_UINT32(SCROLL_ID, s_fx.ctx->captures[0].active_id);
     arb_release(&p);
     arb_frame(&p, 1);
-    TEST_ASSERT_TRUE(float_near(arb_list()->vel[1], 0.0F, 0.001F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(arb_list()->vel[1], 0.0F, 0.001F));
 }
 
 /* The slop first crossed on the release frame, outside every hitbox: the list takes it, flings, and
@@ -2469,7 +2467,7 @@ static void test_arb_release_crossing_outside_flings(void) {
     TEST_ASSERT_EQUAL_UINT32(SCROLL_ID, s_fx.ctx->captures[0].active_id);
     TEST_ASSERT_TRUE(nt_ui_wants_pointer(s_fx.ctx));
     TEST_ASSERT_TRUE(arb_list()->vel[1] < -100.0F);
-    TEST_ASSERT_TRUE(float_near(arb_list()->pos[1], -32.0F, 0.5F)); /* the 40 move minus the slop */
+    TEST_ASSERT_TRUE(ui_fx_float_near(arb_list()->pos[1], -32.0F, 0.5F)); /* the 40 move minus the slop */
 }
 
 /* A press on the thumb of a flinging list grabs the thumb (no tap-to-stop claim on the list). */
@@ -2522,7 +2520,7 @@ static void test_arb_unclipped_floating_keeps_drag_from_list(void) {
     p.y = 50.0F;
     arb_frame(&p, 1);
     TEST_ASSERT_EQUAL_UINT32(CLAY_ID("arb_popup").id, s_fx.ctx->captures[0].active_id);
-    TEST_ASSERT_TRUE(float_near(arb_list()->raw[1], 0.0F, 0.001F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(arb_list()->raw[1], 0.0F, 0.001F));
 }
 
 /* A real popup opened from inside a list: a drag on its content never scrolls the list behind it. */
@@ -2530,7 +2528,7 @@ static void body_real_popup(void) {
     nt_ui_popup_style_t st = nt_ui_popup_style_defaults();
     st.ease_speed = 0.0F;
     const nt_ui_popup_anchor_t anchor = {.x = 40.0F, .y = 20.0F, .w = 80.0F, .h = 30.0F, .prefer_side = NT_UI_POPUP_BELOW};
-    nt_ui_open(s_fx.ctx, CLAY_ID("arb_real_popup").id);
+    nt_ui_popup_open(s_fx.ctx, CLAY_ID("arb_real_popup").id);
     if (nt_ui_popup_begin(s_fx.ctx, CLAY_ID("arb_real_popup").id, &st, &anchor, NULL)) {
         CLAY({.id = CLAY_ID("arb_popup_btn"), .layout = {.sizing = {CLAY_SIZING_FIXED(80), CLAY_SIZING_FIXED(80)}}}) { s_fg_in = nt_ui_step(s_fx.ctx, CLAY_ID("arb_popup_btn").id, NULL); }
         nt_ui_popup_end(s_fx.ctx);
@@ -2549,7 +2547,7 @@ static void test_arb_popup_in_list_keeps_drag_from_list(void) {
     p.y = 50.0F;
     arb_frame(&p, 1);
     TEST_ASSERT_EQUAL_UINT32(CLAY_ID("arb_popup_btn").id, s_fx.ctx->captures[0].active_id);
-    TEST_ASSERT_TRUE(float_near(arb_list()->raw[1], 0.0F, 0.001F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(arb_list()->raw[1], 0.0F, 0.001F));
 }
 
 /* A tap's pending gesture ends with its frame: a button found held when the context runs again
@@ -2565,7 +2563,7 @@ static void test_arb_tap_gesture_does_not_outlive_its_frame(void) {
     p.y = 110.0F;
     arb_frame(&p, 1);
     TEST_ASSERT_EQUAL_UINT32(0U, s_fx.ctx->captures[0].active_id);
-    TEST_ASSERT_TRUE(float_near(arb_list()->raw[1], 0.0F, 0.001F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(arb_list()->raw[1], 0.0F, 0.001F));
 }
 
 /* A thumb press over a full-width row takes the thumb, not the row under it. */
@@ -2610,7 +2608,7 @@ static void test_arb_thumb_drag_moves_content_the_same_frame(void) {
     arb_frame(&p, 1);
     /* The laid-out content, not the state cell: the offset this frame's layout was given. */
     const nt_ui_bbox_t content = nt_ui_get_bbox(s_fx.ctx, CLAY_ID("arb_content").id);
-    TEST_ASSERT_TRUE(content.found && float_near(content.y, -200.0F, 0.5F));
+    TEST_ASSERT_TRUE(content.found && ui_fx_float_near(content.y, -200.0F, 0.5F));
 }
 
 /* A bar takes presses only while it shows a thumb that can move: over a list that fits, and over a
@@ -2673,7 +2671,7 @@ static void test_arb_thumb_stops_when_its_axis_is_disabled(void) {
     p.y = 100.0F;
     arb_frame(&p, 1);
     arb_frame(&p, 1);
-    TEST_ASSERT_TRUE(float_near(arb_list()->pos[1], held, 0.001F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(arb_list()->pos[1], held, 0.001F));
     TEST_ASSERT_EQUAL_UINT32(0U, s_fx.ctx->captures[0].active_id);
 }
 
@@ -2705,7 +2703,7 @@ static void test_arb_wheel_does_not_move_a_held_thumb(void) {
     const float held = arb_list()->pos[1];
     p.wheel_dy = 1.0F;
     arb_frame(&p, 1);
-    TEST_ASSERT_TRUE(float_near(arb_list()->pos[1], held, 0.001F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(arb_list()->pos[1], held, 0.001F));
 }
 
 /* An overlay that opens over a held press ends its pending scroll: the drag past the slop scrolls nothing. */
@@ -2723,7 +2721,7 @@ static void test_arb_overlay_ends_a_pending_scroll(void) {
     p.y -= 40.0F;
     arb_frame(&p, 1);
     arb_frame(&p, 1);
-    TEST_ASSERT_TRUE_MESSAGE(float_near(arb_list()->raw[1], 0.0F, 0.001F), "the list under the overlay does not scroll");
+    TEST_ASSERT_TRUE_MESSAGE(ui_fx_float_near(arb_list()->raw[1], 0.0F, 0.001F), "the list under the overlay does not scroll");
 }
 
 /* Equal crossings: the pressed widget keeps the drag over a scroll, the inner scroll over the outer. */
@@ -2740,7 +2738,7 @@ static void test_arb_equal_crossings_go_to_the_widget_then_the_inner_scroll(void
     arb_frame(&p, 1);
     TEST_ASSERT_EQUAL_UINT32(CLAY_ID("arb_row").id, s_fx.ctx->captures[0].active_id);
     TEST_ASSERT_FALSE(s_child_in.gesture_pending);
-    TEST_ASSERT_TRUE(float_near(arb_list()->raw[1], 0.0F, 0.001F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(arb_list()->raw[1], 0.0F, 0.001F));
 
     arb_release(&p);
     arb_frame(&p, 1);
@@ -2955,7 +2953,7 @@ static void test_arb_dropped_pointer_slot_holds_no_gesture(void) {
     arb_frame(ps, 2);
     TEST_ASSERT_EQUAL_UINT32(0U, s_fx.ctx->captures[1].pending_scroll);
     TEST_ASSERT_EQUAL_UINT32(0U, s_fx.ctx->captures[1].active_id);
-    TEST_ASSERT_TRUE(float_near(arb_list()->raw[1], 0.0F, 0.001F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(arb_list()->raw[1], 0.0F, 0.001F));
 }
 
 /* A pending press keeps the pointer for the UI after it leaves the list: the list may still take it. */
@@ -2981,7 +2979,7 @@ static void test_arb_track_tap_centers_the_thumb(void) {
     for (int i = 0; i < 240; ++i) {
         arb_frame(&p, 1);
     }
-    TEST_ASSERT_TRUE(float_near(arb_list()->pos[1], -650.0F, 1.0F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(arb_list()->pos[1], -650.0F, 1.0F));
 }
 
 /* The wheel over a scrollbar scrolls its list. */
@@ -3018,7 +3016,7 @@ static void test_arb_content_take_keeps_last_thumb_move(void) {
     ps[1].y = 110.0F; /* 40 up: claims the list, the excess past the 8 slop routes */
     arb_frame(ps, 2);
     TEST_ASSERT_EQUAL_UINT32(SCROLL_ID, s_fx.ctx->captures[1].active_id);
-    TEST_ASSERT_TRUE(float_near(arb_list()->pos[1], after_thumb - 32.0F, 0.5F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(arb_list()->pos[1], after_thumb - 32.0F, 0.5F));
 }
 
 /* Two fingers press both bars of one list in one frame: one takes it, and a still frame moves nothing. */
@@ -3039,8 +3037,8 @@ static void test_arb_both_bars_pressed_together(void) {
     arb_hold(&ps[1]);
     arb_frame(ps, 2);
     TEST_ASSERT_TRUE(s_fx.ctx->captures[0].active_id == 0U || s_fx.ctx->captures[1].active_id == 0U);
-    TEST_ASSERT_TRUE(float_near(arb_list()->pos[0], x0, 0.001F));
-    TEST_ASSERT_TRUE(float_near(arb_list()->pos[1], y0, 0.001F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(arb_list()->pos[0], x0, 0.001F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(arb_list()->pos[1], y0, 0.001F));
 }
 
 /* A tap on the second bar while the first is held: a still frame moves nothing. */
@@ -3062,7 +3060,7 @@ static void test_arb_tap_on_other_bar_while_held(void) {
     ps[1].buttons[NT_BUTTON_LEFT].is_pressed = false;
     ps[1].buttons[NT_BUTTON_LEFT].is_released = false;
     arb_frame(ps, 2);
-    TEST_ASSERT_TRUE(float_near(arb_list()->pos[0], x0, 0.001F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(arb_list()->pos[0], x0, 0.001F));
 }
 
 /* A second finger pressing a held thumb takes it (newest pointer wins). */
@@ -3090,10 +3088,10 @@ static void test_hard_edge_drag_reversal_has_no_dead_zone(void) {
     nt_ui_scroll_state_t s = {0};
     s.raw[1] = 50.0F; /* dragged 50 past the top edge */
     nt_ui_scroll_test_integrate(&s, wheel, 1.0F / 60.0F, content, container, &style, true);
-    TEST_ASSERT_TRUE(float_near(s.pos[1], 0.0F, 0.001F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(s.pos[1], 0.0F, 0.001F));
     s.raw[1] -= 10.0F; /* finger reverses 10 */
     nt_ui_scroll_test_integrate(&s, wheel, 1.0F / 60.0F, content, container, &style, true);
-    TEST_ASSERT_TRUE(float_near(s.pos[1], -10.0F, 0.001F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(s.pos[1], -10.0F, 0.001F));
 }
 // #endregion
 

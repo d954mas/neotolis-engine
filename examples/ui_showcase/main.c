@@ -1700,7 +1700,7 @@ static void render_modals(nt_ui_context_t *ctx, tab_state_t *st) {
         true);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Show confirm", g_current->body);
     if (nt_ui_button_end(ctx)) {
-        nt_ui_open(ctx, s_id_modal_confirm);
+        nt_ui_modal_open(ctx, s_id_modal_confirm);
     }
 }
 
@@ -1735,7 +1735,7 @@ static void render_modal_overlay(nt_ui_context_t *ctx, tab_state_t *st) {
                     nt_ui_close(ctx, s_id_modal_confirm);
                 }
                 if (modal_action_btn(ctx, s_id_modal_nested_btn, "Show nested")) {
-                    nt_ui_open(ctx, s_id_modal_nested);
+                    nt_ui_modal_open(ctx, s_id_modal_nested);
                 }
             }
 
@@ -3076,7 +3076,7 @@ enum {
  * separator, a checkmark toggle, a disabled-via-custom row, and Quit. Built in CODE every frame. */
 static void render_menu_global(nt_ui_context_t *ctx, tab_state_t *st) {
     nt_ui_menu_t *menu = &st->menu.global_menu;
-    if (nt_ui_menu_begin(menu, ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_menu_global, g_current->menu)) {
+    if (nt_ui_menu_begin(menu, ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, g_current->menu)) {
         nt_ui_menu_item_opts_t newo = {0};
         newo.icon = s_icon_bunny_ref;
         newo.shortcut = "Ctrl+N";
@@ -3115,7 +3115,7 @@ static void render_menu_global(nt_ui_context_t *ctx, tab_state_t *st) {
  * custom not-activatable row whose inner control owns the click while the row only highlights. */
 static void render_menu_zone(nt_ui_context_t *ctx, tab_state_t *st) {
     nt_ui_menu_t *menu = &st->menu.zone_menu;
-    if (nt_ui_menu_begin(menu, ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_menu_zone, g_current->menu)) {
+    if (nt_ui_menu_begin(menu, ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, g_current->menu)) {
         nt_ui_menu_item_opts_t edit = {0};
         edit.icon = s_icon_bunny_ref;
         if (nt_ui_menu_item_ex(menu, MK_EDIT, "Edit panel", edit)) {

@@ -57,8 +57,6 @@ void setUp(void) {
 
 void tearDown(void) { ui_walker_fixture_shutdown(&s_fx); }
 
-static bool float_near(float a, float b, float eps) { return fabsf(a - b) <= eps; }
-
 static void declare_btn_element(void) {
     CLAY({.id = CLAY_ID("btn"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = BTN_X, .y = BTN_Y}}, .layout = {.sizing = {CLAY_SIZING_FIXED(BTN_W), CLAY_SIZING_FIXED(BTN_H)}}}) {}
 }
@@ -96,8 +94,8 @@ static void test_default_viewport_identity_hit(void) {
     TEST_ASSERT_TRUE(in.hovered);
     TEST_ASSERT_TRUE(in.pressed_now);
     /* pos echoes the converted (== device under identity) pointer in layout space. */
-    TEST_ASSERT_TRUE(float_near(in.pos[0], BTN_CX, 0.5F));
-    TEST_ASSERT_TRUE(float_near(in.pos[1], BTN_CY, 0.5F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(in.pos[0], BTN_CX, 0.5F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(in.pos[1], BTN_CY, 0.5F));
 }
 
 /* ---- 2: a scaled viewport maps a DEVICE pointer onto the widget's LAYOUT rect ---- */
@@ -113,8 +111,8 @@ static void test_scaled_viewport_device_pointer_hits(void) {
     TEST_ASSERT_TRUE(in.hovered);
     TEST_ASSERT_TRUE(in.pressed_now);
     /* Reported pos is in LAYOUT space (device converted back through the viewport). */
-    TEST_ASSERT_TRUE(float_near(in.pos[0], BTN_CX, 0.5F));
-    TEST_ASSERT_TRUE(float_near(in.pos[1], BTN_CY, 0.5F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(in.pos[0], BTN_CX, 0.5F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(in.pos[1], BTN_CY, 0.5F));
 }
 
 /* A device pointer OUTSIDE the widget's mapped rect does not hit. */
@@ -139,8 +137,8 @@ static void test_converters_roundtrip_and_default_identity(void) {
     const float screen0[2] = {BTN_CX, BTN_CY};
     float layout0[2];
     nt_ui_screen_to_layout(s_fx.ctx, screen0, layout0);
-    TEST_ASSERT_TRUE(float_near(layout0[0], BTN_CX, 0.001F));
-    TEST_ASSERT_TRUE(float_near(layout0[1], BTN_CY, 0.001F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(layout0[0], BTN_CX, 0.001F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(layout0[1], BTN_CY, 0.001F));
     nt_ui_end(s_fx.ctx);
 
     /* Scaled viewport: layout -> screen -> layout round-trips. */
@@ -150,11 +148,11 @@ static void test_converters_roundtrip_and_default_identity(void) {
     float layout_back[2];
     nt_ui_layout_to_screen(s_fx.ctx, layout_in, screen);
     /* Forward maps to the expected device coord. */
-    TEST_ASSERT_TRUE(float_near(screen[0], VP_OFF_X + (BTN_X * VP_SCALE), 0.01F));
-    TEST_ASSERT_TRUE(float_near(screen[1], VP_OFF_Y + (BTN_Y * VP_SCALE), 0.01F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(screen[0], VP_OFF_X + (BTN_X * VP_SCALE), 0.01F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(screen[1], VP_OFF_Y + (BTN_Y * VP_SCALE), 0.01F));
     nt_ui_screen_to_layout(s_fx.ctx, screen, layout_back);
-    TEST_ASSERT_TRUE(float_near(layout_back[0], BTN_X, 0.01F));
-    TEST_ASSERT_TRUE(float_near(layout_back[1], BTN_Y, 0.01F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(layout_back[0], BTN_X, 0.01F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(layout_back[1], BTN_Y, 0.01F));
     nt_ui_end(s_fx.ctx);
 }
 
@@ -193,8 +191,8 @@ static void test_anisotropic_viewport_device_pointer_hits(void) {
     TEST_ASSERT_TRUE(in.hovered);
     TEST_ASSERT_TRUE(in.pressed_now);
     /* Reported pos is LAYOUT space (device converted back per axis). */
-    TEST_ASSERT_TRUE(float_near(in.pos[0], BTN_CX, 0.5F));
-    TEST_ASSERT_TRUE(float_near(in.pos[1], BTN_CY, 0.5F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(in.pos[0], BTN_CX, 0.5F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(in.pos[1], BTN_CY, 0.5F));
 
     /* layout -> screen -> layout round-trip under the anisotropic viewport. */
     nt_pointer_t p = ui_fx_pointer(0.0F, 0.0F, false, false, false);
@@ -204,11 +202,11 @@ static void test_anisotropic_viewport_device_pointer_hits(void) {
     float layout_back[2];
     nt_ui_layout_to_screen(s_fx.ctx, layout_in, screen);
     /* Forward maps PER AXIS to the expected device coord (transposition -> different value -> fails). */
-    TEST_ASSERT_TRUE(float_near(screen[0], dev_cx, 0.01F));
-    TEST_ASSERT_TRUE(float_near(screen[1], dev_cy, 0.01F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(screen[0], dev_cx, 0.01F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(screen[1], dev_cy, 0.01F));
     nt_ui_screen_to_layout(s_fx.ctx, screen, layout_back);
-    TEST_ASSERT_TRUE(float_near(layout_back[0], BTN_CX, 0.01F));
-    TEST_ASSERT_TRUE(float_near(layout_back[1], BTN_CY, 0.01F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(layout_back[0], BTN_CX, 0.01F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(layout_back[1], BTN_CY, 0.01F));
     nt_ui_end(s_fx.ctx);
 }
 

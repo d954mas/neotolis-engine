@@ -694,13 +694,15 @@ static void focus_step(input_frame_t *f) {
     } else {
         in = (nt_ui_interaction_t){0};
         nt_ui_block_pointer(ctx, id, NULL);
-        nt_ui_debug_record_disabled_zone(ctx, id, NULL);
         /* A disabled field can't be clicked to refocus and gates out Esc/Tab while focused==false, so
          * a still-declared disabled field would hold focus forever (nt_ui_wants_keyboard stuck true). Drop it
          * the frame it's declared disabled. */
         if (ctx->focused_input_id == id) {
             ctx->focused_input_id = 0U;
         }
+    }
+    if (!f->enabled) {
+        nt_ui_debug_record_disabled_zone(ctx, id, NULL); /* a field only covered by an overlay is not disabled */
     }
     const bool focus_now = input_focus_edge(st, &in, was_focused);
 

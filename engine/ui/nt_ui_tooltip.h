@@ -11,8 +11,9 @@
  * The target's hover is read via nt_ui_hovered_within (read-only), so the tooltip never becomes a
  * second mutating interaction step on the underlying widget, and a tooltip on a container stays up while
  * the pointer is on an interactive element declared inside it. Only records are targets: a container
- * that should keep its tooltip over its own gaps calls nt_ui_block_pointer on itself. A combo or menu
- * opened inside the target counts as inside too, so the tooltip shows over the open overlay. */
+ * that should keep its tooltip over its own gaps calls nt_ui_block_pointer on itself. The rows of a combo or
+ * menu declared inside the target count as inside too; a pointer on an overlay's catcher hovers nothing. A
+ * tooltip is no overlay: it takes no input and draws above every overlay. */
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -55,7 +56,7 @@ nt_ui_tooltip_style_t nt_ui_tooltip_style_defaults(void);
 /* Declare a tooltip for `target_id` (a widget declared THIS frame). Call every frame AFTER the target
  * so the target carries a queryable bbox. The engine owns the hover timer in the state pool; the panel
  * appears below the target (edge-flip ABOVE near the bottom border) once the cursor has hovered the
- * target for style->delay_secs, and hides the instant the cursor leaves. NO catcher is declared, so the
+ * target for style->delay_secs, and fades out once the cursor leaves. NO catcher is declared, so the
  * tooltip cannot gate base UI. Returns true on the frames the tooltip panel is declared (visible).
  * ctx/content/style non-NULL; target_id non-zero.
  * Layers: the panel fill + caret draw on data->layer (also the popup panel layer), the label on

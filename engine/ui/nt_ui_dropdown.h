@@ -8,7 +8,8 @@
  * A long list is wrapped in nt_ui_scroll_begin/end, NOT a raw Clay .clip — a raw .clip leaks a
  * scroll-container pool slot (type=7 crash).
  *
- * The GAME owns `int *selected`; the list's open state is the overlay stack's (nt_ui_is_open).
+ * The GAME owns `int *selected`; the list's open state is the overlay stack's, under an id private to the combo:
+ * the trigger opens it, and a pick, Esc or an outside press closes it.
  *
  * Customizable game UI (button/checkbox/tabbar parity): the trigger + rows are per-state visual models
  * (idle/hover/pressed, + selected for rows) with an OPTIONAL atlas-ref bg (slice9), a tint, and a flat

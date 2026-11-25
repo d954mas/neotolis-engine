@@ -45,7 +45,6 @@ static ui_walker_fixture_t s_fx;
 static nt_ui_slider_style_t s_style;
 
 /* Unity float macros are excluded in this build (UNITY_EXCLUDE_FLOAT). */
-static bool float_near(float a, float b, float eps) { return fabsf(a - b) <= eps; }
 
 static void init_style(void) {
     const nt_atlas_region_ref_t art = nt_atlas_ref_idx(s_fx.atlas.handle, 0, s_fx.atlas.white_region_idx);
@@ -166,21 +165,21 @@ static void test_track_jump_value_map(void) {
     /* Press at the far left (thumb-center anchor) -> value 0. */
     nt_pointer_t pl = ui_fx_pointer(SL_X_AT_FRAC(0.0F), SL_CY, true, true, false);
     (void)slider_float_frame(&pl, &value, 0.0F, 1.0F, 0.0F, true);
-    TEST_ASSERT_TRUE(float_near(value, 0.0F, 0.02F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(value, 0.0F, 0.02F));
 
     /* Release, re-warm, press at the far right -> value 1. */
     nt_pointer_t up = ui_fx_pointer(SL_X_AT_FRAC(0.0F), SL_CY, false, false, true);
     (void)slider_float_frame(&up, &value, 0.0F, 1.0F, 0.0F, true);
     nt_pointer_t pr = ui_fx_pointer(SL_X_AT_FRAC(1.0F), SL_CY, true, true, false);
     (void)slider_float_frame(&pr, &value, 0.0F, 1.0F, 0.0F, true);
-    TEST_ASSERT_TRUE(float_near(value, 1.0F, 0.02F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(value, 1.0F, 0.02F));
 
     /* Release, press at the midpoint -> value 0.5. */
     nt_pointer_t up2 = ui_fx_pointer(SL_X_AT_FRAC(1.0F), SL_CY, false, false, true);
     (void)slider_float_frame(&up2, &value, 0.0F, 1.0F, 0.0F, true);
     nt_pointer_t pm = ui_fx_pointer(SL_X_AT_FRAC(0.5F), SL_CY, true, true, false);
     (void)slider_float_frame(&pm, &value, 0.0F, 1.0F, 0.0F, true);
-    TEST_ASSERT_TRUE(float_near(value, 0.5F, 0.02F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(value, 0.5F, 0.02F));
 }
 
 /* ---- Test 2: a drag that overshoots the track ends clamps the value, not wraps.
@@ -194,12 +193,12 @@ static void test_value_clamped(void) {
     (void)slider_float_frame(&grab, &value, 0.0F, 1.0F, 0.0F, true);
     nt_pointer_t drag_l = ui_fx_pointer(SL_X - 200.0F, SL_CY, true, false, false);
     (void)slider_float_frame(&drag_l, &value, 0.0F, 1.0F, 0.0F, true);
-    TEST_ASSERT_TRUE(float_near(value, 0.0F, 0.001F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(value, 0.0F, 0.001F));
 
     /* Same hold, drag far RIGHT -> clamps to 1. */
     nt_pointer_t drag_r = ui_fx_pointer(SL_X + SL_W + 200.0F, SL_CY, true, false, false);
     (void)slider_float_frame(&drag_r, &value, 0.0F, 1.0F, 0.0F, true);
-    TEST_ASSERT_TRUE(float_near(value, 1.0F, 0.001F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(value, 1.0F, 0.001F));
 }
 
 /* ---- Test 3: non-unit [min,max] maps linearly (range 10..50, midpoint -> 30). ---- */
@@ -208,7 +207,7 @@ static void test_value_map_nonunit_range(void) {
     warmup_float(&value, 10.0F, 50.0F);
     nt_pointer_t pm = ui_fx_pointer(SL_X_AT_FRAC(0.5F), SL_CY, true, true, false);
     (void)slider_float_frame(&pm, &value, 10.0F, 50.0F, 0.0F, true);
-    TEST_ASSERT_TRUE(float_near(value, 30.0F, 0.8F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(value, 30.0F, 0.8F));
 }
 
 /* ---- Test 4: float step quantizes to the min + k*step grid (step 0.25). ---- */
@@ -218,7 +217,7 @@ static void test_float_step_quantize(void) {
     /* Press at ~0.6 fraction with step 0.25 -> snaps to 0.5. */
     nt_pointer_t p = ui_fx_pointer(SL_X_AT_FRAC(0.6F), SL_CY, true, true, false);
     (void)slider_float_frame(&p, &value, 0.0F, 1.0F, 0.25F, true);
-    TEST_ASSERT_TRUE(float_near(value, 0.5F, 0.001F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(value, 0.5F, 0.001F));
 }
 
 /* ---- Test 5: int variant casts + quantizes (range 0..10, midpoint -> 5). ---- */
@@ -249,19 +248,19 @@ static void test_thumb_grab_vs_track_jump(void) {
     const float thumb_center_x = SL_X_AT_FRAC(0.5F);
     nt_pointer_t grab = ui_fx_pointer(thumb_center_x, SL_CY, true, true, false);
     (void)slider_float_frame(&grab, &value, 0.0F, 1.0F, 0.0F, true);
-    TEST_ASSERT_TRUE(float_near(value, 0.5F, 0.02F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(value, 0.5F, 0.02F));
 
     /* Drag right by a quarter of the usable width -> value moves +0.25 (relative). */
     nt_pointer_t drag = ui_fx_pointer(thumb_center_x + (SL_USABLE * 0.25F), SL_CY, true, false, false);
     (void)slider_float_frame(&drag, &value, 0.0F, 1.0F, 0.0F, true);
-    TEST_ASSERT_TRUE(float_near(value, 0.75F, 0.03F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(value, 0.75F, 0.03F));
 
     /* Release; new press on the FAR LEFT track (off the thumb) -> jumps to ~0. */
     nt_pointer_t up = ui_fx_pointer(thumb_center_x + (SL_USABLE * 0.25F), SL_CY, false, false, true);
     (void)slider_float_frame(&up, &value, 0.0F, 1.0F, 0.0F, true);
     nt_pointer_t jump = ui_fx_pointer(SL_X_AT_FRAC(0.0F), SL_CY, true, true, false);
     (void)slider_float_frame(&jump, &value, 0.0F, 1.0F, 0.0F, true);
-    TEST_ASSERT_TRUE(float_near(value, 0.0F, 0.03F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(value, 0.0F, 0.03F));
 }
 
 /* ---- Test 7: nt_ui_slider_thumb_pos returns the thumb screen center for the current
@@ -275,8 +274,8 @@ static void test_thumb_pos_exposed(void) {
 
     const nt_ui_slider_thumb_t t = nt_ui_slider_thumb_pos(s_fx.ctx, nt_ui_id("sl"));
     TEST_ASSERT_TRUE(t.found);
-    TEST_ASSERT_TRUE(float_near(t.x, SL_X_AT_FRAC(0.5F), 1.0F));
-    TEST_ASSERT_TRUE(float_near(t.y, SL_CY, 1.0F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(t.x, SL_X_AT_FRAC(0.5F), 1.0F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(t.y, SL_CY, 1.0F));
 }
 
 /* ---- Test 8: thumb_pos for an id never declared returns found=false. ---- */
@@ -291,7 +290,7 @@ static void test_disabled_no_drag(void) {
     warmup_float(&value, 0.0F, 1.0F);
     nt_pointer_t p = ui_fx_pointer(SL_X_AT_FRAC(0.0F), SL_CY, true, true, false);
     TEST_ASSERT_FALSE(slider_float_frame(&p, &value, 0.0F, 1.0F, 0.0F, false));
-    TEST_ASSERT_TRUE(float_near(value, 0.5F, 0.001F)); /* untouched */
+    TEST_ASSERT_TRUE(ui_fx_float_near(value, 0.5F, 0.001F)); /* untouched */
 }
 
 /* ---- Test 9b: disabling mid-drag clears the drag cell, so re-enabling with the
@@ -305,19 +304,19 @@ static void test_disabled_mid_drag_no_resume_jump(void) {
     const float thumb_center_x = SL_X_AT_FRAC(0.5F);
     nt_pointer_t grab = ui_fx_pointer(thumb_center_x, SL_CY, true, true, false);
     (void)slider_float_frame(&grab, &value, 0.0F, 1.0F, 0.0F, true);
-    TEST_ASSERT_TRUE(float_near(value, 0.5F, 0.02F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(value, 0.5F, 0.02F));
 
     /* Disable while the pointer is held FAR from the thumb: a stale grab cell would map
      * this pointer to the value on re-enable. The value must stay put while disabled. */
     nt_pointer_t held_far = ui_fx_pointer(SL_X_AT_FRAC(0.0F), SL_CY, true, false, false);
     TEST_ASSERT_FALSE(slider_float_frame(&held_far, &value, 0.0F, 1.0F, 0.0F, false));
-    TEST_ASSERT_TRUE(float_near(value, 0.5F, 0.001F)); /* untouched while disabled */
+    TEST_ASSERT_TRUE(ui_fx_float_near(value, 0.5F, 0.001F)); /* untouched while disabled */
 
     /* Re-enable with the pointer still held (no fresh press_now): the cleared cell means
      * no live drag, so the value must NOT snap to the held pointer position. */
     nt_pointer_t held_still = ui_fx_pointer(SL_X_AT_FRAC(0.0F), SL_CY, true, false, false);
     TEST_ASSERT_FALSE(slider_float_frame(&held_still, &value, 0.0F, 1.0F, 0.0F, true));
-    TEST_ASSERT_TRUE(float_near(value, 0.5F, 0.02F)); /* no stale-grab jump */
+    TEST_ASSERT_TRUE(ui_fx_float_near(value, 0.5F, 0.02F)); /* no stale-grab jump */
 }
 
 /* ---- Test 10: style defaults are a valid baseline that renders with supplied art. ---- */
@@ -358,8 +357,8 @@ static bool find_track_and_fill(float *track_left, float *track_right, float *fi
             continue;
         }
         const Clay_BoundingBox b = c->boundingBox;
-        const bool track_tall = float_near(b.height, SL_H, 0.5F); /* fill is track-tall; thumb is SL_TH */
-        if (track_tall && float_near(b.x, *track_left, 0.5F)) {
+        const bool track_tall = ui_fx_float_near(b.height, SL_H, 0.5F); /* fill is track-tall; thumb is SL_TH */
+        if (track_tall && ui_fx_float_near(b.x, *track_left, 0.5F)) {
             *fill_left = b.x;
             *fill_right = b.x + b.width;
             *has_fill = true;
@@ -384,14 +383,14 @@ static void test_fill_inside_track_all_ratios(void) {
         float fr = 0.0F;
         bool has_fill = false;
         TEST_ASSERT_TRUE(find_track_and_fill(&tl, &tr, &fl, &fr, &has_fill));
-        TEST_ASSERT_TRUE(float_near(tl, SL_X, 0.5F));
-        TEST_ASSERT_TRUE(float_near(tr, SL_X + SL_W, 0.5F));
+        TEST_ASSERT_TRUE(ui_fx_float_near(tl, SL_X, 0.5F));
+        TEST_ASSERT_TRUE(ui_fx_float_near(tr, SL_X + SL_W, 0.5F));
 
         TEST_ASSERT_TRUE(has_fill);
         /* Left edge anchored to the track; right edge == THUMB CENTER (fill meets the knob,
          * never fraction*track_w — the thumb travels inset by thumb_w/2); never past the track. */
-        TEST_ASSERT_TRUE(float_near(fl, tl, 0.5F));
-        TEST_ASSERT_TRUE(float_near(fr, SL_X_AT_FRAC(ratios[ri]), 0.5F));
+        TEST_ASSERT_TRUE(ui_fx_float_near(fl, tl, 0.5F));
+        TEST_ASSERT_TRUE(ui_fx_float_near(fr, SL_X_AT_FRAC(ratios[ri]), 0.5F));
         TEST_ASSERT_TRUE(fl >= tl - 0.5F);
         TEST_ASSERT_TRUE(fr <= tr + 0.5F);
     }
@@ -413,7 +412,7 @@ static void test_hit_pad_above_track_drags(void) {
     TEST_ASSERT_TRUE(above_y < SL_Y); /* genuinely outside the visual track */
     nt_pointer_t p = ui_fx_pointer(SL_X_AT_FRAC(0.5F), above_y, true, true, false);
     (void)slider_float_frame(&p, &value, 0.0F, 1.0F, 0.0F, true);
-    TEST_ASSERT_TRUE(float_near(value, 0.5F, 0.03F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(value, 0.5F, 0.03F));
 }
 
 /* ---- Test 13: thumb overhang (thumb_h > track_h) is clickable even at ZERO style pad —
@@ -428,7 +427,7 @@ static void test_thumb_overhang_auto_pad_drags(void) {
     /* Press 1px above the track top (inside the 2px auto-grown overhang pad). */
     nt_pointer_t p = ui_fx_pointer(SL_X_AT_FRAC(0.5F), SL_Y - 1.0F, true, true, false);
     (void)slider_float_frame(&p, &value, 0.0F, 1.0F, 0.0F, true);
-    TEST_ASSERT_TRUE(float_near(value, 0.5F, 0.03F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(value, 0.5F, 0.03F));
 }
 
 /* ---- Test 14: stepped drag SNAPS the thumb visually — the emitted thumb center sits on the
@@ -451,9 +450,9 @@ static void test_step_thumb_visual_snap(void) {
     /* The emitted thumb center sits on the 0.6 tick fraction, NOT the 0.63 pointer fraction. */
     const nt_ui_slider_thumb_t t = nt_ui_slider_thumb_pos(s_fx.ctx, nt_ui_id("sl"));
     TEST_ASSERT_TRUE(t.found);
-    TEST_ASSERT_TRUE(float_near(t.x, SL_X_AT_FRAC(0.6F), 0.6F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(t.x, SL_X_AT_FRAC(0.6F), 0.6F));
     /* And NOT at the raw pointer fraction (would be ~3px off at this width — guards the regression). */
-    TEST_ASSERT_FALSE(float_near(t.x, SL_X_AT_FRAC(0.63F), 0.6F));
+    TEST_ASSERT_FALSE(ui_fx_float_near(t.x, SL_X_AT_FRAC(0.63F), 0.6F));
 }
 
 /* ---- Test 15: an out-of-range incoming *value is clamped AND written back (returns true)
@@ -464,19 +463,19 @@ static void test_out_of_range_writeback(void) {
     nt_pointer_t idle = ui_fx_pointer(SL_X - 50.0F, SL_CY, false, false, false);
     const bool changed_hi = slider_float_frame(&idle, &hi, 0.0F, 1.0F, 0.0F, true);
     TEST_ASSERT_TRUE(changed_hi);
-    TEST_ASSERT_TRUE(float_near(hi, 1.0F, 0.001F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(hi, 1.0F, 0.001F));
 
     /* Below min: clamps to 0.0, write-back true. */
     float lo = -3.0F;
     const bool changed_lo = slider_float_frame(&idle, &lo, 0.0F, 1.0F, 0.0F, true);
     TEST_ASSERT_TRUE(changed_lo);
-    TEST_ASSERT_TRUE(float_near(lo, 0.0F, 0.001F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(lo, 0.0F, 0.001F));
 
     /* In-range, untouched -> no write-back. */
     float ok = 0.5F;
     const bool changed_ok = slider_float_frame(&idle, &ok, 0.0F, 1.0F, 0.0F, true);
     TEST_ASSERT_FALSE(changed_ok);
-    TEST_ASSERT_TRUE(float_near(ok, 0.5F, 0.001F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(ok, 0.5F, 0.001F));
 }
 
 /* ---- Test 16: a slider inside a scroll container scrolled under the clip edge must have its
@@ -524,7 +523,7 @@ static void slider_in_scroll_frame(const nt_pointer_t *p, float *value, const nt
 static const Clay_RenderCommand *find_thumb_image(int32_t *out_index) {
     for (int32_t i = 0; i < s_fx.ctx->frozen_cmds.length; ++i) {
         const Clay_RenderCommand *c = &s_fx.ctx->frozen_cmds.internalArray[i];
-        if (c->commandType == CLAY_RENDER_COMMAND_TYPE_IMAGE && float_near(c->boundingBox.height, SL_TH, 0.5F)) {
+        if (c->commandType == CLAY_RENDER_COMMAND_TYPE_IMAGE && ui_fx_float_near(c->boundingBox.height, SL_TH, 0.5F)) {
             if (out_index != NULL) {
                 *out_index = i;
             }
@@ -594,13 +593,13 @@ static void test_slider_in_scroll_vertical_drag_keeps_value(void) {
     slider_top_in_scroll_frame(&p, &value);
     p = ui_fx_pointer(TOP_SL_TRACK_X, TOP_SL_CY, true, true, false);
     slider_top_in_scroll_frame(&p, &value);
-    TEST_ASSERT_TRUE(float_near(value, 0.5F, 0.0001F)); /* pending: no track jump yet */
+    TEST_ASSERT_TRUE(ui_fx_float_near(value, 0.5F, 0.0001F)); /* pending: no track jump yet */
     p = ui_fx_pointer(TOP_SL_TRACK_X, TOP_SL_CY - 30.0F, true, false, false);
     slider_top_in_scroll_frame(&p, &value);
     TEST_ASSERT_EQUAL_UINT32(SCROLL_SL_ID, s_fx.ctx->captures[0].active_id);
     p = ui_fx_pointer(TOP_SL_TRACK_X, TOP_SL_CY - 30.0F, false, false, true);
     slider_top_in_scroll_frame(&p, &value);
-    TEST_ASSERT_TRUE(float_near(value, 0.5F, 0.0001F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(value, 0.5F, 0.0001F));
 }
 
 /* A horizontal drag on the thumb stays with the slider: the value follows once the slop is crossed. */
@@ -614,11 +613,11 @@ static void test_slider_in_scroll_horizontal_drag_moves_value(void) {
     slider_top_in_scroll_frame(&p, &value);
     p = ui_fx_pointer(thumb_x + 10.0F, TOP_SL_CY, true, false, false); /* below the slop: pending */
     slider_top_in_scroll_frame(&p, &value);
-    TEST_ASSERT_TRUE(float_near(value, 0.5F, 0.0001F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(value, 0.5F, 0.0001F));
     p = ui_fx_pointer(thumb_x + 41.0F, TOP_SL_CY + 2.0F, true, false, false);
     slider_top_in_scroll_frame(&p, &value);
     TEST_ASSERT_EQUAL_UINT32(SCROLL_SL_ID + 1U, s_fx.ctx->captures[0].active_id);
-    TEST_ASSERT_TRUE(float_near(value, 0.5F + (36.0F / SL_USABLE), 0.01F)); /* grab kept, no jump */
+    TEST_ASSERT_TRUE(ui_fx_float_near(value, 0.5F + (36.0F / SL_USABLE), 0.01F)); /* grab kept, no jump */
 }
 
 /* A tap on the thumb inside a scroll changes nothing. */
@@ -632,7 +631,7 @@ static void test_slider_in_scroll_thumb_tap_keeps_value(void) {
     slider_top_in_scroll_frame(&p, &value);
     p = ui_fx_pointer(thumb_x + 5.0F, TOP_SL_CY, false, false, true);
     slider_top_in_scroll_frame(&p, &value);
-    TEST_ASSERT_TRUE(float_near(value, 0.5F, 0.0001F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(value, 0.5F, 0.0001F));
 }
 
 /* A thumb tap leaves a value the game set while the press was pending. */
@@ -647,7 +646,7 @@ static void test_slider_in_scroll_thumb_tap_keeps_game_value(void) {
     value = 0.2F;
     p = ui_fx_pointer(thumb_x + 5.0F, TOP_SL_CY, false, false, true);
     slider_top_in_scroll_frame(&p, &value);
-    TEST_ASSERT_TRUE(float_near(value, 0.2F, 0.0001F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(value, 0.2F, 0.0001F));
 }
 
 /* A thumb drag inside a scroll that crosses the slop on its release frame applies the release point. */
@@ -661,7 +660,7 @@ static void test_slider_in_scroll_drag_crossing_on_release_applies(void) {
     slider_top_in_scroll_frame(&p, &value);
     p = ui_fx_pointer(thumb_x + 36.0F, TOP_SL_CY, false, false, true);
     slider_top_in_scroll_frame(&p, &value);
-    TEST_ASSERT_TRUE(float_near(value, 0.5F + (36.0F / SL_USABLE), 0.01F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(value, 0.5F + (36.0F / SL_USABLE), 0.01F));
 }
 
 /* A track tap inside a scroll released off the slider (below the slop) is cancelled. */
@@ -674,7 +673,7 @@ static void test_slider_in_scroll_track_tap_released_outside_keeps_value(void) {
     slider_top_in_scroll_frame(&p, &value);
     p = ui_fx_pointer(TOP_SL_TRACK_X, SCROLL_Y + SL_H + 7.0F, false, false, true);
     slider_top_in_scroll_frame(&p, &value);
-    TEST_ASSERT_TRUE(float_near(value, 0.5F, 0.0001F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(value, 0.5F, 0.0001F));
 }
 
 /* A tap on the track inside a scroll applies its jump on release. */
@@ -685,7 +684,7 @@ static void test_slider_in_scroll_track_tap_applies_on_release(void) {
     slider_top_in_scroll_frame(&p, &value);
     p = ui_fx_pointer(TOP_SL_TRACK_X, TOP_SL_CY, true, true, false);
     slider_top_in_scroll_frame(&p, &value);
-    TEST_ASSERT_TRUE(float_near(value, 0.5F, 0.0001F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(value, 0.5F, 0.0001F));
     p = ui_fx_pointer(TOP_SL_TRACK_X, TOP_SL_CY, false, false, true);
     slider_top_in_scroll_frame(&p, &value);
     TEST_ASSERT_TRUE(value > 0.9F);
@@ -718,7 +717,7 @@ static void test_thumb_clipped_in_scroll(void) {
     TEST_ASSERT_TRUE(clipped); /* FAILS if clipTo reverts to CLAY_CLIP_TO_NONE (no scissor emitted) */
 
     /* The clip rect is the scroll viewport (200x200 at the scroll container origin). */
-    TEST_ASSERT_TRUE(float_near(clip.height, SCROLL_DIM, 1.0F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(clip.height, SCROLL_DIM, 1.0F));
     const float clip_top = clip.y;
     const float clip_bottom = clip.y + clip.height;
 
@@ -741,21 +740,21 @@ static void test_vertical_track_jump_bottom_up(void) {
     /* Press at the TOP edge -> value 1 (up = more under BOTTOM_UP). */
     nt_pointer_t pt = ui_fx_pointer(VT_CX, VT_Y_AT_FRAC_BU(1.0F), true, true, false);
     (void)slider_vfloat_frame(&pt, &value, 0.0F, 1.0F, 0.0F, true);
-    TEST_ASSERT_TRUE(float_near(value, 1.0F, 0.02F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(value, 1.0F, 0.02F));
 
     /* Release, press at the BOTTOM edge -> value 0. */
     nt_pointer_t up = ui_fx_pointer(VT_CX, VT_Y_AT_FRAC_BU(1.0F), false, false, true);
     (void)slider_vfloat_frame(&up, &value, 0.0F, 1.0F, 0.0F, true);
     nt_pointer_t pb = ui_fx_pointer(VT_CX, VT_Y_AT_FRAC_BU(0.0F), true, true, false);
     (void)slider_vfloat_frame(&pb, &value, 0.0F, 1.0F, 0.0F, true);
-    TEST_ASSERT_TRUE(float_near(value, 0.0F, 0.02F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(value, 0.0F, 0.02F));
 
     /* Release, press at the MIDDLE -> value 0.5. */
     nt_pointer_t up2 = ui_fx_pointer(VT_CX, VT_Y_AT_FRAC_BU(0.0F), false, false, true);
     (void)slider_vfloat_frame(&up2, &value, 0.0F, 1.0F, 0.0F, true);
     nt_pointer_t pm = ui_fx_pointer(VT_CX, VT_Y_AT_FRAC_BU(0.5F), true, true, false);
     (void)slider_vfloat_frame(&pm, &value, 0.0F, 1.0F, 0.0F, true);
-    TEST_ASSERT_TRUE(float_near(value, 0.5F, 0.02F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(value, 0.5F, 0.02F));
 }
 
 /* ---- Test V2: vertical track-jump value map, TOP_DOWN (top edge -> min, bottom -> max). ---- */
@@ -767,14 +766,14 @@ static void test_vertical_track_jump_top_down(void) {
     /* Press at the TOP edge -> value 0 (down = more under TOP_DOWN). */
     nt_pointer_t pt = ui_fx_pointer(VT_CX, VT_Y_AT_FRAC_TD(0.0F), true, true, false);
     (void)slider_vfloat_frame(&pt, &value, 0.0F, 1.0F, 0.0F, true);
-    TEST_ASSERT_TRUE(float_near(value, 0.0F, 0.02F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(value, 0.0F, 0.02F));
 
     /* Release, press at the BOTTOM edge -> value 1. */
     nt_pointer_t up = ui_fx_pointer(VT_CX, VT_Y_AT_FRAC_TD(0.0F), false, false, true);
     (void)slider_vfloat_frame(&up, &value, 0.0F, 1.0F, 0.0F, true);
     nt_pointer_t pb = ui_fx_pointer(VT_CX, VT_Y_AT_FRAC_TD(1.0F), true, true, false);
     (void)slider_vfloat_frame(&pb, &value, 0.0F, 1.0F, 0.0F, true);
-    TEST_ASSERT_TRUE(float_near(value, 1.0F, 0.02F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(value, 1.0F, 0.02F));
 }
 
 /* ---- Test V3a: vertical thumb-grab relative drag under BOTTOM_UP. Dragging the pointer UP
@@ -786,10 +785,10 @@ static void test_vertical_thumb_grab_bottom_up(void) {
     const float thumb_center = VT_Y_AT_FRAC_BU(0.5F);
     nt_pointer_t grab = ui_fx_pointer(VT_CX, thumb_center, true, true, false);
     (void)slider_vfloat_frame(&grab, &value, 0.0F, 1.0F, 0.0F, true);
-    TEST_ASSERT_TRUE(float_near(value, 0.5F, 0.02F)); /* grab keeps the value this frame */
+    TEST_ASSERT_TRUE(ui_fx_float_near(value, 0.5F, 0.02F)); /* grab keeps the value this frame */
     nt_pointer_t up = ui_fx_pointer(VT_CX, thumb_center - (VT_USABLE * 0.25F), true, false, false);
     (void)slider_vfloat_frame(&up, &value, 0.0F, 1.0F, 0.0F, true);
-    TEST_ASSERT_TRUE(float_near(value, 0.75F, 0.03F)); /* up = more */
+    TEST_ASSERT_TRUE(ui_fx_float_near(value, 0.75F, 0.03F)); /* up = more */
 }
 
 /* ---- Test V3b: vertical thumb-grab relative drag under TOP_DOWN. Dragging the pointer UP
@@ -801,10 +800,10 @@ static void test_vertical_thumb_grab_top_down(void) {
     const float thumb_center = VT_Y_AT_FRAC_TD(0.5F);
     nt_pointer_t grab = ui_fx_pointer(VT_CX, thumb_center, true, true, false);
     (void)slider_vfloat_frame(&grab, &value, 0.0F, 1.0F, 0.0F, true);
-    TEST_ASSERT_TRUE(float_near(value, 0.5F, 0.02F)); /* grab keeps the value this frame */
+    TEST_ASSERT_TRUE(ui_fx_float_near(value, 0.5F, 0.02F)); /* grab keeps the value this frame */
     nt_pointer_t up = ui_fx_pointer(VT_CX, thumb_center - (VT_USABLE * 0.25F), true, false, false);
     (void)slider_vfloat_frame(&up, &value, 0.0F, 1.0F, 0.0F, true);
-    TEST_ASSERT_TRUE(float_near(value, 0.25F, 0.03F)); /* up = less */
+    TEST_ASSERT_TRUE(ui_fx_float_near(value, 0.25F, 0.03F)); /* up = less */
 }
 
 /* ---- Test V4: a wide thumb (thumb_w > track_w) auto-grows the hit pad on LEFT/RIGHT for a
@@ -822,7 +821,7 @@ static void test_vertical_hit_pad_left_right(void) {
     TEST_ASSERT_TRUE(left_x < VT_X); /* genuinely outside the visual track */
     nt_pointer_t p = ui_fx_pointer(left_x, VT_Y_AT_FRAC_BU(0.5F), true, true, false);
     (void)slider_vfloat_frame(&p, &value, 0.0F, 1.0F, 0.0F, true);
-    TEST_ASSERT_TRUE(float_near(value, 0.5F, 0.03F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(value, 0.5F, 0.03F));
 }
 
 /* ---- Test V5: nt_ui_slider_thumb_pos is axis-aware for a vertical slider — the thumb travels Y
@@ -837,8 +836,8 @@ static void test_vertical_thumb_pos_exposed(void) {
 
     const nt_ui_slider_thumb_t t = nt_ui_slider_thumb_pos(s_fx.ctx, nt_ui_id("vsl"));
     TEST_ASSERT_TRUE(t.found);
-    TEST_ASSERT_TRUE(float_near(t.x, VT_CX, 1.0F));                  /* centered on the cross (X) axis */
-    TEST_ASSERT_TRUE(float_near(t.y, VT_Y_AT_FRAC_BU(0.25F), 1.0F)); /* travels Y, BOTTOM_UP inverted */
+    TEST_ASSERT_TRUE(ui_fx_float_near(t.x, VT_CX, 1.0F));                  /* centered on the cross (X) axis */
+    TEST_ASSERT_TRUE(ui_fx_float_near(t.y, VT_Y_AT_FRAC_BU(0.25F), 1.0F)); /* travels Y, BOTTOM_UP inverted */
 }
 
 /* ---- Vertical slider_int: the public _int entry's axis branch + BOTTOM_UP quantize ---- */
@@ -964,7 +963,7 @@ static void test_thumb_above_modal_band_first_frame(void) {
     mst.ease_speed = 0.0F; /* snap open: the panel is at full size on frame 1 */
 
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &idle, .pointer_count = 1});
-    nt_ui_open(s_fx.ctx, 0x5D0001U);
+    nt_ui_modal_open(s_fx.ctx, 0x5D0001U);
     if (nt_ui_modal_begin(s_fx.ctx, 0x5D0001U, &mst, NULL)) {
         CLAY({.id = CLAY_ID("modal_panel"),
               .layout = {.sizing = {CLAY_SIZING_FIXED(400.0F), CLAY_SIZING_FIXED(200.0F)}},
@@ -1004,10 +1003,10 @@ static void test_thumb_above_modal_band_first_frame(void) {
      * as an offset instead of a coordinate the test has to predict. The value travel rides the walker
      * transform, not the Clay box, so the attached box sits exactly on the track's left edge. */
     TEST_ASSERT_NOT_NULL(track);
-    TEST_ASSERT_TRUE_MESSAGE(float_near(thumb->boundingBox.x, track->boundingBox.x, 0.5F), "thumb box must attach to the track left edge, not a stale-bbox origin");
+    TEST_ASSERT_TRUE_MESSAGE(ui_fx_float_near(thumb->boundingBox.x, track->boundingBox.x, 0.5F), "thumb box must attach to the track left edge, not a stale-bbox origin");
     const float thumb_cy = thumb->boundingBox.y + (thumb->boundingBox.height * 0.5F);
     const float track_cy = track->boundingBox.y + (track->boundingBox.height * 0.5F);
-    TEST_ASSERT_TRUE_MESSAGE(float_near(thumb_cy, track_cy, 0.5F), "thumb must stay centered on the track cross axis");
+    TEST_ASSERT_TRUE_MESSAGE(ui_fx_float_near(thumb_cy, track_cy, 0.5F), "thumb must stay centered on the track cross axis");
 }
 
 int main(void) {

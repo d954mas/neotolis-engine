@@ -4,7 +4,7 @@
 /* Popup-core: the shared floating-overlay primitive (tooltip, popup, modal, menu level). One panel floating
  * element + a catcher for an overlay that takes input + an open/close value_t tween + its overlay stack slot
  * (open order = paint order) + trigger-anchoring with per-side edge-flip. The open state is the stack's:
- * nt_ui_open / nt_ui_close / nt_ui_is_open (nt_ui.h). Conditional begin/end: end only after begin returned true. */
+ * nt_ui_popup_open, nt_ui_close, nt_ui_is_open. Conditional begin/end: end only after begin returned true. */
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -40,8 +40,8 @@ typedef enum {
     NT_UI_POPUP_CLOSE_NONE = 0,
     NT_UI_POPUP_CLOSE_ESC,
     NT_UI_POPUP_CLOSE_OUTSIDE,  /* a press outside the panel: on its catcher (a modal's backdrop) or on no record */
-    NT_UI_POPUP_CLOSE_REPLACED, /* an overlay that takes input opened outside it */
-    NT_UI_POPUP_CLOSE_GAME,     /* nt_ui_close */
+    NT_UI_POPUP_CLOSE_REPLACED, /* an overlay opened that is not declared or opened inside it, or it was reopened */
+    NT_UI_POPUP_CLOSE_GAME,     /* nt_ui_close, of it or of the overlay it was opened inside */
 } nt_ui_popup_close_t;
 
 /* Per-frame info of a popup or a modal (nullable out of begin): the tween, the chosen side, the close. */
@@ -53,33 +53,30 @@ typedef struct {
 } nt_ui_popup_info_t;
 _Static_assert(sizeof(nt_ui_popup_info_t) == 8, "nt_ui_popup_info_t stable ABI (1 float + 2 u8 + 2 pad)");
 
-/* A popup takes input and closes on Esc, an outside press or another overlay opening outside it; a tooltip
- * shows and takes no input (spec: "Input ownership", rule 2). */
-typedef enum {
-    NT_UI_POPUP_KIND_POPUP = 0,
-    NT_UI_POPUP_KIND_TOOLTIP,
-} nt_ui_popup_kind_t;
-
 typedef struct {
     float ease_speed;                 /* value_speed for the open/close tween; >= 0 (0 = instant snap) */
     nt_ui_transform_t open_xf_start;  /* panel transform at t=0 while opening (eases to identity at t=1) */
     nt_ui_transform_t close_xf_start; /* panel transform at t=0 while closing (independent of open) */
     nt_ui_layer_t layer;              /* draw layer for catcher + panel element data */
-    uint8_t kind;                     /* nt_ui_popup_kind_t */
-    uint8_t _pad[2];
+    uint8_t _pad[3];
 } nt_ui_popup_style_t;
-_Static_assert(sizeof(nt_ui_popup_style_t) == 80, "nt_ui_popup_style_t stable ABI (1 float + 2 transform[36] + 1 u8 + 1 u8 + 2 pad)");
+_Static_assert(sizeof(nt_ui_popup_style_t) == 80, "nt_ui_popup_style_t stable ABI (1 float + 2 transform[36] + 1 u8 + 3 pad)");
 
-/* Valid baseline: identity transforms (no spatial animation), the popup kind. Transforms are identity
- * (scale 1) so a {0}-init never trips nt_ui_anim's scale_*>0 assert. */
+/* Valid baseline: identity transforms (no spatial animation). Transforms are identity (scale 1) so a {0}-init
+ * never trips nt_ui_anim's scale_*>0 assert. */
 nt_ui_popup_style_t nt_ui_popup_style_defaults(void);
 
+/* Opens the popup `id` on top of the overlay stack, inside the overlay being declared at the call (0 = none), and
+ * closes every popup that is not its ancestor; opening an open one does nothing, a reopen during the fade starts
+ * it again on top. It takes input from the frame after its first declaration (spec: "Input ownership"). */
+void nt_ui_popup_open(nt_ui_context_t *ctx, uint32_t id);
+
 /* Returns whether the popup shows this frame: open, or fading out after a close. Only then it declares the
- * catcher (a popup) and the panel on its stack slot's band, eased toward open?1:0, placed at the anchor with
- * edge-flip (or centered for a CENTER anchor); the game declares the body and calls nt_ui_popup_end. A popup
- * that is not open declares nothing:
+ * catcher and the panel on its stack slot's band, eased toward open?1:0, placed at the anchor with edge-flip
+ * (or centered for a CENTER anchor); the game declares the body and calls nt_ui_popup_end. It closes on Esc and
+ * on a press outside it. A popup that is not open declares nothing:
  *
- *   if (clicked_trigger) nt_ui_open(ctx, ID);
+ *   if (clicked_trigger) nt_ui_popup_open(ctx, ID);
  *   if (nt_ui_popup_begin(ctx, ID, &style, &anchor, NULL)) {
  *       CLAY({ ...popup body... }) { if (select) nt_ui_close(ctx, ID); }
  *       nt_ui_popup_end(ctx);

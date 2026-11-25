@@ -11,11 +11,9 @@
 #include "ui/nt_ui_popup.h"
 #include "ui/nt_ui_popup_internal.h"
 
-/* The modal is a thin composition over popup-core: popup-core owns the z-band push, the
- * value_t tween, the open-only catcher, the close-scan, and the panel floating decl. The
- * modal adds only the modal-specific surface — the typed anim recipe (scale-pop / slide / fade), the
- * centered placement, the dim backdrop color, and the Esc/backdrop close-reason mapping. The shared
- * depth/z-band machinery lives in exactly one place (no copy-paste of the occluder/z-band). */
+/* The modal is a thin composition over popup-core, which owns the stack band, the value_t tween, the open-only
+ * catcher and the panel floating decl. The modal adds the typed anim recipe (scale-pop / slide / fade), the
+ * centered placement, the dim backdrop and the Esc/backdrop closes its style asks for. */
 
 const nt_ui_widget_def_t NT_UI_MODAL_DEF = {
     .name = "nt_modal",
@@ -90,7 +88,6 @@ bool nt_ui_modal_begin(nt_ui_context_t *ctx, uint32_t id, const nt_ui_modal_styl
         .open_xf_start = modal_anim_start(&style->open),
         .close_xf_start = modal_anim_start(&style->close),
         .layer = style->layer,
-        .kind = NT_UI_POPUP_KIND_POPUP, /* unused: the modal passes its own ext */
     };
     const nt_ui_popup_anchor_t anchor = {.prefer_side = NT_UI_POPUP_CENTER};
     const nt_ui_popup_ext_t ext = {
@@ -98,11 +95,16 @@ bool nt_ui_modal_begin(nt_ui_context_t *ctx, uint32_t id, const nt_ui_modal_styl
         .backdrop_color = style->backdrop_color,
         .backdrop_alpha = style->backdrop_alpha,
         .close_pad = style->backdrop_close_pad,
-        .catcher = true, /* a modal ALWAYS gates click-through, a backdrop close or not */
         .esc_close = (style->flags & NT_UI_MODAL_LISTEN_ESC) != 0U,
-        .dismiss_on_click = (style->flags & NT_UI_MODAL_CLOSE_ON_BACKDROP) != 0U,
+        .outside_close = (style->flags & NT_UI_MODAL_CLOSE_ON_BACKDROP) != 0U,
     };
     return nt_ui_popup_begin_internal(ctx, id, &pstyle, &anchor, &ext, info);
+}
+
+void nt_ui_modal_open(nt_ui_context_t *ctx, uint32_t id) {
+    NT_ASSERT(ctx != NULL && id != 0U && "nt_ui_modal_open: ctx non-NULL, id non-zero");
+    /* A modal ALWAYS gates click-through and is not light dismiss: only the game, or its style, closes it. */
+    nt_ui_internal_overlay_open(ctx, id, nt_ui_internal_overlay_here(ctx), 0U, NT_UI_OVERLAY_CATCHER);
 }
 
 void nt_ui_modal_end(nt_ui_context_t *ctx) { nt_ui_popup_end(ctx); }

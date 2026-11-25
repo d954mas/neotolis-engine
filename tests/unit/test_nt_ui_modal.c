@@ -38,18 +38,21 @@ void setUp(void) {
 
 void tearDown(void) { ui_walker_fixture_shutdown(&s_fx); }
 
-static bool float_near(float a, float b, float eps) { return fabsf(a - b) <= eps; }
-
 #define MODAL_A 0x4D0001U
 #define MODAL_B 0x4D0002U
 
-/* Begins a modal the test holds open: opened per call, so a raised close never sticks across frames. An
- * open modal always shows, so the caller declares the body and ends it unconditionally. */
-static nt_ui_popup_info_t modal_begin_open(nt_ui_context_t *ctx, uint32_t id, const nt_ui_modal_style_t *st) {
-    nt_ui_open(ctx, id);
+/* Begins a modal that shows (open, or eased while it closes); the caller declares the body and ends it
+ * unconditionally. */
+static nt_ui_popup_info_t modal_begin_shown(nt_ui_context_t *ctx, uint32_t id, const nt_ui_modal_style_t *st) {
     nt_ui_popup_info_t info = {0};
     TEST_ASSERT_TRUE(nt_ui_modal_begin(ctx, id, st, &info));
     return info;
+}
+
+/* Opens (inside the overlay being declared) and begins a modal the test holds open. */
+static nt_ui_popup_info_t modal_begin_open(nt_ui_context_t *ctx, uint32_t id, const nt_ui_modal_style_t *st) {
+    nt_ui_modal_open(ctx, id);
+    return modal_begin_shown(ctx, id, st);
 }
 
 /* A 40x40 panel body, so the panel has an area to hit. */
@@ -109,8 +112,8 @@ static void test_modal_esc_top_only(void) {
     /* Frame 2: Esc held. Only B (last frame's deepest = top) consumes it; A stays silent. */
     nt_input_feed(nt_test_key(NT_KEY_ESCAPE, true));
     ui_fx_frame_begin(s_fx.ctx, NULL);
-    const nt_ui_popup_info_t outer = modal_begin_open(s_fx.ctx, MODAL_A, &st); /* NOT top */
-    const nt_ui_popup_info_t inner = modal_begin_open(s_fx.ctx, MODAL_B, &st); /* TOP */
+    const nt_ui_popup_info_t outer = modal_begin_shown(s_fx.ctx, MODAL_A, &st); /* NOT top */
+    const nt_ui_popup_info_t inner = modal_begin_shown(s_fx.ctx, MODAL_B, &st); /* TOP */
     nt_ui_modal_end(s_fx.ctx);
     nt_ui_modal_end(s_fx.ctx);
     nt_ui_end(s_fx.ctx);
@@ -145,7 +148,7 @@ typedef struct {
 static void modal_frame(uint32_t id, const nt_ui_modal_style_t *st, bool open, modal_frame_t *out) {
     ui_fx_frame_begin(s_fx.ctx, NULL);
     if (open) {
-        nt_ui_open(s_fx.ctx, id);
+        nt_ui_modal_open(s_fx.ctx, id);
     } else {
         nt_ui_close(s_fx.ctx, id);
     }
@@ -173,7 +176,7 @@ static void test_modal_open_entrance_eases_from_zero(void) {
     for (int i = 0; i < 120; ++i) {
         modal_frame(MODAL_A, &st, true, &r);
     }
-    TEST_ASSERT_TRUE(float_near(r.info.t, 1.0F, 0.02F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(r.info.t, 1.0F, 0.02F));
 }
 
 /* ---- An explicitly-open modal declares its body on frame 1 even before t crosses epsilon: visible
@@ -194,7 +197,7 @@ static void test_modal_open_instant_snaps(void) {
     st.ease_speed = 0.0F;
     modal_frame_t r;
     modal_frame(MODAL_A, &st, true, &r);
-    TEST_ASSERT_TRUE(float_near(r.info.t, 1.0F, 0.0001F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(r.info.t, 1.0F, 0.0001F));
     TEST_ASSERT_TRUE(r.visible);
 }
 
@@ -245,7 +248,7 @@ static nt_ui_interaction_t modal_gate_base_frame(const nt_ui_modal_style_t *st, 
         in = nt_ui_step(s_fx.ctx, nt_ui_id("gated_base_btn"), NULL);
     }
     if (open) {
-        nt_ui_open(s_fx.ctx, MODAL_A);
+        nt_ui_modal_open(s_fx.ctx, MODAL_A);
     } else {
         nt_ui_close(s_fx.ctx, MODAL_A);
     }
@@ -297,12 +300,11 @@ static void test_modal_closing_backdrop_lets_the_pointer_through(void) {
     TEST_ASSERT_TRUE_MESSAGE(in.clicked, "the base under the fading backdrop takes the tap");
 }
 
-/* One modal frame with a stepped button child. The button id is stepped INSIDE the body — mirrors the
- * showcase's action-button pattern. */
+/* One frame of modal A, which the test opened, with a stepped button child. The button id is stepped INSIDE the
+ * body — mirrors the showcase's action-button pattern. */
 
 static nt_ui_interaction_t modal_button_frame(const nt_ui_modal_style_t *st, const nt_pointer_t *p) {
     ui_fx_frame_begin(s_fx.ctx, p);
-    nt_ui_open(s_fx.ctx, MODAL_A);
     nt_ui_popup_info_t info = {0};
     nt_ui_interaction_t in = {0};
     if (nt_ui_modal_begin(s_fx.ctx, MODAL_A, st, &info)) { /* a snap modal that closed itself shows nothing */
@@ -319,6 +321,7 @@ static nt_ui_interaction_t modal_button_frame(const nt_ui_modal_style_t *st, con
 static void test_modal_body_button_clickable(void) {
     nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
     st.ease_speed = 0.0F; /* t snaps to 1: panel lives from frame 1 */
+    nt_ui_modal_open(s_fx.ctx, MODAL_A);
 
     /* Frame 1: register the button (empty prev-frame registry -> nothing hot yet). */
     nt_pointer_t f1 = modal_btn_pointer(false, false, false);
@@ -341,8 +344,9 @@ static void test_modal_body_button_clickable(void) {
  *      shrink-wrapped 200x120 box at (0,0); is_top needs the 1-frame IM lag so each probe runs 2 frames
  *      (F1 establishes top, F2 holds the click). ---- */
 static nt_ui_popup_close_t modal_backdrop_click_reason(const nt_ui_modal_style_t *st, float cx, float cy) {
+    nt_ui_modal_open(s_fx.ctx, MODAL_A);
     nt_pointer_t f1 = ui_fx_pointer(cx, cy, false, false, false);
-    modal_button_frame(st, &f1); /* establish top (overlay_top) */
+    modal_button_frame(st, &f1); /* the modal is the top from the next frame */
     /* F2: full press+release in one frame at (cx,cy) -> backdrop click fires this frame. */
     nt_pointer_t f2 = ui_fx_pointer(cx, cy, false, false, true);
     f2.buttons[NT_BUTTON_LEFT].is_pressed = true;
@@ -457,10 +461,11 @@ static void test_modal_stride_one_gates_base_ui(void) {
 }
 
 /* ---- A closed modal takes no stack slot: declared between the 15th and the 16th shown modals at the largest
- *      valid stride, it neither asserts nor moves the 16th off the last slot's band. ---- */
+ *      valid stride (the tooltip band ends at INT16_MAX), it neither asserts nor moves the 16th off the last
+ *      slot's band. ---- */
 static void test_modal_closed_takes_no_stack_slot(void) {
     nt_ui_create_desc_t desc = nt_ui_create_desc_defaults();
-    desc.overlay_zband_stride = (int16_t)(INT16_MAX - ((NT_UI_OVERLAY_MAX - 1) * NT_UI_OVERLAY_MAX));
+    desc.overlay_zband_stride = (int16_t)(INT16_MAX - (NT_UI_OVERLAY_MAX * NT_UI_OVERLAY_MAX));
     nt_ui_context_t *ctx = nt_ui_create_context(s_custom_arena, sizeof s_custom_arena, &desc);
     TEST_ASSERT_NOT_NULL(ctx);
     nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
@@ -475,17 +480,16 @@ static void test_modal_closed_takes_no_stack_slot(void) {
     CLAY({.id = CLAY_ID("last_body"), .layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(20)}}, .backgroundColor = {8, 8, 8, 255}}) {}
     nt_ui_modal_end(ctx);
     nt_ui_end(ctx);
-    TEST_ASSERT_EQUAL_UINT8(NT_UI_OVERLAY_MAX, ctx->overlay_count);
     const Clay_RenderCommand *last = ui_fx_find_rect(ctx, CLAY_ID("last_body").id);
     TEST_ASSERT_NOT_NULL(last);
-    TEST_ASSERT_EQUAL_INT32(INT16_MAX, last->zIndex);
+    TEST_ASSERT_EQUAL_INT32(INT16_MAX - NT_UI_OVERLAY_MAX, last->zIndex);
     nt_ui_destroy_context(ctx);
 }
 
 /* ---- A 0 stride (no fallback to the default, which lives only in nt_ui_create_desc_defaults) and a stride
- *      whose last stack slot's band passes int16 by one assert at create. ---- */
+ *      whose tooltip band, above the last stack slot's, passes int16 by one assert at create. ---- */
 static void test_modal_stride_out_of_range_asserts(void) {
-    const int16_t strides[] = {0, (int16_t)(INT16_MAX - ((NT_UI_OVERLAY_MAX - 1) * NT_UI_OVERLAY_MAX) + 1)};
+    const int16_t strides[] = {0, (int16_t)(INT16_MAX - (NT_UI_OVERLAY_MAX * NT_UI_OVERLAY_MAX) + 1)};
     for (int i = 0; i < 2; ++i) {
         nt_ui_create_desc_t desc = nt_ui_create_desc_defaults();
         desc.overlay_zband_stride = strides[i];
@@ -559,7 +563,7 @@ static void test_modal_anim_asserts(void) {
     nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
     st.ease_speed = 0.0F;
     ui_fx_frame_begin(s_fx.ctx, NULL);
-    nt_ui_open(s_fx.ctx, MODAL_A);
+    nt_ui_modal_open(s_fx.ctx, MODAL_A);
 
     nt_ui_modal_style_t bad = st;
     bad.open = (nt_ui_modal_anim_t){.type = NT_UI_MODAL_ANIM_SCALE_POP, .scale_start = 0.0F};
@@ -610,7 +614,7 @@ static void test_modal_close_uses_close_recipe(void) {
             nt_input_feed(nt_test_key(NT_KEY_ESCAPE, true));
         }
         ui_fx_frame_begin(s_fx.ctx, NULL);
-        const nt_ui_popup_info_t info = modal_begin_open(s_fx.ctx, MODAL_A, &st);
+        const nt_ui_popup_info_t info = (f == 0) ? modal_begin_open(s_fx.ctx, MODAL_A, &st) : modal_begin_shown(s_fx.ctx, MODAL_A, &st);
         modal_body();
         nt_ui_modal_end(s_fx.ctx);
         nt_ui_end(s_fx.ctx);

@@ -2,8 +2,8 @@
 #define NT_UI_MODAL_H
 
 /* Modal: panel + full-viewport backdrop floating elements, an input gate and an open/close tween. The game opens
- * and closes it with nt_ui_open / nt_ui_close (nt_ui.h); Esc and a backdrop press close it only per style flags.
- * Conditional begin/end: end only after begin returned true. It owns no scene, lifecycle or assets. */
+ * and closes it with nt_ui_modal_open / nt_ui_close (nt_ui.h); Esc and a backdrop press close it only per style
+ * flags. Conditional begin/end: end only after begin returned true. It owns no scene, lifecycle or assets. */
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -57,10 +57,15 @@ _Static_assert(sizeof(nt_ui_modal_style_t) == 40, "nt_ui_modal_style_t stable AB
 /* Valid baseline: symmetric scale-pop entrance + exit. scale_start > 0 (nt_ui_anim asserts scale_* > 0). */
 nt_ui_modal_style_t nt_ui_modal_style_defaults(void);
 
+/* Opens the modal `id` on top of the overlay stack, inside the overlay being declared at the call (0 = none), and
+ * closes every popup that is not its ancestor; modals stay (spec: "Input ownership"). It takes input from the
+ * frame after its first declaration. */
+void nt_ui_modal_open(nt_ui_context_t *ctx, uint32_t id);
+
 /* Returns whether the modal shows this frame: open, or fading out after a close. Only then it declares the
  * backdrop + panel on its overlay stack slot's band; the game declares the body and calls nt_ui_modal_end:
  *
- *   if (clicked_show) nt_ui_open(ctx, ID);
+ *   if (clicked_show) nt_ui_modal_open(ctx, ID);
  *   if (nt_ui_modal_begin(ctx, ID, &style, NULL)) {
  *       CLAY({ ...panel... }) { if (ok_clicked) nt_ui_close(ctx, ID); }
  *       nt_ui_modal_end(ctx);

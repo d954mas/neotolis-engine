@@ -50,8 +50,6 @@ void setUp(void) {
 
 void tearDown(void) { ui_walker_fixture_shutdown(&s_fx); }
 
-static bool float_near(float a, float b, float eps) { return fabsf(a - b) <= eps; }
-
 static nt_ui_tooltip_style_t test_style(void) {
     nt_ui_tooltip_style_t st = nt_ui_tooltip_style_defaults();
     st.delay_secs = DELAY;
@@ -177,7 +175,7 @@ static void test_tooltip_hide_on_leave(void) {
     nt_pointer_t away = ui_fx_pointer(VIEW_W - 10.0F, VIEW_H - 10.0F, false, false, false);
     bool shown_after = tooltip_frame(&away, &st);
     TEST_ASSERT_FALSE(shown_after);
-    TEST_ASSERT_TRUE(float_near(nt_ui_tooltip_test_hover_secs(s_fx.ctx, TGT_ID), 0.0F, 0.0001F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(nt_ui_tooltip_test_hover_secs(s_fx.ctx, TGT_ID), 0.0F, 0.0001F));
 }
 
 /* ---- No catcher: even while the tooltip is shown, popup-core declares NO
@@ -284,7 +282,7 @@ static bool tooltip_panel_rect(Clay_BoundingBox *out_box, float *out_radius) {
 static bool tooltip_image_of_width(float width, Clay_BoundingBox *out_box) {
     for (int32_t i = 0; i < s_fx.ctx->frozen_cmds.length; ++i) {
         const Clay_RenderCommand *c = &s_fx.ctx->frozen_cmds.internalArray[i];
-        if (c->commandType == CLAY_RENDER_COMMAND_TYPE_IMAGE && float_near(c->boundingBox.width, width, 0.5F)) {
+        if (c->commandType == CLAY_RENDER_COMMAND_TYPE_IMAGE && ui_fx_float_near(c->boundingBox.width, width, 0.5F)) {
             *out_box = c->boundingBox;
             return true;
         }
@@ -301,7 +299,7 @@ static bool caret_paints_after_panel(float caret_size) {
         const Clay_RenderCommand *c = &s_fx.ctx->frozen_cmds.internalArray[i];
         if (c->commandType == CLAY_RENDER_COMMAND_TYPE_RECTANGLE && c->zIndex > 0) {
             panel_at = i;
-        } else if (c->commandType == CLAY_RENDER_COMMAND_TYPE_IMAGE && float_near(c->boundingBox.width, caret_size, 0.5F)) {
+        } else if (c->commandType == CLAY_RENDER_COMMAND_TYPE_IMAGE && ui_fx_float_near(c->boundingBox.width, caret_size, 0.5F)) {
             caret_at = i;
         }
     }
@@ -312,7 +310,7 @@ static bool caret_paints_after_panel(float caret_size) {
 static bool tooltip_caret(float caret_size, Clay_BoundingBox *out_box, uint8_t *out_flip) {
     for (int32_t i = 0; i < s_fx.ctx->frozen_cmds.length; ++i) {
         const Clay_RenderCommand *c = &s_fx.ctx->frozen_cmds.internalArray[i];
-        if (c->commandType != CLAY_RENDER_COMMAND_TYPE_IMAGE || !float_near(c->boundingBox.width, caret_size, 0.5F) || !float_near(c->boundingBox.height, caret_size, 0.5F)) {
+        if (c->commandType != CLAY_RENDER_COMMAND_TYPE_IMAGE || !ui_fx_float_near(c->boundingBox.width, caret_size, 0.5F) || !ui_fx_float_near(c->boundingBox.height, caret_size, 0.5F)) {
             continue;
         }
         const nt_ui_image_payload_t *p = (const nt_ui_image_payload_t *)c->renderData.image.imageData;
@@ -337,7 +335,7 @@ static void test_tooltip_caret_below(void) {
     const nt_ui_bbox_t target = nt_ui_get_bbox(s_fx.ctx, TGT_ID);
     TEST_ASSERT_TRUE(target.found);
     TEST_ASSERT_TRUE(tooltip_panel_rect(&panel, &radius));
-    TEST_ASSERT_TRUE_MESSAGE(float_near(panel.y, target.y + target.height, 0.5F), "BELOW attaches the panel's top edge to the target's bottom edge (CENTER would land elsewhere)");
+    TEST_ASSERT_TRUE_MESSAGE(ui_fx_float_near(panel.y, target.y + target.height, 0.5F), "BELOW attaches the panel's top edge to the target's bottom edge (CENTER would land elsewhere)");
     TEST_ASSERT_TRUE_MESSAGE(tooltip_caret((float)below.caret_size, &caret, &flip), "a resolvable caret ref must emit the caret");
     TEST_ASSERT_TRUE_MESSAGE(caret.y + caret.height <= panel.y + 0.5F, "a BELOW panel wears its caret on the TOP edge");
     TEST_ASSERT_TRUE_MESSAGE(caret_paints_after_panel((float)below.caret_size), "the caret must paint AFTER its panel");
@@ -372,7 +370,7 @@ static void test_tooltip_caret_above_on_flip(void) {
     const nt_ui_bbox_t target = nt_ui_get_bbox(s_fx.ctx, TGT_ID);
     TEST_ASSERT_TRUE(target.found);
     TEST_ASSERT_TRUE(tooltip_panel_rect(&panel, &radius));
-    TEST_ASSERT_TRUE_MESSAGE(float_near(panel.y + panel.height, target.y, 0.5F), "ABOVE attaches the panel's bottom edge to the target's top edge");
+    TEST_ASSERT_TRUE_MESSAGE(ui_fx_float_near(panel.y + panel.height, target.y, 0.5F), "ABOVE attaches the panel's bottom edge to the target's top edge");
     TEST_ASSERT_TRUE(tooltip_caret((float)above.caret_size, &caret, &flip));
     TEST_ASSERT_TRUE_MESSAGE(caret.y >= panel.y + panel.height - 0.5F, "an ABOVE panel wears its caret on the BOTTOM edge");
     TEST_ASSERT_EQUAL_UINT8((uint8_t)NT_SPRITE_FLAG_FLIP_Y, flip);
@@ -390,7 +388,7 @@ static void test_tooltip_panel_art_no_corner_radius(void) {
     nt_pointer_t over_flat = ui_fx_pointer(TGT_W * 0.5F, TGT_H * 0.5F, false, false, false);
     reveal_at(&over_flat, &flat, false);
     TEST_ASSERT_TRUE_MESSAGE(tooltip_panel_rect(&panel, &radius), "the flat panel must emit its rounded rectangle");
-    TEST_ASSERT_TRUE(float_near(radius, 8.0F, 0.0001F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(radius, 8.0F, 0.0001F));
     const float panel_w = panel.width;
 
     /* Art path, same text and padding: the panel becomes an IMAGE of the same width, and an image has no

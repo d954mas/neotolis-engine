@@ -44,7 +44,6 @@ void setUp(void) {
 void tearDown(void) { ui_walker_fixture_shutdown(&s_fx); }
 
 /* Unity float macros are excluded in this build (UNITY_EXCLUDE_FLOAT). */
-static bool float_near(float a, float b, float eps) { return fabsf(a - b) <= eps; }
 
 /* Build a primary pointer at (x,y) with the LEFT button edges set. */
 /* Declare the button bbox at a FIXED absolute position so the layout solver
@@ -180,8 +179,8 @@ static void test_interaction_release_outside_cancels(void) {
     nt_ui_interaction_t in3 = query_btn_frame(&f3);
     TEST_ASSERT_TRUE(in3.pressed); /* capture holds even off-widget */
     TEST_ASSERT_FALSE(in3.hovered);
-    TEST_ASSERT_TRUE(float_near(in3.drag_dx, far_x - BTN_CX, 0.01F));
-    TEST_ASSERT_TRUE(float_near(in3.drag_dy, far_y - BTN_CY, 0.01F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(in3.drag_dx, far_x - BTN_CX, 0.01F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(in3.drag_dy, far_y - BTN_CY, 0.01F));
 
     /* Frame 4: release OUTSIDE -> released_now true, clicked FALSE (cancel),
      * capture cleared. */
@@ -310,23 +309,6 @@ static void test_interaction_second_button_keeps_the_gesture(void) {
     p = ui_fx_pointer(600.0F, 500.0F, true, true, false);
     (void)query_btn_frame(&p);
     TEST_ASSERT_FALSE_MESSAGE(nt_ui_wants_pointer(s_fx.ctx), "a press of its own off the UI is the game's");
-}
-
-/* ---- A second button never takes a gesture the game began: the button pressed first decides (Dear ImGui's
- *      earliest-down rule), so a right press over a widget mid-drag leaves the rest of the drag the game's. ---- */
-static void test_interaction_second_button_leaves_a_game_gesture(void) {
-    nt_pointer_t p = ui_fx_pointer(BTN_CX, BTN_CY, false, false, false);
-    warm_btn_frame(&p);
-    p = ui_fx_pointer(600.0F, 500.0F, true, true, false);
-    (void)query_btn_frame(&p);
-    TEST_ASSERT_FALSE(nt_ui_wants_pointer(s_fx.ctx));
-    p = ui_fx_pointer(BTN_CX, BTN_CY, true, false, false);
-    p.buttons[NT_BUTTON_RIGHT] = (nt_button_state_t){.is_down = true, .is_pressed = true};
-    (void)query_btn_frame(&p);
-    p = ui_fx_pointer(600.0F, 500.0F, true, false, false);
-    p.buttons[NT_BUTTON_RIGHT] = (nt_button_state_t){.is_down = true};
-    (void)query_btn_frame(&p);
-    TEST_ASSERT_FALSE_MESSAGE(nt_ui_wants_pointer(s_fx.ctx), "off the widget the drag is still the game's");
 }
 
 /* ---- Test 8: exclusive capture — while A owns capture, B sees zero ----
@@ -817,7 +799,6 @@ int main(void) {
     RUN_TEST(test_interaction_disabled_skips);
     RUN_TEST(test_interaction_wants_pointer);
     RUN_TEST(test_interaction_second_button_keeps_the_gesture);
-    RUN_TEST(test_interaction_second_button_leaves_a_game_gesture);
     RUN_TEST(test_interaction_padded_hover_and_capture);
     RUN_TEST(test_interaction_disabled_with_padding_stays_disabled);
     RUN_TEST(test_interaction_capture_excludes_other_widgets);

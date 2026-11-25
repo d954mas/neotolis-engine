@@ -238,8 +238,8 @@ nt_ui_context_t *nt_ui_create_context(void *arena, size_t arena_size, const nt_u
     ctx->element_depth_bias_ndc = desc->element_depth_bias_ndc;
     /* Used as-is; the default comes solely from nt_ui_create_desc_defaults() (same convention as max_elements). */
     ctx->overlay_zband_stride = desc->overlay_zband_stride;
-    NT_ASSERT(ctx->overlay_zband_stride > 0 && (int32_t)ctx->overlay_zband_stride + ((NT_UI_OVERLAY_MAX - 1) * NT_UI_OVERLAY_MAX) <= INT16_MAX &&
-              "nt_ui_create_context: overlay_zband_stride must be > 0 with room for every overlay stack slot's band");
+    NT_ASSERT(ctx->overlay_zband_stride > 0 && (int32_t)ctx->overlay_zband_stride + (NT_UI_OVERLAY_MAX * NT_UI_OVERLAY_MAX) <= INT16_MAX &&
+              "nt_ui_create_context: overlay_zband_stride must be > 0 with room for every stack slot's band and the tooltip band");
     /* Touch-friendly baseline, looser than ImGui's mouse 6px/0.3s: the engine targets mobile/WASM. */
     ctx->gesture_dbl_window_secs = 0.50F;
     ctx->gesture_move_radius_dp = 16.0F;
@@ -405,6 +405,8 @@ void nt_ui_set_font(nt_ui_context_t *ctx, uint16_t font_id, nt_font_t font) {
 
 // #region begin_end
 static void resolve_hot(nt_ui_context_t *ctx);
+static void overlay_close_at(nt_ui_context_t *ctx, int32_t at, uint8_t reason);
+static bool outside_press(nt_ui_context_t *ctx, const nt_ui_overlay_t *o);
 
 /* A record is the top's when it lies at or above the top's catcher in last frame's paint/hit order; with no
  * top, in a 3D ctx (no band ranking) and for an inspector pane, every record is. */
@@ -548,20 +550,19 @@ void nt_ui_begin(nt_ui_context_t *ctx, const nt_ui_frame_desc_t *frame) {
     ctx->last_press_age += dt;
     ctx->overlay_depth = 0U; /* overlay begin++/end-- balance across the frame (asserted == 0 at end) */
     ctx->inert_from = 0U;
-    /* S1: an overlay last frame did not declare leaves (one opened since the last begin waits one more); the top is
-     * the highest open one with a catcher declared last frame. */
+    /* S1: an overlay neither declared nor opened since the last begin leaves; the top is the highest live one with
+     * a catcher. */
     uint8_t kept = 0U;
     ctx->overlay_top = 0U;
     for (uint8_t i = 0U; i < ctx->overlay_count; ++i) {
         nt_ui_overlay_t o = ctx->overlays[i];
-        if (!o.seen && !o.fresh) {
+        if (!o.seen) {
             continue;
         }
-        if (o.seen && o.open && o.live && o.catcher) {
+        if (o.open && o.live && o.catcher) {
             ctx->overlay_top = o.id;
         }
         o.seen = false;
-        o.fresh = false;
         ctx->overlays[kept++] = o;
     }
     ctx->overlay_count = kept;
@@ -671,6 +672,13 @@ void nt_ui_begin(nt_ui_context_t *ctx, const nt_ui_frame_desc_t *frame) {
         } else if (!l->is_down && !l->is_released && !r->is_down && !r->is_released) {
             ctx->captures[i].ui_gesture = false;
         }
+    }
+    /* S3: the top closes on the Esc it owns or on a press outside it, before anything of the frame declares. */
+    const int32_t top = (ctx->overlay_top != 0U) ? nt_ui_internal_overlay_index(ctx, ctx->overlay_top) : -1;
+    if (top >= 0 && ctx->overlays[top].esc_close && ctx->keys_owner == ctx->overlay_top && nt_input_key_is_pressed(NT_KEY_ESCAPE)) {
+        overlay_close_at(ctx, top, NT_UI_POPUP_CLOSE_ESC);
+    } else if (top >= 0 && ctx->overlays[top].outside_close && outside_press(ctx, &ctx->overlays[top])) {
+        overlay_close_at(ctx, top, NT_UI_POPUP_CLOSE_OUTSIDE); /* on the press, as Dear ImGui */
     }
     nt_ui_internal_scroll_arbitrate(ctx);
 
@@ -2988,14 +2996,14 @@ const nt_pointer_t *nt_ui_internal_top_pointer(const nt_ui_context_t *ctx, uint3
     return nt_ui_internal_is_top(ctx, id) ? &ctx->frame_pointers[ctx->frame_primary] : &idle;
 }
 
-// #region overlay stack (spec: "Input ownership", S1-S2; out of line: inlined they cost ~1.2 KB wasm)
-NT_NOINLINE nt_ui_overlay_t *nt_ui_internal_overlay_find(nt_ui_context_t *ctx, uint32_t id) {
+// #region overlay stack (spec: "Input ownership", S1-S3; out of line: inlined they cost ~1.2 KB wasm)
+NT_NOINLINE int32_t nt_ui_internal_overlay_index(const nt_ui_context_t *ctx, uint32_t id) {
     for (uint8_t i = 0U; i < ctx->overlay_count; ++i) {
         if (ctx->overlays[i].id == id) {
-            return &ctx->overlays[i];
+            return i;
         }
     }
-    return NULL;
+    return -1;
 }
 
 NT_NOINLINE void nt_ui_internal_overlay_remove(nt_ui_context_t *ctx, nt_ui_overlay_t *o) {
@@ -3004,63 +3012,90 @@ NT_NOINLINE void nt_ui_internal_overlay_remove(nt_ui_context_t *ctx, nt_ui_overl
     --ctx->overlay_count;
 }
 
-NT_NOINLINE static bool overlay_declared_around(const nt_ui_context_t *ctx, uint32_t id) {
-    for (uint8_t d = 0U; d < ctx->overlay_depth; ++d) {
-        if (ctx->overlay_decl[d] == id) {
-            return true;
+uint32_t nt_ui_internal_overlay_here(const nt_ui_context_t *ctx) {
+    for (uint8_t d = ctx->overlay_depth; d > 0U; --d) {
+        if (ctx->overlay_decl[d - 1U] != 0U) {
+            return ctx->overlay_decl[d - 1U];
         }
     }
-    return false;
+    return 0U;
 }
 
-NT_NOINLINE void nt_ui_internal_overlay_open(nt_ui_context_t *ctx, uint32_t id, uint32_t opener) {
-    nt_ui_overlay_t *o = nt_ui_internal_overlay_find(ctx, id);
-    if (o != NULL && o->open && o->opener == opener) {
-        return;
-    }
-    if (o != NULL) {
-        nt_ui_internal_overlay_remove(ctx, o); /* a reopen is the last opened */
-    } else if (ctx->overlay_count == NT_UI_OVERLAY_MAX) {
-        for (uint8_t i = 0U; i < ctx->overlay_count; ++i) {
-            if (!ctx->overlays[i].open && !overlay_declared_around(ctx, ctx->overlays[i].id)) {
-                nt_ui_internal_overlay_remove(ctx, &ctx->overlays[i]); /* a full stack takes a fading slot; its fade ends */
-                break;
-            }
+uint32_t nt_ui_internal_overlay_last_open(const nt_ui_context_t *ctx) {
+    for (uint8_t i = ctx->overlay_count; i > 0U; --i) {
+        if (ctx->overlays[i - 1U].open) {
+            return ctx->overlays[i - 1U].id;
         }
     }
-    NT_ASSERT(ctx->overlay_count < NT_UI_OVERLAY_MAX && "nt_ui_open: more than NT_UI_OVERLAY_MAX open overlays");
-    if (ctx->overlay_top == id) {
-        ctx->overlay_top = 0U; /* a reopened top takes input from the next frame, as a new one */
+    return 0U;
+}
+
+/* Closes the overlay in slot `at` and every overlay opened inside it, which lie above it in the stack. */
+NT_NOINLINE static void overlay_close_at(nt_ui_context_t *ctx, int32_t at, uint8_t reason) {
+    uint32_t closing[NT_UI_OVERLAY_MAX];
+    uint8_t n = 0U;
+    for (int32_t k = at; k < (int32_t)ctx->overlay_count; ++k) {
+        nt_ui_overlay_t *o = &ctx->overlays[k];
+        bool inside = (k == at);
+        for (uint8_t c = 0U; c < n && !inside; ++c) {
+            inside = (o->parent == closing[c]);
+        }
+        if (inside && o->open) {
+            o->open = false;
+            o->reason = reason;
+        }
+        if (inside) {
+            closing[n++] = o->id;
+        }
     }
-    ctx->overlays[ctx->overlay_count++] = (nt_ui_overlay_t){.id = id, .opener = opener, .open = true, .fresh = true};
 }
 
 NT_NOINLINE void nt_ui_internal_overlay_close(nt_ui_context_t *ctx, uint32_t id, uint8_t reason) {
-    nt_ui_overlay_t *o = nt_ui_internal_overlay_find(ctx, id);
-    if (o != NULL && o->open) {
-        o->open = false;
-        o->reason = reason;
+    const int32_t at = nt_ui_internal_overlay_index(ctx, id);
+    if (at >= 0) {
+        overlay_close_at(ctx, at, reason);
     }
 }
 
-NT_NOINLINE uint32_t nt_ui_internal_overlay_opener(nt_ui_context_t *ctx, uint32_t id) {
-    const nt_ui_overlay_t *o = nt_ui_internal_overlay_find(ctx, id);
-    return (o != NULL && o->open) ? o->opener : 0U;
-}
-
-NT_NOINLINE void nt_ui_internal_overlay_close_popups(nt_ui_context_t *ctx, const nt_ui_overlay_t *opener) {
-    for (uint8_t i = 0U; i < ctx->overlay_count; ++i) {
-        nt_ui_overlay_t *o = &ctx->overlays[i];
-        if (o != opener && o->popup && o->open && o->live && !overlay_declared_around(ctx, o->id)) {
-            o->open = false;
-            o->reason = NT_UI_POPUP_CLOSE_REPLACED;
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) — two flat scans: the ancestors, then S2
+NT_NOINLINE void nt_ui_internal_overlay_open(nt_ui_context_t *ctx, uint32_t id, uint32_t parent, uint32_t opener, uint8_t flags) {
+    const int32_t at = nt_ui_internal_overlay_index(ctx, id);
+    if (at >= 0 && ctx->overlays[at].open && ctx->overlays[at].opener == opener) {
+        return;
+    }
+    if (at >= 0) {
+        overlay_close_at(ctx, at, NT_UI_POPUP_CLOSE_REPLACED); /* a reopen starts a new subtree on top */
+        nt_ui_internal_overlay_remove(ctx, &ctx->overlays[at]);
+    }
+    NT_ASSERT(ctx->overlay_count < NT_UI_OVERLAY_MAX && "nt_ui: more than NT_UI_OVERLAY_MAX overlays open or fading");
+    /* S2: the ancestors are the overlays the call is declared inside and those `parent` was opened inside, as
+     * HTML takes a popover's ancestors from the DOM and from its invoker; every other light overlay closes. */
+    uint32_t anc[2 * NT_UI_OVERLAY_MAX];
+    uint8_t n = 0U;
+    for (uint8_t d = 0U; d < ctx->overlay_depth; ++d) {
+        anc[n++] = ctx->overlay_decl[d];
+    }
+    for (int32_t p = nt_ui_internal_overlay_index(ctx, parent); p >= 0 && n < 2 * NT_UI_OVERLAY_MAX; p = nt_ui_internal_overlay_index(ctx, ctx->overlays[p].parent)) {
+        anc[n++] = ctx->overlays[p].id;
+    }
+    for (int32_t k = 0; k < (int32_t)ctx->overlay_count; ++k) {
+        bool ancestor = false;
+        for (uint8_t c = 0U; c < n && !ancestor; ++c) {
+            ancestor = (ctx->overlays[k].id == anc[c]);
+        }
+        if (ctx->overlays[k].open && ctx->overlays[k].light && !ancestor) {
+            overlay_close_at(ctx, k, NT_UI_POPUP_CLOSE_REPLACED);
         }
     }
-}
-
-void nt_ui_open(nt_ui_context_t *ctx, uint32_t id) {
-    NT_ASSERT(ctx != NULL && id != 0U && "nt_ui_open: ctx non-NULL, id non-zero");
-    nt_ui_internal_overlay_open(ctx, id, 0U);
+    ctx->overlays[ctx->overlay_count++] = (nt_ui_overlay_t){
+        .id = id,
+        .parent = parent,
+        .opener = opener,
+        .open = true,
+        .seen = true,
+        .light = (flags & NT_UI_OVERLAY_LIGHT) != 0U,
+        .catcher = (flags & NT_UI_OVERLAY_CATCHER) != 0U,
+    };
 }
 
 void nt_ui_close(nt_ui_context_t *ctx, uint32_t id) {
@@ -3070,21 +3105,19 @@ void nt_ui_close(nt_ui_context_t *ctx, uint32_t id) {
 
 bool nt_ui_is_open(const nt_ui_context_t *ctx, uint32_t id) {
     NT_ASSERT(ctx != NULL && id != 0U && "nt_ui_is_open: ctx non-NULL, id non-zero");
-    for (uint8_t i = 0U; i < ctx->overlay_count; ++i) {
-        if (ctx->overlays[i].id == id) {
-            return ctx->overlays[i].open;
-        }
-    }
-    return false;
+    const int32_t at = nt_ui_internal_overlay_index(ctx, id);
+    return at >= 0 && ctx->overlays[at].open;
 }
 // #endregion
 
-bool nt_ui_internal_outside_press(nt_ui_context_t *ctx, uint32_t id, int16_t pad) {
-    const nt_pointer_t *pp = nt_ui_internal_top_pointer(ctx, id);
+/* The top `o` got a primary press, either button, outside its panel grown by its close_pad, on its catcher or on
+ * no record. */
+static bool outside_press(nt_ui_context_t *ctx, const nt_ui_overlay_t *o) {
+    const nt_pointer_t *pp = nt_ui_internal_top_pointer(ctx, o->id);
     const uint32_t hot = ctx->pointer_hot[ctx->frame_primary].id;
-    const int16_t pad_lrtb[4] = {pad, pad, pad, pad};
-    return (pp->buttons[NT_BUTTON_LEFT].is_pressed || pp->buttons[NT_BUTTON_RIGHT].is_pressed) && (hot == nt_ui_internal_popup_catcher_id(id) || hot == 0U) &&
-           !nt_ui_internal_hit_test_padded(ctx, id, pp->x, pp->y, pad_lrtb);
+    const int16_t pad_lrtb[4] = {o->close_pad, o->close_pad, o->close_pad, o->close_pad};
+    return (pp->buttons[NT_BUTTON_LEFT].is_pressed || pp->buttons[NT_BUTTON_RIGHT].is_pressed) && (hot == nt_ui_internal_popup_catcher_id(o->id) || hot == 0U) &&
+           !nt_ui_internal_hit_test_padded(ctx, o->id, pp->x, pp->y, pad_lrtb);
 }
 
 bool nt_ui_wants_pointer(const nt_ui_context_t *ctx) {
@@ -3176,9 +3209,11 @@ bool nt_ui_hovered_within(const nt_ui_context_t *ctx, uint32_t id) {
     if (!hit_range(ctx, id, &first, &last)) {
         return false;
     }
+    const uint32_t catcher = (ctx->overlay_top != 0U) ? nt_ui_internal_popup_catcher_id(ctx->overlay_top) : 0U;
     for (uint32_t i = 0; i < ctx->frame_pointer_count; ++i) {
         uint32_t t = 0U;
-        if (pointer_target(ctx, i, &t) && t >= first && t <= last) {
+        /* A pointer on the top's catcher hovers nothing, as Dear ImGui's items behind a popup. */
+        if (ctx->pointer_hot[i].id != catcher && pointer_target(ctx, i, &t) && t >= first && t <= last) {
             return true;
         }
     }

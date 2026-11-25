@@ -26,7 +26,9 @@
 #include "test_helpers/ui_walker_fixture.h"
 #include "ui/nt_ui.h"
 #include "ui/nt_ui_debug_hit_zones.h"
+#include "ui/nt_ui_input.h"
 #include "ui/nt_ui_internal.h"
+#include "ui/nt_ui_modal.h"
 #include "unity.h"
 
 #if NT_UI_DEBUG_TOOLS
@@ -348,6 +350,53 @@ static void test_debug_disabled_helper_records_zone(void) {
     nt_ui_end(s_fx.ctx);
 }
 
+#define ZONE_MODAL 0x2D0001U
+#define ZONE_FIELD 0x2D0002U
+
+/* One frame: a text field in the base UI, enabled or not, then modal ZONE_MODAL while it shows. */
+static void field_under_modal_frame(bool field_enabled) {
+    static char buf[16];
+    nt_ui_input_style_t is = nt_ui_input_style_defaults();
+    is.text.font_size = 16.0F;
+    is.placeholder.font_size = 16.0F;
+    is.caret_blink_rate = 0.0F;
+    const nt_ui_input_props_t props = {0};
+    const Clay_ElementDeclaration decl = {.layout = {.sizing = {CLAY_SIZING_FIXED(BTN_W), CLAY_SIZING_FIXED(BTN_H)}}};
+    nt_ui_modal_style_t ms = nt_ui_modal_style_defaults();
+    ms.ease_speed = 0.0F;
+    nt_pointer_t idle = ui_fx_pointer(5.0F, 5.0F, false, false, false);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &idle, .pointer_count = 1});
+    CLAY({.id = CLAY_ID("zone_field_root"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = BTN_X, .y = BTN_Y}}}) {
+        (void)nt_ui_input_text(s_fx.ctx, NULL, 0U, ZONE_FIELD, buf, sizeof buf, &props, &is, &decl, field_enabled, NULL);
+    }
+    if (nt_ui_modal_begin(s_fx.ctx, ZONE_MODAL, &ms, NULL)) {
+        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(100), CLAY_SIZING_FIXED(60)}}}) {}
+        nt_ui_modal_end(s_fx.ctx);
+    }
+    nt_ui_end(s_fx.ctx);
+}
+
+/* ---- A field the open modal covers takes no input, yet it is not disabled: it records no DISABLED zone; a
+ *      field the game declares disabled does. ---- */
+static void test_debug_field_under_a_modal_is_not_disabled(void) {
+    ui_walker_fixture_fill_stub_font(&s_fx);
+    nt_ui_debug_set_recording(s_fx.ctx, true);
+    nt_ui_modal_open(s_fx.ctx, ZONE_MODAL);
+    for (int f = 0; f < 3; ++f) {
+        field_under_modal_frame(true);
+    }
+    const nt_ui_debug_zone_t *z = nt_ui_internal_find_debug_zone(s_fx.ctx, ZONE_FIELD);
+    TEST_ASSERT_TRUE_MESSAGE(z == NULL || (z->state_flags & NT_UI_DEBUG_FLAG_DISABLED) == 0U, "a covered field is not drawn as disabled");
+
+    nt_ui_close(s_fx.ctx, ZONE_MODAL);
+    for (int f = 0; f < 2; ++f) {
+        field_under_modal_frame(false);
+    }
+    z = nt_ui_internal_find_debug_zone(s_fx.ctx, ZONE_FIELD);
+    TEST_ASSERT_NOT_NULL(z);
+    TEST_ASSERT_TRUE_MESSAGE((z->state_flags & NT_UI_DEBUG_FLAG_DISABLED) != 0U, "a disabled field records a DISABLED zone");
+}
+
 /* ---- Test 9: disabled-record helper is zero-overhead when recording is OFF ---- */
 static void test_debug_disabled_helper_off_no_capture(void) {
     nt_pointer_t f1 = ui_fx_pointer(0.0F, 0.0F, false, false, false);
@@ -392,6 +441,7 @@ int main(void) {
     RUN_TEST(test_debug_labels_draw_after_all_fills);
     RUN_TEST(test_debug_disabled_helper_records_zone);
     RUN_TEST(test_debug_disabled_helper_off_no_capture);
+    RUN_TEST(test_debug_field_under_a_modal_is_not_disabled);
     RUN_TEST(test_debug_step_past_registry_asserts);
     return UNITY_END();
 }
