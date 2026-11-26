@@ -63,9 +63,8 @@ static void act_capture(uint32_t row_scoped_id, bool clicked) {
 static float s_ptr_x;
 static float s_ptr_y;
 static bool s_ptr_seen;
-/* Where menu_im_frame declares the test modal: before the menu (the menu on top), or around it, kept open or
- * closed by the game in this frame. */
-typedef enum { MODAL_NONE, MODAL_UNDER_MENU, MODAL_HOLDS_MENU, MODAL_CLOSES_AROUND_MENU } menu_modal_t;
+/* Whether menu_im_frame declares the test modal around the menu, kept open or closed by the game in this frame. */
+typedef enum { MODAL_NONE, MODAL_HOLDS_MENU, MODAL_CLOSES_AROUND_MENU } menu_modal_t;
 static menu_modal_t s_modal;
 static int s_popup_depth;   /* menu_popup_frame: the menu depth whose custom row holds the popup (-1 = none) */
 static bool s_popup_opened; /* that row opened its popup already: it opens once, as on a game's click */
@@ -179,54 +178,48 @@ static void menu_im_tree(nt_ui_menu_t *st, nt_ui_menu_style_t *style) {
 #define MODAL_ID 0x40DA1U
 
 /* Places the test modal (menu_set_modal) and opens it, except for MODAL_CLOSES_AROUND_MENU: the game opens it
- * when it shows it first, so the modal opened before the menu lies under it. */
+ * when it shows it first. */
 static void menu_set_modal(menu_modal_t m) {
     s_modal = m;
-    if (m != MODAL_NONE && m != MODAL_CLOSES_AROUND_MENU) {
+    if (m == MODAL_HOLDS_MENU) {
         nt_ui_modal_open(s_fx.ctx, MODAL_ID);
     }
 }
 
-/* The test modal: an Esc-listening one holding the menu when s_modal puts it inside; returns whether the modal
- * reported a close. */
-static bool menu_im_modal(nt_ui_menu_t *st, nt_ui_menu_style_t *style) {
-    nt_ui_modal_style_t ms = nt_ui_modal_style_defaults();
-    ms.flags = NT_UI_MODAL_LISTEN_ESC;
-    if (s_modal == MODAL_CLOSES_AROUND_MENU) {
-        nt_ui_close(s_fx.ctx, MODAL_ID);
-    }
-    nt_ui_popup_info_t info = {0};
-    if (nt_ui_modal_begin(s_fx.ctx, MODAL_ID, &ms, &info)) {
-        if (s_modal >= MODAL_HOLDS_MENU) {
-            menu_im_tree(st, style);
-        }
-        nt_ui_modal_end(s_fx.ctx);
-    }
-    return info.reason != NT_UI_POPUP_CLOSE_NONE;
-}
-
-/* One frame of the menu tree and the s_modal placement; returns whether the modal reported a close. */
-static bool menu_im_frame_ptr(nt_ui_menu_t *st, nt_ui_menu_style_t *style, const nt_pointer_t *p) {
+/* One frame of the menu tree, inside the test modal when s_modal places one. */
+static void menu_im_frame_ptr(nt_ui_menu_t *st, nt_ui_menu_style_t *style, const nt_pointer_t *p) {
     menu_frame_begin(p);
-    bool modal_close = false;
-    if (s_modal == MODAL_UNDER_MENU || s_modal >= MODAL_HOLDS_MENU) {
-        modal_close = menu_im_modal(st, style);
-    }
-    if (s_modal < MODAL_HOLDS_MENU) {
+    if (s_modal == MODAL_NONE) {
         menu_im_tree(st, style);
+    } else {
+        nt_ui_modal_style_t ms = nt_ui_modal_style_defaults();
+        if (s_modal == MODAL_CLOSES_AROUND_MENU) {
+            nt_ui_close(s_fx.ctx, MODAL_ID);
+        }
+        if (nt_ui_modal_begin(s_fx.ctx, MODAL_ID, &ms, NULL)) {
+            menu_im_tree(st, style);
+            nt_ui_modal_end(s_fx.ctx);
+        }
     }
     nt_ui_end(s_fx.ctx);
-    return modal_close;
 }
 
-static void menu_im_frame(nt_ui_menu_t *st, nt_ui_menu_style_t *style, float px, float py) { (void)menu_im_frame_ptr(st, style, &(nt_pointer_t){.x = px, .y = py, .active = true}); }
+static void menu_im_frame(nt_ui_menu_t *st, nt_ui_menu_style_t *style, float px, float py) { menu_im_frame_ptr(st, style, &(nt_pointer_t){.x = px, .y = py, .active = true}); }
 
-/* A frame whose pointer presses the left button at (px,py): a mouse click or a touch tap. */
-static void menu_im_press(nt_ui_menu_t *st, nt_ui_menu_style_t *style, float px, float py, uint8_t type) {
-    nt_pointer_t p = {.x = px, .y = py, .type = type, .active = true};
-    p.buttons[NT_BUTTON_LEFT].is_down = true;
-    p.buttons[NT_BUTTON_LEFT].is_pressed = true;
-    (void)menu_im_frame_ptr(st, style, &p);
+/* A pointer at (x, y) carrying the edge of `press` and of `release` (a button, or -1): a press holds its button
+ * down, a tap carries both edges. */
+static nt_pointer_t menu_ptr(float x, float y, int press, int release) {
+    nt_pointer_t p = {.x = x, .y = y, .active = true};
+    for (int b = 0; b < NT_BUTTON_MAX; ++b) {
+        p.buttons[b] = (nt_button_state_t){.is_down = b == press && b != release, .is_pressed = b == press, .is_released = b == release};
+    }
+    return p;
+}
+
+/* A frame whose pointer presses the left button at (px,py). */
+static void menu_im_press(nt_ui_menu_t *st, nt_ui_menu_style_t *style, float px, float py) {
+    const nt_pointer_t p = menu_ptr(px, py, NT_BUTTON_LEFT, -1);
+    menu_im_frame_ptr(st, style, &p);
 }
 
 /* ---- Outside press: a left click, a tap or a right click far outside every open panel closes the whole
@@ -241,9 +234,9 @@ static void test_menu_outside_press_dismisses_chain(void) {
         menu_im_frame(&st, &style, 700.0F, 500.0F);
         const nt_ui_bbox_t root = nt_ui_get_bbox(s_fx.ctx, nt_ui_menu_test_panel_id(MENU_A, 0U));
         TEST_ASSERT_TRUE_MESSAGE(root.found && ui_fx_float_near(root.x, 120.0F, 0.5F) && ui_fx_float_near(root.y, 80.0F, 0.5F), "the root's top-left sits at the open point");
-        nt_pointer_t p = {.x = 780.0F, .y = 580.0F, .type = types[i], .active = true};
-        p.buttons[buttons[i]] = (nt_button_state_t){.is_down = true, .is_pressed = true};
-        (void)menu_im_frame_ptr(&st, &style, &p);
+        nt_pointer_t p = menu_ptr(780.0F, 580.0F, buttons[i], -1);
+        p.type = types[i];
+        menu_im_frame_ptr(&st, &style, &p);
         TEST_ASSERT_FALSE_MESSAGE(nt_ui_is_open(s_fx.ctx, MENU_A), "an outside press dismisses the whole chain");
         TEST_ASSERT_FALSE_MESSAGE(menu_level_found(0U), "the press frame declares no level");
     }
@@ -289,8 +282,9 @@ static void menu_click_tools_over_file_open(nt_ui_menu_t *st, nt_ui_menu_style_t
     float cx = 0.0F;
     float cy = 0.0F;
     menu_row_center(nt_ui_menu_test_item_id(MENU_A, KEY_TOOLS), &cx, &cy);
-    menu_im_press(st, style, cx, cy, NT_POINTER_MOUSE);
-    menu_im_frame_ptr(st, style, &(nt_pointer_t){.x = cx, .y = cy, .active = true, .buttons[NT_BUTTON_LEFT].is_released = true});
+    menu_im_press(st, style, cx, cy);
+    const nt_pointer_t release = menu_ptr(cx, cy, -1, NT_BUTTON_LEFT);
+    menu_im_frame_ptr(st, style, &release);
 }
 
 /* Right (into the focused open parent) and Enter; true when `leaf` activated. */
@@ -824,41 +818,14 @@ static void test_menu_submenu_begin_ex_icon_disabled(void) {
     float cx = 0.0F;
     float cy = 0.0F;
     menu_row_center(parent, &cx, &cy);
-    nt_pointer_t p = {.x = cx, .y = cy, .active = true};
-    menu_im_frame_rows(&st, &style, &p);
-    menu_im_frame_rows(&st, &style, &p);
-    p.buttons[NT_BUTTON_LEFT].is_down = true;
-    p.buttons[NT_BUTTON_LEFT].is_pressed = true;
-    menu_im_frame_rows(&st, &style, &p);
-    p.buttons[NT_BUTTON_LEFT] = (nt_button_state_t){.is_released = true};
-    menu_im_frame_rows(&st, &style, &p);
+    const nt_pointer_t frames[] = {menu_ptr(cx, cy, -1, -1), menu_ptr(cx, cy, -1, -1), menu_ptr(cx, cy, NT_BUTTON_LEFT, -1), menu_ptr(cx, cy, -1, NT_BUTTON_LEFT)};
+    for (int f = 0; f < 4; ++f) {
+        menu_im_frame_rows(&st, &style, &frames[f]);
+    }
     menu_im_frame_rows(&st, &style, &(nt_pointer_t){.active = true});
     TEST_ASSERT_TRUE(nt_ui_is_open(s_fx.ctx, MENU_A));
     TEST_ASSERT_EQUAL_UINT32(0U, st.focus);
     TEST_ASSERT_FALSE_MESSAGE(menu_level_found(1U), "a disabled parent opens neither by hover nor by click");
-}
-
-/* ---- Esc with a menu open over a modal closes only the menu, the top. ---- */
-static void test_menu_esc_over_a_modal_closes_only_the_menu(void) {
-    nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
-    nt_ui_menu_t st = {0};
-    menu_set_modal(MODAL_UNDER_MENU);
-    nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
-    TEST_ASSERT_FALSE(menu_im_frame_ptr(&st, &style, &(nt_pointer_t){.active = true}));
-    menu_key(NT_KEY_ESCAPE);
-    const bool modal_close = menu_im_frame_ptr(&st, &style, &(nt_pointer_t){.active = true});
-    TEST_ASSERT_FALSE_MESSAGE(nt_ui_is_open(s_fx.ctx, MENU_A), "Esc closes the menu");
-    TEST_ASSERT_FALSE_MESSAGE(modal_close, "Esc over a modal closes only the menu on top of it");
-}
-
-/* ---- nt_ui_pointer_pos is the primary pointer in UI space. ---- */
-static void test_menu_pointer_pos(void) {
-    menu_frame_begin(&(nt_pointer_t){.x = 37.0F, .y = 41.0F, .active = true});
-    float x = 0.0F;
-    float y = 0.0F;
-    nt_ui_pointer_pos(s_fx.ctx, &x, &y);
-    nt_ui_end(s_fx.ctx);
-    TEST_ASSERT_TRUE(ui_fx_float_near(x, 37.0F, 0.01F) && ui_fx_float_near(y, 41.0F, 0.01F));
 }
 
 /* ---- Esc or Left at the root closes the menu, and nt_ui_menu_begin declares nothing in that frame. ---- */
@@ -944,17 +911,10 @@ static menu_row_child_result_t menu_row_child_frames(nt_ui_menu_t *st, bool non_
         const nt_ui_bbox_t child = nt_ui_get_bbox(s_fx.ctx, MENU_ROW_CHILD_ID);
         const nt_ui_bbox_t row = nt_ui_get_bbox(s_fx.ctx, row_id);
         const bool found = child.found && row.found;
-        nt_pointer_t p = {.active = true};
-        if (found) {
-            p.x = on_child ? (child.x + (child.width * 0.5F)) : (row.x + row.width - 2.0F);
-            p.y = child.y + (child.height * 0.5F);
-        }
-        if (frame == 2 && found) {
-            p.buttons[NT_BUTTON_LEFT].is_down = true;
-            p.buttons[NT_BUTTON_LEFT].is_pressed = true;
-        } else if (frame == 3 && found) {
-            p.buttons[NT_BUTTON_LEFT].is_released = true;
-        }
+        const float on_x = on_child ? (child.x + (child.width * 0.5F)) : (row.x + row.width - 2.0F);
+        const float x = found ? on_x : 0.0F;
+        const float y = found ? (child.y + (child.height * 0.5F)) : 0.0F;
+        const nt_pointer_t p = menu_ptr(x, y, (frame == 2 && found) ? NT_BUTTON_LEFT : -1, (frame == 3 && found) ? NT_BUTTON_LEFT : -1);
         menu_frame_begin(&p);
         if (nt_ui_menu_begin(st, s_fx.ctx, NULL, 0U, &style)) {
             nt_ui_menu_item_begin(st, KEY_NEW, true, !non_activatable);
@@ -1088,10 +1048,7 @@ static bool menu_click_row(nt_ui_menu_t *st, nt_ui_menu_style_t *style, menu_row
         float bx = 0.0F;
         float by = 0.0F;
         menu_row_center(row_id, &bx, &by);
-        nt_pointer_t p = {.x = bx, .y = by, .active = true};
-        p.buttons[NT_BUTTON_LEFT].is_down = (frame == 2);
-        p.buttons[NT_BUTTON_LEFT].is_pressed = (frame == 2);
-        p.buttons[NT_BUTTON_LEFT].is_released = (frame == 3);
+        const nt_pointer_t p = menu_ptr(bx, by, (frame == 2) ? NT_BUTTON_LEFT : -1, (frame == 3) ? NT_BUTTON_LEFT : -1);
         menu_frame_begin(&p);
         if (nt_ui_menu_begin(st, s_fx.ctx, NULL, 0U, style)) {
             activated |= menu_declare_row(st, kind);
@@ -1290,7 +1247,7 @@ static void test_menu_press_in_just_closed_panel_keeps_open(void) {
     float nx = 0.0F;
     float ny = 0.0F;
     menu_row_center(nt_ui_menu_test_item_id(nt_ui_menu_test_item_id(MENU_A, KEY_FILE), KEY_QUIT), &nx, &ny);
-    menu_im_press(&st, &style, nx, ny, NT_POINTER_MOUSE);
+    menu_im_press(&st, &style, nx, ny);
     TEST_ASSERT_TRUE_MESSAGE(menu_row_shown(menu_row(menu_row(MENU_A, KEY_TOOLS), KEY_OPT)), "the click had switched to Tools: File's level is gone");
     TEST_ASSERT_TRUE_MESSAGE(nt_ui_is_open(s_fx.ctx, MENU_A), "a press on a panel shown last frame must not dismiss the menu");
 }
@@ -1311,9 +1268,7 @@ static void menu_tap_and_enter(int focus_downs, uint32_t tap_key, bool *l1, bool
     float cx = 0.0F;
     float cy = 0.0F;
     menu_row_center(nt_ui_menu_test_item_id(MENU_A, tap_key), &cx, &cy);
-    nt_pointer_t p = {.x = cx, .y = cy, .active = true};
-    p.buttons[NT_BUTTON_LEFT].is_pressed = true;
-    p.buttons[NT_BUTTON_LEFT].is_released = true;
+    const nt_pointer_t p = menu_ptr(cx, cy, NT_BUTTON_LEFT, NT_BUTTON_LEFT);
     menu_key(NT_KEY_ENTER);
     menu_frame_begin(&p);
     if (nt_ui_menu_begin(&st, s_fx.ctx, NULL, 0U, &style)) {
@@ -1563,9 +1518,13 @@ static void test_menu_pointer_over_child_holds_it(void) {
     TEST_ASSERT_TRUE_MESSAGE(menu_level_found(1U), "the pointer over the open child holds it");
 }
 
-/* ---- Reopening starts fresh: nt_ui_menu_open forgets the chain, and the opening frame takes neither the
- *      hover at the old place nor an Esc (the reopened menu reads keys from its next frame). ---- */
-static void test_menu_reopen_starts_fresh(void) {
+/* ---- The opening frame takes no input. A reopen forgets the chain, and its frame takes neither the hover at the
+ *      old place nor an Esc (the reopened menu reads keys from its next frame). A release over a row's old rect
+ *      after a reopen elsewhere, the release of the press that reopened the menu over a row, and a tap in the
+ *      frame the menu reopens at the same place click nothing (the same tap a frame later does); a reopening
+ *      press outside the menu, with either button, does not dismiss it. ---- */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_menu_opening_frame_takes_no_input(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
     nt_ui_menu_t st = {0};
     nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
@@ -1586,18 +1545,13 @@ static void test_menu_reopen_starts_fresh(void) {
     TEST_ASSERT_FALSE_MESSAGE(menu_level_found(1U), "the opening frame opens nothing from the old place");
     menu_key(NT_KEY_ESCAPE);
     menu_im_frame(&st, &style, fx, fy);
+    nt_input_init();
     TEST_ASSERT_FALSE(nt_ui_is_open(s_fx.ctx, MENU_A));
-}
 
-/* ---- The opening frame takes no pointer input: a release over a row's old rect after a reopen elsewhere,
- *      or the release of the press that reopened the menu over a row, clicks nothing; a reopening press
- *      outside the menu, with either button, does not dismiss it. ---- */
-static void test_menu_opening_frame_ignores_the_pointer(void) {
-    nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
-    nt_ui_menu_t st = {0};
     const uint32_t edit = nt_ui_menu_test_item_id(MENU_A, KEY_EDIT);
     s_act_capture_id = edit;
-    for (int c = 0; c < 2; ++c) {
+    static const char *const msgs[] = {"the release at the old place activates nothing", "the reopening press is not a click on the row under it", "the frame the menu reopens takes no tap"};
+    for (int c = 0; c < 3; ++c) {
         nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
         menu_im_frame(&st, &style, 0.0F, 0.0F);
         menu_im_frame(&st, &style, 0.0F, 0.0F);
@@ -1605,18 +1559,24 @@ static void test_menu_opening_frame_ignores_the_pointer(void) {
         float ey = 0.0F;
         menu_row_center(edit, &ex, &ey);
         menu_im_frame(&st, &style, ex, ey);
+        const nt_pointer_t tap = menu_ptr(ex, ey, NT_BUTTON_LEFT, NT_BUTTON_LEFT);
+        const nt_pointer_t release = menu_ptr(ex, ey, -1, NT_BUTTON_LEFT);
         if (c == 0) { /* pressed on Edit, released on the frame the menu reopens elsewhere */
-            menu_im_press(&st, &style, ex, ey, NT_POINTER_MOUSE);
+            menu_im_press(&st, &style, ex, ey);
             nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 400.0F, 300.0F);
-        } else { /* the game reopens the menu at the same place with this press */
+        } else { /* the game reopens the menu at the same place with this press, or with a tap */
             nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
-            menu_im_press(&st, &style, ex, ey, NT_POINTER_MOUSE);
         }
-        nt_pointer_t release = {.x = ex, .y = ey, .active = true};
-        release.buttons[NT_BUTTON_LEFT].is_released = true;
-        (void)menu_im_frame_ptr(&st, &style, &release);
-        TEST_ASSERT_FALSE_MESSAGE(s_act_hit, c == 0 ? "the release at the old place activates nothing" : "the reopening press is not a click on the row under it");
+        if (c == 1) {
+            menu_im_press(&st, &style, ex, ey);
+        }
+        menu_im_frame_ptr(&st, &style, (c == 2) ? &tap : &release);
+        TEST_ASSERT_FALSE_MESSAGE(s_act_hit, msgs[c]);
         TEST_ASSERT_TRUE(nt_ui_is_open(s_fx.ctx, MENU_A));
+        if (c == 2) {
+            menu_im_frame_ptr(&st, &style, &tap);
+            TEST_ASSERT_TRUE_MESSAGE(s_act_hit, "the same tap a frame later activates the row");
+        }
     }
     const nt_button_t buttons[] = {NT_BUTTON_LEFT, NT_BUTTON_RIGHT};
     for (int b = 0; b < 2; ++b) {
@@ -1624,37 +1584,11 @@ static void test_menu_opening_frame_ignores_the_pointer(void) {
         menu_im_frame(&st, &style, 0.0F, 0.0F);
         menu_im_frame(&st, &style, 0.0F, 0.0F);
         nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 400.0F, 300.0F);
-        nt_pointer_t p = {.x = 780.0F, .y = 580.0F, .active = true};
-        p.buttons[buttons[b]] = (nt_button_state_t){.is_down = true, .is_pressed = true};
-        (void)menu_im_frame_ptr(&st, &style, &p);
+        const nt_pointer_t p = menu_ptr(780.0F, 580.0F, (int)buttons[b], -1);
+        menu_im_frame_ptr(&st, &style, &p);
         TEST_ASSERT_TRUE_MESSAGE(nt_ui_is_open(s_fx.ctx, MENU_A), "the reopening press is not an outside press");
         menu_im_frame(&st, &style, 780.0F, 580.0F);
     }
-}
-
-/* ---- A menu reopened while open takes no input in that frame: a tap on a row in the frame after the game
- *      reopens it at the same place activates nothing, and the same tap a frame later does. ---- */
-static void test_menu_reopened_while_open_ignores_that_frames_tap(void) {
-    const uint32_t edit = nt_ui_menu_test_item_id(MENU_A, KEY_EDIT);
-    nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
-    nt_ui_menu_t st = {0};
-    s_act_capture_id = edit;
-    s_act_hit = false;
-    nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
-    menu_im_frame(&st, &style, 0.0F, 0.0F);
-    menu_im_frame(&st, &style, 0.0F, 0.0F);
-    float ex = 0.0F;
-    float ey = 0.0F;
-    menu_row_center(edit, &ex, &ey);
-    menu_im_frame(&st, &style, ex, ey);
-    nt_pointer_t tap = {.x = ex, .y = ey, .active = true};
-    tap.buttons[NT_BUTTON_LEFT] = (nt_button_state_t){.is_pressed = true, .is_released = true};
-    nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
-    (void)menu_im_frame_ptr(&st, &style, &tap);
-    TEST_ASSERT_FALSE_MESSAGE(s_act_hit, "the frame the menu reopens takes no tap");
-    TEST_ASSERT_TRUE(nt_ui_is_open(s_fx.ctx, MENU_A));
-    (void)menu_im_frame_ptr(&st, &style, &tap);
-    TEST_ASSERT_TRUE_MESSAGE(s_act_hit, "the same tap a frame later activates the row");
 }
 
 /* ---- The outside press belongs to the pointer that pressed: a second finger resting on the menu does not
@@ -1668,9 +1602,9 @@ static void test_menu_outside_press_ignores_other_pointers(void) {
     float ex = 0.0F;
     float ey = 0.0F;
     menu_row_center(nt_ui_menu_test_item_id(MENU_A, KEY_EDIT), &ex, &ey);
-    nt_pointer_t two[2] = {{.x = 780.0F, .y = 580.0F, .active = true, .type = NT_POINTER_TOUCH}, {.x = ex, .y = ey, .active = true, .type = NT_POINTER_TOUCH}};
-    two[0].buttons[NT_BUTTON_LEFT].is_down = true;
-    two[0].buttons[NT_BUTTON_LEFT].is_pressed = true;
+    nt_pointer_t two[2] = {menu_ptr(780.0F, 580.0F, NT_BUTTON_LEFT, -1), menu_ptr(ex, ey, -1, -1)};
+    two[0].type = NT_POINTER_TOUCH;
+    two[1].type = NT_POINTER_TOUCH;
     nt_arena_reset(&g_nt_mem_scratch);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = UI_FX_DT, .pointers = two, .pointer_count = 2, .primary = 0});
     if (nt_ui_menu_begin(&st, s_fx.ctx, NULL, 0U, &style)) {
@@ -1748,8 +1682,8 @@ static void menu_popup_row(nt_ui_menu_t *st, int depth) {
 }
 
 /* One frame: root = [L1, File > (L1, Open > (Project))]; either L1 may hold the popup. */
-static void menu_popup_frame_ptr(nt_ui_menu_t *st, nt_ui_menu_style_t *style, const nt_pointer_t *p) {
-    menu_frame_begin(p);
+static void menu_popup_frame(nt_ui_menu_t *st, nt_ui_menu_style_t *style, float px, float py) {
+    menu_frame_begin(&(nt_pointer_t){.x = px, .y = py, .active = true});
     if (nt_ui_menu_begin(st, s_fx.ctx, NULL, 0U, style)) {
         menu_popup_row(st, 0);
         if (nt_ui_menu_submenu_begin(st, KEY_FILE, "File")) {
@@ -1765,56 +1699,41 @@ static void menu_popup_frame_ptr(nt_ui_menu_t *st, nt_ui_menu_style_t *style, co
     nt_ui_end(s_fx.ctx);
 }
 
-static void menu_popup_frame(nt_ui_menu_t *st, nt_ui_menu_style_t *style, float px, float py) { menu_popup_frame_ptr(st, style, &(nt_pointer_t){.x = px, .y = py, .active = true}); }
-
-/* ---- A popup a root row opens closes File's open level at once, and the pointer resting on File does not open
- *      it again under the popup in that frame: the menu's pointer waits while something opened this frame lies
- *      over it. From the next frame the popup is the top. ---- */
+/* ---- A popup a row opens closes the level beside it (S2). A root row's popup closes File's open level at once,
+ *      and the pointer resting on File does not open it again under the popup in that frame: the menu's pointer
+ *      waits while something opened this frame lies over it. From the next frame the popup is the top. A level-1
+ *      row's popup closes only the branch below that row: File stays open, Open closes. ---- */
 static void test_menu_row_popup_takes_the_pointer_in_its_frame(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
     nt_ui_menu_t st = {0};
-    nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
-    menu_popup_frame(&st, &style, 0.0F, 0.0F);
-    menu_popup_frame(&st, &style, 0.0F, 0.0F);
     const uint32_t file = nt_ui_menu_test_item_id(MENU_A, KEY_FILE);
-    menu_hover_open(&st, &style, file, 1U, menu_popup_frame);
-    float px = 0.0F;
-    float py = 0.0F;
-    menu_row_center(file, &px, &py);
-    menu_popup_frame(&st, &style, px, py);
-    TEST_ASSERT_TRUE(menu_level_found(1U));
-    s_popup_depth = 0; /* L1, declared before File, opens its popup */
-    menu_popup_frame(&st, &style, px, py);
-    TEST_ASSERT_FALSE_MESSAGE(menu_level_found(1U), "the frame the popup opens declares no level over it");
-    menu_popup_frame(&st, &style, px, py);
-    TEST_ASSERT_FALSE_MESSAGE(menu_level_found(1U), "the hover on File did not reopen its level under the popup");
+    const uint32_t open = nt_ui_menu_test_item_id(file, KEY_OPEN);
+    for (int depth = 0; depth < 2; ++depth) {
+        s_popup_depth = -1;
+        s_popup_opened = false;
+        nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
+        menu_popup_frame(&st, &style, 0.0F, 0.0F);
+        menu_popup_frame(&st, &style, 0.0F, 0.0F);
+        menu_hover_open(&st, &style, file, 1U, menu_popup_frame);
+        if (depth == 1) {
+            menu_hover_open(&st, &style, open, 2U, menu_popup_frame);
+        }
+        float px = 0.0F;
+        float py = 0.0F;
+        menu_row_center((depth == 0) ? file : open, &px, &py);
+        menu_popup_frame(&st, &style, px, py);
+        s_popup_depth = depth; /* L1, declared before File or Open, opens its popup */
+        menu_popup_frame(&st, &style, px, py);
+        TEST_ASSERT_FALSE_MESSAGE(menu_level_found((uint8_t)(depth + 1)), "the frame the popup opens declares no level over it");
+        menu_popup_frame(&st, &style, px, py);
+        TEST_ASSERT_FALSE_MESSAGE(menu_level_found((uint8_t)(depth + 1)), "the hover did not reopen the level under the popup");
+        TEST_ASSERT_TRUE_MESSAGE(depth == 0 || menu_level_found(1U), "a level-1 row's popup keeps its own level");
+    }
     menu_key(NT_KEY_ESCAPE);
-    menu_popup_frame(&st, &style, px, py);
+    menu_popup_frame(&st, &style, 0.0F, 0.0F);
     nt_input_init();
     TEST_ASSERT_FALSE_MESSAGE(nt_ui_is_open(s_fx.ctx, ROW_POPUP_ID), "the popup is the top: Esc closes it");
     TEST_ASSERT_TRUE(nt_ui_is_open(s_fx.ctx, MENU_A));
-}
-
-/* ---- A popup a level-1 row opens closes only the branch below that row: File stays open, Open closes. ---- */
-static void test_menu_deep_row_popup_closes_its_level_branch(void) {
-    nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
-    nt_ui_menu_t st = {0};
-    nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
-    menu_popup_frame(&st, &style, 0.0F, 0.0F);
-    menu_popup_frame(&st, &style, 0.0F, 0.0F);
-    const uint32_t file = nt_ui_menu_test_item_id(MENU_A, KEY_FILE);
-    menu_hover_open(&st, &style, file, 1U, menu_popup_frame);
-    const uint32_t open = nt_ui_menu_test_item_id(file, KEY_OPEN);
-    menu_hover_open(&st, &style, open, 2U, menu_popup_frame);
-    float x = 0.0F;
-    float y = 0.0F;
-    menu_row_center(open, &x, &y);
-    s_popup_depth = 1;
-    for (int f = 0; f < 3; ++f) {
-        menu_popup_frame(&st, &style, x, y);
-    }
-    TEST_ASSERT_TRUE(menu_level_found(1U));
-    TEST_ASSERT_FALSE_MESSAGE(menu_level_found(2U), "the popup closes the branch beside its row");
 }
 
 /* A press of `button` without movement after a key: focus returns to the row under the pointer. */
@@ -1835,10 +1754,8 @@ static void menu_still_press_ends_keyboard_mode(nt_button_t button) {
     nt_input_init();
     menu_im_frame(&st, &style, ex, ey);
     TEST_ASSERT_EQUAL_UINT32(nt_ui_menu_test_item_id(MENU_A, KEY_FILE), st.focus);
-    nt_pointer_t p = {.x = ex, .y = ey, .active = true};
-    p.buttons[button].is_down = true;
-    p.buttons[button].is_pressed = true;
-    (void)menu_im_frame_ptr(&st, &style, &p);
+    const nt_pointer_t p = menu_ptr(ex, ey, (int)button, -1);
+    menu_im_frame_ptr(&st, &style, &p);
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(edit, st.focus, "a still press hands focus back to the pointer");
     TEST_ASSERT_TRUE(nt_ui_is_open(s_fx.ctx, MENU_A));
 }
@@ -1966,8 +1883,8 @@ static void test_menu_click_beats_a_same_frame_key(void) {
     TEST_ASSERT_EQUAL_UINT32(a, st.focus);
     TEST_ASSERT_TRUE(menu_row_shown(menu_row(c, KEY_OPT)));
     menu_row_center(b, &x, &y);
-    nt_pointer_t tap = {.x = x, .y = y, .active = true, .type = NT_POINTER_TOUCH};
-    tap.buttons[NT_BUTTON_LEFT] = (nt_button_state_t){.is_pressed = true, .is_released = true};
+    nt_pointer_t tap = menu_ptr(x, y, NT_BUTTON_LEFT, NT_BUTTON_LEFT);
+    tap.type = NT_POINTER_TOUCH;
     menu_key(NT_KEY_ARROW_RIGHT); /* on A */
     menu_dyn_frame_ptr(&st, &style, &t, &tap);
     nt_input_init();
@@ -1976,29 +1893,38 @@ static void test_menu_click_beats_a_same_frame_key(void) {
     TEST_ASSERT_FALSE(menu_row_shown(menu_row(a, KEY_OPT)));
 }
 
-/* ---- Levels snap: a level opened the frame before shows fully, and the open menu keeps no state-pool cell. ---- */
-static void test_menu_levels_snap_and_keep_no_state_cells(void) {
+/* ---- Absence: a level opened the frame before shows fully (levels snap), rows with an instant highlight
+ *      (state_speed 0) take no anim slot, and neither the open menu nor a popup, snap or eased, keeps a state-pool
+ *      cell. ---- */
+static void test_menu_and_popup_keep_no_state(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
+    style.state_speed = 0.0F;
     nt_ui_menu_t st = {0};
     nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
     menu_open_file_open(&st, &style);
     TEST_ASSERT_TRUE_MESSAGE(ui_fx_float_near(ui_fx_rendered_opacity(s_fx.ctx, nt_ui_menu_test_panel_id(MENU_A, 2U)), 1.0F, 0.0001F), "a level takes no open tween");
     TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_state_used_slots(s_fx.ctx));
-}
-
-/* ---- Rows with an instant highlight (state_speed 0) take no anim slot, even on the frame they show. ---- */
-static void test_menu_instant_rows_take_no_anim_slot(void) {
-    nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
-    style.state_speed = 0.0F;
-    nt_ui_menu_t st = {0};
-    nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
-    menu_im_frame(&st, &style, 0.0F, 0.0F);
-    menu_im_frame(&st, &style, 0.0F, 0.0F);
     const uint32_t file = nt_ui_menu_test_item_id(MENU_A, KEY_FILE);
     const uint32_t edit = nt_ui_menu_test_item_id(MENU_A, KEY_EDIT);
     for (uint32_t i = 0; i < NT_UI_ANIM_SLOTS; ++i) {
         TEST_ASSERT_TRUE_MESSAGE(s_fx.ctx->anim[i].id != file && s_fx.ctx->anim[i].id != edit, "an instant row holds no anim slot");
     }
+    nt_ui_popup_style_t ps = nt_ui_popup_style_defaults();
+    ps.ease_speed = 8.0F;
+    const nt_ui_popup_anchor_t anchor = {.x = 100.0F, .y = 100.0F, .w = 40.0F, .h = 24.0F, .prefer_side = NT_UI_POPUP_BELOW};
+    for (int f = 0; f < 2; ++f) {
+        if (f == 0) {
+            nt_ui_popup_open(s_fx.ctx, ROW_POPUP_ID);
+        } else {
+            nt_ui_close(s_fx.ctx, ROW_POPUP_ID);
+        }
+        menu_frame_begin(&(nt_pointer_t){.active = true});
+        if (nt_ui_popup_begin(s_fx.ctx, ROW_POPUP_ID, &ps, &anchor, NULL)) {
+            nt_ui_popup_end(s_fx.ctx);
+        }
+        nt_ui_end(s_fx.ctx);
+    }
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, nt_ui_state_used_slots(s_fx.ctx), "an eased popup keeps no state cell");
 }
 
 /* ---- A menu in a modal the game closes is inert in that frame: Enter on its focused leaf activates
@@ -2065,8 +1991,8 @@ static void test_menu_focused_field_owns_keys(void) {
     menu_field_frame(&st, &style, true, &(nt_pointer_t){.active = true});
     const nt_ui_bbox_t fb = nt_ui_get_bbox(s_fx.ctx, MENU_FIELD);
     TEST_ASSERT_TRUE(fb.found);
-    nt_pointer_t tap = {.x = fb.x + 10.0F, .y = fb.y + 10.0F, .active = true, .type = NT_POINTER_TOUCH};
-    tap.buttons[NT_BUTTON_LEFT] = (nt_button_state_t){.is_pressed = true, .is_released = true};
+    nt_pointer_t tap = menu_ptr(fb.x + 10.0F, fb.y + 10.0F, NT_BUTTON_LEFT, NT_BUTTON_LEFT);
+    tap.type = NT_POINTER_TOUCH;
     menu_field_frame(&st, &style, true, &tap);
     const nt_pointer_t rest = {.x = fb.x + 10.0F, .y = fb.y + 10.0F, .active = true};
     menu_field_frame(&st, &style, true, &rest);
@@ -2124,13 +2050,10 @@ int main(void) {
     RUN_TEST(test_menu_row_popup_takes_the_pointer_in_its_frame);
     RUN_TEST(test_menu_in_a_closing_modal_takes_no_key);
     RUN_TEST(test_menu_click_beats_a_same_frame_key);
-    RUN_TEST(test_menu_instant_rows_take_no_anim_slot);
-    RUN_TEST(test_menu_levels_snap_and_keep_no_state_cells);
+    RUN_TEST(test_menu_and_popup_keep_no_state);
     RUN_TEST(test_menu_focused_field_owns_keys);
     RUN_TEST(test_menu_lost_focus_lights_the_open_parent);
-    RUN_TEST(test_menu_deep_row_popup_closes_its_level_branch);
     RUN_TEST(test_menu_right_and_esc_in_one_frame);
-    RUN_TEST(test_menu_esc_over_a_modal_closes_only_the_menu);
     RUN_TEST(test_menu_resting_pointer_yields_to_keyboard);
     RUN_TEST(test_menu_keys_act_on_the_focused_level);
     RUN_TEST(test_menu_press_in_just_closed_panel_keeps_open);
@@ -2155,13 +2078,10 @@ int main(void) {
     RUN_TEST(test_menu_separators_non_interactive);
     RUN_TEST(test_menu_pointer_on_a_separator_is_inert);
     RUN_TEST(test_menu_arrow_marker_on_parent_only);
-    RUN_TEST(test_menu_pointer_pos);
     RUN_TEST(test_menu_left_at_root_closes);
     RUN_TEST(test_menu_back_closes_a_hover_opened_child);
     RUN_TEST(test_menu_no_focus_right_leaves_down);
-    RUN_TEST(test_menu_reopen_starts_fresh);
-    RUN_TEST(test_menu_opening_frame_ignores_the_pointer);
-    RUN_TEST(test_menu_reopened_while_open_ignores_that_frames_tap);
+    RUN_TEST(test_menu_opening_frame_takes_no_input);
     RUN_TEST(test_menu_disabled_focused_row_keeps_its_place);
     RUN_TEST(test_menu_up_down_wrap);
     RUN_TEST(test_menu_down_skips_disabled);

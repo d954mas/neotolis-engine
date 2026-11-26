@@ -167,8 +167,8 @@ root, then `layer` asc within each barrier-delimited run of one root, then
 Clay's command order (a parent's border after its children); SCISSOR/CUSTOM
 are hard barriers. An accumulated band that would saturate
 `int16` raises a Clay error, which `nt_ui` asserts on rather than
-silently merging two bands. `nt_ui_create_context` asserts that the last
-stack slot's band fits `int16`, so no overlay can overflow. A game floating
+silently merging two bands. `nt_ui_create_context` asserts that the tooltip
+band above the last stack slot fits `int16`, so no overlay can overflow. A game floating
 inside an overlay adds its own `zIndex` to that overlay's band, which must
 still fit `int16`.
 
@@ -312,7 +312,7 @@ Rules for game code:
    it, or on Esc or a backdrop press if its style says so.
 3. *Open and close.* `nt_ui_popup_open`, `nt_ui_modal_open` and
    `nt_ui_menu_open` open an overlay inside the innermost open overlay being
-   declared at the call; `nt_ui_close(ctx, id)` closes it with the overlays
+   declared at the call (a modal: the innermost one that is not a popup, S2); `nt_ui_close(ctx, id)` closes it with the overlays
    opened inside it;
    `nt_ui_is_open(ctx, id)` asks. Open a nested overlay inside its parent's
    body, so that it closes with it. Its begin returns true while it shows
@@ -341,8 +341,8 @@ Engine rules:
   A record is the hit entry `nt_ui_step`, `nt_ui_block_pointer` or a scroll
   surface makes.
 - *R2 Gesture* (router). The press that starts a gesture decides whose it is:
-  the UI's when it lands on a record or an overlay with a catcher is up, else
-  the game's. A press while the other button is held, or released in the same
+  the UI's when it lands on a record or, in a 2D ctx, an overlay with a catcher
+  is up (it covers the screen, letterbox bars included), else the game's. A press while the other button is held, or released in the same
   frame, joins that gesture and
   reaches no widget when the gesture is the game's, as Dear ImGui's
   `MouseDownOwned`. `nt_ui_wants_pointer` follows the gesture's owner while a
@@ -357,9 +357,10 @@ Engine rules:
   key reads report nothing, as HTML `inert`; a pointer on the top's catcher
   hovers nothing either. Nothing declared in a closing body is live, an
   overlay included: it is never the top, and a closing body registers no
-  record. `nt_ui_begin`, before it resolves the pointer, drops last frame's
-  catcher record of each overlay closed since its declaration (mid-frame or
-  between frames): it is invisible. The panel and rows the frame drew still
+  record. `nt_ui_begin`, before it resolves the pointer, registers the catcher
+  of each overlay still open that was declared live last frame, so the catcher
+  of one closed since its declaration (mid-frame or between frames), which is
+  invisible, gates nothing. The panel and rows the frame drew still
   take the next press (an open overlay's panel is a record), so a press on a
   just-closed popup or submenu does not reach what lies under it or dismiss
   the menu. `nt_ui_begin` also drops a
@@ -382,16 +383,18 @@ Engine rules:
   which is the paint and hit order (see "Floating zIndex is relative"; slot `i`
   sits on band `overlay_zband_stride + i * NT_UI_OVERLAY_MAX`, tooltips on the
   band above every slot). The stack changes only in `nt_ui_begin` (S3) and in
-  the open and close calls; a begin only reads it. Within a frame entries are
+  the open and close calls; a begin reads its order and open state and records
+  its declaration in its entry. Within a frame entries are
   only appended, so no band moves before the next `nt_ui_begin`, which drops
   the dead ones. Opening pushes an overlay on top (opening an open one does
   nothing; a reopen leaves the old entry dead and starts it again on top, its
   subtree closed); each entry records the overlay it was opened inside, its
-  parent; nothing opens inside a closing overlay, so an open overlay always
-  has an open parent. A closed overlay fades and leaves when it is hidden; an open one
+  parent. An open made while a closing overlay is declared opens inside the
+  nearest open overlay around it, and a menu level never opens inside a
+  closing level, so an open overlay always has an open parent. A closed overlay fades and leaves when it is hidden; an open one
   neither declared nor newly opened since the previous `nt_ui_begin` closes there,
-  as `nt_ui_close` would, with the overlays opened inside it, before the
-  records are dropped and the top is chosen. The
+  as `nt_ui_close` would, with the overlays opened inside it, before the top
+  is chosen. The
   top is the highest overlay with a catcher (a popup, a modal, a menu's root)
   declared live last frame.
 - *S2 Opening closes popups.* Opening an overlay closes every open popup that
@@ -405,18 +408,21 @@ Engine rules:
   opened inside it.
 - *S3 Own close* (`nt_ui_begin`). The top closes before anything of the frame
   declares: on Esc it owns (a popup; a modal whose style listens), or on a
-  press of the primary pointer outside its panel grown by `close_pad`, on its
-  catcher or on no record (a popup; a modal on a backdrop press if its style
-  says so). It reads the close its declaration recorded last frame. It is
+  left or right press of the primary pointer outside its panel grown by `close_pad`: on its
+  catcher or on no record (a popup), or on its backdrop, the catcher (a modal,
+  if its style says so). It reads the close its declaration recorded last frame. It is
   closing that whole frame and registers no catcher, so the next press reaches
   what lies under it.
 - *S4 Limits.* `nt_ui_begin` keeps at most `NT_UI_OVERLAY_MAX / 2` fading
-  overlays: older fades end there, so slow fades or a paused `dt` never fill
-  the stack. Asserted: more than `NT_UI_OVERLAY_MAX` stack slots taken in one
+  overlays: the lowest fades in the stack end there, so slow fades or a paused
+  `dt` never fill the stack (a fade cut before its begin saw the close
+  reports no `info.reason`). Asserted: more than `NT_UI_OVERLAY_MAX` stack slots taken in one
   frame (open, fading, or left dead by a reopen until the next `nt_ui_begin`),
   a stride whose tooltip band passes `int16`, and a root overlay inside a game
-  floating at or above `overlay_zband_stride`. In a 3D ctx a modal gates only
-  the panels its catcher lies in front of: the nearest hit wins (R1).
+  floating at or above `overlay_zband_stride`. In a 3D ctx an overlay is modal
+  for its surface only, as a dialog inside an iframe: it gates the panels its
+  catcher lies in front of (the nearest hit wins, R1), and a ray past the
+  surface is the game's gesture; it closes a popup but not a modal.
 
 **Overlay lifecycle.** An overlay's phase is decided at its declaration from
 whether it is open and whether it was declared open last frame:
@@ -443,8 +449,8 @@ and the fixed owners (the menu's keys); its rows only record, except that the
 focused row acts on the key the begin read (a menu parent opens its own child);
 its end runs what needs this frame's declarations (the menu's Up/Down
 neighbours, its click, hover and aim corridor). (3) A declaration draws and
-writes the records the next frame hits, and the next `nt_ui_begin` drops the
-records of what closed (R3). Result: 1-frame IM-lag is intrinsic (current frame reads
+writes the records the next frame hits, and the next `nt_ui_begin` registers
+the catchers of what is still open (R3). Result: 1-frame IM-lag is intrinsic (current frame reads
 previous frame's bbox); no stuck input on widget disappearance.
 
 ## Front-most arbitration
@@ -801,8 +807,8 @@ Both are popups (see "Input ownership"). The combo trigger opens its list; a
 pick, Esc or an outside press closes it. The list is the overlay under the
 combo id (`nt_ui_is_open` and `nt_ui_close` take it); the trigger widget's id
 is `nt_ui_combo_trigger_id(id)`. The game opens a menu with `nt_ui_menu_open(menu, ctx, menu_id, x, y)` at
-a point in UI space, from anywhere outside its begin..end (`nt_ui_pointer_pos`,
-inside a UI frame, gives the primary pointer in that space of a 2D context);
+a point in UI space, from anywhere outside its begin..end (`nt_ui_screen_to_layout`
+converts a device pointer to that space);
 the menu keeps `menu_id`, and `nt_ui_close` and `nt_ui_is_open` take it. The
 root's top-left sits at that point, flips above it when it does not fit below,
 and shifts left to stay on screen from the first frame that knows its width. An
@@ -816,7 +822,7 @@ declaration, so the press that opened it does not dismiss it. Menu rules:
   blocks the pointer, so nothing under it is hovered or clicked. Levels snap (no
   tween).
 - *M2 Focus and keys.* One focused row; keys act on its level, one key per
-  frame, the first pressed of Esc or Left, Right, Enter, Up, Down. Enter on a
+  frame, in this priority: Esc or Left, Right or Enter, Up, Down. Enter on a
   leaf activates it; Right or Enter on a parent opens it in the parent row's own
   call, as Dear ImGui's `BeginMenu`, so its child declares that frame, and
   `nt_ui_menu_end` focuses the child's first enabled row (an empty child stays
@@ -824,8 +830,8 @@ declaration, so the press that opened it does not dismiss it. Menu rules:
   the level's enabled rows and wrap (with no focus, Down starts at the first and
   Up at the last; focus leaving an open parent closes its child); Left and Esc
   close the deepest open level (at the root, the menu). Enter and Right without
-  a focused row are no key. The menu reads keys globally and does not consume
-  them; a field focused in a custom row owns them instead.
+  a focused row are no key. The menu reads keys as their owner (R4); a field
+  focused in a custom row owns them instead.
 - *M3 Pointer.* The pointer moves focus to the enabled row under it (a disabled
   row, padding or a separator takes none). A key hands focus to the keyboard: a
   pointer resting on a row neither moves focus nor switches a submenu until it
@@ -839,14 +845,14 @@ declaration, so the press that opened it does not dismiss it. Menu rules:
 - *M4 Activation* (a click, or Enter) closes the whole menu at once, before
   the row returns true; the other rows only record, and the pointer acts in
   `nt_ui_menu_end` while nothing a custom row opened that frame lies over the
-  menu. A frame activates
-  at most one row, the first declared. A click on a parent opens it after the
-  key acts, so it wins over Right.
+  menu. A frame activates at most one row, the first declared. A click on a
+  parent opens it after the key acts, so it wins over Right and one level of
+  each depth declares per frame.
 
 The menu keeps the focused row as a row ID and each level records the row
 that opened it, so inserting, deleting or reordering other rows keeps them; an
-open parent the frame does not declare as an enabled parent closes its branch,
-and a focused row its level lacks loses focus.
+open parent the frame does not declare as an enabled parent closes its branch
+at the next `nt_ui_begin` (S1), and a focused row its level lacks loses focus.
 
 A custom-content row (`item_begin..item_end`, `selectable_begin..selectable_end`,
 `preview_begin..preview_end`, and a tab's `nt_ui_tab_begin..nt_ui_tab_end`) steps
@@ -863,8 +869,8 @@ captures or activates.
 
 The game owns one `nt_ui_menu_t` per menu and UI context (the anchor, the focus,
 the keyboard mode, the aim corridor and the per-declaration scratch), so the core
-`nt_ui_context` pays nothing for menus and the menu TU dead-strips from a game
-without one. All-zero is the valid closed state. Row identity is KEY-STABLE:
+`nt_ui_context` keeps only the row that opened each stack entry for menus and
+the menu TU dead-strips from a game without one. All-zero is the valid closed state. Row identity is KEY-STABLE:
 `mix(scope_id, key)` (fmix, never additive: additive sibling ids collide in
 Clay's anonymous child-id space), where the scope is the menu id at the root and
 the open parent's row id below it (ImGui `PushID` model), so keys need only be

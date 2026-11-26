@@ -123,7 +123,7 @@ nt_ui_menu_style_t nt_ui_menu_style_defaults(void) {
     };
 }
 
-// #region open chain: each level's overlay stack entry records the row that opened it (spec: M1; out of line for size)
+// #region open chain: each level's overlay stack entry records the row that opened it (out of line for size)
 /* The row that opened level `d + 1`, 0 when that level is closed. */
 NT_NOINLINE static uint32_t menu_parent(const nt_ui_menu_t *menu, uint8_t d) {
     const nt_ui_context_t *ctx = menu->frame.ui;
@@ -147,7 +147,7 @@ NT_NOINLINE static void menu_set_open(nt_ui_menu_t *menu, uint8_t depth, uint32_
     }
     nt_ui_context_t *ctx = menu->frame.ui;
     const uint32_t child = menu_level_id(menu->id, (uint8_t)(depth + 1U));
-    nt_ui_internal_overlay_close(ctx, child, NT_UI_POPUP_CLOSE_GAME);
+    nt_ui_internal_overlay_close(ctx, child, NT_UI_POPUP_CLOSE_OTHER);
     if (row_id != 0U) {
         nt_ui_internal_overlay_open(ctx, child, menu_level_id(menu->id, depth), row_id, NT_UI_OVERLAY_LIGHT);
     }
@@ -160,8 +160,8 @@ void nt_ui_menu_open(nt_ui_menu_t *menu, nt_ui_context_t *ctx, uint32_t menu_id,
     NT_ASSERT(menu->frame.ui == NULL && "nt_ui_menu_open: call outside nt_ui_menu_begin/end (it resets the chain the rows declare)");
     NT_ASSERT(isfinite(x) && isfinite(y) && "nt_ui_menu_open: the anchor point must be finite");
     *menu = (nt_ui_menu_t){.id = menu_id, .anchor_x = x, .anchor_y = y};
-    nt_ui_internal_overlay_close(ctx, menu_id, NT_UI_POPUP_CLOSE_GAME); /* a reopen starts fresh, on top */
-    nt_ui_internal_overlay_open(ctx, menu_id, nt_ui_internal_overlay_here(ctx), 0U, NT_UI_OVERLAY_LIGHT | NT_UI_OVERLAY_CATCHER);
+    nt_ui_internal_overlay_close(ctx, menu_id, NT_UI_POPUP_CLOSE_OTHER); /* a reopen starts fresh, on top */
+    nt_ui_internal_overlay_open(ctx, menu_id, nt_ui_internal_overlay_here(ctx, 0U), 0U, NT_UI_OVERLAY_LIGHT | NT_UI_OVERLAY_CATCHER);
 }
 
 // #region menu UI declaration (shared row/marker/panel helpers fed by the immediate path)
@@ -427,7 +427,6 @@ static void menu_open_panel(nt_ui_context_t *ctx, uint8_t fill_layer, uint32_t m
     }
     nt_ui_clay_priv_open_element();
     nt_ui_clay_priv_configure_open_element(panel);
-    nt_ui_block_pointer(ctx, panel_id, NULL); /* the rows, declared later, win; nothing under a panel is hit */
 }
 
 /* Declare a level's popup at `anchor` and its panel. Every level is a popup; the root takes input and closes on
@@ -493,14 +492,14 @@ bool nt_ui_menu_begin(nt_ui_menu_t *menu, nt_ui_context_t *ctx, const nt_ui_elem
 }
 
 /* A row activates on its click or on Enter while focused; a frame activates one row, the first declared (a
- * tap and Enter can land on two). M4: the menu closes with its levels before the row returns true, so what the
+ * tap and Enter can land on two). The menu closes with its levels before the row returns true, so what the
  * game opens in response is not their child (Win32 and Qt send the command after the menu closed). */
 static bool menu_activate(nt_ui_menu_t *menu, uint32_t row_id, bool clicked) {
     if (menu->frame.activated || !(clicked || menu_key_on(menu, row_id, MENU_KEY_ENTER))) {
         return false;
     }
     menu->frame.activated = true;
-    nt_ui_internal_overlay_close(menu->frame.ui, menu->id, NT_UI_POPUP_CLOSE_GAME);
+    nt_ui_internal_overlay_close(menu->frame.ui, menu->id, NT_UI_POPUP_CLOSE_OTHER);
     return true;
 }
 
@@ -549,7 +548,7 @@ bool nt_ui_menu_submenu_begin_ex(nt_ui_menu_t *menu, uint32_t key, const char *l
         return false; /* a disabled parent never steps, never flies out, never opens */
     }
     if (nt_ui_step(f->ui, row_id, NULL).clicked) {
-        f->click_id = row_id; /* committed in menu_end, over the aim corridor */
+        f->click_id = row_id; /* committed in menu_end: opened here with a same-frame key, two levels of one depth would declare */
         f->click_depth = depth;
     }
     if (menu_key_on(menu, row_id, MENU_KEY_RIGHT) || menu_key_on(menu, row_id, MENU_KEY_ENTER)) {
@@ -564,7 +563,6 @@ bool nt_ui_menu_submenu_begin_ex(nt_ui_menu_t *menu, uint32_t key, const char *l
     (void)menu_open_level(menu, child, &sub_anchor); /* an open level has no own close */
     f->scope[child] = row_id;                        /* the child's rows are keyed under the row that opened it (ImGui PushID) */
     f->depth = child;
-    f->declared_depth = child;
     return true;
 }
 
@@ -624,9 +622,6 @@ static void menu_resolve(nt_ui_menu_t *menu) {
     /* An overlay a custom row opened this frame lies above the menu's deepest level: the pointer is its. */
     const bool top = menu_top(menu) && nt_ui_internal_overlay_last_open(ctx) == menu_level_id(menu->id, menu_open_depth(menu));
     // #region reconcile the kept state with this frame's declaration, before any input
-    if (f->declared_depth < menu_open_depth(menu)) {
-        menu_set_open(menu, f->declared_depth, 0U); /* a removed, disabled or leaf parent closes its branch */
-    }
     if (!f->nav_passed) {
         menu->focus = 0U; /* the focused row is gone from its level; a disabled one still declares and stays */
     }
@@ -656,7 +651,7 @@ static void menu_resolve(nt_ui_menu_t *menu) {
     const bool ours = pp->active;
     const float mx = pp->x;
     const float my = pp->y;
-    if (!menu->kbd_mode && f->hover_id != 0U) {
+    if (top && !menu->kbd_mode && f->hover_id != 0U) {
         menu->focus = f->hover_id;
         menu->focus_depth = f->hover_depth;
     }

@@ -405,7 +405,6 @@ void nt_ui_set_font(nt_ui_context_t *ctx, uint16_t font_id, nt_font_t font) {
 
 // #region begin_end
 static void resolve_hot(nt_ui_context_t *ctx);
-static void drop_closed_overlay_records(nt_ui_context_t *ctx);
 static void overlay_close_at(nt_ui_context_t *ctx, int32_t at, uint8_t reason);
 static bool outside_press(nt_ui_context_t *ctx, const nt_ui_overlay_t *o);
 
@@ -556,12 +555,11 @@ void nt_ui_begin(nt_ui_context_t *ctx, const nt_ui_frame_desc_t *frame) {
     /* An open overlay the game stopped declaring closes like nt_ui_close: with the overlays opened inside it. */
     for (uint8_t i = 0U; i < ctx->overlay_count; ++i) {
         if (ctx->overlays[i].open && !ctx->overlays[i].seen) {
-            overlay_close_at(ctx, i, NT_UI_POPUP_CLOSE_GAME);
+            overlay_close_at(ctx, i, NT_UI_POPUP_CLOSE_OTHER);
         }
     }
-    drop_closed_overlay_records(ctx); /* before the prune clears the record ranges; closes made between frames count */
-    /* S1: an overlay neither declared nor opened since the last begin leaves, and so do the oldest fading ones past
-     * half the stack (S4: their fade ends early); the top is the highest live one with a catcher. */
+    /* An overlay neither declared nor opened since the last begin leaves, and so do the oldest fading ones past half
+     * the stack (their fade ends early); the top is the highest live one with a catcher. */
     uint8_t fading = 0U;
     for (uint8_t i = 0U; i < ctx->overlay_count; ++i) {
         fading += (ctx->overlays[i].seen && !ctx->overlays[i].open) ? 1U : 0U;
@@ -580,9 +578,10 @@ void nt_ui_begin(nt_ui_context_t *ctx, const nt_ui_frame_desc_t *frame) {
         }
         if (o->open && o->live && (o->flags & NT_UI_OVERLAY_CATCHER) != 0U) {
             ctx->overlay_top = o->id;
+            /* Its catcher, declared last frame, gates what lies under it; a closed overlay's is gone at once. */
+            nt_ui_internal_register_interactive(ctx, nt_ui_internal_popup_catcher_id(o->id), NULL);
         }
         o->seen = false;
-        o->catcher_rec = 0U;
         ctx->overlays[kept++] = *o;
     }
     ctx->overlay_count = kept;
@@ -677,14 +676,14 @@ void nt_ui_begin(nt_ui_context_t *ctx, const nt_ui_frame_desc_t *frame) {
     /* Input is decided here, from last frame's layout: the front-most record per pointer, then the
      * scroll gestures. Every step and query of the frame reads the result. */
     resolve_hot(ctx);
-    /* A press on a record, or anywhere while an overlay is up, makes the gesture the UI's (Dear ImGui's
-     * MouseDownOwned). A press while the other button is held joins that gesture: the earlier one decides. */
+    /* A press on a record makes the gesture the UI's (Dear ImGui's MouseDownOwned); in 2D so does any press while an
+     * overlay is up, as it covers the screen, letterbox bars included; a 3D overlay covers only its surface. A press while the other button is held joins that gesture: the earlier one decides. */
     for (uint32_t i = 0; i < ctx->frame_pointer_count; ++i) {
         const nt_button_state_t *l = &ctx->frame_pointers[i].buttons[NT_BUTTON_LEFT];
         const nt_button_state_t *r = &ctx->frame_pointers[i].buttons[NT_BUTTON_RIGHT];
         const bool joins = ((l->is_down || l->is_released) && !l->is_pressed) || ((r->is_down || r->is_released) && !r->is_pressed);
         if ((l->is_pressed || r->is_pressed) && !joins) {
-            ctx->captures[i].ui_gesture = ctx->pointer_hot[i].id != 0U || ctx->overlay_top != 0U;
+            ctx->captures[i].ui_gesture = ctx->pointer_hot[i].id != 0U || (ctx->overlay_top != 0U && !ctx->use_raycast_input);
         } else if (joins && !ctx->captures[i].ui_gesture) {
             /* A press that joins the game's gesture is the game's: the UI sees no press edge. */
             ctx->frame_pointers[i].buttons[NT_BUTTON_LEFT].is_pressed = false;
@@ -693,7 +692,7 @@ void nt_ui_begin(nt_ui_context_t *ctx, const nt_ui_frame_desc_t *frame) {
             ctx->captures[i].ui_gesture = false;
         }
     }
-    /* S3: the top closes on the Esc it owns or on a press outside it, before anything of the frame declares. */
+    /* The top closes on the Esc it owns or on a press outside it, before anything of the frame declares. */
     const int32_t top = (ctx->overlay_top != 0U) ? nt_ui_internal_overlay_index(ctx, ctx->overlay_top) : -1;
     const uint8_t closes = (top >= 0) ? ctx->overlays[top].flags : 0U;
     if ((closes & NT_UI_OVERLAY_ESC) != 0U && ctx->keys_owner == ctx->overlay_top && nt_input_key_is_pressed(NT_KEY_ESCAPE)) {
@@ -3018,7 +3017,7 @@ const nt_pointer_t *nt_ui_internal_top_pointer(const nt_ui_context_t *ctx, uint3
     return nt_ui_internal_is_top(ctx, id) ? &ctx->frame_pointers[ctx->frame_primary] : &idle;
 }
 
-// #region overlay stack (spec: "Input ownership", S1-S3; out of line: inlined they cost ~1.2 KB wasm)
+// #region overlay stack (spec: "Input ownership"; out of line: inlined they cost ~1.2 KB wasm)
 NT_NOINLINE int32_t nt_ui_internal_overlay_index(const nt_ui_context_t *ctx, uint32_t id) {
     for (uint8_t i = 0U; id != 0U && i < ctx->overlay_count; ++i) {
         if (ctx->overlays[i].id == id) {
@@ -3028,11 +3027,11 @@ NT_NOINLINE int32_t nt_ui_internal_overlay_index(const nt_ui_context_t *ctx, uin
     return -1;
 }
 
-uint32_t nt_ui_internal_overlay_here(const nt_ui_context_t *ctx) {
+uint32_t nt_ui_internal_overlay_here(const nt_ui_context_t *ctx, uint8_t skip) {
     /* A closed one is skipped: what a pick or an activation opens after its menu or list closed is not its child. */
     for (uint8_t d = ctx->overlay_depth; d > 0U; --d) {
         const int32_t at = nt_ui_internal_overlay_index(ctx, ctx->overlay_decl[d - 1U]);
-        if (at >= 0 && ctx->overlays[at].open) {
+        if (at >= 0 && ctx->overlays[at].open && (ctx->overlays[at].flags & skip) == 0U) {
             return ctx->overlays[at].id;
         }
     }
@@ -3075,10 +3074,10 @@ NT_NOINLINE void nt_ui_internal_overlay_close(nt_ui_context_t *ctx, uint32_t id,
     }
 }
 
-// NOLINTNEXTLINE(readability-function-cognitive-complexity) — two flat scans: the ancestors, then S2
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) — two flat scans: the ancestors, then the light closes
 NT_NOINLINE void nt_ui_internal_overlay_open(nt_ui_context_t *ctx, uint32_t id, uint32_t parent, uint32_t opener, uint8_t flags) {
     const int32_t at = nt_ui_internal_overlay_index(ctx, id);
-    if (at >= 0 && ctx->overlays[at].open && ctx->overlays[at].opener == opener) {
+    if (at >= 0 && ctx->overlays[at].open) {
         return;
     }
     const int32_t in = nt_ui_internal_overlay_index(ctx, parent);
@@ -3086,13 +3085,13 @@ NT_NOINLINE void nt_ui_internal_overlay_open(nt_ui_context_t *ctx, uint32_t id, 
         return; /* inside a closing overlay nothing opens: an open overlay always has an open parent */
     }
     if (at >= 0) {
-        overlay_close_at(ctx, at, NT_UI_POPUP_CLOSE_REPLACED); /* a reopen starts a new subtree on top */
+        overlay_close_at(ctx, at, NT_UI_POPUP_CLOSE_OTHER); /* a reopen starts a new subtree on top */
         /* Dead until nt_ui_begin, so no band moves this frame; its catcher record is still dropped there. */
         ctx->overlays[at].id = 0U;
         ctx->overlays[at].seen = false;
     }
     NT_ASSERT(ctx->overlay_count < NT_UI_OVERLAY_MAX && "nt_ui: NT_UI_OVERLAY_MAX stack slots taken (open, fading, or reopened this frame)");
-    /* S2: the ancestors are `parent` and the overlays it was opened inside, as HTML walks a popover's invoker
+    /* The ancestors are `parent` and the overlays it was opened inside, as HTML walks a popover's invoker
      * chain; every other light overlay closes. */
     uint32_t anc[NT_UI_OVERLAY_MAX];
     uint8_t n = 0U;
@@ -3105,7 +3104,7 @@ NT_NOINLINE void nt_ui_internal_overlay_open(nt_ui_context_t *ctx, uint32_t id, 
             ancestor = (ctx->overlays[k].id == anc[c]);
         }
         if (ctx->overlays[k].open && (ctx->overlays[k].flags & NT_UI_OVERLAY_LIGHT) != 0U && !ancestor) {
-            overlay_close_at(ctx, k, NT_UI_POPUP_CLOSE_REPLACED);
+            overlay_close_at(ctx, k, NT_UI_POPUP_CLOSE_OTHER);
         }
     }
     ctx->overlays[ctx->overlay_count++] = (nt_ui_overlay_t){
@@ -3120,7 +3119,7 @@ NT_NOINLINE void nt_ui_internal_overlay_open(nt_ui_context_t *ctx, uint32_t id, 
 
 void nt_ui_close(nt_ui_context_t *ctx, uint32_t id) {
     NT_ASSERT(ctx != NULL && id != 0U && "nt_ui_close: ctx non-NULL, id non-zero");
-    nt_ui_internal_overlay_close(ctx, id, NT_UI_POPUP_CLOSE_GAME);
+    nt_ui_internal_overlay_close(ctx, id, NT_UI_POPUP_CLOSE_OTHER);
 }
 
 bool nt_ui_is_open(const nt_ui_context_t *ctx, uint32_t id) {
@@ -3130,35 +3129,14 @@ bool nt_ui_is_open(const nt_ui_context_t *ctx, uint32_t id) {
 }
 // #endregion
 
-/* R3, at nt_ui_begin on last frame's registry: an overlay closed since its declaration (mid-frame, or between
- * frames) leaves no catcher, so the pointer reaches what lies under it; the panel it drew still takes the press.
- * A closing body registers nothing. */
-static void drop_closed_overlay_records(nt_ui_context_t *ctx) {
-    bool any = false;
-    for (uint8_t i = 0U; i < ctx->overlay_count; ++i) {
-        const nt_ui_overlay_t *o = &ctx->overlays[i];
-        if (!o->open && o->catcher_rec != 0U) {
-            ctx->interactive_cur[o->catcher_rec - 1U].id = 0U;
-            any = true;
-        }
-    }
-    uint32_t kept = 0U;
-    for (uint32_t k = 0U; any && k < ctx->interactive_cur_count; ++k) {
-        if (ctx->interactive_cur[k].id != 0U) {
-            ctx->interactive_cur[kept++] = ctx->interactive_cur[k];
-        }
-    }
-    ctx->interactive_cur_count = any ? kept : ctx->interactive_cur_count;
-}
-
-/* The top `o` got a primary press, either button, outside its panel grown by its close_pad, on its catcher or on
- * no record. */
+/* The top `o` got a primary press, either button, outside its panel grown by its close_pad: on its catcher (a modal's
+ * backdrop), or for a popup also on no record (a letterbox bar, a 3D ray past its surface). */
 static bool outside_press(nt_ui_context_t *ctx, const nt_ui_overlay_t *o) {
     const nt_pointer_t *pp = nt_ui_internal_top_pointer(ctx, o->id);
     const uint32_t hot = ctx->pointer_hot[ctx->frame_primary].id;
     const int16_t pad_lrtb[4] = {o->close_pad, o->close_pad, o->close_pad, o->close_pad};
-    return (pp->buttons[NT_BUTTON_LEFT].is_pressed || pp->buttons[NT_BUTTON_RIGHT].is_pressed) && (hot == nt_ui_internal_popup_catcher_id(o->id) || hot == 0U) &&
-           !nt_ui_internal_hit_test_padded(ctx, o->id, pp->x, pp->y, pad_lrtb);
+    return (pp->buttons[NT_BUTTON_LEFT].is_pressed || pp->buttons[NT_BUTTON_RIGHT].is_pressed) &&
+           (hot == nt_ui_internal_popup_catcher_id(o->id) || (hot == 0U && (o->flags & NT_UI_OVERLAY_LIGHT) != 0U)) && !nt_ui_internal_hit_test_padded(ctx, o->id, pp->x, pp->y, pad_lrtb);
 }
 
 bool nt_ui_wants_pointer(const nt_ui_context_t *ctx) {
@@ -3223,15 +3201,6 @@ static bool pointer_target(const nt_ui_context_t *ctx, uint32_t i, uint32_t *out
     return true;
 }
 
-void nt_ui_pointer_pos(const nt_ui_context_t *ctx, float *out_x, float *out_y) {
-    NT_ASSERT(ctx != NULL && ctx->in_frame && ctx == g_nt_ui_inframe_ctx && "nt_ui_pointer_pos: call between nt_ui_begin/end");
-    NT_ASSERT(!ctx->use_raycast_input && "nt_ui_pointer_pos: a 3D context has no 2D pointer position");
-    NT_ASSERT(out_x != NULL && out_y != NULL && "nt_ui_pointer_pos: out_x and out_y must be non-NULL");
-    const nt_pointer_t *p = &ctx->frame_pointers[ctx->frame_primary];
-    *out_x = p->x;
-    *out_y = p->y;
-}
-
 bool nt_ui_hovered_within(const nt_ui_context_t *ctx, uint32_t id) {
     NT_ASSERT(ctx != NULL && "nt_ui_hovered_within: ctx must be non-NULL");
     NT_ASSERT(id != 0U && "nt_ui_hovered_within: id must be non-zero (0 = no widget)");
@@ -3258,7 +3227,6 @@ bool nt_ui_hovered_within(const nt_ui_context_t *ctx, uint32_t id) {
     }
     return false;
 }
-
 // #endregion
 
 // #region public_metrics

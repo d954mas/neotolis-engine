@@ -21,6 +21,7 @@
 #include "ui/nt_ui.h"
 #include "ui/nt_ui_debug_hit_zones.h"
 #include "ui/nt_ui_internal.h"
+#include "ui/nt_ui_modal.h"
 #include "ui/nt_ui_popup.h"
 #include "ui/nt_ui_scroll.h"
 #include "unity.h"
@@ -345,6 +346,74 @@ static void test_popup_over_a_held_press_keeps_the_3d_capture(void) {
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(id, nt_ui_test_capture_active_id(s_fx.ctx, 0U), "the 3D press under a new overlay keeps its capture");
 }
 
+#define OVERLAY3D_ID 0x3D0002U
+
+/* One frame of an open modal (backdrop closes it) or popup in a 3D ctx, its panel at the layout center. */
+static void overlay_frame_3d(bool modal, nt_pointer_t p) {
+    float vp[16];
+    make_ortho_clay_y_down(vp);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = SCREEN_W, .layout_h = SCREEN_H, .pointers = &p, .pointer_count = 1, .view_proj = vp});
+    nt_ui_modal_style_t ms = nt_ui_modal_style_defaults();
+    ms.ease_speed = 0.0F;
+    ms.flags = NT_UI_MODAL_CLOSE_ON_BACKDROP;
+    nt_ui_popup_style_t ps = nt_ui_popup_style_defaults();
+    ps.ease_speed = 0.0F;
+    const nt_ui_popup_anchor_t anc = {.x = 350.0F, .y = 270.0F, .prefer_side = NT_UI_POPUP_BELOW};
+    if (modal ? nt_ui_modal_begin(s_fx.ctx, OVERLAY3D_ID, &ms, NULL) : nt_ui_popup_begin(s_fx.ctx, OVERLAY3D_ID, &ps, &anc, NULL)) {
+        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(100), CLAY_SIZING_FIXED(60)}}}) {}
+        if (modal) {
+            nt_ui_modal_end(s_fx.ctx);
+        } else {
+            nt_ui_popup_end(s_fx.ctx);
+        }
+    }
+    nt_ui_end(s_fx.ctx);
+}
+
+static nt_pointer_t press_3d(float x, float y) {
+    nt_pointer_t p = {.x = x, .y = y, .active = true};
+    p.buttons[NT_BUTTON_LEFT] = (nt_button_state_t){.is_down = true, .is_pressed = true};
+    return p;
+}
+
+static void open_overlay_3d(bool modal) {
+    float vp[16];
+    make_ortho_clay_y_down(vp);
+    const nt_pointer_t idle = {.x = 10.0F, .y = 10.0F, .active = true};
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = SCREEN_W, .layout_h = SCREEN_H, .pointers = &idle, .pointer_count = 1, .view_proj = vp});
+    if (modal) {
+        nt_ui_modal_open(s_fx.ctx, OVERLAY3D_ID);
+    } else {
+        nt_ui_popup_open(s_fx.ctx, OVERLAY3D_ID);
+    }
+    nt_ui_end(s_fx.ctx);
+    for (int f = 0; f < 3; ++f) {
+        overlay_frame_3d(modal, idle);
+    }
+}
+
+/* ---- A 3D modal is modal for its surface: a ray past it is the game's and keeps the modal; a press on its
+ *      backdrop closes it. ---- */
+static void test_modal_3d_gates_only_its_surface(void) {
+    open_overlay_3d(true);
+    overlay_frame_3d(true, press_3d(-20.0F, -20.0F));
+    TEST_ASSERT_FALSE_MESSAGE(nt_ui_wants_pointer(s_fx.ctx), "a ray past the surface is the game's gesture");
+    TEST_ASSERT_TRUE_MESSAGE(nt_ui_is_open(s_fx.ctx, OVERLAY3D_ID), "a ray past the surface is not a backdrop press");
+    overlay_frame_3d(true, (nt_pointer_t){.x = 10.0F, .y = 10.0F, .active = true});
+    overlay_frame_3d(true, press_3d(20.0F, 20.0F));
+    TEST_ASSERT_TRUE_MESSAGE(nt_ui_wants_pointer(s_fx.ctx), "a press on the backdrop is the UI's");
+    TEST_ASSERT_FALSE_MESSAGE(nt_ui_is_open(s_fx.ctx, OVERLAY3D_ID), "a press on the backdrop closes the modal");
+}
+
+/* ---- A 3D popup closes on a ray past its surface, which stays the game's gesture. ---- */
+static void test_popup_3d_closes_on_a_ray_past_its_surface(void) {
+    open_overlay_3d(false);
+    TEST_ASSERT_TRUE(nt_ui_is_open(s_fx.ctx, OVERLAY3D_ID));
+    overlay_frame_3d(false, press_3d(-20.0F, -20.0F));
+    TEST_ASSERT_FALSE_MESSAGE(nt_ui_is_open(s_fx.ctx, OVERLAY3D_ID), "a ray past the surface dismisses the popup");
+    TEST_ASSERT_FALSE_MESSAGE(nt_ui_wants_pointer(s_fx.ctx), "and the gesture is the game's");
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_coplanar_row_beats_its_scroll_surface);
@@ -358,5 +427,7 @@ int main(void) {
     RUN_TEST(test_occlusion_blocks_widget_beyond_cutoff);
     RUN_TEST(test_occlusion_allows_widget_within_cutoff);
     RUN_TEST(test_popup_over_a_held_press_keeps_the_3d_capture);
+    RUN_TEST(test_modal_3d_gates_only_its_surface);
+    RUN_TEST(test_popup_3d_closes_on_a_ray_past_its_surface);
     return UNITY_END();
 }

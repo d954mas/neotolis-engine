@@ -93,23 +93,6 @@ static bool band_has_backdrop(const nt_ui_context_t *ctx, int32_t band) {
     return false;
 }
 
-/* ---- LISTEN_ESC off: Esc raises nothing even on the top modal (flag gates the source). ---- */
-static void test_modal_esc_requires_flag(void) {
-    nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
-    st.ease_speed = 0.0F;
-    st.flags = 0U; /* no LISTEN_ESC, no CLOSE_ON_BACKDROP */
-    ui_fx_frame_begin(s_fx.ctx, NULL);
-    (void)modal_begin_open(s_fx.ctx, MODAL_A, &st); /* top from the next frame on */
-    nt_ui_modal_end(s_fx.ctx);
-    nt_ui_end(s_fx.ctx);
-    nt_input_feed(nt_test_key(NT_KEY_ESCAPE, true));
-    ui_fx_frame_begin(s_fx.ctx, NULL);
-    const nt_ui_popup_info_t r = modal_begin_open(s_fx.ctx, MODAL_A, &st);
-    nt_ui_modal_end(s_fx.ctx);
-    nt_ui_end(s_fx.ctx);
-    TEST_ASSERT_FALSE(r.reason != NT_UI_POPUP_CLOSE_NONE);
-}
-
 /* What one modal frame reported: the info and whether begin showed the modal. */
 typedef struct {
     nt_ui_popup_info_t info;
@@ -207,19 +190,14 @@ static void test_modal_wants_pointer_while_open(void) {
 /* ---- A modal WITHOUT CLOSE_ON_BACKDROP (LISTEN_ESC only) still gates click-through: the backdrop
  *      registers as an inert block_pointer occluder that wins topmost-z, so a base widget behind the
  *      open modal never goes hot and gets neither press nor click. Two frames for the IM-lag. ---- */
-static nt_ui_interaction_t modal_gate_base_frame(const nt_ui_modal_style_t *st, const nt_pointer_t *p, bool open, bool *shown) {
+static nt_ui_interaction_t modal_gate_base_frame(const nt_ui_modal_style_t *st, const nt_pointer_t *p) {
     ui_fx_frame_begin(s_fx.ctx, p);
     nt_ui_interaction_t in;
     CLAY({.id = (Clay_ElementId){.id = nt_ui_id("gated_base_btn")}, .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(120)}}}) {
         in = nt_ui_step(s_fx.ctx, nt_ui_id("gated_base_btn"), NULL);
     }
-    if (open) {
-        nt_ui_modal_open(s_fx.ctx, MODAL_A);
-    } else {
-        nt_ui_close(s_fx.ctx, MODAL_A);
-    }
-    *shown = nt_ui_modal_begin(s_fx.ctx, MODAL_A, st, NULL);
-    if (*shown) {
+    nt_ui_modal_open(s_fx.ctx, MODAL_A);
+    if (nt_ui_modal_begin(s_fx.ctx, MODAL_A, st, NULL)) {
         nt_ui_modal_end(s_fx.ctx);
     }
     nt_ui_end(s_fx.ctx);
@@ -227,43 +205,24 @@ static nt_ui_interaction_t modal_gate_base_frame(const nt_ui_modal_style_t *st, 
 }
 
 static void test_modal_no_backdrop_close_still_gates(void) {
-    bool shown = false;
     nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
     st.ease_speed = 0.0F;
     st.flags = NT_UI_MODAL_LISTEN_ESC; /* no CLOSE_ON_BACKDROP */
 
     /* Frame 1: register the base button + the modal's block_pointer occluder. */
     nt_pointer_t f1 = ui_fx_pointer(100.0F, 60.0F, false, false, false);
-    modal_gate_base_frame(&st, &f1, true, &shown);
+    modal_gate_base_frame(&st, &f1);
 
     /* Frame 2: press over the base button. The block_pointer backdrop won the prev-frame topmost-z,
      * so the base widget never goes hot and the press is gated. */
     nt_pointer_t f2 = ui_fx_pointer(100.0F, 60.0F, true, true, false);
-    nt_ui_interaction_t in2 = modal_gate_base_frame(&st, &f2, true, &shown);
+    nt_ui_interaction_t in2 = modal_gate_base_frame(&st, &f2);
     TEST_ASSERT_FALSE(in2.pressed_now); /* base click-through blocked by the occluder */
 
     /* Frame 3: release over the base button -> still no click; the occluder gated the whole gesture. */
     nt_pointer_t f3 = ui_fx_pointer(100.0F, 60.0F, false, false, true);
-    nt_ui_interaction_t in3 = modal_gate_base_frame(&st, &f3, true, &shown);
+    nt_ui_interaction_t in3 = modal_gate_base_frame(&st, &f3);
     TEST_ASSERT_FALSE(in3.clicked); /* base widget never clicks behind the open modal */
-}
-
-/* ---- A closing modal only paints: its fading backdrop lets a tap through to the base button. ---- */
-static void test_modal_closing_backdrop_lets_the_pointer_through(void) {
-    nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
-    st.ease_speed = 8.0F;
-    bool shown = false;
-    for (int f = 0; f < 90; ++f) {
-        (void)modal_gate_base_frame(&st, &(nt_pointer_t){.x = 100.0F, .y = 60.0F, .active = true}, true, &shown);
-    }
-    for (int f = 0; f < 2; ++f) {
-        (void)modal_gate_base_frame(&st, &(nt_pointer_t){.x = 100.0F, .y = 60.0F, .active = true}, false, &shown);
-    }
-    nt_pointer_t tap = ui_fx_pointer(100.0F, 60.0F, false, true, true);
-    tap.type = NT_POINTER_TOUCH;
-    const nt_ui_interaction_t in = modal_gate_base_frame(&st, &tap, false, &shown);
-    TEST_ASSERT_TRUE_MESSAGE(shown, "the modal still fades");
-    TEST_ASSERT_TRUE_MESSAGE(in.clicked, "the base under the fading backdrop takes the tap");
 }
 
 /* One frame of modal A, which the test opened, with a stepped button child. The button id is stepped INSIDE the
@@ -345,8 +304,9 @@ static void test_wants_keyboard_follows_the_top(void) {
     TEST_ASSERT_FALSE(nt_ui_wants_keyboard(s_fx.ctx));
 }
 
-/* ---- Per-context overlay_zband_stride: a root modal and its backdrop sit on the stride band, a nested one
- *      and its backdrop on stack slot 1's band. A second ctx coexists with the fixture's (module inited by setUp). ---- */
+/* ---- Per-context overlay_zband_stride: each overlay lands on its stack slot's absolute band, overlay_zband_stride +
+ *      slot * NT_UI_OVERLAY_MAX: a root modal and its backdrop sit on the stride band, a nested one and its backdrop
+ *      on slot 1's band and paint above it. A second ctx coexists with the fixture's (module inited by setUp). ---- */
 alignas(NT_UI_ARENA_ALIGN) static uint8_t s_custom_arena[NT_UI_TEST_ARENA_SIZE];
 
 static void test_modal_custom_zband_stride(void) {
@@ -372,34 +332,10 @@ static void test_modal_custom_zband_stride(void) {
     TEST_ASSERT_TRUE(a != NULL && b != NULL);
     TEST_ASSERT_EQUAL_INT32(custom_stride, a->zIndex);
     TEST_ASSERT_EQUAL_INT32_MESSAGE(custom_stride + NT_UI_OVERLAY_MAX, b->zIndex, "a nested modal sits on its stack slot's band");
+    TEST_ASSERT_TRUE_MESSAGE(b > a, "and paints above it");
     TEST_ASSERT_TRUE_MESSAGE(band_has_backdrop(ctx, custom_stride), "the outer backdrop paints on its panel's band");
     TEST_ASSERT_TRUE_MESSAGE(band_has_backdrop(ctx, custom_stride + NT_UI_OVERLAY_MAX), "the nested backdrop paints on its own panel's band");
 
-    nt_ui_destroy_context(ctx);
-}
-
-/* ---- A stride of 1 is valid: the catcher shares the panel's band 1 and still gates the base band. ---- */
-static void test_modal_stride_one_gates_base_ui(void) {
-    nt_ui_create_desc_t desc = nt_ui_create_desc_defaults();
-    desc.overlay_zband_stride = 1;
-    nt_ui_context_t *ctx = nt_ui_create_context(s_custom_arena, sizeof s_custom_arena, &desc);
-    TEST_ASSERT_NOT_NULL(ctx);
-    nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
-    st.ease_speed = 8.0F; /* eased: the frame it closes itself still shows, so the test ends it */
-    bool clicked = false;
-    for (int f = 0; f < 4; ++f) {
-        nt_pointer_t p = {.x = 20.0F, .y = 20.0F, .active = true};
-        p.buttons[NT_BUTTON_LEFT] = (nt_button_state_t){.is_down = f == 2, .is_pressed = f == 2, .is_released = f == 3};
-        ui_fx_frame_begin(ctx, &p);
-        (void)modal_begin_open(ctx, MODAL_A, &st);
-        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(20)}}}) {}
-        nt_ui_modal_end(ctx);
-        /* A game floating on the base band declared after the modal: only the catcher's band keeps it under. */
-        CLAY({.id = CLAY_ID("s1_base"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT}, .layout = {.sizing = {CLAY_SIZING_FIXED(80), CLAY_SIZING_FIXED(80)}}}) {}
-        clicked = nt_ui_step(ctx, CLAY_ID("s1_base").id, NULL).clicked || clicked;
-        nt_ui_end(ctx);
-    }
-    TEST_ASSERT_FALSE_MESSAGE(clicked, "the base UI under a stride-1 modal clicks nothing");
     nt_ui_destroy_context(ctx);
 }
 
@@ -429,9 +365,10 @@ static void test_modal_closed_takes_no_stack_slot(void) {
     nt_ui_destroy_context(ctx);
 }
 
-/* ---- A 0 stride (no fallback to the default, which lives only in nt_ui_create_desc_defaults) and a stride
- *      whose tooltip band, above the last stack slot's, passes int16 by one assert at create. ---- */
-static void test_modal_stride_out_of_range_asserts(void) {
+/* ---- Stride range: a 0 stride (no fallback to the default, which lives only in nt_ui_create_desc_defaults) and a
+ *      stride whose tooltip band, above the last stack slot's, passes int16 by one assert at create; a stride of 1 is
+ *      valid: the catcher shares the panel's band 1 and still gates the base band. ---- */
+static void test_modal_stride_range(void) {
     const int16_t strides[] = {0, (int16_t)(INT16_MAX - (NT_UI_OVERLAY_MAX * NT_UI_OVERLAY_MAX) + 1)};
     for (int i = 0; i < 2; ++i) {
         nt_ui_create_desc_t desc = nt_ui_create_desc_defaults();
@@ -439,6 +376,27 @@ static void test_modal_stride_out_of_range_asserts(void) {
         NT_TEST_EXPECT_ASSERT((void)nt_ui_create_context(s_custom_arena, sizeof s_custom_arena, &desc));
         TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "overlay_zband_stride must be > 0 with room"));
     }
+    nt_ui_create_desc_t desc = nt_ui_create_desc_defaults();
+    desc.overlay_zband_stride = 1;
+    nt_ui_context_t *ctx = nt_ui_create_context(s_custom_arena, sizeof s_custom_arena, &desc);
+    TEST_ASSERT_NOT_NULL(ctx);
+    nt_ui_modal_style_t st = nt_ui_modal_style_defaults();
+    st.ease_speed = 8.0F; /* eased: the frame it closes itself still shows, so the test ends it */
+    bool clicked = false;
+    for (int f = 0; f < 4; ++f) {
+        nt_pointer_t p = {.x = 20.0F, .y = 20.0F, .active = true};
+        p.buttons[NT_BUTTON_LEFT] = (nt_button_state_t){.is_down = f == 2, .is_pressed = f == 2, .is_released = f == 3};
+        ui_fx_frame_begin(ctx, &p);
+        (void)modal_begin_open(ctx, MODAL_A, &st);
+        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(20)}}}) {}
+        nt_ui_modal_end(ctx);
+        /* A game floating on the base band declared after the modal: only the catcher's band keeps it under. */
+        CLAY({.id = CLAY_ID("s1_base"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT}, .layout = {.sizing = {CLAY_SIZING_FIXED(80), CLAY_SIZING_FIXED(80)}}}) {}
+        clicked = nt_ui_step(ctx, CLAY_ID("s1_base").id, NULL).clicked || clicked;
+        nt_ui_end(ctx);
+    }
+    TEST_ASSERT_FALSE_MESSAGE(clicked, "the base UI under a stride-1 modal clicks nothing");
+    nt_ui_destroy_context(ctx);
 }
 
 /* ---- SLIDE edge: each edge displaces the panel on the right axis with the right sign (+x right, +y down);
@@ -570,13 +528,11 @@ static void test_modal_close_uses_close_recipe(void) {
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_modal_defaults_valid);
-    RUN_TEST(test_modal_esc_requires_flag);
     RUN_TEST(test_modal_open_entrance_eases_from_zero);
     RUN_TEST(test_modal_open_visible_before_epsilon);
     RUN_TEST(test_modal_open_instant_snaps);
     RUN_TEST(test_modal_wants_pointer_while_open);
     RUN_TEST(test_modal_no_backdrop_close_still_gates);
-    RUN_TEST(test_modal_closing_backdrop_lets_the_pointer_through);
     RUN_TEST(test_modal_backdrop_close_pad);
     RUN_TEST(test_wants_keyboard_follows_the_top);
     RUN_TEST(test_modal_slide_dir);
@@ -584,8 +540,7 @@ int main(void) {
     RUN_TEST(test_modal_close_uses_close_recipe);
     RUN_TEST(test_modal_anim_asserts);
     RUN_TEST(test_modal_custom_zband_stride);
-    RUN_TEST(test_modal_stride_out_of_range_asserts);
-    RUN_TEST(test_modal_stride_one_gates_base_ui);
+    RUN_TEST(test_modal_stride_range);
     RUN_TEST(test_modal_closed_takes_no_stack_slot);
     return UNITY_END();
 }

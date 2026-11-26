@@ -123,13 +123,9 @@ static void popup_check_args(const nt_ui_context_t *ctx, uint32_t id, const nt_u
     NT_ASSERT(isfinite(anchor->x) && isfinite(anchor->y) && isfinite(anchor->w) && isfinite(anchor->h) && "nt_ui_popup_begin: anchor rect must be finite");
 }
 
-/* Declares a shown overlay: the panel eased toward open?1:0 on its stack slot's band, the catcher of a live one, the
- * backdrop of a closing one too, and the panel of an open one as a record (it takes the next press even if the
- * overlay closes after this declaration); it records what nt_ui_begin reads next frame (S1, S3).
- * Its phase (spec: "Input ownership", lifecycle): OPENING (first declaration since it opened) and CLOSING bodies
- * are inert, an OPEN one takes input. A tooltip passes no `slot`: the band above every slot, no catcher, no record,
- * no declaration depth (it closes its own element). Returns false when it faded out: nothing declared, and the
- * slot is left for nt_ui_begin to drop, so no band moves within the frame. */
+/* Declares a shown overlay on its stack slot's band (spec: "Input ownership", overlay lifecycle); a tooltip passes no
+ * `slot` and takes the band above every slot with no catcher or record. False once it faded out: the slot stays
+ * for nt_ui_begin to drop, so no band moves within the frame. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static bool popup_declare(nt_ui_context_t *ctx, uint32_t id, const nt_ui_popup_style_t *style, const nt_ui_popup_anchor_t *anchor, const nt_ui_popup_ext_t *ext, nt_ui_overlay_t *slot, bool open,
                           nt_ui_popup_info_t *info) {
@@ -218,10 +214,6 @@ static bool popup_declare(nt_ui_context_t *ctx, uint32_t id, const nt_ui_popup_s
             .userData = (void *)catcher_data,
         }) {}
     }
-    if (catcher) {
-        slot->catcher_rec = ctx->interactive_cur_count + 1U; /* invisible: nt_ui_begin drops it once the overlay closes */
-        nt_ui_block_pointer(ctx, catcher_id, NULL);          /* the gate; the top's outside press reads the press on it */
-    }
     // #endregion
     // #region panel floating decl (stays OPEN until nt_ui_popup_end)
     const nt_ui_transform_t panel_xf = popup_eased_transform(xf_start, t);
@@ -271,7 +263,7 @@ bool nt_ui_internal_tooltip_begin(nt_ui_context_t *ctx, uint32_t id, const nt_ui
 
 void nt_ui_popup_open(nt_ui_context_t *ctx, uint32_t id) {
     NT_ASSERT(ctx != NULL && id != 0U && "nt_ui_popup_open: ctx non-NULL, id non-zero");
-    nt_ui_internal_overlay_open(ctx, id, nt_ui_internal_overlay_here(ctx), 0U, NT_UI_OVERLAY_LIGHT | NT_UI_OVERLAY_CATCHER);
+    nt_ui_internal_overlay_open(ctx, id, nt_ui_internal_overlay_here(ctx, 0U), 0U, NT_UI_OVERLAY_LIGHT | NT_UI_OVERLAY_CATCHER);
 }
 
 bool nt_ui_popup_begin(nt_ui_context_t *ctx, uint32_t id, const nt_ui_popup_style_t *style, const nt_ui_popup_anchor_t *anchor, nt_ui_popup_info_t *info) {

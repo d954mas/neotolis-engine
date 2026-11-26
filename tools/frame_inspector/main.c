@@ -2795,6 +2795,9 @@ static void frame(void) {
             s_ctx,
             &(nt_ui_frame_desc_t){
                 .layout_w = scale.logical_w, .layout_h = scale.logical_h, .dt = g_nt_app.dt, .pointers = &pointer, .pointer_count = 1, .viewport = nt_ui_viewport_from_scale(&scale, g_nt_window.dpr)});
+        if (s.dirty) {
+            rebuild_rows(); /* keys move over the rows the last click left */
+        }
         handle_keys(); /* after nt_ui_begin: nt_ui_wants_keyboard is this frame's owner, so a focused field's keys stay its */
         if (s.dirty) {
             rebuild_rows();

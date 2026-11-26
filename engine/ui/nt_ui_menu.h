@@ -94,7 +94,6 @@ typedef struct {
     uint32_t child_first;                 /* first enabled row of the child Right or Enter opened this frame */
     uint8_t depth;                        /* level being declared */
     uint8_t key;                          /* the frame's one menu key, read at begin (0 = none) */
-    uint8_t declared_depth;               /* deepest level declared: open parents past it are gone */
     uint8_t hover_depth;
     uint8_t click_depth;
     uint8_t fill_layer;
@@ -146,7 +145,7 @@ void nt_ui_menu_end(nt_ui_menu_t *menu);
 /* Opens the menu `menu_id` with its root at (x, y) in UI space, on top of the overlay stack, inside the overlay
  * being declared at the call (0 = none), closing every popup that is not its ancestor, and starts its navigation
  * fresh; it takes input from the frame after its first declaration, so the press that opened it does not dismiss
- * it. When to open is the game's call: a right-click (nt_ui_pointer_pos gives the point), a long-press, a button. */
+ * it. When to open is the game's call: a right-click (nt_ui_screen_to_layout gives the point), a long-press, a button. */
 void nt_ui_menu_open(nt_ui_menu_t *menu, nt_ui_context_t *ctx, uint32_t menu_id, float x, float y);
 
 #ifdef NT_TEST_ACCESS

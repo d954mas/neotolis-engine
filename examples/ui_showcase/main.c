@@ -358,6 +358,7 @@ typedef struct {
     const char *last_chosen;  /* readout label of the last chosen row; points at the row's static literal (NULL = none) */
     bool show_grid;           /* checkmark-toggle row state (global menu) */
     uint8_t opacity_pct;      /* custom-row state the inner "reset" button restores to 100 */
+    bool modal_up;            /* the confirm modal was open before nt_ui_begin, which may close it on this press */
 } menu_params_t;
 
 /* Input tab: four game-owned field buffers (ImGui-style). The widget edits these in place;
@@ -3186,13 +3187,15 @@ static void render_menu(nt_ui_context_t *ctx, tab_state_t *st) {
     /* A right-click opens the zone menu over the panel and the global one anywhere else; opening one closes
      * the other. The panel test is geometric (prev-frame bbox), so a right-click re-opens the zone menu
      * through the open menu's catcher. */
-    float px = 0.0F;
-    float py = 0.0F;
-    nt_ui_pointer_pos(ctx, &px, &py);
+    const nt_pointer_t *pointer = &g_nt_input.pointers[g_nt_input.primary];
+    float pos[2];
+    nt_ui_screen_to_layout(ctx, (const float[2]){pointer->x, pointer->y}, pos);
+    const float px = pos[0];
+    const float py = pos[1];
     const nt_ui_bbox_t zone_bb = nt_ui_get_bbox(ctx, s_id_menu_panel);
     const bool over_zone = zone_bb.found && px >= zone_bb.x && px <= zone_bb.x + zone_bb.width && py >= zone_bb.y && py <= zone_bb.y + zone_bb.height;
-    /* A modal over the tab owns the pointer: no menu opens through it. */
-    const bool right = nt_input_mouse_is_pressed(NT_BUTTON_RIGHT) && !nt_ui_inspector_pointer_consumed(ctx) && !nt_ui_is_open(ctx, s_id_modal_confirm);
+    /* A modal over the tab owns the pointer: no menu opens through it, nor on the press that closes it. */
+    const bool right = nt_input_mouse_is_pressed(NT_BUTTON_RIGHT) && !nt_ui_inspector_pointer_consumed(ctx) && !st->menu.modal_up;
     const bool held = nt_ui_hold_crossed(&zone_ev, 0.5F);
     if (held || (right && over_zone)) {
         nt_ui_menu_open(&st->menu.zone_menu, ctx, s_id_menu_zone, held ? zone_ev.pos[0] : px, held ? zone_ev.pos[1] : py); /* a hold opens under its finger */
@@ -3738,6 +3741,7 @@ static void frame(void) {
         const bool base_on = g_tabs[s_active_tab].render == render_base_material && s_state.base_sdf && base_info && nt_gfx_program_ready(base_info->program);
         nt_ui_set_sprite_material(s_ctx, base_on ? s_base_material : s_sprite_material);
 
+        s_state.menu.modal_up = nt_ui_is_open(s_ctx, s_id_modal_confirm);
         /* Pass the RAW device pointer; the ctx converts it via the scale-derived viewport. */
         nt_ui_begin(s_ctx, &(nt_ui_frame_desc_t){.layout_w = scale.logical_w,
                                                  .layout_h = scale.logical_h,

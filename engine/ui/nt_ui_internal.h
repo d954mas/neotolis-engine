@@ -161,21 +161,20 @@ typedef struct {
 #ifndef NT_UI_OVERLAY_MAX
 #define NT_UI_OVERLAY_MAX 16
 #endif
-_Static_assert(NT_UI_OVERLAY_MAX >= 1 && NT_UI_OVERLAY_MAX <= UINT8_MAX, "NT_UI_OVERLAY_MAX must fit the uint8_t stack counters");
+_Static_assert(NT_UI_OVERLAY_MAX >= 1 && NT_UI_OVERLAY_MAX * NT_UI_OVERLAY_MAX < INT16_MAX, "NT_UI_OVERLAY_MAX: the tooltip band (stride + MAX * MAX) must fit int16");
 
-/* One overlay stack entry: the stack is the open state (spec: "Input ownership", S1). Within a frame entries are
+/* One overlay stack entry: the stack is the open state (spec: "Input ownership"). Within a frame entries are
  * only appended (a reopened one leaves a dead entry, id 0), so a slot's band never moves before nt_ui_begin. */
 typedef struct {
-    uint32_t id;          /* 0 = dead (reopened this frame), dropped by the next nt_ui_begin */
-    uint32_t parent;      /* the overlay it was opened inside (a menu level: the level under it), else 0 */
-    uint32_t opener;      /* the row that opened a menu level, else 0 */
-    uint32_t catcher_rec; /* 1 + this frame's registry index of its catcher record (0 = none): dropped once it is closed */
-    int16_t close_pad;    /* px around the panel where a press is not outside (S3) */
-    bool open;            /* false while it fades out after a close */
-    bool seen;            /* declared or opened since the last nt_ui_begin: kept by the next prune */
-    bool live;            /* last declared open: its next declaration is OPEN, and it can be the top */
-    uint8_t flags;        /* NT_UI_OVERLAY_*: its kind from the open, its own closes from the declaration */
-    uint8_t reason;       /* nt_ui_popup_close_t not yet reported to its begin */
+    uint32_t id;       /* 0 = dead (reopened this frame), dropped by the next nt_ui_begin */
+    uint32_t parent;   /* the overlay it was opened inside (a menu level: the level under it), else 0 */
+    uint32_t opener;   /* the row that opened a menu level, else 0 */
+    int16_t close_pad; /* px around the panel where a press is not outside, for its own close */
+    bool open;         /* false while it fades out after a close */
+    bool seen;         /* declared or opened since the last nt_ui_begin: kept by the next prune */
+    bool live;         /* last declared open: its next declaration is OPEN, and it can be the top */
+    uint8_t flags;     /* NT_UI_OVERLAY_*: its kind from the open, its own closes from the declaration */
+    uint8_t reason;    /* nt_ui_popup_close_t not yet reported to its begin */
 } nt_ui_overlay_t;
 
 /* Bound the storage and per-row work of NT_UI_CHECKS duplicate detection. */
@@ -232,7 +231,7 @@ struct nt_ui_context {
     /* The top overlay read at nt_ui_begin from the stack: the highest live entry with a catcher (0 = none). */
     uint32_t overlay_top;
     /* The overlay stack in open order, which is also its paint and hit order (slot i takes band
-     * stride + i * NT_UI_OVERLAY_MAX), and the ids of the overlays open in the declaration (0 = a tooltip). */
+     * stride + i * NT_UI_OVERLAY_MAX), and the ids of the overlays open in the declaration. */
     nt_ui_overlay_t overlays[NT_UI_OVERLAY_MAX];
     uint32_t overlay_decl[NT_UI_OVERLAY_MAX];
     /* Keyboard-focus arbiter (0 = none): a press sets it; Esc or a disabled declaration clears it.
@@ -608,21 +607,21 @@ bool nt_ui_internal_owned_by_top(nt_ui_context_t *ctx, uint32_t id);
 static inline bool nt_ui_internal_is_top(const nt_ui_context_t *ctx, uint32_t id) { return id == ctx->overlay_top && ctx->inert_from == 0U; }
 static inline bool nt_ui_internal_owns_keys(const nt_ui_context_t *ctx, uint32_t id) { return id == ctx->keys_owner && ctx->inert_from == 0U; }
 const nt_pointer_t *nt_ui_internal_top_pointer(const nt_ui_context_t *ctx, uint32_t id);
-/* `id` is live: outside an inert subtree, at or above the top's catcher (spec: "Input ownership", R3). */
+/* `id` is live: outside an inert subtree, at or above the top's catcher (spec: "Input ownership"). */
 static inline bool nt_ui_internal_live(nt_ui_context_t *ctx, uint32_t id) { return ctx->inert_from == 0U && nt_ui_internal_owned_by_top(ctx, id); }
 
-/* The overlay stack (spec: "Input ownership", S1-S3). open pushes or reopens `id` inside `parent` (opened by
+/* The overlay stack (spec: "Input ownership"). open pushes or reopens `id` inside `parent` (opened by
  * `opener`, a menu row, or 0) and closes the light overlays that are not its ancestors; close starts the fade of
  * `id` and of the overlays opened inside it; index returns its slot or -1; here is the innermost open overlay
- * declared at the call (0 = none); last_open is the last opened one still open (0 = none). */
+ * declared at the call without a `skip` flag (0 = none); last_open is the last opened one still open (0 = none). */
 #define NT_UI_OVERLAY_LIGHT ((uint8_t)(1U << 0))   /* light dismiss: an opening overlay that is not its descendant closes it */
 #define NT_UI_OVERLAY_CATCHER ((uint8_t)(1U << 1)) /* gates the UI under it: it can be the top */
-#define NT_UI_OVERLAY_ESC ((uint8_t)(1U << 2))     /* S3 on the Esc it owns */
-#define NT_UI_OVERLAY_OUTSIDE ((uint8_t)(1U << 3)) /* S3 on a press outside its panel */
+#define NT_UI_OVERLAY_ESC ((uint8_t)(1U << 2))     /* its own close on the Esc it owns */
+#define NT_UI_OVERLAY_OUTSIDE ((uint8_t)(1U << 3)) /* its own close on a press outside its panel */
 void nt_ui_internal_overlay_open(nt_ui_context_t *ctx, uint32_t id, uint32_t parent, uint32_t opener, uint8_t flags);
 void nt_ui_internal_overlay_close(nt_ui_context_t *ctx, uint32_t id, uint8_t reason);
 int32_t nt_ui_internal_overlay_index(const nt_ui_context_t *ctx, uint32_t id);
-uint32_t nt_ui_internal_overlay_here(const nt_ui_context_t *ctx);
+uint32_t nt_ui_internal_overlay_here(const nt_ui_context_t *ctx, uint8_t skip);
 uint32_t nt_ui_internal_overlay_last_open(const nt_ui_context_t *ctx);
 
 /* Adds a registry record for the front-most resolve. */

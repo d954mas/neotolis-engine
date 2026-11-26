@@ -39,9 +39,8 @@ _Static_assert(sizeof(nt_ui_popup_anchor_t) == 20, "nt_ui_popup_anchor_t stable 
 typedef enum {
     NT_UI_POPUP_CLOSE_NONE = 0,
     NT_UI_POPUP_CLOSE_ESC,
-    NT_UI_POPUP_CLOSE_OUTSIDE,  /* a press outside the panel: on its catcher (a modal's backdrop) or on no record */
-    NT_UI_POPUP_CLOSE_REPLACED, /* an overlay opened that is not opened inside it */
-    NT_UI_POPUP_CLOSE_GAME,     /* nt_ui_close of it or of the overlay it was opened inside, its menu's activation, or no declaration */
+    NT_UI_POPUP_CLOSE_OUTSIDE, /* a press outside the panel: on its catcher (a modal's backdrop) or on no record */
+    NT_UI_POPUP_CLOSE_OTHER,   /* nt_ui_close of it or of the overlay it was opened inside, an overlay opened outside it, its menu's activation, or no declaration */
 } nt_ui_popup_close_t;
 
 /* Per-frame info of a popup or a modal (nullable out of begin): the chosen side, the close. */

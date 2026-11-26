@@ -620,8 +620,8 @@ void nt_ui_block_pointer(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lr
  * to its release, or a pointer is over last frame's record. Decided at nt_ui_begin: read it after begin. */
 bool nt_ui_wants_pointer(const nt_ui_context_t *ctx);
 
-/* True when the UI owns this frame's keys: a focused text field, else an open overlay with a catcher (a modal,
- * a menu, a combo list). Fixed at nt_ui_begin, so read it after begin; the game gates its hotkeys on it. */
+/* True when the UI owns this frame's keys: a focused text field, else last frame's live top overlay (a modal, a
+ * menu, a combo list). Fixed at nt_ui_begin, so read it after begin; the game gates its hotkeys on it. */
 bool nt_ui_wants_keyboard(const nt_ui_context_t *ctx);
 
 /* Overlays (a popup, a modal, a menu; opened by nt_ui_popup_open, nt_ui_modal_open, nt_ui_menu_open): close starts
@@ -649,9 +649,6 @@ nt_ui_hot_t nt_ui_pointer_hot(const nt_ui_context_t *ctx, uint32_t pointer_index
  * holder instead, and only while it is over it. id need not be interactive. Last frame's layout, like
  * every query. Read-only; `hovered` stays "this record is the target". */
 bool nt_ui_hovered_within(const nt_ui_context_t *ctx, uint32_t id);
-/* The primary pointer's position this frame in UI (layout) space of a 2D context; call between nt_ui_begin
- * and nt_ui_end. */
-void nt_ui_pointer_pos(const nt_ui_context_t *ctx, float *out_x, float *out_y);
 // #endregion
 
 // #region test_access
