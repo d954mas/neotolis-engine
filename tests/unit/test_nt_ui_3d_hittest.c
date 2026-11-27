@@ -20,6 +20,7 @@
 #include "test_helpers/ui_walker_fixture.h"
 #include "ui/nt_ui.h"
 #include "ui/nt_ui_debug_hit_zones.h"
+#include "ui/nt_ui_input.h"
 #include "ui/nt_ui_internal.h"
 #include "ui/nt_ui_modal.h"
 #include "ui/nt_ui_popup.h"
@@ -320,8 +321,8 @@ static void test_nearer_panel_beats_later_declared(void) {
 #endif
 }
 
-/* ---- A 3D ctx does not rank overlays by band, so a popup opening over a held press leaves its capture. ---- */
-static void test_popup_over_a_held_press_keeps_the_3d_capture(void) {
+/* ---- One liveness rule in 2D and 3D: a popup opening over a held press drops its capture. ---- */
+static void test_3d_overlay_drops_a_capture_under_it(void) {
     nt_ui_popup_style_t st = nt_ui_popup_style_defaults();
     st.ease_speed = 0.0F;
     const nt_ui_popup_anchor_t anc = {.x = 500.0F, .y = 400.0F, .prefer_side = NT_UI_POPUP_BELOW};
@@ -335,6 +336,9 @@ static void test_popup_over_a_held_press_keeps_the_3d_capture(void) {
         CLAY({.id = CLAY_ID("hit3d"),
               .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = BBOX_X, .y = BBOX_Y}},
               .layout = {.sizing = {CLAY_SIZING_FIXED(BBOX_W), CLAY_SIZING_FIXED(BBOX_H)}}}){}(void)nt_ui_step(s_fx.ctx, id, NULL);
+        if (f == 2) {
+            TEST_ASSERT_EQUAL_UINT32(id, nt_ui_test_capture_active_id(s_fx.ctx, 0U));
+        }
         if (f >= 3) {
             nt_ui_popup_open(s_fx.ctx, 0x3D0001U);
             if (nt_ui_popup_begin(s_fx.ctx, 0x3D0001U, &st, &anc, NULL)) {
@@ -343,7 +347,7 @@ static void test_popup_over_a_held_press_keeps_the_3d_capture(void) {
         }
         nt_ui_end(s_fx.ctx);
     }
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(id, nt_ui_test_capture_active_id(s_fx.ctx, 0U), "the 3D press under a new overlay keeps its capture");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, nt_ui_test_capture_active_id(s_fx.ctx, 0U), "the 3D press under a new overlay loses its capture");
 }
 
 #define OVERLAY3D_ID 0x3D0002U
@@ -397,11 +401,11 @@ static void open_overlay_3d(bool modal) {
 static void test_modal_3d_gates_only_its_surface(void) {
     open_overlay_3d(true);
     overlay_frame_3d(true, press_3d(-20.0F, -20.0F));
-    TEST_ASSERT_FALSE_MESSAGE(nt_ui_wants_pointer(s_fx.ctx), "a ray past the surface is the game's gesture");
+    TEST_ASSERT_FALSE_MESSAGE(nt_ui_wants_pointer(s_fx.ctx, 0U), "a ray past the surface is the game's gesture");
     TEST_ASSERT_TRUE_MESSAGE(nt_ui_is_open(s_fx.ctx, OVERLAY3D_ID), "a ray past the surface is not a backdrop press");
     overlay_frame_3d(true, (nt_pointer_t){.x = 10.0F, .y = 10.0F, .active = true});
     overlay_frame_3d(true, press_3d(20.0F, 20.0F));
-    TEST_ASSERT_TRUE_MESSAGE(nt_ui_wants_pointer(s_fx.ctx), "a press on the backdrop is the UI's");
+    TEST_ASSERT_TRUE_MESSAGE(nt_ui_wants_pointer(s_fx.ctx, 0U), "a press on the backdrop is the UI's");
     TEST_ASSERT_FALSE_MESSAGE(nt_ui_is_open(s_fx.ctx, OVERLAY3D_ID), "a press on the backdrop closes the modal");
 }
 
@@ -411,7 +415,86 @@ static void test_popup_3d_closes_on_a_ray_past_its_surface(void) {
     TEST_ASSERT_TRUE(nt_ui_is_open(s_fx.ctx, OVERLAY3D_ID));
     overlay_frame_3d(false, press_3d(-20.0F, -20.0F));
     TEST_ASSERT_FALSE_MESSAGE(nt_ui_is_open(s_fx.ctx, OVERLAY3D_ID), "a ray past the surface dismisses the popup");
-    TEST_ASSERT_FALSE_MESSAGE(nt_ui_wants_pointer(s_fx.ctx), "and the gesture is the game's");
+    TEST_ASSERT_FALSE_MESSAGE(nt_ui_wants_pointer(s_fx.ctx, 0U), "and the gesture is the game's");
+}
+
+/* ---- A record under a 3D overlay is no target but still stops the ray: one nearer than the overlay's surface
+ *      leaves the pointer with no target, so its press is the game's and the modal stays. ---- */
+static void raised_under_modal_frame(nt_pointer_t p) {
+    float vp[16];
+    make_ortho_clay_y_down(vp);
+    nt_ui_transform_t near_t = nt_ui_transform_defaults();
+    near_t.offset_z = 0.5F;
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = SCREEN_W, .layout_h = SCREEN_H, .pointers = &p, .pointer_count = 1, .view_proj = vp});
+    CLAY({.id = CLAY_ID("raised3d"),
+          .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = BBOX_X, .y = BBOX_Y}},
+          .layout = {.sizing = {CLAY_SIZING_FIXED(BBOX_W), CLAY_SIZING_FIXED(BBOX_H)}},
+          .userData = NT_UI_CLAY_DATA_XFORM(0, &near_t, 1.0F)}) {
+        (void)nt_ui_step(s_fx.ctx, nt_ui_id("raised3d"), NULL);
+    }
+    nt_ui_modal_style_t ms = nt_ui_modal_style_defaults();
+    ms.ease_speed = 0.0F;
+    ms.flags = NT_UI_MODAL_CLOSE_ON_BACKDROP;
+    if (nt_ui_modal_begin(s_fx.ctx, OVERLAY3D_ID, &ms, NULL)) {
+        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(100), CLAY_SIZING_FIXED(60)}}}) {}
+        nt_ui_modal_end(s_fx.ctx);
+    }
+    nt_ui_end(s_fx.ctx);
+}
+
+static void test_3d_record_under_an_overlay_stops_the_ray(void) {
+    const nt_pointer_t idle = {.x = BBOX_X + 20.0F, .y = BBOX_Y + 20.0F, .active = true};
+    raised_under_modal_frame(idle);
+    nt_ui_modal_open(s_fx.ctx, OVERLAY3D_ID);
+    for (int f = 0; f < 3; ++f) {
+        raised_under_modal_frame(idle);
+    }
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, nt_ui_pointer_hot(s_fx.ctx, 0U).id, "the raised record is not live and hides the backdrop");
+    raised_under_modal_frame(press_3d(BBOX_X + 20.0F, BBOX_Y + 20.0F));
+    TEST_ASSERT_FALSE(nt_ui_wants_pointer(s_fx.ctx, 0U));
+    TEST_ASSERT_TRUE(nt_ui_is_open(s_fx.ctx, OVERLAY3D_ID));
+}
+
+/* ---- A 3D modal opening over a focused field of its context takes the focus and the keys, as in 2D. ---- */
+#define FIELD3D_ID 0x3D0003U
+static void field_under_modal_frame(nt_pointer_t p, bool modal, char *buf) {
+    float vp[16];
+    make_ortho_clay_y_down(vp);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = SCREEN_W, .layout_h = SCREEN_H, .pointers = &p, .pointer_count = 1, .view_proj = vp});
+    const nt_ui_input_style_t style = nt_ui_input_style_defaults();
+    const nt_ui_input_props_t props = {0};
+    CLAY({.id = CLAY_ID("field3d_root"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = BBOX_X, .y = BBOX_Y}}}) {
+        (void)nt_ui_input_text(s_fx.ctx, NULL, 0, FIELD3D_ID, buf, 32U, &props, &style, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(BBOX_W), CLAY_SIZING_FIXED(BBOX_H)}}}, true,
+                               NULL);
+    }
+    if (modal) {
+        nt_ui_modal_open(s_fx.ctx, OVERLAY3D_ID);
+    }
+    nt_ui_modal_style_t ms = nt_ui_modal_style_defaults();
+    ms.ease_speed = 0.0F;
+    if (nt_ui_modal_begin(s_fx.ctx, OVERLAY3D_ID, &ms, NULL)) {
+        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(100), CLAY_SIZING_FIXED(60)}}}) {}
+        nt_ui_modal_end(s_fx.ctx);
+    }
+    nt_ui_end(s_fx.ctx);
+}
+
+static void test_3d_modal_takes_the_focus_of_a_field_under_it(void) {
+    ui_walker_fixture_fill_stub_font(&s_fx);
+    char buf[32] = {0};
+    const nt_pointer_t idle = {.x = 10.0F, .y = 10.0F, .active = true};
+    field_under_modal_frame(idle, false, buf);
+    field_under_modal_frame(idle, false, buf);
+    nt_pointer_t p = press_3d(BBOX_X + 20.0F, BBOX_Y + 20.0F);
+    field_under_modal_frame(p, false, buf);
+    p.buttons[NT_BUTTON_LEFT] = (nt_button_state_t){.is_released = true};
+    field_under_modal_frame(p, false, buf);
+    TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, FIELD3D_ID));
+    for (int f = 0; f < 3; ++f) {
+        field_under_modal_frame(idle, true, buf);
+    }
+    TEST_ASSERT_FALSE_MESSAGE(nt_ui_input_focused(s_fx.ctx, FIELD3D_ID), "the modal over the field takes its focus");
+    TEST_ASSERT_TRUE_MESSAGE(nt_ui_wants_keyboard(s_fx.ctx), "and the keys");
 }
 
 int main(void) {
@@ -426,8 +509,10 @@ int main(void) {
     RUN_TEST(test_raycast_hit_perspective);
     RUN_TEST(test_occlusion_blocks_widget_beyond_cutoff);
     RUN_TEST(test_occlusion_allows_widget_within_cutoff);
-    RUN_TEST(test_popup_over_a_held_press_keeps_the_3d_capture);
+    RUN_TEST(test_3d_overlay_drops_a_capture_under_it);
+    RUN_TEST(test_3d_record_under_an_overlay_stops_the_ray);
     RUN_TEST(test_modal_3d_gates_only_its_surface);
     RUN_TEST(test_popup_3d_closes_on_a_ray_past_its_surface);
+    RUN_TEST(test_3d_modal_takes_the_focus_of_a_field_under_it);
     return UNITY_END();
 }

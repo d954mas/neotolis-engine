@@ -45,7 +45,7 @@ static inline void sc_step_dt(sc_t *s, float dt, float x, float y, int press, in
     s->frame(s->game);
     nt_ui_end(s->ctx);
     s->wants_keyboard = nt_ui_wants_keyboard(s->ctx);
-    s->wants_pointer = nt_ui_wants_pointer(s->ctx);
+    s->wants_pointer = nt_ui_wants_pointer(s->ctx, 0U);
 }
 
 /* One 60 Hz frame with the pointer at (x, y) and a wheel delta; `press` / `release` as in sc_step_dt. */

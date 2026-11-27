@@ -649,7 +649,33 @@ static void test_popup_closing_nested_keeps_the_parent_inert(void) {
 static void test_popup_press_off_every_record_dismisses(void) {
     inert_open_fully(NESTED_NONE);
     TEST_ASSERT_FALSE(inert_frame(ui_fx_pointer(-20.0F, -20.0F, true, true, false), true, NESTED_NONE).open);
-    TEST_ASSERT_TRUE(nt_ui_wants_pointer(s_fx.ctx));
+    TEST_ASSERT_TRUE(nt_ui_wants_pointer(s_fx.ctx, 0U));
+}
+
+/* ---- In 2D the top's catcher covers the whole window, letterbox bars included: a pointer off every other record
+ *      targets it, so the UI wants it. ---- */
+static void test_popup_catcher_targets_off_every_record(void) {
+    inert_open_fully(NESTED_NONE);
+    (void)inert_frame(ui_fx_pointer(-20.0F, -20.0F, false, false, false), true, NESTED_NONE);
+    TEST_ASSERT_EQUAL_UINT32(nt_ui_internal_popup_catcher_id(INERT_POPUP), nt_ui_pointer_hot(s_fx.ctx, 0U).id);
+    TEST_ASSERT_TRUE(nt_ui_wants_pointer(s_fx.ctx, 0U));
+}
+
+/* ---- The top closes on a first press of any pointer outside it, not only the primary's. ---- */
+static void test_popup_closes_on_another_pointers_press(void) {
+    inert_open_fully(NESTED_NONE);
+    nt_pointer_t ps[2] = {ui_fx_pointer(5.0F, 5.0F, false, false, false), ui_fx_pointer(700.0F, 500.0F, true, true, false)};
+    ps[1].type = NT_POINTER_TOUCH;
+    ps[1].id = 3U;
+    nt_ui_popup_style_t st = nt_ui_popup_style_defaults();
+    st.ease_speed = 8.0F;
+    const nt_ui_popup_anchor_t anc = {.x = 300.0F, .y = 200.0F, .prefer_side = NT_UI_POPUP_BELOW};
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = UI_FX_VIEW_W, .layout_h = UI_FX_VIEW_H, .dt = UI_FX_DT, .pointers = ps, .pointer_count = 2, .primary = 0});
+    if (nt_ui_popup_begin(s_fx.ctx, INERT_POPUP, &st, &anc, NULL)) {
+        nt_ui_popup_end(s_fx.ctx);
+    }
+    nt_ui_end(s_fx.ctx);
+    TEST_ASSERT_FALSE(nt_ui_is_open(s_fx.ctx, INERT_POPUP));
 }
 
 #define GAME_WINDOW 0x50A0D1U
@@ -758,6 +784,7 @@ static void test_popup_root_overlay_out_of_the_bands_asserts(void) {
             nt_ui_popup_open(s_fx.ctx, POP_A);
             NT_TEST_EXPECT_ASSERT((void)nt_ui_popup_begin(s_fx.ctx, POP_A, &st, &anc, NULL)); /* asserts before the push */
             TEST_ASSERT_NOT_NULL(strstr(nt_test_assert_last_expr, "enclosing floating must lie under overlay_zband_stride"));
+            nt_ui_close(s_fx.ctx, POP_A); /* the trapped begin left it marked declared without its catcher */
         }
         nt_ui_end(s_fx.ctx);
     }
@@ -772,6 +799,8 @@ int main(void) {
     RUN_TEST(test_popup_closing_ends_a_held_press);
     RUN_TEST(test_popup_closing_nested_keeps_the_parent_inert);
     RUN_TEST(test_popup_press_off_every_record_dismisses);
+    RUN_TEST(test_popup_catcher_targets_off_every_record);
+    RUN_TEST(test_popup_closes_on_another_pointers_press);
     RUN_TEST(test_popup_root_overlay_is_a_top_layer);
     RUN_TEST(test_popup_reopened_during_its_fade_goes_on_top);
     RUN_TEST(test_popup_root_overlay_out_of_the_bands_asserts);

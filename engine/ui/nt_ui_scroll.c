@@ -301,16 +301,14 @@ static gesture_link_t gesture_chain(nt_ui_context_t *ctx, uint32_t id) {
     return (gesture_link_t){0};
 }
 
-#if NT_UI_DEBUG_TOOLS
-static bool gesture_is_pane(nt_ui_context_t *ctx, uint32_t id) {
-    const gesture_link_t link = gesture_link(ctx, id);
-    return link.s != NULL && (link.s->flags & NT_UI_SCROLL_FLAG_PANE) != 0U;
-}
-#endif
-
 /* How a hit on a registry record counts: a scroll's own id is its surface, hit only while it can
  * move (a fitting list is see-through); an inspector pane wins outright over any game record. */
 nt_ui_hit_kind_t nt_ui_internal_record_kind(nt_ui_context_t *ctx, uint32_t id) {
+#if NT_UI_DEBUG_TOOLS
+    if (id == nt_ui_internal_inspector_root_id()) {
+        return NT_UI_HIT_PANE; /* the sidebar: under its panes, over everything else */
+    }
+#endif
     const gesture_link_t link = gesture_link(ctx, id);
     if (link.s == NULL) {
         return NT_UI_HIT; /* not a scroll declared last frame: an ordinary record */
@@ -352,7 +350,7 @@ static bool gesture_owned(const nt_ui_context_t *ctx, uint32_t id) {
 static void scroll_take(nt_ui_context_t *ctx, uint32_t id, uint32_t self) {
     for (uint32_t j = 0; j < ctx->frame_pointer_count; ++j) {
         if (j != self && ctx->captures[j].active_id == id) {
-            ctx->captures[j].active_id = 0U;
+            nt_ui_internal_capture_drop(&ctx->captures[j]);
             ctx->captures[j].pending_scroll = 0U;
         }
     }
@@ -416,6 +414,7 @@ static void gesture_claim(nt_ui_context_t *ctx, uint32_t i, gesture_link_t link,
     }
     link.s->flags &= (uint8_t)~NT_UI_SCROLL_FLAG_SCROLL_TO;
     link.s->bar_axis = 0U;
+    nt_ui_internal_capture_drop(cap); /* the pressed widget's tap ends: its step reads released_now, no click */
     cap->active_id = link.id;
     cap->hold_live = false; /* a claim is not a press: the slot's hold belongs to an earlier one */
 }
@@ -447,50 +446,53 @@ static void gesture_decide(nt_ui_context_t *ctx, uint32_t i, const float slop[2]
     cap->pending_scroll = 0U;
     if (win.s != NULL) {
         gesture_claim(ctx, i, win, d, slop);
+    } else if (cap->active_id != ctx->focused_input_id) {
+        ctx->focused_input_id = 0U; /* the pressed widget's own drag took the press: it blurs as a press off the field */
     }
 }
 
-/* This frame's wheel goes, per axis, to the first scroll on the hovered chain that can move on it. */
-static void gesture_route_wheel(nt_ui_context_t *ctx, uint32_t i, gesture_link_t hover) {
-    for (gesture_link_t link = hover; link.s != NULL; link = gesture_chain(ctx, clip_parent(ctx, link.id))) {
+/* The wheel latch (spec: "Input ownership", Wheel): a latched scroll keeps every tick, also at its end, so content
+ * sliding under a resting cursor never steals a flick; an unlatched axis goes to the target's chain. */
+static void gesture_route_wheel(nt_ui_context_t *ctx, uint32_t i, const float slop[2]) {
+    nt_ui_capture_t *cap = &ctx->captures[i];
+    const nt_pointer_t *p = &ctx->frame_pointers[i];
+    uint32_t *owner = ctx->wheel_owner[i];
+    cap->wheel_idle += ctx->frame_dt;
+    const float moved[2] = {p->x - cap->wheel_anchor[0], p->y - cap->wheel_anchor[1]};
+    const bool seen = p->active && ctx->pointer_occlusion[i] > 0.0F;
+    const bool hold = seen && cap->wheel_idle <= ctx->gesture_wheel_latch_secs && gesture_crossing(moved, slop, NT_UI_DRAG_X | NT_UI_DRAG_Y) == 0.0F && !nt_ui_internal_game_gesture(ctx, i);
+    for (int a = 0; a < 2; ++a) {
+        if (owner[a] != 0U && (!hold || !nt_ui_internal_owned_by_top(ctx, owner[a]) || (gesture_link(ctx, owner[a]).axes & (1U << a)) == 0U)) {
+            owner[a] = 0U;
+        }
+    }
+    const float wheel[2] = {p->wheel_dx, p->wheel_dy};
+    if (wheel[0] == 0.0F && wheel[1] == 0.0F) {
+        return;
+    }
+    if (owner[0] == 0U && owner[1] == 0U) {
+        cap->wheel_anchor[0] = p->x;
+        cap->wheel_anchor[1] = p->y;
+    }
+    cap->wheel_idle = 0.0F;
+    for (gesture_link_t link = gesture_chain(ctx, ctx->pointer_hot[i].id); link.s != NULL; link = gesture_chain(ctx, clip_parent(ctx, link.id))) {
         for (int a = 0; a < 2; ++a) {
-            if (ctx->wheel_owner[i][a] == 0U && (link.axes & (1U << a)) != 0U) {
-                ctx->wheel_owner[i][a] = link.id;
+            if (wheel[a] != 0.0F && owner[a] == 0U && (link.axes & (1U << a)) != 0U) {
+                owner[a] = link.id;
             }
         }
     }
 }
 
 /* The chain under a pointer: where its wheel or its press starts. */
-static gesture_link_t gesture_hover(nt_ui_context_t *ctx, uint32_t i) {
-    gesture_link_t hover = gesture_chain(ctx, ctx->pointer_hot[i].id);
-#if NT_UI_DEBUG_TOOLS
-    if (i == ctx->frame_primary && ctx->inspector_pointer_consumed && (hover.s == NULL || (hover.s->flags & NT_UI_SCROLL_FLAG_PANE) == 0U)) {
-        hover = (gesture_link_t){0}; /* the sidebar's pointer reaches only its panes */
-    }
-#endif
-    return hover;
-}
+static gesture_link_t gesture_hover(nt_ui_context_t *ctx, uint32_t i) { return gesture_chain(ctx, ctx->pointer_hot[i].id); }
 
 void nt_ui_internal_scroll_arbitrate(nt_ui_context_t *ctx) {
     const float slop[2] = {NT_UI_DRAG_SLOP_DP * ctx->layout_per_dp[0], NT_UI_DRAG_SLOP_DP * ctx->layout_per_dp[1]};
     for (uint32_t i = 0; i < ctx->frame_pointer_count; ++i) {
         nt_ui_capture_t *cap = &ctx->captures[i];
         const nt_button_state_t btn = ctx->frame_pointers[i].buttons[NT_BUTTON_LEFT];
-#if NT_UI_DEBUG_TOOLS
-        if (i == ctx->frame_primary && ctx->inspector_pointer_consumed) {
-            /* The sidebar owns this pointer: only its panes scroll, and a game drag that entered it ends. */
-            if (gesture_link(ctx, cap->active_id).s != NULL && !gesture_is_pane(ctx, cap->active_id)) {
-                cap->active_id = 0U;
-            }
-            if (!gesture_is_pane(ctx, cap->pending_scroll)) {
-                cap->pending_scroll = 0U;
-            }
-        }
-#endif
-        if (ctx->frame_pointers[i].wheel_dx != 0.0F || ctx->frame_pointers[i].wheel_dy != 0.0F) {
-            gesture_route_wheel(ctx, i, gesture_hover(ctx, i));
-        }
+        gesture_route_wheel(ctx, i, slop);
         if (btn.is_pressed) {
             gesture_press(ctx, i, gesture_hover(ctx, i));
             if (!btn.is_down) {
@@ -788,12 +790,15 @@ void nt_ui_scroll_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
     }
 
     for (uint32_t i = 0; ctx->inert_from != 0U && i < ctx->frame_pointer_count; ++i) {
-        /* Inert: the scroll drops the gesture it holds and takes no new one. */
+        /* Inert: the scroll drops the gesture and the wheel latch it holds and takes no new one. */
         if (ctx->captures[i].active_id == id) {
             ctx->captures[i].active_id = 0U;
         }
         if (ctx->captures[i].pending_scroll == id) {
             ctx->captures[i].pending_scroll = 0U;
+        }
+        for (int a = 0; a < 2; ++a) {
+            ctx->wheel_owner[i][a] = (ctx->wheel_owner[i][a] == id) ? 0U : ctx->wheel_owner[i][a];
         }
     }
     const bool fresh_state = nt_ui_state_find(ctx, id) == NULL;

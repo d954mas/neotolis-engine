@@ -348,7 +348,7 @@ typedef struct {
     uint32_t primary;             /* anchors menus, the Clay feed and the inspector */
     nt_ui_viewport_t viewport;    /* device content rect (nt_ui_viewport_from_scale); zero size = identity (px_per_dp 0 = 1) */
     const float *view_proj;       /* 3D ctx: mat4 (above); 2D ctx: NULL */
-    const float *occlusion;       /* 3D ctx: per-pointer max ray distance, e.g. the nearest world hit; NULL = none */
+    const float *occlusion;       /* per pointer: 3D the max ray distance, e.g. the nearest world hit; 0 hides it (2D and 3D); NULL = none */
 } nt_ui_frame_desc_t;
 
 void nt_ui_begin(nt_ui_context_t *ctx, const nt_ui_frame_desc_t *frame);
@@ -551,11 +551,11 @@ nt_ui_bbox_t nt_ui_get_bbox(const nt_ui_context_t *ctx, uint32_t id);
  * owning (or first hovering) pointer. */
 /* This-frame pointer vs PREVIOUS-frame bbox (1-frame IM lag). */
 typedef struct {
-    bool hovered;           /* pointer over bbox (transform-aware) */
+    bool hovered;           /* the pointer's target is this widget; for its holder, the target lies in it */
     bool pressed;           /* currently captured (held) */
     bool pressed_now;       /* press began this frame */
-    bool released_now;      /* released this frame (even off-widget = cancel) */
-    bool clicked;           /* released OVER the widget -> one-shot */
+    bool released_now;      /* the capture ended this frame: its release (also off-widget), or once when nt_ui_begin dropped it */
+    bool clicked;           /* released while hovered, not cancelled -> one-shot */
     bool double_clicked;    /* step only: 2nd press within the dbl window+radius -> one-shot */
     float hold_secs;        /* seconds since the press while the capturing pointer stays over the widget; 0 otherwise */
     float hold_prev_secs;   /* hold_secs of the previous frame */
@@ -565,6 +565,10 @@ typedef struct {
     uint32_t pointer_id;    /* which pointer captured (multitouch) */
     bool gesture_pending;   /* an enclosing scroll may still take this press: hold off value changes; a pending release is a tap */
     float distance;         /* 3D ctx: world distance (near-plane-relative) to this widget; 0 in 2D */
+    bool right_clicked;     /* the release of a gesture whose first press was the right button, with this widget the target */
+    bool drag_over;         /* a drag with a payload (another widget's capture) has this widget as its target */
+    bool dropped;           /* that drag's release here, not cancelled */
+    uint32_t drag_payload;  /* the payload of that drag while drag_over; 0 otherwise */
 } nt_ui_interaction_t;
 
 /* Front-most interactive record under a pointer, resolved per frame (3D: nearest; then tree root, then record). */
@@ -585,10 +589,10 @@ nt_ui_interaction_t nt_ui_query_interaction(nt_ui_context_t *ctx, uint32_t id);
 typedef struct {
     const int16_t *pad_lrtb; /* inflates the bbox BEFORE the inverse-affine (touch targets); NULL = none, each >= 0 */
     uint8_t drag_axes;       /* NT_UI_DRAG_X | NT_UI_DRAG_Y; 0 = taps only (a scroll may take the drag) */
+    uint32_t drag_payload;   /* non-zero: this widget's capture is a drag its target reads (drag_over, dropped); 0 = none */
 } nt_ui_step_desc_t;
 
-/* MUTATING — call ONCE per widget per frame from the widget's begin. desc NULL = unpadded, no drag axes.
- * Sidebar-consumed pointer returns zeroed struct (see nt_ui_inspector_pointer_consumed). */
+/* MUTATING — call ONCE per widget per frame from the widget's begin. desc NULL = unpadded, no drag axes. */
 nt_ui_interaction_t nt_ui_step(nt_ui_context_t *ctx, uint32_t id, const nt_ui_step_desc_t *desc);
 
 /* One-shot long press: true on the frame the hold crosses secs > 0. secs must stay constant for the
@@ -605,20 +609,22 @@ float nt_ui_hold_progress(const nt_ui_interaction_t *in, float secs);
 #endif
 
 /* App-wide gesture constants: the double-click window (secs) and the move radius (dp) within which a
- * second press still counts as a double-click. Hold/long-press is NOT cancelled by movement — only by
- * leaving the widget's hitbox. Asserts each is finite and >= 0. Defaults: 0.5 s, 16 dp. */
-void nt_ui_set_gesture_constants(nt_ui_context_t *ctx, float dbl_window_secs, float move_radius_dp);
+ * second press still counts as a double-click, and the wheel latch time (secs): a wheel tick within it of the
+ * previous one stays on the scroll that took that one. Hold/long-press is NOT cancelled by movement — only by
+ * leaving the widget's hitbox. All in UI time. Asserts each is finite and >= 0. Defaults: 0.5 s, 16 dp, 0.5 s. */
+void nt_ui_set_gesture_constants(nt_ui_context_t *ctx, float dbl_window_secs, float move_radius_dp, float wheel_latch_secs);
 
 /* Inert occluder: enters id into the interactive registry so it wins next-frame front-most
  * arbitration over widgets behind it (the pointer can't leak through), but never captures or
  * clicks; nt_ui_query_interaction on it reads like an unstepped widget (hover and the press edge while
- * front-most, unpadded). Disabled widgets call this so a modal/overlay blocks input to whatever sits
+ * it is the target, over the area pad_lrtb gives it). Disabled widgets call this so a modal/overlay blocks input to whatever sits
  * underneath. pad_lrtb inflates the block area (NULL = none, asserts >= 0). */
 void nt_ui_block_pointer(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lrtb[4]);
 
-/* True while a pointer's gesture began on the UI (a left or right press on a widget, or anywhere while an overlay is up), up
- * to its release, or a pointer is over last frame's record. Decided at nt_ui_begin: read it after begin. */
-bool nt_ui_wants_pointer(const nt_ui_context_t *ctx);
+/* Pointer `pointer_index` of the frame desc is the UI's: its gesture's first press had a target (a widget, a blocker, a
+ * scroll, an open overlay's catcher), up to the release of its last button; a free pointer has a target. Decided at
+ * nt_ui_begin: read it after begin. */
+bool nt_ui_wants_pointer(const nt_ui_context_t *ctx, uint32_t pointer_index);
 
 /* True when the UI owns this frame's keys: a focused text field, else last frame's live top overlay (a modal, a
  * menu, a combo list). Fixed at nt_ui_begin, so read it after begin; the game gates its hotkeys on it. */

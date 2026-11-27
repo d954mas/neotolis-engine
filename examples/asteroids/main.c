@@ -182,7 +182,7 @@ static camera_drag_t s_camera_drag[NT_INPUT_MAX_POINTERS], s_light_drag[NT_INPUT
 static float s_key_elapsed[NT_KEY_COUNT];
 static bool s_key_active[NT_KEY_COUNT];
 static float s_pan_pressed_world[NT_INPUT_MAX_POINTERS][3];
-static uint8_t s_pointer_owner[NT_INPUT_MAX_POINTERS][NT_BUTTON_MAX];
+static bool s_scene_held_off[NT_INPUT_MAX_POINTERS]; /* a reset or a modal took this gesture from the scene */
 static struct {
     uint32_t slots[2], ids[2], count;
     float span;
@@ -1159,6 +1159,17 @@ static void format_gpu_time(char *text, size_t capacity) {
 #endif
 }
 
+/* A drag in progress would undo a reset from its press orientation, so the scene drops it until its buttons are up. */
+static void hold_off_scene_gestures(void) {
+    for (uint32_t p = 0; p < NT_INPUT_MAX_POINTERS; p++) {
+        bool down = false;
+        for (uint32_t b = 0; b < NT_BUTTON_MAX; b++) {
+            down = down || g_nt_input.pointers[p].buttons[b].is_down;
+        }
+        s_scene_held_off[p] = down;
+    }
+}
+
 static void reset_camera_input(bool reset_light) {
     memset(&s_touch, 0, sizeof(s_touch));
     memset(s_key_active, 0, sizeof(s_key_active));
@@ -1167,11 +1178,7 @@ static void reset_camera_input(bool reset_light) {
     s_zoom_until = 0;
     s_zoom_factor = 1;
     s_zoom_direction = 0;
-    for (uint32_t p = 0; p < NT_INPUT_MAX_POINTERS; p++) {
-        for (uint32_t b = 0; b < NT_BUTTON_MAX; b++) {
-            s_pointer_owner[p][b] = g_nt_input.pointers[p].buttons[b].is_down ? 2U : 0U;
-        }
-    }
+    hold_off_scene_gestures();
     if (reset_light) {
         s_light = s_initial_light;
     } else {
@@ -1489,6 +1496,12 @@ static void build_ui(void) {
     const bool narrow = width < 720;
     const bool compact_status = width < 900;
     const float status_height = compact_status ? 76.0F : 56.0F;
+    /* The compact layout shows the settings panel as a modal. Opened before begin, it declares in the frame it opens,
+     * and its own Esc or backdrop close (made in begin, reported by its begin) is not undone by the open request. */
+    const uint32_t modal_id = CLAY_ID("asteroids.compact_modal").id;
+    if (narrow && s_ui_panel_open && !nt_ui_is_open(s_ui, modal_id)) {
+        nt_ui_modal_open(s_ui, modal_id);
+    }
     nt_ui_begin(s_ui, &(nt_ui_frame_desc_t){.layout_w = width,
                                             .layout_h = height,
                                             .dt = g_nt_app.dt,
@@ -1544,9 +1557,6 @@ static void build_ui(void) {
                 }
             }
             if (narrow) {
-                /* The compact layout shows the settings panel as a modal. Its own Esc or backdrop close (made in
-                 * nt_ui_begin, reported by its begin) clears the panel flag first; then the flag drives it. */
-                const uint32_t modal_id = CLAY_ID("asteroids.compact_modal").id;
                 nt_ui_popup_info_t modal = {0};
                 s_ui_modal_shown = nt_ui_modal_begin(s_ui, modal_id, &s_ui_modal, &modal);
                 if (modal.reason == NT_UI_POPUP_CLOSE_ESC || modal.reason == NT_UI_POPUP_CLOSE_OUTSIDE) {
@@ -1558,12 +1568,8 @@ static void build_ui(void) {
                     }
                     nt_ui_modal_end(s_ui);
                 }
-                if (s_ui_panel_open != nt_ui_is_open(s_ui, modal_id)) {
-                    if (s_ui_panel_open) {
-                        nt_ui_modal_open(s_ui, modal_id);
-                    } else {
-                        nt_ui_close(s_ui, modal_id);
-                    }
+                if (!s_ui_panel_open && nt_ui_is_open(s_ui, modal_id)) {
+                    nt_ui_close(s_ui, modal_id);
                 }
             }
         }
@@ -1583,29 +1589,22 @@ static void draw_ui(void) {
     nt_ui_walk(s_ui, &target);
 }
 
-/* A press owns its complete drag. UI-origin drags cannot enter the scene after leaving a panel. */
+/* The UI decides whose gesture this is (a UI drag never enters the scene); the scene also skips a gesture a reset
+ * or a modal took, and the wheel under a modal that is opening or fading. */
 static nt_pointer_t scene_pointer(uint32_t index) {
     nt_pointer_t pointer = g_nt_input.pointers[index];
-    bool over_ui = false;
-    if (s_ui_built) {
-        bool owned_by_ui = false;
-        for (uint32_t b = 0; b < NT_BUTTON_MAX; b++) {
-            owned_by_ui = owned_by_ui || s_pointer_owner[index][b] == 2U;
-        }
-        over_ui = nt_ui_pointer_hot(s_ui, index).id != 0 || s_ui_modal_shown || (owned_by_ui && nt_ui_wants_pointer(s_ui));
-    }
+    bool held = false;
     for (uint32_t b = 0; b < NT_BUTTON_MAX; b++) {
-        if (pointer.buttons[b].is_pressed) {
-            s_pointer_owner[index][b] = over_ui ? 2U : 1U;
-        }
-        if (!pointer.active || !pointer.buttons[b].is_down) {
-            s_pointer_owner[index][b] = 0;
-        }
-        if (s_pointer_owner[index][b] != 1U) {
+        held = held || (pointer.buttons[b].is_down && !pointer.buttons[b].is_pressed);
+    }
+    if (!held) {
+        s_scene_held_off[index] = false; /* free, a release or a new gesture: the one taken has ended */
+    }
+    const bool off = s_scene_held_off[index] || (s_ui_built && (s_ui_modal_shown || nt_ui_wants_pointer(s_ui, index)));
+    if (off) {
+        for (uint32_t b = 0; b < NT_BUTTON_MAX; b++) {
             pointer.buttons[b] = (nt_button_state_t){0};
         }
-    }
-    if (over_ui) {
         pointer.wheel_dx = 0;
         pointer.wheel_dy = 0;
     }
@@ -1849,14 +1848,12 @@ static void handle_input(float dt) {
     const bool scene_blocked = (s_ui_modal_shown || g_nt_window.fb_width == 0 || g_nt_window.fb_height == 0);
     for (uint32_t p = 0; p < NT_INPUT_MAX_POINTERS; p++) {
         scene_pointers[p] = scene_pointer(p);
-        if (scene_blocked) {
-            for (uint32_t b = 0; b < NT_BUTTON_MAX; b++) {
-                s_pointer_owner[p][b] = g_nt_input.pointers[p].buttons[b].is_down ? 2U : 0U;
-                scene_pointers[p].buttons[b] = (nt_button_state_t){0};
-            }
-        }
     }
     if (scene_blocked) {
+        hold_off_scene_gestures();
+        for (uint32_t p = 0; p < NT_INPUT_MAX_POINTERS; p++) {
+            memset(scene_pointers[p].buttons, 0, sizeof(scene_pointers[p].buttons));
+        }
         memset(&s_touch, 0, sizeof(s_touch));
         memset(s_key_active, 0, sizeof(s_key_active));
         memset(s_key_elapsed, 0, sizeof(s_key_elapsed));
@@ -1878,6 +1875,12 @@ static void handle_input(float dt) {
     }
     if (s_ui_built && nt_ui_wants_keyboard(s_ui)) {
         return; /* the UI owns this frame's keys: the modal, the Esc that closed it */
+    }
+    /* Esc closes the settings first, also in the frames after F3 before the compact modal takes the keys. */
+    const bool esc = nt_input_key_is_pressed(NT_KEY_ESCAPE);
+    const bool esc_closes_panel = esc && s_ui_panel_open;
+    if (esc_closes_panel) {
+        s_ui_panel_open = false;
     }
     for (uint32_t i = 0; i < 10; i++) {
         if (!ctrl && !alt && nt_input_key_is_pressed((nt_key_t)(NT_KEY_0 + (int)i))) {
@@ -1909,7 +1912,7 @@ static void handle_input(float dt) {
         s_fullscreen = !s_fullscreen;
         nt_window_set_fullscreen(s_fullscreen);
     }
-    if (nt_input_key_is_pressed(NT_KEY_ESCAPE) || (ctrl && nt_input_key_is_pressed(NT_KEY_Q))) {
+    if ((esc && !esc_closes_panel) || (ctrl && nt_input_key_is_pressed(NT_KEY_Q))) {
         nt_app_quit();
     }
 #endif

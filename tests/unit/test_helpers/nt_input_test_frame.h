@@ -20,6 +20,8 @@ static inline nt_input_event_t nt_test_contact_move(uint32_t id, float x, float 
 static inline nt_input_event_t nt_test_contact_up(uint32_t id) { return (nt_input_event_t){.kind = NT_INPUT_EV_CONTACT_UP, .contact = {.id = id}}; }
 static inline nt_input_event_t nt_test_wheel(float dx, float dy) { return (nt_input_event_t){.kind = NT_INPUT_EV_WHEEL, .wheel = {dx, dy}}; }
 static inline nt_input_event_t nt_test_focus_lost(void) { return (nt_input_event_t){.kind = NT_INPUT_EV_FOCUS_LOST}; }
+static inline nt_input_event_t nt_test_contact_cancel(uint32_t id) { return (nt_input_event_t){.kind = NT_INPUT_EV_POINTER_CANCEL, .contact = {.id = id, .type = NT_POINTER_TOUCH}}; }
+static inline nt_input_event_t nt_test_mouse_cancel(void) { return (nt_input_event_t){.kind = NT_INPUT_EV_POINTER_CANCEL, .contact = {.type = NT_POINTER_MOUSE}}; }
 
 /* Publish a frame with exactly one fresh press of key and nothing else held. */
 static inline void nt_input_test_key_press(nt_key_t key) {

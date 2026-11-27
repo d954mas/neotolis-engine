@@ -332,10 +332,8 @@ static void test_overlay_noop_without_highlight(void) {
 }
 
 /* ---- Test 13: inspector sidebar consumes pointer ----
- * When inspector_active and pointer is in the right-attached sidebar footprint
- * (panel_width wide), nt_ui_step returns zeroed for every user widget
- * AND nt_ui_inspector_pointer_consumed must be true
- * AND nt_ui_wants_pointer must be true. */
+ * The sidebar is a record above everything: a pointer over it targets the sidebar, so a user widget
+ * under it reads nothing, nt_ui_inspector_pointer_consumed is true and nt_ui_wants_pointer too. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_inspector_intercepts_pointer_over_sidebar(void) {
     nt_ui_inspector_set_active(s_fx.ctx, true);
@@ -370,10 +368,10 @@ static void test_inspector_intercepts_pointer_over_sidebar(void) {
     CLAY({.id = CLAY_ID("hidden_btn"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = btn_x, .y = btn_y}}, .layout = {.sizing = {CLAY_SIZING_FIXED(btn_w), CLAY_SIZING_FIXED(btn_h)}}}) {
     }
 
-    /* The flag is set in nt_ui_begin (coord-based, frame-1 safe). */
+    /* Frame 1 declared the sidebar, so its record is the pointer's target. */
     TEST_ASSERT_TRUE(nt_ui_inspector_pointer_consumed(s_fx.ctx));
-    TEST_ASSERT_EQUAL_UINT32(nt_ui_id("hidden_btn"), nt_ui_pointer_hot(s_fx.ctx, 0U).id); /* hot under the sidebar... */
-    TEST_ASSERT_FALSE(nt_ui_hovered_within(s_fx.ctx, nt_ui_id("hidden_btn")));            /* ...but the sidebar has the pointer */
+    TEST_ASSERT_EQUAL_UINT32(Clay__HashString(CLAY_STRING("ntInsp_Root"), 0, 0).id, nt_ui_pointer_hot(s_fx.ctx, 0U).id);
+    TEST_ASSERT_FALSE(nt_ui_hovered_within(s_fx.ctx, nt_ui_id("hidden_btn")));
 
     /* Both the unpadded and padded query MUST return zeroed: no hover, no
      * press, no clicked, no capture. */
@@ -394,9 +392,34 @@ static void test_inspector_intercepts_pointer_over_sidebar(void) {
 
     /* wants_pointer must be TRUE even though no user widget recorded hover,
      * so the game can suppress its world-input. */
-    TEST_ASSERT_TRUE(nt_ui_wants_pointer(s_fx.ctx));
+    TEST_ASSERT_TRUE(nt_ui_wants_pointer(s_fx.ctx, 0U));
 
     nt_ui_end(s_fx.ctx);
+}
+
+/* A capture is a gesture's, not the pointer's position: a press that started on a game widget keeps it
+ * while the drag crosses the sidebar, without hover, and its release there reports released_now, no click. */
+static void sidebar_drag_frame(nt_pointer_t p, nt_ui_interaction_t *out) {
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &p, .pointer_count = 1});
+    CLAY({.id = CLAY_ID("drag_src"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = 100.0F, .y = 200.0F}}, .layout = {.sizing = {CLAY_SIZING_FIXED(160), CLAY_SIZING_FIXED(48)}}}) {
+        *out = nt_ui_step(s_fx.ctx, nt_ui_id("drag_src"), NULL);
+    }
+    nt_ui_end(s_fx.ctx);
+}
+
+static void test_inspector_sidebar_keeps_a_capture_dragged_over_it(void) {
+    nt_ui_inspector_set_active(s_fx.ctx, true);
+    nt_ui_interaction_t in = {0};
+    sidebar_drag_frame(ui_fx_pointer(180.0F, 224.0F, false, false, false), &in);
+    sidebar_drag_frame(ui_fx_pointer(180.0F, 224.0F, true, true, false), &in);
+    TEST_ASSERT_TRUE(in.pressed_now);
+    sidebar_drag_frame(ui_fx_pointer(600.0F, 224.0F, true, false, false), &in);
+    TEST_ASSERT_TRUE(in.pressed);
+    TEST_ASSERT_FALSE(in.hovered);
+    TEST_ASSERT_EQUAL_UINT32(nt_ui_id("drag_src"), nt_ui_test_capture_active_id(s_fx.ctx, 0));
+    sidebar_drag_frame(ui_fx_pointer(600.0F, 224.0F, false, false, true), &in);
+    TEST_ASSERT_TRUE(in.released_now);
+    TEST_ASSERT_FALSE(in.clicked);
 }
 
 /* ---- Test 14: pointer OUTSIDE the sidebar still works normally ----
@@ -1938,36 +1961,30 @@ static void test_inspector_metrics_zero_init_uses_defaults(void) {
     TEST_ASSERT_EQUAL_UINT8(16U, s_fx.ctx->inspector_metrics.indent_width);
 }
 
-/* set_metrics flows panel_width into the pointer-consume gate. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+/* set_metrics flows panel_width into the sidebar record, which takes the pointer from the frame after it
+ * is declared at that width. */
+static bool consumed_frame(float px) {
+    nt_pointer_t p = ui_fx_pointer(px, 100.0F, false, false, false);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &p, .pointer_count = 1});
+    const bool consumed = nt_ui_inspector_pointer_consumed(s_fx.ctx);
+    nt_ui_end(s_fx.ctx);
+    return consumed;
+}
+
 static void test_inspector_metrics_set_changes_input_consume_gate(void) {
     nt_ui_inspector_set_active(s_fx.ctx, true);
-    const float screen_w = 800.0F;
-    const float screen_h = 600.0F;
-
+    TEST_ASSERT_FALSE_MESSAGE(consumed_frame(420.0F), "the sidebar is a record from the frame after its first declaration");
     /* Default panel_width = 400 -> sidebar covers x=400..800. x=420 is INSIDE. */
-    nt_pointer_t p_default = ui_fx_pointer(420.0F, 100.0F, false, false, false);
-    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = screen_w, .layout_h = screen_h, .pointers = &p_default, .pointer_count = 1});
-    TEST_ASSERT_TRUE_MESSAGE(nt_ui_inspector_pointer_consumed(s_fx.ctx), "default 400 panel: pointer at x=420 must be consumed");
-    nt_ui_end(s_fx.ctx);
+    TEST_ASSERT_TRUE_MESSAGE(consumed_frame(420.0F), "default 400 panel: pointer at x=420 must be consumed");
 
-    /* Shrink to 320 -> sidebar covers x=480..800. x=420 is now OUTSIDE. */
+    /* Shrink to 320 -> sidebar covers x=480..800. x=420 is OUTSIDE from the frame after. */
     nt_ui_inspector_metrics_t narrow = NT_UI_INSPECTOR_METRICS_DEFAULT;
     narrow.panel_width = 320.0F;
     nt_ui_inspector_set_metrics(s_fx.ctx, &narrow);
     TEST_ASSERT_TRUE(fabsf(s_fx.ctx->inspector_metrics.panel_width - 320.0F) <= 1e-3F);
-
-    nt_pointer_t p_after = ui_fx_pointer(420.0F, 100.0F, false, false, false);
-    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = screen_w, .layout_h = screen_h, .pointers = &p_after, .pointer_count = 1});
-    TEST_ASSERT_FALSE_MESSAGE(nt_ui_inspector_pointer_consumed(s_fx.ctx), "after set_metrics(panel_width=320): pointer at x=420 must NOT be consumed");
-    nt_ui_end(s_fx.ctx);
-
-    /* Sanity: a pointer INSIDE the narrowed panel still triggers. x=600 is
-     * inside 320 (covers 480..800) and was already inside default 400. */
-    nt_pointer_t p_in_narrow = ui_fx_pointer(600.0F, 100.0F, false, false, false);
-    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = screen_w, .layout_h = screen_h, .pointers = &p_in_narrow, .pointer_count = 1});
-    TEST_ASSERT_TRUE_MESSAGE(nt_ui_inspector_pointer_consumed(s_fx.ctx), "narrowed 320 panel: pointer at x=600 must be consumed");
-    nt_ui_end(s_fx.ctx);
+    (void)consumed_frame(420.0F);
+    TEST_ASSERT_FALSE_MESSAGE(consumed_frame(420.0F), "after set_metrics(panel_width=320): pointer at x=420 must NOT be consumed");
+    TEST_ASSERT_TRUE_MESSAGE(consumed_frame(600.0F), "narrowed 320 panel: pointer at x=600 must be consumed");
 }
 
 /* Invalid metrics must assert (death tests via the assert trap). */
@@ -2346,9 +2363,9 @@ static void inspector_over_game_scroll_frame(float screen_w, float screen_h, flo
     inspector_over_game_scroll_pointer_frame(screen_w, screen_h, &p);
 }
 
-/* A press on the game list that is still pending when the pointer enters the sidebar is not taken
- * by the game list: the sidebar's pointer only reaches inspector panes. */
-static void test_inspector_sidebar_drops_pending_game_drag(void) {
+/* A gesture belongs to its first press: a press on the game list that is still pending when the
+ * pointer enters the sidebar is the list's drag, as over any other record. */
+static void test_inspector_sidebar_keeps_a_pending_game_drag(void) {
     nt_ui_inspector_set_active(s_fx.ctx, true);
     const float screen_w = 1280.0F;
     const float screen_h = 800.0F;
@@ -2362,9 +2379,9 @@ static void test_inspector_sidebar_drops_pending_game_drag(void) {
     p.x = 1000.0F; /* into the sidebar, far past the slop on both axes */
     p.y = 360.0F;
     inspector_over_game_scroll_pointer_frame(screen_w, screen_h, &p);
-    TEST_ASSERT_NOT_EQUAL_UINT32(REPRO_GAME_SCROLL_ID, nt_ui_test_capture_active_id(s_fx.ctx, 0U));
+    TEST_ASSERT_EQUAL_UINT32(REPRO_GAME_SCROLL_ID, nt_ui_test_capture_active_id(s_fx.ctx, 0U));
     const nt_ui_scroll_state_t *game = (const nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, REPRO_GAME_SCROLL_ID);
-    TEST_ASSERT_TRUE(game->raw[1] == 0.0F);
+    TEST_ASSERT_TRUE(game->raw[1] != 0.0F);
 }
 
 static void test_inspector_pane_wins_over_game_container(void) {
@@ -2717,6 +2734,7 @@ int main(void) {
     RUN_TEST(test_inspector_many_widgets_safe);
     RUN_TEST(test_overlay_noop_without_highlight);
     RUN_TEST(test_inspector_intercepts_pointer_over_sidebar);
+    RUN_TEST(test_inspector_sidebar_keeps_a_capture_dragged_over_it);
     RUN_TEST(test_inspector_pointer_outside_sidebar_normal);
     RUN_TEST(test_inspector_walker_enumerates_user_tree);
     RUN_TEST(test_widget_register_padded_roundtrip);
@@ -2764,7 +2782,7 @@ int main(void) {
     RUN_TEST(test_inspector_truncated_pane_scroll_press_safe);
     RUN_TEST(test_inspector_tree_pane_scrolls_on_wheel_integration);
     RUN_TEST(test_inspector_pane_wins_over_game_container);
-    RUN_TEST(test_inspector_sidebar_drops_pending_game_drag);
+    RUN_TEST(test_inspector_sidebar_keeps_a_pending_game_drag);
     RUN_TEST(test_inspector_pane_drag_tracks_1to1);
     RUN_TEST(test_inspector_pane_drag_release_flings);
     RUN_TEST(test_inspector_pane_tap_still_selects_row);

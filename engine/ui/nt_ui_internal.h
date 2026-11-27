@@ -192,10 +192,23 @@ typedef struct {
      * none). Lives from the press edge to the release, independent of active_id (an empty-area press
      * has none). */
     uint32_t pending_scroll;
-    bool hold_live;    /* false once the pointer left the hitbox; only a new press restarts the hold */
-    bool ui_gesture;   /* the press landed on the UI: the gesture is the UI's until left and right are up */
-    uint8_t drag_axes; /* NT_UI_DRAG_* the capturing widget drags along itself (from its step desc) */
+    uint32_t ended_id;     /* the holder whose capture nt_ui_begin ended without its release: its step reads released_now once */
+    uint32_t drag_payload; /* the holder's step desc payload: its capture is a drag its target reads (0 = none) */
+    float wheel_idle;      /* UI time since this pointer's last wheel tick: a latch older than the latch time drops */
+    float wheel_anchor[2]; /* where the wheel latch started: moving past the drag slop drops it */
+    bool hold_live;        /* false once the pointer left the hitbox; only a new press restarts the hold */
+    bool ui_gesture;       /* the gesture's first press had a target: it is the UI's until every button is up */
+    bool right_press;      /* the gesture's first press was the right button */
+    uint8_t drag_axes;     /* NT_UI_DRAG_* the capturing widget drags along itself (from its step desc) */
 } nt_ui_capture_t;
+
+/* Ends a capture without its release (a cancel, an overlay, a scroll claim, a widget that did not step, a swallowed
+ * release): the holder's step reports released_now once, and its drag drops nothing. */
+static inline void nt_ui_internal_capture_drop(nt_ui_capture_t *cap) {
+    cap->ended_id = (cap->active_id != 0U) ? cap->active_id : cap->ended_id;
+    cap->active_id = 0U;
+    cap->drag_payload = 0U;
+}
 
 /* Lives at arena head; hot fields first. Per-ctx — no module globals. Field order is deliberately
  * hot-first for cache locality, not padding-optimal; a context is per-UI (not a dense array), so the
@@ -226,7 +239,7 @@ struct nt_ui_context {
      * here by alignment (after the 4B-aligned captures) to avoid adding struct padding. */
     nt_ui_hot_t pointer_hot[NT_INPUT_MAX_POINTERS];
     float pointer_occlusion[NT_INPUT_MAX_POINTERS]; /* max world ray distance; default +inf = no cutoff */
-    /* Per pointer and axis (0 = x, 1 = y): the scroll allowed to consume this frame's wheel. */
+    /* Per pointer and axis (0 = x, 1 = y): the scroll the wheel is latched to, which consumes this frame's wheel. */
     uint32_t wheel_owner[NT_INPUT_MAX_POINTERS][2];
     /* The top overlay read at nt_ui_begin from the stack: the highest live entry with a catcher (0 = none). */
     uint32_t overlay_top;
@@ -389,6 +402,7 @@ struct nt_ui_context {
     /* App-wide gesture constants, see nt_ui_set_gesture_constants. Grouped with the float block to avoid padding. */
     float gesture_dbl_window_secs;
     float gesture_move_radius_dp;
+    float gesture_wheel_latch_secs;
     float layout_per_dp[2]; /* layout units per dp on x/y, from the viewport each frame */
     uint32_t last_press_id; /* widget of the previous press; 0 = nothing to pair with */
     float last_press_age;   /* dt accumulated since that press */
@@ -436,8 +450,6 @@ struct nt_ui_context {
     bool inspector_active;
     uint32_t inspector_highlight_id;
     uint32_t inspector_selected_id;
-    /* Pointer inside sidebar footprint — gates nt_ui_step to zeroed return. */
-    bool inspector_pointer_consumed;
     /* Prev-frame tree truncation state — warn only on the OFF->ON edge, not every frame. */
     bool inspector_was_truncated;
 
@@ -590,9 +602,34 @@ Clay_Vector2 nt_ui_internal_scroll_pane_offset(nt_ui_context_t *ctx, uint32_t id
 /* How a hit on a registry record counts in the front-most resolve. */
 typedef enum { NT_UI_HIT_NONE = 0, NT_UI_HIT, NT_UI_HIT_PANE } nt_ui_hit_kind_t;
 
+/* A pointer's buttons as bit masks (bit = nt_button_t), in one scan. */
+typedef struct {
+    uint8_t down;
+    uint8_t released;
+} nt_ui_buttons_t;
+static inline nt_ui_buttons_t nt_ui_internal_buttons(const nt_pointer_t *p) {
+    nt_ui_buttons_t m = {0};
+    for (int b = 0; b < NT_BUTTON_MAX; ++b) {
+        m.down |= p->buttons[b].is_down ? (uint8_t)(1U << b) : 0U;
+        m.released |= p->buttons[b].is_released ? (uint8_t)(1U << b) : 0U;
+    }
+    return m;
+}
+
+/* Pointer i is in a gesture the game owns: the UI reads no target, no press and no wheel for it. */
+static inline bool nt_ui_internal_game_gesture(const nt_ui_context_t *ctx, uint32_t i) {
+    const nt_ui_buttons_t m = nt_ui_internal_buttons(&ctx->frame_pointers[i]);
+    return (m.down | m.released) != 0U && !ctx->captures[i].ui_gesture;
+}
+
 /* nt_ui_begin's gesture arbiter (nt_ui_scroll.c): starts press records, decides slop crossings,
- * routes the wheel. Reads last frame's layout and this frame's front-most records. */
+ * routes and latches the wheel. Reads last frame's layout and this frame's front-most records. */
 void nt_ui_internal_scroll_arbitrate(nt_ui_context_t *ctx);
+
+#if NT_UI_DEBUG_TOOLS
+/* The inspector sidebar's element id: a record above every game record, under its own panes. */
+uint32_t nt_ui_internal_inspector_root_id(void);
+#endif
 
 /* How a hit on record `id` counts in the front-most resolve: a scroll's own id is its surface. */
 nt_ui_hit_kind_t nt_ui_internal_record_kind(nt_ui_context_t *ctx, uint32_t id);
@@ -607,6 +644,8 @@ bool nt_ui_internal_owned_by_top(nt_ui_context_t *ctx, uint32_t id);
 static inline bool nt_ui_internal_is_top(const nt_ui_context_t *ctx, uint32_t id) { return id == ctx->overlay_top && ctx->inert_from == 0U; }
 static inline bool nt_ui_internal_owns_keys(const nt_ui_context_t *ctx, uint32_t id) { return id == ctx->keys_owner && ctx->inert_from == 0U; }
 const nt_pointer_t *nt_ui_internal_top_pointer(const nt_ui_context_t *ctx, uint32_t id);
+/* A field takes the text focus, and its context the keyboard. */
+void nt_ui_internal_focus(nt_ui_context_t *ctx, uint32_t id);
 /* `id` is live: outside an inert subtree, at or above the top's catcher (spec: "Input ownership"). */
 static inline bool nt_ui_internal_live(nt_ui_context_t *ctx, uint32_t id) { return ctx->inert_from == 0U && nt_ui_internal_owned_by_top(ctx, id); }
 

@@ -666,12 +666,12 @@ static void update_stage_camera(const nt_pointer_t *pointer, const nt_ui_scale_t
         } else {
             s_shell_stage_pan = false;
         }
-    } else if (pointer->buttons[NT_BUTTON_LEFT].is_pressed && over_stage && !nt_ui_wants_pointer(s_ui)) {
+    } else if (pointer->buttons[NT_BUTTON_LEFT].is_pressed && over_stage && !nt_ui_wants_pointer(s_ui, 0U)) {
         s_shell_stage_drag = true;
-    } else if (pointer->buttons[NT_BUTTON_RIGHT].is_pressed && over_stage && !nt_ui_wants_pointer(s_ui)) {
+    } else if (pointer->buttons[NT_BUTTON_RIGHT].is_pressed && over_stage && !nt_ui_wants_pointer(s_ui, 0U)) {
         s_shell_stage_pan = true;
     }
-    if (over_stage && !nt_ui_wants_pointer(s_ui)) {
+    if (over_stage && !nt_ui_wants_pointer(s_ui, 0U)) {
         s_camera_distance -= pointer->wheel_dy * 0.35F * s_fit_scale;
         if (s_camera_distance < CAMERA_MIN * s_fit_scale) {
             s_camera_distance = CAMERA_MIN * s_fit_scale;
@@ -2609,9 +2609,6 @@ static void frame(void) {
     refresh_views();
     link_programs();
     try_bind_resources();
-    if (nt_input_key_is_pressed(NT_KEY_R)) {
-        reset_active_scene();
-    }
 
     const float fb_w = (float)(g_nt_window.fb_width > 0 ? g_nt_window.fb_width : 800);
     const float fb_h = (float)(g_nt_window.fb_height > 0 ? g_nt_window.fb_height : 600);
@@ -2640,9 +2637,13 @@ static void frame(void) {
         s_ui_scale.fb_h = fb_h;
         declare_ui(&s_ui_scale);
     }
+    /* After nt_ui_begin, which fixed this frame's keyboard owner: a key the UI takes is no hotkey. */
+    if (!nt_ui_wants_keyboard(s_ui) && nt_input_key_is_pressed(NT_KEY_R)) {
+        reset_active_scene();
+    }
 #ifndef NT_PLATFORM_WEB
     if (!nt_ui_wants_keyboard(s_ui) && nt_input_key_is_pressed(NT_KEY_ESCAPE)) {
-        nt_app_quit(); /* after nt_ui_begin, which fixed this frame's keyboard owner */
+        nt_app_quit();
     }
 #endif
     const skeletal_scene_desc_t *scene = &s_scene_registry[s_active_scene];

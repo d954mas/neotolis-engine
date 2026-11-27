@@ -346,22 +346,21 @@ static void test_routed_pan_preserves_source_math_for_all_pointer_slots(void) {
     }
 }
 
-static void test_ui_owned_drag_stays_blocked_until_release(void) {
+static void test_held_off_drag_stays_blocked_until_release(void) {
     nt_input_init();
     nt_pointer_t *pointer = &g_nt_input.pointers[3];
     *pointer = (nt_pointer_t){.active = true, .x = 900, .y = 100};
     pointer->buttons[NT_BUTTON_LEFT].is_down = true;
-    s_pointer_owner[3][NT_BUTTON_LEFT] = 2;
+    hold_off_scene_gestures();
     pointer->x = 100;
     pointer->dx = -800;
     TEST_ASSERT_FALSE(scene_pointer(3).buttons[NT_BUTTON_LEFT].is_down);
-    TEST_ASSERT_EQUAL_UINT8(2, s_pointer_owner[3][NT_BUTTON_LEFT]);
-    pointer->buttons[NT_BUTTON_LEFT].is_down = false;
+    TEST_ASSERT_TRUE(s_scene_held_off[3]);
+    pointer->buttons[NT_BUTTON_LEFT] = (nt_button_state_t){.is_released = true};
     (void)scene_pointer(3);
-    TEST_ASSERT_EQUAL_UINT8(0, s_pointer_owner[3][NT_BUTTON_LEFT]);
+    TEST_ASSERT_FALSE_MESSAGE(s_scene_held_off[3], "the release ends the gesture");
     pointer->buttons[NT_BUTTON_LEFT] = (nt_button_state_t){.is_down = true, .is_pressed = true};
     TEST_ASSERT_TRUE(scene_pointer(3).buttons[NT_BUTTON_LEFT].is_down);
-    TEST_ASSERT_EQUAL_UINT8(1, s_pointer_owner[3][NT_BUTTON_LEFT]);
     nt_input_shutdown();
 }
 
@@ -375,12 +374,11 @@ static void test_reset_cancels_pending_camera_motion(void) {
     s_key_active[NT_KEY_W] = true;
     s_key_elapsed[NT_KEY_W] = 0.1F;
     g_nt_input.pointers[1].buttons[NT_BUTTON_LEFT].is_down = true;
-    s_pointer_owner[1][NT_BUTTON_LEFT] = 1;
     reset_camera_input(false);
     TEST_ASSERT_EQUAL_MEMORY(&s_initial_camera, &s_camera, sizeof(s_camera));
     TEST_ASSERT_TRUE(s_zoom_until == 0 && s_zoom_elapsed == 0 && s_zoom_factor == 1 && s_zoom_direction == 0);
     TEST_ASSERT_FALSE(s_key_active[NT_KEY_W]);
-    TEST_ASSERT_EQUAL_UINT8(2, s_pointer_owner[1][NT_BUTTON_LEFT]);
+    TEST_ASSERT_TRUE(s_scene_held_off[1]);
     nt_input_shutdown();
     s_camera = old_camera;
 }
@@ -405,15 +403,15 @@ static void test_modal_and_resize_cancel_scene_drag_before_input_early_return(vo
     *pointer = (nt_pointer_t){.active = true, .x = 300, .y = 300};
     pointer->buttons[NT_BUTTON_LEFT] = (nt_button_state_t){.is_down = true, .is_pressed = true};
     handle_input(0);
-    TEST_ASSERT_EQUAL_UINT8(1, s_pointer_owner[0][NT_BUTTON_LEFT]);
+    TEST_ASSERT_FALSE(s_scene_held_off[0]);
     s_ui_modal_shown = true;
     pointer->buttons[NT_BUTTON_LEFT] = (nt_button_state_t){.is_released = true};
     handle_input(0);
-    TEST_ASSERT_EQUAL_UINT8(0, s_pointer_owner[0][NT_BUTTON_LEFT]);
+    TEST_ASSERT_FALSE(s_scene_held_off[0]);
     pointer->x = 900;
     pointer->buttons[NT_BUTTON_LEFT] = (nt_button_state_t){.is_down = true, .is_pressed = true};
     handle_input(0);
-    TEST_ASSERT_EQUAL_UINT8(2, s_pointer_owner[0][NT_BUTTON_LEFT]);
+    TEST_ASSERT_TRUE(s_scene_held_off[0]);
     pointer->buttons[NT_BUTTON_LEFT].is_pressed = false;
     nt_input_feed(nt_test_key(NT_KEY_F4, true));
     publish_keys();
@@ -427,22 +425,25 @@ static void test_modal_and_resize_cancel_scene_drag_before_input_early_return(vo
     pointer->dx = -700;
     handle_input(0);
     TEST_ASSERT_EQUAL_MEMORY(&s_initial_camera, &s_camera, sizeof(s_camera));
-    TEST_ASSERT_EQUAL_UINT8(2, s_pointer_owner[0][NT_BUTTON_LEFT]);
+    TEST_ASSERT_TRUE(s_scene_held_off[0]);
     pointer->buttons[NT_BUTTON_LEFT] = (nt_button_state_t){0};
     handle_input(0);
     pointer->buttons[NT_BUTTON_LEFT] = (nt_button_state_t){.is_down = true, .is_pressed = true};
     pointer->dx = 0;
     handle_input(0);
-    TEST_ASSERT_EQUAL_UINT8(1, s_pointer_owner[0][NT_BUTTON_LEFT]);
+    TEST_ASSERT_FALSE(s_scene_held_off[0]);
     g_nt_window.fb_width = 0;
     pointer->buttons[NT_BUTTON_LEFT].is_pressed = false;
     handle_input(0);
-    TEST_ASSERT_EQUAL_UINT8(2, s_pointer_owner[0][NT_BUTTON_LEFT]);
+    TEST_ASSERT_TRUE(s_scene_held_off[0]);
     g_nt_window.fb_width = 1000;
     pointer->x = 800;
     pointer->dx = 600;
     handle_input(0);
     TEST_ASSERT_EQUAL_MEMORY(&s_initial_camera, &s_camera, sizeof(s_camera));
+    pointer->buttons[NT_BUTTON_LEFT] = (nt_button_state_t){.is_released = true};
+    handle_input(0);
+    TEST_ASSERT_FALSE_MESSAGE(s_scene_held_off[0], "the release ends the gesture the resize took");
     nt_input_shutdown();
     g_nt_window = old_window;
     s_camera = old_camera;
@@ -473,7 +474,7 @@ static void test_keyboard_resets_win_over_already_sampled_drag(void) {
     pointer->x = 500;
     handle_input(0);
     TEST_ASSERT_EQUAL_MEMORY(&s_initial_camera, &s_camera, sizeof(s_camera));
-    TEST_ASSERT_EQUAL_UINT8(2, s_pointer_owner[0][NT_BUTTON_LEFT]);
+    TEST_ASSERT_TRUE(s_scene_held_off[0]);
     nt_input_init();
     *pointer = (nt_pointer_t){.active = true, .x = 300, .y = 300};
     pointer->buttons[NT_BUTTON_RIGHT] = (nt_button_state_t){.is_down = true, .is_pressed = true};
@@ -489,11 +490,34 @@ static void test_keyboard_resets_win_over_already_sampled_drag(void) {
     pointer->x = 500;
     handle_input(0);
     TEST_ASSERT_EQUAL_MEMORY(&s_initial_light, &s_light, sizeof(s_light));
-    TEST_ASSERT_EQUAL_UINT8(2, s_pointer_owner[0][NT_BUTTON_RIGHT]);
+    TEST_ASSERT_TRUE(s_scene_held_off[0]);
     nt_input_shutdown();
     g_nt_window = old_window;
     s_camera = old_camera;
     s_light = old_light;
+}
+
+/* Esc while the settings are open closes them, also before the compact modal takes the keys (the frames after F3). */
+static void test_esc_closes_the_settings_before_it_quits(void) {
+    const nt_window_t old_window = g_nt_window;
+    const bool old_built = s_ui_built;
+    g_nt_window.fb_width = 1000;
+    g_nt_window.fb_height = 1000;
+    s_ui_built = false;
+    nt_input_init();
+    nt_input_feed(nt_test_key(NT_KEY_F3, true));
+    publish_keys();
+    s_ui_panel_open = false;
+    handle_input(0);
+    TEST_ASSERT_TRUE(s_ui_panel_open);
+    nt_input_feed(nt_test_key(NT_KEY_F3, false));
+    nt_input_feed(nt_test_key(NT_KEY_ESCAPE, true));
+    publish_keys();
+    handle_input(0);
+    TEST_ASSERT_FALSE_MESSAGE(s_ui_panel_open, "Esc closes the settings");
+    nt_input_shutdown();
+    s_ui_built = old_built;
+    g_nt_window = old_window;
 }
 
 typedef struct {
@@ -511,7 +535,7 @@ static touch_test_state_t begin_touch_test(void) {
     s_ui_modal_shown = false;
     s_paused = true;
     s_eye_pivot = false;
-    memset(s_pointer_owner, 0, sizeof(s_pointer_owner));
+    memset(s_scene_held_off, 0, sizeof(s_scene_held_off));
     reset_camera_input(false);
     return old;
 }
@@ -519,7 +543,7 @@ static touch_test_state_t begin_touch_test(void) {
 static void end_touch_test(touch_test_state_t old) {
     nt_input_shutdown();
     memset(&s_touch, 0, sizeof(s_touch));
-    memset(s_pointer_owner, 0, sizeof(s_pointer_owner));
+    memset(s_scene_held_off, 0, sizeof(s_scene_held_off));
     s_ui_built = old.ui_built;
     s_ui_modal_shown = old.modal_shown;
     g_nt_window = old.window;
@@ -610,7 +634,7 @@ static void test_touch_coincident_fingers_replacement_and_third_finger(void) {
     end_touch_test(old);
 }
 
-static void test_touch_ui_owned_finger_does_not_join_scene_pinch(void) {
+static void test_touch_held_off_finger_does_not_join_scene_pinch(void) {
     const touch_test_state_t old = begin_touch_test();
     nt_pointer_t *scene = &g_nt_input.pointers[1];
     nt_pointer_t *ui = &g_nt_input.pointers[7];
@@ -620,13 +644,13 @@ static void test_touch_ui_owned_finger_does_not_join_scene_pinch(void) {
     scene->buttons[NT_BUTTON_LEFT].is_pressed = false;
     *ui = (nt_pointer_t){.id = 707, .active = true, .type = NT_POINTER_TOUCH, .x = 600, .y = 350};
     ui->buttons[NT_BUTTON_LEFT].is_down = true;
-    s_pointer_owner[7][NT_BUTTON_LEFT] = 2;
+    s_scene_held_off[7] = true;
     handle_input(0);
     ui->x = 900;
     ui->dx = 300;
     handle_input(0);
     TEST_ASSERT_EQUAL_UINT32(1, s_touch.count);
-    TEST_ASSERT_EQUAL_UINT8(2, s_pointer_owner[7][NT_BUTTON_LEFT]);
+    TEST_ASSERT_TRUE(s_scene_held_off[7]);
     TEST_ASSERT_EQUAL_MEMORY(&s_initial_camera, &s_camera, sizeof(s_camera));
     ui->buttons[NT_BUTTON_LEFT] = (nt_button_state_t){0};
     handle_input(0);
@@ -685,8 +709,8 @@ static void test_touch_modal_resize_and_reset_cancel_gesture(void) {
         }
         handle_input(0);
         TEST_ASSERT_EQUAL_UINT32(0, s_touch.count);
-        TEST_ASSERT_EQUAL_UINT8(2, s_pointer_owner[0][NT_BUTTON_LEFT]);
-        TEST_ASSERT_EQUAL_UINT8(2, s_pointer_owner[1][NT_BUTTON_LEFT]);
+        TEST_ASSERT_TRUE(s_scene_held_off[0]);
+        TEST_ASSERT_TRUE(s_scene_held_off[1]);
         s_ui_modal_shown = false;
         g_nt_window.fb_width = 1000;
         g_nt_input.pointers[1].x = 900;
@@ -1055,13 +1079,14 @@ int main(void) {
     RUN_TEST(test_lod_clamps_to_the_four_subdivisions);
     RUN_TEST(test_pan_matches_source_event_accumulation);
     RUN_TEST(test_routed_pan_preserves_source_math_for_all_pointer_slots);
-    RUN_TEST(test_ui_owned_drag_stays_blocked_until_release);
+    RUN_TEST(test_held_off_drag_stays_blocked_until_release);
     RUN_TEST(test_reset_cancels_pending_camera_motion);
     RUN_TEST(test_modal_and_resize_cancel_scene_drag_before_input_early_return);
     RUN_TEST(test_keyboard_resets_win_over_already_sampled_drag);
+    RUN_TEST(test_esc_closes_the_settings_before_it_quits);
     RUN_TEST(test_touch_orbit_pinch_and_transition_rebase);
     RUN_TEST(test_touch_coincident_fingers_replacement_and_third_finger);
-    RUN_TEST(test_touch_ui_owned_finger_does_not_join_scene_pinch);
+    RUN_TEST(test_touch_held_off_finger_does_not_join_scene_pinch);
     RUN_TEST(test_touch_pinch_respects_eye_pivot_and_stationary_fingers);
     RUN_TEST(test_touch_modal_resize_and_reset_cancel_gesture);
     RUN_TEST(test_memory_labels_distinguish_pending_unavailable_and_diagnostics);

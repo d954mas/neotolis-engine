@@ -175,7 +175,7 @@ static void test_modal_wants_pointer_while_open(void) {
     (void)modal_begin_open(s_fx.ctx, MODAL_A, &st);
     nt_ui_modal_end(s_fx.ctx);
     nt_ui_end(s_fx.ctx);
-    TEST_ASSERT_TRUE(nt_ui_wants_pointer(s_fx.ctx));
+    TEST_ASSERT_TRUE(nt_ui_wants_pointer(s_fx.ctx, 0U));
 }
 
 /* The panel floats attached-to-root CENTER_CENTER, so it sits at the viewport center; shrink-wrapping its

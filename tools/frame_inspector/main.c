@@ -2521,7 +2521,7 @@ static void step_frame(int dir) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void handle_keys(void) {
-    if (s.file_count == 0 || nt_ui_wants_keyboard(s_ctx)) {
+    if (s.file_count == 0) {
         return;
     }
     const bool shift = s_keys.shift;
@@ -2798,14 +2798,16 @@ static void frame(void) {
         if (s.dirty) {
             rebuild_rows(); /* keys move over the rows the last click left */
         }
-        handle_keys(); /* after nt_ui_begin: nt_ui_wants_keyboard is this frame's owner, so a focused field's keys stay its */
+        if (!nt_ui_wants_keyboard(s_ctx)) {
+            handle_keys(); /* after nt_ui_begin, which fixed this frame's key owner: a focused field's keys stay its */
+        }
         if (s.dirty) {
             rebuild_rows();
         }
         declare_ui();
         nt_ui_end(s_ctx);
     } else {
-        handle_keys(); /* no UI frame while assets load: nothing else owns the keys */
+        handle_keys(); /* no UI frame while assets load: last frame's key owner is stale and nothing else owns the keys */
     }
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {k_bg.r / 255.0F, k_bg.g / 255.0F, k_bg.b / 255.0F, 1.0F}, .clear_depth = 1.0F});
     if (can_render) {

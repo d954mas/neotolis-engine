@@ -57,6 +57,13 @@ void nt_window_set_text_input_mode(nt_text_input_mode_t mode);  // soft-keyboard
 position and deltas in framebuffer pixels (fractional, never rounded), wheel notches, pressure, type, and per-button
 `is_down`/`is_pressed`/`is_released`.
 
+- **A cancel is a release that did not happen.** A platform cancel (web `pointercancel`: an
+  edge swipe, a system overlay, the browser taking the touch for a pan) and a focus loss set
+  `is_released` for each held or waiting button and `cancelled` for that frame, so a consumer
+  that acts on a release (a click, a drop) checks `cancelled` first. `cancelled` is per pointer,
+  not per button: a frame that releases one button normally and cancels another reads both
+  releases as cancelled.
+
 - **A release is published where it happened.** After a button's release edge the pointer holds
   its position for the rest of that frame; where it goes afterwards is published next frame, and
   that frame's `dx`/`dy` cover the motion. So the frame of a release never shows a later hover. A
@@ -97,7 +104,7 @@ position and deltas in framebuffer pixels (fractional, never rounded), wheel not
   `g_nt_input.primary`, so a widget capture stays with its slot. `nt_ui` anchors menus, the Clay feed and the inspector on that pointer.
 
 Every real mouse event is a move with the held buttons (a button change too), plus a leave; each
-real wheel event first moves the mouse to the cursor. Contacts arrive as down, move and up.
+real wheel event first moves the mouse to the cursor. Contacts arrive as down, move and up, or a cancel instead of the up.
 Devapi input automation drives the same mouse and its own contacts (see "Input automation" in
 [Logging, errors and debugging](../debug/logging-errors-debugging.md)).
 

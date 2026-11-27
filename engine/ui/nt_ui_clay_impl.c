@@ -663,6 +663,11 @@ static void cdv_init_owned_ids_once(void) {
     s_cdv_owned_ids_init = true;
 }
 
+uint32_t nt_ui_internal_inspector_root_id(void) {
+    cdv_init_owned_ids_once();
+    return s_cdv_owned_ids[0];
+}
+
 static bool cdv_is_inspector_owned_id(uint32_t id) {
     for (int32_t i = 0; i < CDV_OWNED_ID_COUNT; ++i) {
         if (s_cdv_owned_ids[i] == id) {
@@ -1472,7 +1477,7 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
     /* No sidebar row picked → scan viewport for a user element under the cursor. Zones, not the pointer's
      * hot: only stepped widgets record one, so the pick sees through block-only gates (an inert catcher, a
      * non-top popup's catcher) and scroll surfaces to the element under them. */
-    if (highlightedElementId == 0U && !ctx->inspector_pointer_consumed) {
+    if (highlightedElementId == 0U && !nt_ui_inspector_pointer_consumed(ctx)) {
         const float panel_left_x = context->layoutDimensions.width - ctx->inspector_metrics.panel_width;
 
         const float px = context->pointerInfo.position.x;
@@ -1639,6 +1644,8 @@ static void nt_ui_internal_emit_inspector_layout(nt_ui_context_t *ctx) {
                        .attachTo = CLAY_ATTACH_TO_ROOT,
                        .clipTo = CLAY_CLIP_TO_ATTACHED_PARENT},
           .border = {.color = CDV_COLOR_3, .width = {.bottom = 1}}}) {
+        /* Before the panes: equal PANE ranks go to the later record, so a pane that can scroll wins over the sidebar. */
+        nt_ui_internal_register_interactive(ctx, nt_ui_internal_inspector_root_id(), NULL);
         CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(row_h)}, .padding = {outer_pad, outer_pad, 0, 0}, .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}},
               .backgroundColor = CDV_COLOR_2,
               .userData = debug_bg_data}) {

@@ -2,7 +2,7 @@
  * combo"). Fixed seeds drive opens, closes, reopens and nested opens made before nt_ui_begin, between and inside
  * the declarations, modals opened from menu, combo and popup bodies, popups and the menu opened from a menu
  * activation or a combo pick, paused (dt = 0) spells that pile up more fades than nt_ui_begin keeps, a shuffled
- * root declaration order with units left out, pointer moves, left and right presses, releases and wheel, Esc, Down,
+ * root declaration order with units left out, pointer moves, left, right and middle presses, releases and wheel, Esc, Down,
  * Right and Enter; the engine's own asserts (stack limits) fire in the driver. Every frame checks, through
  * nt_ui_is_open, the clicks and the router answers: OPENING and CLOSING bodies take no click, nothing clicks through
  * to the base UI under an overlay, an open overlay has an open parent, the gesture keeps its pointer owner, the
@@ -217,35 +217,39 @@ static bool box_has(uint32_t id, float x, float y) {
 // #endregion
 
 // #region checks at nt_ui_begin
-/* R2: the press that starts a gesture decides its owner, the UI's on a record or while a catcher overlay is the
- * top; a press while the other button is held, or released in that frame, joins it; the owner holds
- * nt_ui_wants_pointer to the last release; a free pointer is the UI's over a record. */
+/* The press that starts a gesture decides its owner, the UI's when it has a target (a record, or the top's
+ * catcher, which covers the whole window in 2D); a press of any button while another one is held, or released in
+ * that frame, joins it; the owner holds nt_ui_wants_pointer to the last release, and the game's gesture has no
+ * target; a free pointer is the UI's when it has one. */
 static void check_gesture(void) {
     const bool hot = nt_ui_pointer_hot(w.ctx, 0U).id != 0U;
     if (w.press_any && !w.held_before) {
         w.drag_active = true;
-        w.drag_ui = -1; /* the top is unknown */
-        if (w.top >= 0) {
-            w.drag_ui = (hot || w.top == 1) ? 1 : 0;
-        }
+        w.drag_ui = hot ? 1 : 0;
         r.top_presses += (w.top == 1) ? 1 : 0;
         r.free_presses += (w.top == 0) ? 1 : 0;
-        if (w.drag_ui >= 0 && w.wants_pointer != (w.drag_ui == 1)) {
+        if (w.top == 1 && !hot) {
+            fail(INV_GESTURE, "a press under a top overlay has no target: the catcher covers the window");
+        }
+        if (w.wants_pointer != hot) {
             fail(INV_GESTURE, "nt_ui_wants_pointer %d on the press that starts a gesture (hot %d, top %d)", (int)w.wants_pointer, (int)hot, w.top);
         }
-    } else if (w.drag_active && w.drag_ui >= 0) {
+    } else if (w.drag_active) {
         r.joins += w.press_any ? 1 : 0;
         r.holds += w.press_any ? 0 : 1;
         if (w.wants_pointer != (w.drag_ui == 1)) {
             fail(INV_GESTURE, "nt_ui_wants_pointer %d during a gesture owned by the %s", (int)w.wants_pointer, (w.drag_ui == 1) ? "UI" : "game");
         }
-    } else if (!w.drag_active) {
+        if (w.drag_ui == 0 && hot) {
+            fail(INV_GESTURE, "the game's gesture has a target");
+        }
+    } else {
         ++r.free_pointers;
         if (w.wants_pointer != hot) {
             fail(INV_GESTURE, "nt_ui_wants_pointer %d for a free pointer, hot %d", (int)w.wants_pointer, (int)hot);
         }
     }
-    if (!w.sc.down[NT_BUTTON_LEFT] && !w.sc.down[NT_BUTTON_RIGHT]) {
+    if (!w.sc.down[NT_BUTTON_LEFT] && !w.sc.down[NT_BUTTON_RIGHT] && !w.sc.down[NT_BUTTON_MIDDLE]) {
         w.drag_active = false;
     }
 }
@@ -260,7 +264,7 @@ static void after_begin(void) {
     if ((w.live_prev & CATCHERS) != 0U) {
         w.top = 1;
     }
-    w.wants_pointer = nt_ui_wants_pointer(w.ctx);
+    w.wants_pointer = nt_ui_wants_pointer(w.ctx, 0U);
     w.wants_keyboard = nt_ui_wants_keyboard(w.ctx);
     r.wants_pointer += w.wants_pointer ? 1 : 0;
     r.wants_keyboard += w.wants_keyboard ? 1 : 0;
@@ -600,7 +604,7 @@ static void frame_fn(void *game) {
         }
     }
     maybe_op(2U);
-    if (nt_ui_wants_pointer(w.ctx) != w.wants_pointer || nt_ui_wants_keyboard(w.ctx) != w.wants_keyboard) {
+    if (nt_ui_wants_pointer(w.ctx, 0U) != w.wants_pointer || nt_ui_wants_keyboard(w.ctx) != w.wants_keyboard) {
         fail(INV_ROUTER, "pointer %d keyboard %d after begin, changed before end", (int)w.wants_pointer, (int)w.wants_keyboard);
     }
 }
@@ -682,6 +686,7 @@ static void run_frame(void) {
     look();
     const bool left = w.sc.down[NT_BUTTON_LEFT];
     const bool right = w.sc.down[NT_BUTTON_RIGHT];
+    const bool middle = w.sc.down[NT_BUTTON_MIDDLE];
     float x = w.sc.x;
     float y = w.sc.y;
     if (!(left || right) || chance(15U)) {
@@ -700,8 +705,14 @@ static void run_frame(void) {
         release = NT_BUTTON_RIGHT;
     }
     const uint32_t k = rnd_below(100U);
+    /* The middle button reuses the key draw, so it leaves the seeds' streams as they were until it presses. */
+    if (!w.quiet && press < 0 && !middle && k >= 22U && k < 25U) {
+        press = NT_BUTTON_MIDDLE;
+    } else if (middle && release < 0 && k >= 50U) {
+        release = NT_BUTTON_MIDDLE;
+    }
     const nt_key_t key = (w.quiet || k >= 22U) ? NT_KEY_COUNT : keys[k / 6U];
-    w.held_before = left || right;
+    w.held_before = left || right || middle;
     w.press_any = press >= 0;
     w.press_left = press == NT_BUTTON_LEFT;
     w.release_left = release == NT_BUTTON_LEFT;

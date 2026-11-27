@@ -111,7 +111,8 @@ typedef struct {
     bool hover_trigger;    /* nt_ui_hovered_within the combo trigger */
     bool hover_box;        /* nt_ui_hovered_within the container around the combo */
     bool open_chain;       /* frame_popup_chain opens every level inside the one under it */
-    bool wants_at_begin;   /* nt_ui_wants_pointer read before anything of the frame declared */
+    bool wants_at_begin;   /* nt_ui_wants_pointer(probe_slot) read before anything of the frame declared */
+    uint32_t probe_slot;   /* the pointer frame_probe_pointer asks about */
     bool skip_modal_a;     /* frame_modal_opens_root_modal leaves modal A out */
     float pop_ease;        /* frame_popup_button's popup A: 0 snaps */
     bool field_disabled;   /* frame_popup_field declares its field disabled */
@@ -494,7 +495,7 @@ static void frame_probe_popup(void *game) {
 /* A game widget that reads nt_ui_wants_pointer first, then a button. */
 static void frame_probe_pointer(void *game) {
     (void)game;
-    g.wants_at_begin = nt_ui_wants_pointer(s.ctx);
+    g.wants_at_begin = nt_ui_wants_pointer(s.ctx, g.probe_slot);
     base_button(BTN_A, 400.0F, 400.0F, 150.0F, 60.0F);
 }
 
@@ -766,6 +767,7 @@ static void test_gesture_game_drag_keeps_the_pointer_through_its_release(void) {
  * nothing without a press edge, that drag is the game's. */
 static void test_gesture_pointer_left_out_of_the_frame_forgets_its_ui_gesture(void) {
     scenario(frame_probe_pointer);
+    g.probe_slot = 1U;
     const nt_ui_bbox_t a = sc_box(&s, BTN_A);
     const float ax = a.x + (a.width * 0.5F);
     const float ay = a.y + (a.height * 0.5F);

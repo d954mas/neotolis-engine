@@ -1786,7 +1786,8 @@ static void test_menu_covered_switch_waits(void) {
     TEST_ASSERT_TRUE_MESSAGE(menu_level_found(1U), "the covered menu's switch waits for the popup");
 }
 
-/* ---- A right press while the left drags across the rows is inside the menu: it stays open. ---- */
+/* ---- A right press while the left drags across the rows joins the left's gesture: it is no press, so neither over
+ *      a row nor off the menu does it close the menu. ---- */
 static void test_menu_right_press_during_a_drag_keeps_open(void) {
     nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
     nt_ui_menu_t st = {0};
@@ -1819,7 +1820,7 @@ static void test_menu_right_press_during_a_drag_keeps_open(void) {
     menu_dyn_frame_ptr(&st, &style, &t, &p);
     p.buttons[NT_BUTTON_RIGHT] = (nt_button_state_t){.is_down = true, .is_pressed = true};
     menu_dyn_frame_ptr(&st, &style, &t, &p);
-    TEST_ASSERT_FALSE_MESSAGE(nt_ui_is_open(s_fx.ctx, MENU_A), "a press off the menu dismisses it while the left still holds a row");
+    TEST_ASSERT_TRUE_MESSAGE(nt_ui_is_open(s_fx.ctx, MENU_A), "a joined press off the menu is no outside press");
 }
 
 /* ---- Right and Esc in one frame: the frame acts on one key, and Esc comes first, so the menu closes. ---- */

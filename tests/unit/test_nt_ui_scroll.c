@@ -24,6 +24,7 @@
 #include "test_helpers/ui_walker_fixture.h"
 #include "ui/nt_ui.h"
 #include "ui/nt_ui_internal.h"
+#include "ui/nt_ui_modal.h"
 #include "ui/nt_ui_popup.h"
 #include "ui/nt_ui_scroll.h"
 #include "unity.h"
@@ -193,7 +194,7 @@ static void test_scroll_release_crossing_threshold_allows_next_press(void) {
     TEST_ASSERT_FALSE(scroll_child_frame(&p, &style).clicked);
     /* The scroll owns the release frame, so the game does not see a world release there. */
     TEST_ASSERT_EQUAL_UINT32(SCROLL_ID, s_fx.ctx->captures[0].active_id);
-    TEST_ASSERT_TRUE(nt_ui_wants_pointer(s_fx.ctx));
+    TEST_ASSERT_TRUE(nt_ui_wants_pointer(s_fx.ctx, 0U));
 
     p.buttons[NT_BUTTON_LEFT].is_released = false;
     scroll_child_frame(&p, &style);
@@ -2052,12 +2053,13 @@ typedef struct {
 
 static arb_scene_t s_scene;
 static float s_arb_dt = 1.0F / 60.0F;
+static const float *s_arb_occlusion; /* the frame's per-pointer occlusion; NULL = none */
 static nt_ui_interaction_t s_child_in;
 static nt_ui_interaction_t s_fg_in;
 
 static void arb_frame(const nt_pointer_t *pointers, uint32_t count) {
     const nt_ui_viewport_t vp = {.w = 800.0F, .h = 600.0F, .px_per_dp = (s_scene.px_per_dp > 0.0F) ? s_scene.px_per_dp : 1.0F};
-    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .dt = s_arb_dt, .pointers = pointers, .pointer_count = count, .viewport = vp});
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .dt = s_arb_dt, .pointers = pointers, .pointer_count = count, .viewport = vp, .occlusion = s_arb_occlusion});
     if (s_scene.outside_before != NULL) {
         s_scene.outside_before();
     }
@@ -2097,6 +2099,7 @@ static void arb_scene_reset(void) {
     s_scene = (arb_scene_t){.style = bar_style(NT_UI_SCROLLBAR_ALWAYS), .content_h = 1000.0F}; /* bar art: a bar takes presses only with a thumb */
     s_scene.style.rubber_band_c = 0.0F;                                                        /* raw == the routed drag, easy to read */
     s_arb_dt = 1.0F / 60.0F;
+    s_arb_occlusion = NULL;
     s_child_in = (nt_ui_interaction_t){0};
     s_fg_in = (nt_ui_interaction_t){0};
 }
@@ -2177,7 +2180,7 @@ static void test_arb_modal_blocks_tap_to_stop_and_drag(void) {
     p.y = 60.0F;
     arb_frame(&p, 1);
     TEST_ASSERT_EQUAL_UINT32(0U, s_fx.ctx->captures[0].active_id);
-    TEST_ASSERT_TRUE(nt_ui_wants_pointer(s_fx.ctx)); /* the modal is UI under the pointer */
+    TEST_ASSERT_TRUE(nt_ui_wants_pointer(s_fx.ctx, 0U)); /* the modal is UI under the pointer */
 }
 
 /* A drag that starts on a disabled row (an inert blocker inside the list) still scrolls. */
@@ -2209,6 +2212,29 @@ static void test_arb_diagonal_arc_scrolls_vertical_list(void) {
     arb_release(&p);
     arb_frame(&p, 1);
     TEST_ASSERT_FALSE(s_child_in.clicked); /* the row was cancelled */
+}
+
+/* The list's claim ends the row's capture: the row's step reports released_now in the claim frame, once, and no
+ * click on the release. */
+static void test_arb_claim_reports_released_now_once(void) {
+    s_scene.body = body_button_row;
+    nt_pointer_t p = ui_fx_pointer(100.0F, 30.0F, false, false, false);
+    arb_warm(&p);
+    arb_press(&p);
+    arb_frame(&p, 1);
+    TEST_ASSERT_TRUE(s_child_in.pressed_now && s_child_in.gesture_pending);
+    arb_hold(&p);
+    p.y = 10.0F;
+    arb_frame(&p, 1);
+    TEST_ASSERT_EQUAL_UINT32(SCROLL_ID, s_fx.ctx->captures[0].active_id);
+    TEST_ASSERT_TRUE(s_child_in.released_now);
+    TEST_ASSERT_FALSE(s_child_in.pressed || s_child_in.clicked);
+    p.y = 5.0F;
+    arb_frame(&p, 1);
+    TEST_ASSERT_FALSE(s_child_in.released_now);
+    arb_release(&p);
+    arb_frame(&p, 1);
+    TEST_ASSERT_FALSE(s_child_in.released_now || s_child_in.clicked);
 }
 
 /* Both axes cross in one frame: the stronger crossing wins — a mostly-vertical flick scrolls the
@@ -2268,11 +2294,11 @@ static void test_arb_fitting_list_is_see_through(void) {
     nt_pointer_t p = ui_fx_pointer(100.0F, 150.0F, false, false, false);
     arb_warm(&p);
     arb_frame(&p, 1);
-    TEST_ASSERT_FALSE(nt_ui_wants_pointer(s_fx.ctx));
+    TEST_ASSERT_FALSE(nt_ui_wants_pointer(s_fx.ctx, 0U));
     s_scene.content_h = 1000.0F;
     arb_warm(&p);
     arb_frame(&p, 1);
-    TEST_ASSERT_TRUE(nt_ui_wants_pointer(s_fx.ctx));
+    TEST_ASSERT_TRUE(nt_ui_wants_pointer(s_fx.ctx, 0U));
 }
 
 /* The slop is physical: at 3 device px per dp the 8 dp slop is 24 layout units here. */
@@ -2465,7 +2491,7 @@ static void test_arb_release_crossing_outside_flings(void) {
     p.y = 110.0F;
     arb_frame(&p, 1);
     TEST_ASSERT_EQUAL_UINT32(SCROLL_ID, s_fx.ctx->captures[0].active_id);
-    TEST_ASSERT_TRUE(nt_ui_wants_pointer(s_fx.ctx));
+    TEST_ASSERT_TRUE(nt_ui_wants_pointer(s_fx.ctx, 0U));
     TEST_ASSERT_TRUE(arb_list()->vel[1] < -100.0F);
     TEST_ASSERT_TRUE(ui_fx_float_near(arb_list()->pos[1], -32.0F, 0.5F)); /* the 40 move minus the slop */
 }
@@ -2769,7 +2795,7 @@ static void test_arb_vanished_scroll_takes_nothing(void) {
     arb_frame(&p, 1);
     TEST_ASSERT_EQUAL_UINT32(0U, s_fx.ctx->captures[0].active_id);
     TEST_ASSERT_EQUAL_UINT32(0U, s_fx.ctx->captures[0].pending_scroll);
-    TEST_ASSERT_TRUE(nt_ui_wants_pointer(s_fx.ctx));
+    TEST_ASSERT_TRUE(nt_ui_wants_pointer(s_fx.ctx, 0U));
 }
 
 /* The front-most rule is structural: a floating element is over the content of its band, and the draw
@@ -2944,9 +2970,9 @@ static void test_arb_dropped_pointer_slot_holds_no_gesture(void) {
     arb_frame(ps, 2);
     arb_press(&ps[1]);
     arb_frame(ps, 2);
-    TEST_ASSERT_TRUE(nt_ui_wants_pointer(s_fx.ctx));
+    TEST_ASSERT_TRUE(nt_ui_wants_pointer(s_fx.ctx, 1U));
     arb_frame(ps, 1);
-    TEST_ASSERT_FALSE(nt_ui_wants_pointer(s_fx.ctx));
+    TEST_ASSERT_FALSE(nt_ui_wants_pointer(s_fx.ctx, 1U));
     /* Back, held and moved, with no press edge: the list saw no press, so it takes nothing. */
     arb_hold(&ps[1]);
     ps[1].y = 100.0F;
@@ -2965,7 +2991,7 @@ static void test_arb_pending_press_wants_pointer_off_the_list(void) {
     arb_hold(&p);
     p.x = 500.0F;
     arb_frame(&p, 1);
-    TEST_ASSERT_TRUE(nt_ui_wants_pointer(s_fx.ctx));
+    TEST_ASSERT_TRUE(nt_ui_wants_pointer(s_fx.ctx, 0U));
 }
 
 /* A track tap centers the thumb under the pointer, like a held track press: 150 on a 200 track with a
@@ -3095,6 +3121,233 @@ static void test_hard_edge_drag_reversal_has_no_dead_zone(void) {
 }
 // #endregion
 
+// #region wheel latch
+static const uint32_t SLIDE_OUTER_ID = 0x5CF201U;
+static const uint32_t SLIDE_INNER_ID = 0x5CF202U;
+
+/* An outer 300x300 list whose content holds, 100 below its top, an inner 200x200 list: wheeling the outer slides
+ * the inner up under a cursor resting above it. Instant wheel, so a list moves only on a frame it takes a tick. */
+static void slide_frame(nt_pointer_t *p, float dt) {
+    nt_ui_scroll_style_t style = nt_ui_scroll_style_defaults();
+    style.wheel_ease_speed = 0.0F;
+    style.wheel_step_px = 40.0F;
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .dt = dt, .pointers = p, .pointer_count = 1});
+    CLAY({.id = CLAY_ID("slide-root"), .layout = {.sizing = {CLAY_SIZING_FIXED(300), CLAY_SIZING_FIXED(300)}}}) {
+        nt_ui_scroll_begin(s_fx.ctx, NULL, SLIDE_OUTER_ID, &style, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(300), CLAY_SIZING_FIXED(300)}}});
+        CLAY({.id = CLAY_ID("slide-outer-content"), .layout = {.sizing = {CLAY_SIZING_FIXED(300), CLAY_SIZING_FIXED(1000)}, .layoutDirection = CLAY_TOP_TO_BOTTOM}}) {
+            CLAY({.id = CLAY_ID("slide-gap"), .layout = {.sizing = {CLAY_SIZING_FIXED(300), CLAY_SIZING_FIXED(100)}}}) {}
+            nt_ui_scroll_begin(s_fx.ctx, NULL, SLIDE_INNER_ID, &style, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(200)}}});
+            CLAY({.id = CLAY_ID("slide-inner-content"), .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(800)}}}) {}
+            nt_ui_scroll_end(s_fx.ctx);
+        }
+        nt_ui_scroll_end(s_fx.ctx);
+    }
+    nt_ui_end(s_fx.ctx);
+}
+
+/* A flick that slides an inner list under the resting cursor stays on the outer list; a pause longer than the
+ * latch time lets the next tick go to the list now under the cursor. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_wheel_latch_keeps_the_flick_on_its_scroll(void) {
+    nt_ui_set_gesture_constants(s_fx.ctx, 0.5F, 16.0F, 0.25F);
+    nt_pointer_t p = ui_fx_pointer(100.0F, 60.0F, false, false, false);
+    slide_frame(&p, 1.0F / 60.0F);
+    slide_frame(&p, 1.0F / 60.0F);
+    for (int f = 0; f < 6; ++f) {
+        p.wheel_dy = 1.0F;
+        slide_frame(&p, 1.0F / 60.0F);
+        TEST_ASSERT_TRUE_MESSAGE(nt_ui_wants_pointer(s_fx.ctx, 0U), "a latched pointer is the UI's");
+    }
+    const nt_ui_scroll_state_t *outer = (const nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, SLIDE_OUTER_ID);
+    const nt_ui_scroll_state_t *inner = (const nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, SLIDE_INNER_ID);
+    TEST_ASSERT_NOT_NULL(outer);
+    TEST_ASSERT_NOT_NULL(inner);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(-240, (int)outer->pos[1], "every tick of the flick moved the outer list");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(0, (int)inner->pos[1], "the inner list slid under the cursor and took nothing");
+
+    p.wheel_dy = 0.0F;
+    for (int f = 0; f < 3; ++f) {
+        slide_frame(&p, 0.1F);
+    }
+    p.wheel_dy = 1.0F;
+    slide_frame(&p, 1.0F / 60.0F);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(-240, (int)outer->pos[1], "after the pause the outer list takes no tick");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(-40, (int)inner->pos[1], "the tick after the pause goes to the list under the cursor");
+}
+
+/* A pointer latched to the list, then a game press just past its edge (within the slop): the latch drops, so the
+ * wheel under the game's drag scrolls nothing and the pointer is the game's. */
+static void test_wheel_latch_drops_under_a_game_gesture(void) {
+    s_scene.style.wheel_ease_speed = 0.0F;
+    nt_pointer_t p = ui_fx_pointer(100.0F, 197.0F, false, false, false);
+    arb_frame(&p, 1);
+    arb_frame(&p, 1);
+    p.wheel_dy = 1.0F;
+    arb_frame(&p, 1);
+    TEST_ASSERT_EQUAL_INT(-40, (int)arb_list()->pos[1]);
+    p.wheel_dy = 0.0F;
+    p.y = 203.0F; /* off the list, within the slop of the latch's start */
+    arb_frame(&p, 1);
+    TEST_ASSERT_TRUE_MESSAGE(nt_ui_wants_pointer(s_fx.ctx, 0U), "the latch holds the pointer for the UI off the list");
+    arb_press(&p);
+    arb_frame(&p, 1);
+    arb_hold(&p);
+    p.wheel_dy = 1.0F;
+    arb_frame(&p, 1);
+    TEST_ASSERT_FALSE_MESSAGE(nt_ui_wants_pointer(s_fx.ctx, 0U), "the gesture is the game's");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(-40, (int)arb_list()->pos[1], "the wheel under a game drag scrolls nothing");
+}
+
+#define LATCH_MODAL 0x5C0A02U
+static bool s_latch_modal_up;
+static void outside_latch_modal(void) {
+    if (!s_latch_modal_up) {
+        return;
+    }
+    nt_ui_modal_style_t ms = nt_ui_modal_style_defaults();
+    ms.ease_speed = 0.0F;
+    nt_ui_modal_open(s_fx.ctx, LATCH_MODAL);
+    if (nt_ui_modal_begin(s_fx.ctx, LATCH_MODAL, &ms, NULL)) {
+        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(100), CLAY_SIZING_FIXED(50)}}}) {}
+        nt_ui_modal_end(s_fx.ctx);
+    }
+}
+
+/* A modal opening over a latched list drops the latch: the next ticks scroll nothing under it. */
+static void test_wheel_latch_drops_under_a_modal(void) {
+    s_scene.style.wheel_ease_speed = 0.0F;
+    s_scene.outside_after = outside_latch_modal;
+    s_latch_modal_up = false;
+    nt_pointer_t p = ui_fx_pointer(100.0F, 100.0F, false, false, false);
+    arb_frame(&p, 1);
+    arb_frame(&p, 1);
+    p.wheel_dy = 1.0F;
+    arb_frame(&p, 1);
+    TEST_ASSERT_EQUAL_INT(-40, (int)arb_list()->pos[1]);
+    p.wheel_dy = 0.0F;
+    s_latch_modal_up = true;
+    arb_frame(&p, 1); /* the modal's first declaration */
+    arb_frame(&p, 1); /* it is the top */
+    p.wheel_dy = 1.0F;
+    arb_frame(&p, 1);
+    arb_frame(&p, 1);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(-40, (int)arb_list()->pos[1], "the list under the modal took no tick");
+}
+
+/* Ticks latched to the outer list slide the inner one under the cursor; a move past the drag slop drops the latch,
+ * so the next tick goes to the inner list now under the pointer. */
+static void test_wheel_latch_drops_past_the_drag_slop(void) {
+    nt_pointer_t p = ui_fx_pointer(100.0F, 60.0F, false, false, false);
+    slide_frame(&p, 1.0F / 60.0F);
+    slide_frame(&p, 1.0F / 60.0F);
+    p.wheel_dy = 1.0F;
+    for (int f = 0; f < 3; ++f) {
+        slide_frame(&p, 1.0F / 60.0F);
+    }
+    const nt_ui_scroll_state_t *outer = (const nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, SLIDE_OUTER_ID);
+    const nt_ui_scroll_state_t *inner = (const nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, SLIDE_INNER_ID);
+    TEST_ASSERT_EQUAL_INT(-120, (int)outer->pos[1]);
+    TEST_ASSERT_EQUAL_INT(0, (int)inner->pos[1]);
+    p.x += 40.0F; /* past the 8 dp slop, still over the inner list */
+    slide_frame(&p, 1.0F / 60.0F);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(-120, (int)outer->pos[1], "the latch dropped");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(-40, (int)inner->pos[1], "the tick goes to the list under the pointer");
+}
+
+/* A latched inner list at its end keeps the ticks: the outer list around it never takes them. */
+static void test_wheel_latch_at_the_end_keeps_the_tick(void) {
+    nt_pointer_t p = ui_fx_pointer(100.0F, 200.0F, false, false, false);
+    slide_frame(&p, 1.0F / 60.0F);
+    slide_frame(&p, 1.0F / 60.0F);
+    p.wheel_dy = 1.0F;
+    for (int f = 0; f < 20; ++f) {
+        slide_frame(&p, 1.0F / 60.0F);
+    }
+    const nt_ui_scroll_state_t *outer = (const nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, SLIDE_OUTER_ID);
+    const nt_ui_scroll_state_t *inner = (const nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, SLIDE_INNER_ID);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(-600, (int)inner->pos[1], "the inner list reached its end");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(0, (int)outer->pos[1], "no tick chained to the outer list");
+}
+
+/* A pointer hidden from the context (occlusion 0) or inactive drops its latch: its ticks scroll nothing here and the
+ * pointer is not the UI's. */
+static void test_wheel_latch_drops_for_a_hidden_pointer(void) {
+    static const float hidden[1] = {0.0F};
+    s_scene.style.wheel_ease_speed = 0.0F;
+    nt_pointer_t p = ui_fx_pointer(100.0F, 100.0F, false, false, false);
+    arb_frame(&p, 1);
+    arb_frame(&p, 1);
+    p.wheel_dy = 1.0F;
+    arb_frame(&p, 1);
+    TEST_ASSERT_EQUAL_INT(-40, (int)arb_list()->pos[1]);
+    s_arb_occlusion = hidden;
+    arb_frame(&p, 1);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(-40, (int)arb_list()->pos[1], "a hidden pointer's tick scrolls nothing");
+    TEST_ASSERT_FALSE(nt_ui_wants_pointer(s_fx.ctx, 0U));
+    s_arb_occlusion = NULL;
+    arb_frame(&p, 1);
+    TEST_ASSERT_EQUAL_INT(-80, (int)arb_list()->pos[1]);
+    p.active = false;
+    arb_frame(&p, 1);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(-80, (int)arb_list()->pos[1], "an inactive pointer's tick scrolls nothing");
+    TEST_ASSERT_FALSE(nt_ui_wants_pointer(s_fx.ctx, 0U));
+}
+
+#define CLOSING_LATCH_POPUP 0x5C0A21U
+#define CLOSING_LATCH_LIST 0x5C0A22U
+#define CLOSING_LATCH_BASE 0x5C0A23U
+
+/* An 800x600 base list under an eased popup at (300,100) holding a 200x200 list; instant wheel on both. Returns
+ * whether the popup shows. */
+static bool closing_latch_frame(const nt_pointer_t *p, bool open) {
+    nt_ui_scroll_style_t style = nt_ui_scroll_style_defaults();
+    style.wheel_ease_speed = 0.0F;
+    style.wheel_step_px = 40.0F;
+    nt_ui_popup_style_t ps = nt_ui_popup_style_defaults();
+    ps.ease_speed = 8.0F;
+    const nt_ui_popup_anchor_t anc = {.x = 300.0F, .y = 100.0F, .prefer_side = NT_UI_POPUP_BELOW};
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .dt = 1.0F / 60.0F, .pointers = p, .pointer_count = 1});
+    CLAY({.id = CLAY_ID("closing-latch-root"), .layout = {.sizing = {CLAY_SIZING_FIXED(800), CLAY_SIZING_FIXED(600)}}}) {
+        nt_ui_scroll_begin(s_fx.ctx, NULL, CLOSING_LATCH_BASE, &style, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(800), CLAY_SIZING_FIXED(600)}}});
+        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(800), CLAY_SIZING_FIXED(3000)}}}) {}
+        nt_ui_scroll_end(s_fx.ctx);
+    }
+    if (open) {
+        nt_ui_popup_open(s_fx.ctx, CLOSING_LATCH_POPUP);
+    } else {
+        nt_ui_close(s_fx.ctx, CLOSING_LATCH_POPUP);
+    }
+    const bool shows = nt_ui_popup_begin(s_fx.ctx, CLOSING_LATCH_POPUP, &ps, &anc, NULL);
+    if (shows) {
+        nt_ui_scroll_begin(s_fx.ctx, NULL, CLOSING_LATCH_LIST, &style, &(Clay_ElementDeclaration){.layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(200)}}});
+        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(1000)}}}) {}
+        nt_ui_scroll_end(s_fx.ctx);
+        nt_ui_popup_end(s_fx.ctx);
+    }
+    nt_ui_end(s_fx.ctx);
+    return shows;
+}
+
+/* A wheel latched to a list in a popup drops when the popup starts closing: the ticks during its fade go to the list
+ * under the pointer. */
+static void test_wheel_latch_drops_in_a_closing_overlay(void) {
+    nt_pointer_t p = ui_fx_pointer(400.0F, 200.0F, false, false, false);
+    for (int f = 0; f < 90; ++f) {
+        (void)closing_latch_frame(&p, true);
+    }
+    p.wheel_dy = 1.0F;
+    (void)closing_latch_frame(&p, true);
+    TEST_ASSERT_EQUAL_INT(-40, (int)wheel_pos_y(CLOSING_LATCH_LIST));
+    bool shows = true;
+    for (int f = 0; f < 3; ++f) {
+        shows = closing_latch_frame(&p, false) && shows;
+    }
+    TEST_ASSERT_TRUE_MESSAGE(shows, "the popup still fades");
+    TEST_ASSERT_EQUAL_INT(-40, (int)wheel_pos_y(CLOSING_LATCH_LIST));
+    TEST_ASSERT_TRUE_MESSAGE(wheel_pos_y(CLOSING_LATCH_BASE) < 0.0F, "the ticks during the fade go to the list under the pointer");
+}
+// #endregion
+
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
 /* nt_input publishes a press that follows a release one frame later; a frame with both is not input. */
 static void release_with_newer_press_frame(void) {
@@ -3151,6 +3404,7 @@ int main(void) {
     RUN_TEST(test_arb_nested_vertical_wheel_passes_to_list);
     RUN_TEST(test_arb_tap_below_slop_clicks);
     RUN_TEST(test_arb_claim_reports_no_hold);
+    RUN_TEST(test_arb_claim_reports_released_now_once);
     RUN_TEST(test_arb_dt_zero_drag_no_phantom_fling);
     RUN_TEST(test_arb_release_crossing_outside_flings);
     RUN_TEST(test_arb_thumb_press_during_fling_grabs_bar);
@@ -3217,6 +3471,13 @@ int main(void) {
     RUN_TEST(test_scroll_wheel_front_most_sibling_wins);
     RUN_TEST(test_scrollbar_standalone_renders_inside_clip);
     RUN_TEST(test_scrollbar_nested_clipped_to_outer);
+    RUN_TEST(test_wheel_latch_keeps_the_flick_on_its_scroll);
+    RUN_TEST(test_wheel_latch_drops_under_a_game_gesture);
+    RUN_TEST(test_wheel_latch_drops_under_a_modal);
+    RUN_TEST(test_wheel_latch_drops_past_the_drag_slop);
+    RUN_TEST(test_wheel_latch_at_the_end_keeps_the_tick);
+    RUN_TEST(test_wheel_latch_drops_for_a_hidden_pointer);
+    RUN_TEST(test_wheel_latch_drops_in_a_closing_overlay);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_assert_release_with_newer_press);
     RUN_TEST(test_assert_missing_scroll_end);
