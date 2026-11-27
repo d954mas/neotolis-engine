@@ -50,6 +50,8 @@ static ui_walker_fixture_t s_fx;
 #define MODAL_X_BTN 0x5C0016U
 #define MODAL_Y_BTN 0x5C0017U
 #define MENU_ROW_BTN 0x5C0060U
+#define PANEL_UNDER 0x5C0070U
+#define FRONT_BTN 0x5C0071U
 #define CHAIN_POP(i) (0x5C0300U + (uint32_t)(i))
 #define CHAIN_BTN(i) (0x5C0320U + (uint32_t)(i))
 #define FADE_POP(i) (0x5C0400U + (uint32_t)(i))
@@ -119,6 +121,7 @@ typedef struct {
     bool field_disabled;  /* frame_popup_field declares its field disabled */
     bool wants_kbd_late;  /* nt_ui_wants_keyboard read after frame_popup_field's field */
     bool pop_enter;       /* popup A's body read Enter after its field */
+    int right_under;      /* frame_panel_under_overlays: the right clicks the panel reported */
     nt_ui_dropdown_style_t dd_style;
     nt_ui_tooltip_style_t tip_style;
     nt_ui_input_style_t in_style;
@@ -724,6 +727,18 @@ static void frame_modal_popup(void *game) {
         nt_ui_modal_end(s.ctx);
     }
 }
+/* A panel at the top left that counts its right clicks, under modal A (with a button) and popup A, which the test
+ * opens. */
+static void frame_panel_under_overlays(void *game) {
+    (void)game;
+    CLAY({.id = (Clay_ElementId){.id = nt_ui_fmix_id(PANEL_UNDER, 1U)}, .floating = {.attachTo = CLAY_ATTACH_TO_ROOT}}) {
+        CLAY({.id = (Clay_ElementId){.id = PANEL_UNDER}, .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(200)}}}) {}
+        g.right_under += nt_ui_step(s.ctx, PANEL_UNDER, NULL).right_clicked ? 1 : 0;
+    }
+    modal_with_button(MODAL_A, MODAL_A_BTN);
+    (void)popup(POP_A, POP_A_BTN, 400.0F, 300.0F, 0.0F, NULL, NULL);
+}
+
 // #endregion
 
 // #region Router: Pointer, Gesture
@@ -1555,6 +1570,71 @@ static void test_own_close_game_close_reports_once(void) {
     TEST_ASSERT_TRUE_MESSAGE(g.pop_a_shown, "the popup still fades");
     TEST_ASSERT_EQUAL_UINT8_MESSAGE(NT_UI_POPUP_CLOSE_NONE, g.reason_pop_a_now, "the close is reported once");
 }
+/* Own close: a right press on a popup's catcher closes the popup and its release right-clicks what lies under it; one
+ * on a modal's backdrop closes the modal and right-clicks nothing, as a modal swallows the whole gesture. */
+static void test_own_close_right_press_on_a_modal_backdrop_right_clicks_nothing(void) {
+    g.modal_flags = NT_UI_MODAL_CLOSE_ON_BACKDROP;
+    scenario(frame_panel_under_overlays);
+    nt_ui_popup_open(s_fx.ctx, POP_A);
+    sc_frames(&s, 2);
+    sc_move(&s, 50.0F, 50.0F);
+    sc_press(&s, NT_BUTTON_RIGHT);
+    TEST_ASSERT_FALSE(nt_ui_is_open(s_fx.ctx, POP_A));
+    sc_release(&s, NT_BUTTON_RIGHT);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(1, g.right_under, "the popup's closing press right-clicks the panel under it");
+    nt_ui_modal_open(s_fx.ctx, MODAL_A);
+    sc_frames(&s, 2);
+    sc_press(&s, NT_BUTTON_RIGHT);
+    TEST_ASSERT_FALSE(nt_ui_is_open(s_fx.ctx, MODAL_A));
+    sc_release(&s, NT_BUTTON_RIGHT);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(1, g.right_under, "the modal's closing press right-clicks nothing");
+}
+
+alignas(NT_UI_ARENA_ALIGN) static uint8_t s_arena_front[NT_UI_TEST_ARENA_SIZE];
+
+/* One frame of two contexts: `front`, begun first, holds a button over the back menu's rows (x 100..300,
+ * y 60..200); the game hides from s_fx.ctx's menu a pointer the front wants. */
+static void two_ctx_menu_frame(nt_ui_context_t *front, float x, float y, int press, int release) {
+    nt_pointer_t p = {.x = x, .y = y, .active = true};
+    s.down[NT_BUTTON_LEFT] = press == NT_BUTTON_LEFT || (s.down[NT_BUTTON_LEFT] && release != NT_BUTTON_LEFT);
+    p.buttons[NT_BUTTON_LEFT] = (nt_button_state_t){.is_down = s.down[NT_BUTTON_LEFT], .is_pressed = press == NT_BUTTON_LEFT, .is_released = release == NT_BUTTON_LEFT};
+    nt_input_poll();
+    nt_arena_reset(&g_nt_mem_scratch);
+    nt_ui_begin(front, &(nt_ui_frame_desc_t){.layout_w = UI_FX_VIEW_W, .layout_h = UI_FX_VIEW_H, .dt = UI_FX_DT, .pointers = &p, .pointer_count = 1U});
+    CLAY({.id = (Clay_ElementId){.id = nt_ui_fmix_id(FRONT_BTN, 1U)}, .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = 100.0F, .y = 60.0F}}}) {
+        CLAY({.id = (Clay_ElementId){.id = FRONT_BTN}, .layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(140)}}}) {}
+        log_click(FRONT_BTN, nt_ui_step(front, FRONT_BTN, NULL).clicked);
+    }
+    nt_ui_end(front);
+    const float occlusion[1] = {nt_ui_wants_pointer(front, 0U) ? 0.0F : INFINITY};
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = UI_FX_VIEW_W, .layout_h = UI_FX_VIEW_H, .dt = UI_FX_DT, .pointers = &p, .pointer_count = 1U, .occlusion = occlusion});
+    menu_tree();
+    nt_ui_end(s_fx.ctx);
+}
+
+/* Own close: a press the front context takes is hidden from the back one, and a hidden pointer lies outside every
+ * popup there, so a front press over the back menu's row closes the menu. */
+static void test_own_close_front_press_over_a_back_menu_closes_it(void) {
+    const nt_ui_create_desc_t desc = nt_ui_create_desc_defaults();
+    nt_ui_context_t *front = nt_ui_create_context(s_arena_front, sizeof s_arena_front, &desc);
+    TEST_ASSERT_NOT_NULL(front);
+    nt_ui_set_font(front, 0U, s_fx.stub_font);
+    scenario(frame_menu);
+    nt_ui_menu_open(&g.menu, s_fx.ctx, MENU_A, 120.0F, 80.0F);
+    two_ctx_menu_frame(front, 5.0F, 5.0F, -1, -1);
+    two_ctx_menu_frame(front, 5.0F, 5.0F, -1, -1);
+    const nt_ui_bbox_t row = sc_box(&s, ROW_FILE);
+    const float x = row.x + (row.width * 0.5F);
+    const float y = row.y + (row.height * 0.5F);
+    TEST_ASSERT_TRUE_MESSAGE(x > 100.0F && x < 300.0F && y > 60.0F && y < 200.0F, "the front button covers the File row");
+    two_ctx_menu_frame(front, x, y, -1, -1);
+    two_ctx_menu_frame(front, x, y, NT_BUTTON_LEFT, -1);
+    TEST_ASSERT_FALSE_MESSAGE(nt_ui_is_open(s_fx.ctx, MENU_A), "the hidden press is outside the back menu");
+    two_ctx_menu_frame(front, x, y, -1, NT_BUTTON_LEFT);
+    TEST_ASSERT_EQUAL_INT(1, clicks(FRONT_BTN));
+    nt_ui_destroy_context(front);
+}
+
 // #endregion
 
 // #region Menu
@@ -1677,6 +1757,8 @@ int main(void) {
     RUN_TEST(test_own_close_press_on_the_popup_closes_only_its_combo);
     RUN_TEST(test_own_close_press_on_the_menu_root_closes_the_level_and_its_popup);
     RUN_TEST(test_own_close_backdrop_press_closes_the_popup_in_a_modal_not_the_modal);
+    RUN_TEST(test_own_close_right_press_on_a_modal_backdrop_right_clicks_nothing);
+    RUN_TEST(test_own_close_front_press_over_a_back_menu_closes_it);
     RUN_TEST(test_own_close_picked_combo_list_passes_the_next_press_through);
     RUN_TEST(test_stack_open_between_frames_shows_next_frame);
     RUN_TEST(test_own_close_game_close_reports_once);

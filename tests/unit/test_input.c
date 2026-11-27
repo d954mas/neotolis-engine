@@ -118,7 +118,8 @@ void test_focus_lost_then_press_same_button(void) {
 }
 
 /* Up at one point, a hover and down at another between two polls: the release is published where it
-   happened; the press, its position and the motion since the release one frame later. */
+   happened; the press where it happened and the motion up to it one frame later. Motion after the waiting
+   press is dropped (the next move reports the pointer), and motion in the press frame is published after it. */
 void test_release_then_press_takes_two_frames(void) {
     nt_input_feed(nt_test_mouse(5.0F, 5.0F, 1));
     nt_input_poll();
@@ -132,14 +133,51 @@ void test_release_then_press_takes_two_frames(void) {
     TEST_ASSERT_EQUAL_INT(6, (int)m->x);
     TEST_ASSERT_EQUAL_INT(5, (int)m->y);
     TEST_ASSERT_EQUAL_INT(1, (int)m->dx);
+    nt_input_feed(nt_test_mouse(95.0F, 40.0F, 1));
     nt_input_poll();
     TEST_ASSERT_TRUE(m->buttons[NT_BUTTON_LEFT].is_pressed && m->buttons[NT_BUTTON_LEFT].is_down && !m->buttons[NT_BUTTON_LEFT].is_released);
-    TEST_ASSERT_EQUAL_INT(92, (int)m->x);
+    TEST_ASSERT_EQUAL_INT(90, (int)m->x);
     TEST_ASSERT_EQUAL_INT(40, (int)m->y);
-    TEST_ASSERT_EQUAL_INT(86, (int)m->dx);
+    TEST_ASSERT_EQUAL_INT(84, (int)m->dx);
     TEST_ASSERT_EQUAL_INT(35, (int)m->dy);
     nt_input_poll();
     TEST_ASSERT_TRUE(m->buttons[NT_BUTTON_LEFT].is_down && !m->buttons[NT_BUTTON_LEFT].is_pressed);
+    TEST_ASSERT_EQUAL_INT(95, (int)m->x);
+    TEST_ASSERT_EQUAL_INT(5, (int)m->dx);
+}
+
+/* A press and a move before the poll: the press frame shows the pointer where it pressed; the move is
+   published the frame after, as motion. */
+void test_press_is_published_where_it_happened(void) {
+    nt_input_feed(nt_test_mouse(20.0F, 50.0F, 0));
+    nt_input_poll();
+    nt_input_feed(nt_test_mouse(20.0F, 50.0F, 1));
+    nt_input_feed(nt_test_mouse(180.0F, 60.0F, 1));
+    nt_input_poll();
+    const nt_pointer_t *m = &g_nt_input.pointers[0];
+    TEST_ASSERT_TRUE(m->buttons[NT_BUTTON_LEFT].is_pressed && m->buttons[NT_BUTTON_LEFT].is_down);
+    TEST_ASSERT_EQUAL_INT(20, (int)m->x);
+    TEST_ASSERT_EQUAL_INT(50, (int)m->y);
+    TEST_ASSERT_EQUAL_INT(0, (int)m->dx);
+    nt_input_poll();
+    TEST_ASSERT_TRUE(m->buttons[NT_BUTTON_LEFT].is_down && !m->buttons[NT_BUTTON_LEFT].is_pressed);
+    TEST_ASSERT_EQUAL_INT(180, (int)m->x);
+    TEST_ASSERT_EQUAL_INT(160, (int)m->dx);
+    TEST_ASSERT_EQUAL_INT(10, (int)m->dy);
+}
+
+/* A contact's down and its first move before the poll: the down is published where it landed. */
+void test_contact_down_is_published_where_it_landed(void) {
+    nt_input_feed(nt_test_contact_down(42, 20.0F, 50.0F, 0.5F, NT_POINTER_TOUCH, 1));
+    nt_input_feed(nt_test_contact_move(42, 180.0F, 50.0F, 0.5F, 1));
+    nt_input_poll();
+    const nt_pointer_t *c = &g_nt_input.pointers[1];
+    TEST_ASSERT_TRUE(c->buttons[NT_BUTTON_LEFT].is_pressed);
+    TEST_ASSERT_EQUAL_INT(20, (int)c->x);
+    TEST_ASSERT_EQUAL_INT(0, (int)c->dx);
+    nt_input_poll();
+    TEST_ASSERT_EQUAL_INT(180, (int)c->x);
+    TEST_ASSERT_EQUAL_INT(160, (int)c->dx);
 }
 
 /* A bot's button event has no position: a waiting press keeps the one it was made at. */
@@ -601,6 +639,8 @@ int main(void) {
     RUN_TEST(test_focus_lost_then_press_same_key);
     RUN_TEST(test_focus_lost_then_press_same_button);
     RUN_TEST(test_release_then_press_takes_two_frames);
+    RUN_TEST(test_press_is_published_where_it_happened);
+    RUN_TEST(test_contact_down_is_published_where_it_landed);
     RUN_TEST(test_waiting_press_keeps_its_position_through_a_buttons_event);
     RUN_TEST(test_waiting_tap_survives_a_leave);
     RUN_TEST(test_waiting_tap_keeps_its_point);

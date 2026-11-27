@@ -501,7 +501,6 @@ static uint32_t s_id_tip_a, s_id_tip_b, s_id_tip_c;         /* tooltip targets *
 static uint32_t s_id_menu_global;                           /* global context menu (right-click anywhere) */
 static uint32_t s_id_menu_zone;                             /* zone context menu (bound to a panel) */
 static uint32_t s_id_menu_panel;                            /* the zone panel the zone menu binds to (opens only over it) */
-static bool s_right_press_on_modal;                         /* the right gesture began with the confirm modal open: its press closed the modal */
 static uint32_t s_id_menu_opacity_btn;                      /* inner button on the zone menu's not-activatable custom row */
 static uint32_t s_id_tabs_demo_base;                        /* begin/end-core demo strip: tabs salt from this + index */
 static bool s_ids_ready;
@@ -3185,8 +3184,8 @@ static void render_menu(nt_ui_context_t *ctx, tab_state_t *st) {
     const nt_ui_interaction_t zone_ev = nt_ui_step(ctx, s_id_menu_panel, NULL);
 
     /* A right-click on the panel opens the zone menu, also through an open menu's catcher (its press closes that
-     * menu, its release lands on the panel), but not through the confirm modal, whose backdrop press closes it; a
-     * right release the game owns, outside a left drag, opens the global one. Opening one menu closes the other. The
+     * menu, its release lands on the panel), but not through the confirm modal, whose backdrop press swallows the
+     * gesture; a right release the game owns, outside a left drag, opens the global one. Opening one menu closes the other. The
      * inspector over the tab takes the gesture, so neither opens through it. */
     const nt_pointer_t *pointer = &g_nt_input.pointers[g_nt_input.primary];
     float pos[2];
@@ -3194,7 +3193,7 @@ static void render_menu(nt_ui_context_t *ctx, tab_state_t *st) {
     const bool held = nt_ui_hold_crossed(&zone_ev, 0.5F);
     const nt_button_state_t left = pointer->buttons[NT_BUTTON_LEFT];
     const bool game_right = pointer->buttons[NT_BUTTON_RIGHT].is_released && !pointer->cancelled && !left.is_down && !left.is_released && !nt_ui_wants_pointer(ctx, 0U);
-    if (held || (zone_ev.right_clicked && !s_right_press_on_modal)) {
+    if (held || zone_ev.right_clicked) {
         nt_ui_menu_open(&st->menu.zone_menu, ctx, s_id_menu_zone, zone_ev.pos[0], zone_ev.pos[1]); /* a hold opens under its finger */
     } else if (game_right) {
         nt_ui_menu_open(&st->menu.global_menu, ctx, s_id_menu_global, pos[0], pos[1]);
@@ -3738,9 +3737,6 @@ static void frame(void) {
         const bool base_on = g_tabs[s_active_tab].render == render_base_material && s_state.base_sdf && base_info && nt_gfx_program_ready(base_info->program);
         nt_ui_set_sprite_material(s_ctx, base_on ? s_base_material : s_sprite_material);
 
-        if (g_nt_input.pointers[g_nt_input.primary].buttons[NT_BUTTON_RIGHT].is_pressed) {
-            s_right_press_on_modal = nt_ui_is_open(s_ctx, s_id_modal_confirm); /* read before begin, where the press closes it */
-        }
         /* Pass the RAW device pointer; the ctx converts it via the scale-derived viewport. */
         nt_ui_begin(s_ctx, &(nt_ui_frame_desc_t){.layout_w = scale.logical_w,
                                                  .layout_h = scale.logical_h,

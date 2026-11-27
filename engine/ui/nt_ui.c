@@ -406,8 +406,8 @@ void nt_ui_set_font(nt_ui_context_t *ctx, uint16_t font_id, nt_font_t font) {
 // #region begin_end
 static void resolve_hot(nt_ui_context_t *ctx);
 static void overlay_close_at(nt_ui_context_t *ctx, int32_t at, uint8_t reason);
-static const nt_pointer_t *outside_press(nt_ui_context_t *ctx, const nt_ui_overlay_t *o);
-static bool panel_holds(nt_ui_context_t *ctx, const nt_ui_overlay_t *o, const nt_pointer_t *p);
+static int32_t outside_press(nt_ui_context_t *ctx, const nt_ui_overlay_t *o);
+static bool panel_holds(nt_ui_context_t *ctx, const nt_ui_overlay_t *o, uint32_t i);
 
 /* Last frame's paint order of the top's catcher, which every live element reaches (0 = no top). */
 static uint32_t top_catcher_order(const nt_ui_context_t *ctx) {
@@ -536,7 +536,7 @@ void nt_ui_begin(nt_ui_context_t *ctx, const nt_ui_frame_desc_t *frame) {
         /* nt_input never publishes it: a press that follows a release waits for the next frame. */
         NT_ASSERT((m.pressed & m.released & m.down) == 0U && "nt_ui_begin: a release and a newer press of one pointer in one frame");
         const uint8_t still = (uint8_t)(prev_down[i] & (m.down | m.released) & ~m.pressed);
-        cap->ended_id = 0U;
+        cap->lost_id = 0U;
         if (still == 0U || ((prev_down[i] & ~still) & (1U << NT_BUTTON_LEFT)) != 0U) {
             nt_ui_internal_capture_drop(cap);
             cap->pending_scroll = 0U;
@@ -567,7 +567,7 @@ void nt_ui_begin(nt_ui_context_t *ctx, const nt_ui_frame_desc_t *frame) {
         if (i >= count) {
             ctx->captures[i].pending_scroll = 0U; /* a slot the game stopped passing holds no gesture when it returns */
             ctx->captures[i].ui_gesture = false;
-            ctx->captures[i].ended_id = 0U;
+            ctx->captures[i].lost_id = 0U;
             ctx->wheel_owner[i][0] = 0U;
             ctx->wheel_owner[i][1] = 0U;
         }
@@ -753,14 +753,17 @@ void nt_ui_begin(nt_ui_context_t *ctx, const nt_ui_frame_desc_t *frame) {
     } else if ((closes & NT_UI_OVERLAY_OUTSIDE) != 0U) {
         /* On the press, as Dear ImGui's ClosePopupsOverWindow: the top and every light overlay under it the press
          * passes close (menu levels too), down to the first one whose panel holds it or a modal. */
-        const nt_pointer_t *press = outside_press(ctx, &ctx->overlays[top]);
-        for (int32_t k = top; press != NULL && k >= 0; --k) {
+        const int32_t press = outside_press(ctx, &ctx->overlays[top]);
+        for (int32_t k = top; press >= 0 && k >= 0; --k) {
             const nt_ui_overlay_t *o = &ctx->overlays[k];
             if (!o->open) {
                 continue;
             }
-            if (k < top && ((o->flags & NT_UI_OVERLAY_LIGHT) == 0U || panel_holds(ctx, o, press))) {
+            if (k < top && ((o->flags & NT_UI_OVERLAY_LIGHT) == 0U || panel_holds(ctx, o, (uint32_t)press))) {
                 break;
+            }
+            if ((o->flags & NT_UI_OVERLAY_LIGHT) == 0U) {
+                ctx->captures[press].right_press = false; /* a modal swallows the whole gesture: its release right-clicks nothing */
             }
             overlay_close_at(ctx, k, NT_UI_POPUP_CLOSE_OUTSIDE);
         }
@@ -2714,8 +2717,8 @@ static nt_ui_widget_pidx_state_t resolve_widget_pidx_state(nt_ui_context_t *ctx,
     return s;
 }
 
-/* This widget's interaction this frame: a pure read for a query; for a step it also consumes an ended capture's
- * released_now, and nt_ui_step commits the rest from the pointer state resolved here. */
+/* This widget's interaction this frame: a pure read for a query; for a step it also consumes a lost capture's
+ * report, and nt_ui_step commits the rest from the pointer state resolved here. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static nt_ui_interaction_t read_interaction(nt_ui_context_t *ctx, uint32_t id, bool step, bool *out_owner_over, nt_ui_widget_pidx_state_t *out_s) {
     NT_ASSERT(ctx != NULL && "nt_ui_query_interaction: ctx must be non-NULL");
@@ -2750,9 +2753,10 @@ static nt_ui_interaction_t read_interaction(nt_ui_context_t *ctx, uint32_t id, b
         const bool over = pointer_on(ctx, pidx, id);
         *out_owner_over = over;
         out.pressed = btn.is_down;
-        out.released_now = btn.is_released;
+        out.released_now = btn.is_released && !p->cancelled;
+        out.lost = btn.is_released && p->cancelled;
         out.pressed_now = s.new_capture;
-        out.clicked = btn.is_released && over && !p->cancelled;
+        out.clicked = out.released_now && over;
         out.pointer_id = p->id;
         out.gesture_pending = cap->pending_scroll != 0U;
         if (s.new_capture) {
@@ -2783,17 +2787,29 @@ static nt_ui_interaction_t read_interaction(nt_ui_context_t *ctx, uint32_t id, b
     for (uint32_t i = 0; i < ctx->frame_pointer_count; ++i) {
         const nt_pointer_t *p = &ctx->frame_pointers[i];
         nt_ui_capture_t *cap = &ctx->captures[i];
-        if (cap->ended_id == id) {
-            out.released_now = true;
+        if (cap->lost_id == id) {
+            out.lost = true;
             if (step) {
-                cap->ended_id = 0U; /* reported once */
+                cap->lost_id = 0U; /* reported once */
             }
         }
         if (ctx->pointer_hot[i].id != id) {
             continue; /* the rest goes to the target itself, not to its parents */
         }
         const nt_ui_buttons_t btn = nt_ui_internal_buttons(p);
-        out.right_clicked = out.right_clicked || (cap->right_press && btn.down == 0U && btn.released != 0U && !p->cancelled);
+        if (!out.right_clicked && cap->right_press && btn.down == 0U && btn.released != 0U && !p->cancelled) {
+            out.right_clicked = true;
+            if (s.effective_pidx < 0) { /* a held widget keeps its holder's pointer: its drag reads it */
+                out.pointer_id = p->id;
+                out.distance = ctx->pointer_hot[i].distance;
+                out.press_pos[0] = cap->press_pos[0];
+                out.press_pos[1] = cap->press_pos[1];
+                out.pos[0] = p->x;
+                out.pos[1] = p->y;
+                out.drag_dx = p->x - cap->press_pos[0];
+                out.drag_dy = p->y - cap->press_pos[1];
+            }
+        }
     }
 
     Clay_SetCurrentContext(saved_clay);
@@ -3211,24 +3227,26 @@ bool nt_ui_is_open(const nt_ui_context_t *ctx, uint32_t id) {
 }
 // #endregion
 
-/* The top `o` got a first press of any pointer and button outside its panel grown by its close_pad: on its catcher (a
- * modal's backdrop), or for a popup also with no target (a 3D ray past its surface, a hidden pointer). A press joining
- * a gesture is none. */
-static const nt_pointer_t *outside_press(nt_ui_context_t *ctx, const nt_ui_overlay_t *o) {
+/* The index of a pointer whose first press of any button landed outside the top `o`'s panel grown by its close_pad: on
+ * its catcher (a modal's backdrop), or for a popup also with no target (a 3D ray past its surface, a hidden pointer);
+ * -1 for none. A press joining a gesture is none. */
+static int32_t outside_press(nt_ui_context_t *ctx, const nt_ui_overlay_t *o) {
     for (uint32_t i = 0; i < ctx->frame_pointer_count; ++i) {
-        const nt_pointer_t *pp = &ctx->frame_pointers[i];
         const uint32_t hot = ctx->pointer_hot[i].id;
-        if (nt_ui_internal_buttons(pp).pressed != 0U && (hot == nt_ui_internal_popup_catcher_id(o->id) || (hot == 0U && (o->flags & NT_UI_OVERLAY_LIGHT) != 0U)) && !panel_holds(ctx, o, pp)) {
-            return pp;
+        if (nt_ui_internal_buttons(&ctx->frame_pointers[i]).pressed != 0U && (hot == nt_ui_internal_popup_catcher_id(o->id) || (hot == 0U && (o->flags & NT_UI_OVERLAY_LIGHT) != 0U)) &&
+            !panel_holds(ctx, o, i)) {
+            return (int32_t)i;
         }
     }
-    return NULL;
+    return -1;
 }
 
-/* The pointer lies in the overlay's panel grown by its close_pad. */
-static bool panel_holds(nt_ui_context_t *ctx, const nt_ui_overlay_t *o, const nt_pointer_t *p) {
+/* Pointer i lies in the overlay's panel grown by its close_pad. A hidden pointer (a context in front took it) lies in
+ * no panel here. */
+static bool panel_holds(nt_ui_context_t *ctx, const nt_ui_overlay_t *o, uint32_t i) {
+    const nt_pointer_t *p = &ctx->frame_pointers[i];
     const int16_t pad_lrtb[4] = {o->close_pad, o->close_pad, o->close_pad, o->close_pad};
-    return nt_ui_internal_hit_test_padded(ctx, o->id, p->x, p->y, pad_lrtb);
+    return ctx->pointer_occlusion[i] > 0.0F && nt_ui_internal_hit_test_padded(ctx, o->id, p->x, p->y, pad_lrtb);
 }
 
 bool nt_ui_wants_pointer(const nt_ui_context_t *ctx, uint32_t pointer_index) {
@@ -3280,9 +3298,8 @@ static bool pointer_target(const nt_ui_context_t *ctx, uint32_t i, uint32_t *out
     return true;
 }
 
-bool nt_ui_hovered_within(const nt_ui_context_t *ctx, uint32_t id) {
-    NT_ASSERT(ctx != NULL && "nt_ui_hovered_within: ctx must be non-NULL");
-    NT_ASSERT(id != 0U && "nt_ui_hovered_within: id must be non-zero (0 = no widget)");
+/* Pointers [from, to) target `id` or inside it, as nt_ui_hovered_within. */
+static bool pointers_within(const nt_ui_context_t *ctx, uint32_t id, uint32_t from, uint32_t to) {
     if (ctx->inert_from != 0U) {
         return false;
     }
@@ -3292,7 +3309,7 @@ bool nt_ui_hovered_within(const nt_ui_context_t *ctx, uint32_t id) {
         return false;
     }
     const uint32_t catcher = (ctx->overlay_top != 0U) ? nt_ui_internal_popup_catcher_id(ctx->overlay_top) : 0U;
-    for (uint32_t i = 0; i < ctx->frame_pointer_count; ++i) {
+    for (uint32_t i = from; i < to; ++i) {
         uint32_t t = 0U;
         /* A pointer on the top's catcher hovers nothing, as Dear ImGui's items behind a popup. */
         if (ctx->pointer_hot[i].id != catcher && pointer_target(ctx, i, &t) && t >= first && t <= last) {
@@ -3301,6 +3318,14 @@ bool nt_ui_hovered_within(const nt_ui_context_t *ctx, uint32_t id) {
     }
     return false;
 }
+
+bool nt_ui_hovered_within(const nt_ui_context_t *ctx, uint32_t id) {
+    NT_ASSERT(ctx != NULL && "nt_ui_hovered_within: ctx must be non-NULL");
+    NT_ASSERT(id != 0U && "nt_ui_hovered_within: id must be non-zero (0 = no widget)");
+    return pointers_within(ctx, id, 0U, ctx->frame_pointer_count);
+}
+
+bool nt_ui_internal_primary_within(const nt_ui_context_t *ctx, uint32_t id) { return pointers_within(ctx, id, ctx->frame_primary, ctx->frame_primary + 1U); }
 // #endregion
 
 // #region public_metrics

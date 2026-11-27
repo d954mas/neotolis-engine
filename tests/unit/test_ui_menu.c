@@ -2030,6 +2030,39 @@ static void test_menu_lost_focus_lights_the_open_parent(void) {
     TEST_ASSERT_TRUE_MESSAGE(menu_row_lit(p) > 0.0F, "the open parent is lit when its level has no focus");
 }
 
+/* One frame of the shared tree with two contacts; contact 0 is the primary. */
+static void menu_two_contacts_frame(nt_ui_menu_t *st, nt_ui_menu_style_t *style, const nt_pointer_t ps[2]) {
+    nt_arena_reset(&g_nt_mem_scratch);
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = UI_FX_DT, .pointers = ps, .pointer_count = 2, .primary = 0});
+    menu_im_tree(st, style);
+    nt_ui_end(s_fx.ctx);
+}
+
+/* ---- The primary finger on File and a second finger on Edit: the rows follow the primary, so File keeps the
+ *      focus, as the aim corridor does. ---- */
+static void test_menu_rows_follow_the_primary_contact(void) {
+    nt_ui_menu_style_t style = nt_ui_menu_style_defaults();
+    nt_ui_menu_t st = {0};
+    nt_ui_menu_open(&st, s_fx.ctx, MENU_A, 120.0F, 80.0F);
+    menu_im_frame(&st, &style, 0.0F, 0.0F);
+    menu_im_frame(&st, &style, 0.0F, 0.0F);
+    const uint32_t file = menu_row(MENU_A, KEY_FILE);
+    const uint32_t edit = menu_row(MENU_A, KEY_EDIT);
+    nt_pointer_t ps[2] = {{.id = 1U, .type = NT_POINTER_TOUCH, .active = true}, {.id = 2U, .type = NT_POINTER_TOUCH}};
+    menu_row_center(file, &ps[0].x, &ps[0].y);
+    menu_row_center(edit, &ps[1].x, &ps[1].y);
+    ps[0].buttons[NT_BUTTON_LEFT] = (nt_button_state_t){.is_down = true, .is_pressed = true};
+    menu_two_contacts_frame(&st, &style, ps);
+    ps[0].buttons[NT_BUTTON_LEFT].is_pressed = false;
+    ps[1].active = true;
+    ps[1].buttons[NT_BUTTON_LEFT] = (nt_button_state_t){.is_down = true, .is_pressed = true};
+    menu_two_contacts_frame(&st, &style, ps);
+    ps[1].buttons[NT_BUTTON_LEFT].is_pressed = false;
+    menu_two_contacts_frame(&st, &style, ps);
+    menu_two_contacts_frame(&st, &style, ps);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(file, st.focus, "the second finger on Edit takes no focus");
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_menu_one_activation_per_frame);
@@ -2047,6 +2080,7 @@ int main(void) {
     RUN_TEST(test_menu_still_right_press_ends_keyboard_mode);
     RUN_TEST(test_menu_covered_switch_waits);
     RUN_TEST(test_menu_right_press_during_a_drag_keeps_open);
+    RUN_TEST(test_menu_rows_follow_the_primary_contact);
     RUN_TEST(test_menu_returned_row_is_not_focused);
     RUN_TEST(test_menu_row_popup_takes_the_pointer_in_its_frame);
     RUN_TEST(test_menu_in_a_closing_modal_takes_no_key);

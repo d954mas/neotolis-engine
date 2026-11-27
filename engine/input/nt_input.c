@@ -12,12 +12,12 @@ static nt_input_t s_next; /* events apply here in arrival order */
 
 static bool s_player_enabled = true;
 
-/* A frame with a release edge shows the pointer where the release happened: where it goes afterwards
-   is published next frame. A press of the released button waits with it, so a frame never reads a
-   release together with a newer press. Bit b = button b. */
+/* A frame with a button edge shows the pointer where its first edge happened (a press or a release): where
+   it goes afterwards is published next frame. A press of the released button waits with it, so a frame
+   never reads a release together with a newer press. Bit b = button b. */
 static uint8_t s_waiting_press[NT_INPUT_MAX_POINTERS];
 static uint8_t s_waiting_down[NT_INPUT_MAX_POINTERS]; /* that press is still held */
-static float s_held_pos[NT_INPUT_MAX_POINTERS][2];    /* where the pointer is since its release edge */
+static float s_held_pos[NT_INPUT_MAX_POINTERS][2];    /* where the pointer is since its first edge */
 static uint8_t s_held_jump;                           /* bit i: pointer i came back untracked while held: catching up is no motion */
 static uint8_t s_waiting_cancel;                      /* bit i: a cancel lifted pointer i's waiting press: its tap is cancelled */
 
@@ -42,7 +42,22 @@ static nt_pointer_t *find_free_contact_slot(void) {
     return NULL;
 }
 
-static bool pos_held(const nt_pointer_t *ptr) { return ptr->buttons[0].is_released || ptr->buttons[1].is_released || ptr->buttons[2].is_released; }
+static bool pos_held(const nt_pointer_t *ptr) {
+    for (int b = 0; b < NT_BUTTON_MAX; b++) {
+        if (ptr->buttons[b].is_pressed || ptr->buttons[b].is_released) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* The first edge of the frame: the pointer holds here. */
+static void hold_here(nt_pointer_t *ptr, ptrdiff_t i) {
+    if (!pos_held(ptr)) {
+        s_held_pos[i][0] = ptr->x;
+        s_held_pos[i][1] = ptr->y;
+    }
+}
 
 static void apply_buttons_mask(nt_pointer_t *ptr, uint8_t buttons_mask) {
     static const uint8_t masks[NT_BUTTON_MAX] = {1U, 2U, 4U};
@@ -56,25 +71,23 @@ static void apply_buttons_mask(nt_pointer_t *ptr, uint8_t buttons_mask) {
             continue;
         }
         if (now && !ptr->buttons[b].is_down) {
+            hold_here(ptr, i);
             ptr->buttons[b].is_pressed = true;
         }
         if (!now && ptr->buttons[b].is_down) {
-            if (!pos_held(ptr)) { /* the first release edge of the frame: the pointer holds here */
-                s_held_pos[i][0] = ptr->x;
-                s_held_pos[i][1] = ptr->y;
-            }
+            hold_here(ptr, i);
             ptr->buttons[b].is_released = true;
         }
         ptr->buttons[b].is_down = now;
     }
 }
 
-/* Moves a pointer; after a release edge the new position waits for the next frame. */
+/* Moves a pointer; after a button edge the new position waits for the next frame. */
 static void move_pointer(nt_pointer_t *ptr, float x, float y, bool delta) {
     const ptrdiff_t i = ptr - s_next.pointers;
     if (pos_held(ptr)) {
-        if ((s_waiting_press[i] & ~s_waiting_down[i]) != 0U) {
-            return; /* a waiting tap is published where it was made: motion after it is dropped */
+        if (s_waiting_press[i] != 0U) {
+            return; /* a waiting press is published where it was made: motion after it is dropped */
         }
         s_held_pos[i][0] = x;
         s_held_pos[i][1] = y;
@@ -174,7 +187,7 @@ void nt_input_poll(void) {
         }
         p->dx = 0.0F;
         p->dy = 0.0F;
-        if (held && p->active) { /* the motion the release edge held back */
+        if (held && p->active) { /* the motion the edge held back; a waiting press published below holds here */
             if ((s_held_jump & (1U << i)) == 0U) {
                 p->dx = s_held_pos[i][0] - p->x;
                 p->dy = s_held_pos[i][1] - p->y;

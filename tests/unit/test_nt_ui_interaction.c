@@ -964,19 +964,19 @@ static nt_ui_interaction_t btn_popup_frame(nt_pointer_t p, bool popup) {
     return in;
 }
 
-/* A capture nt_ui_begin drops (an overlay over it) reports released_now once to its holder's step, no click. */
-static void test_dropped_capture_reports_released_now_once(void) {
+/* A capture nt_ui_begin drops (an overlay over it) reports lost once to its holder's step, no release and no click. */
+static void test_dropped_capture_reports_lost_once(void) {
     (void)btn_popup_frame(ui_fx_pointer(BTN_CX, BTN_CY, false, false, false), false);
     (void)btn_popup_frame(ui_fx_pointer(BTN_CX, BTN_CY, true, true, false), false);
     nt_ui_popup_open(s_fx.ctx, POPUP_ID);
     (void)btn_popup_frame(ui_fx_pointer(BTN_CX, BTN_CY, true, false, false), true);
     nt_ui_interaction_t in = btn_popup_frame(ui_fx_pointer(BTN_CX, BTN_CY, true, false, false), true);
-    TEST_ASSERT_TRUE_MESSAGE(in.released_now, "the overlay took the capture");
-    TEST_ASSERT_FALSE(in.pressed || in.clicked);
+    TEST_ASSERT_TRUE_MESSAGE(in.lost, "the overlay took the capture");
+    TEST_ASSERT_FALSE(in.pressed || in.clicked || in.released_now);
     in = btn_popup_frame(ui_fx_pointer(BTN_CX, BTN_CY, true, false, false), true);
-    TEST_ASSERT_FALSE_MESSAGE(in.released_now, "once");
+    TEST_ASSERT_FALSE_MESSAGE(in.lost, "once");
     in = btn_popup_frame(ui_fx_pointer(BTN_CX, BTN_CY, false, false, true), true);
-    TEST_ASSERT_FALSE(in.released_now || in.clicked);
+    TEST_ASSERT_FALSE(in.released_now || in.clicked || in.lost);
 }
 
 /* The button with a child record over its left half; both step. */
@@ -1018,6 +1018,25 @@ static void test_right_click_goes_to_the_target(void) {
     TEST_ASSERT_FALSE_MESSAGE(parent.right_clicked, "a cancelled release clicks nothing");
 }
 
+/* The mouse hovers the button and a pen right-clicks it elsewhere: the right click reports the pen and its point. */
+static void test_right_click_carries_its_own_pointer(void) {
+    const float mouse_x = BTN_X + (BTN_W * 0.6F);
+    const float pen_x = BTN_X + (BTN_W * 0.9F);
+    nt_pointer_t ps[2] = {ui_fx_pointer(mouse_x, BTN_CY, false, false, false), {.x = pen_x, .y = BTN_CY, .active = true, .id = 7U, .type = NT_POINTER_PEN}};
+    nt_ui_interaction_t parent = {0};
+    for (int f = 0; f < 3; ++f) {
+        ps[1].buttons[NT_BUTTON_RIGHT] = (nt_button_state_t){.is_down = f == 1, .is_pressed = f == 1, .is_released = f == 2};
+        nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = ps, .pointer_count = 2});
+        declare_btn_element();
+        parent = nt_ui_step(s_fx.ctx, nt_ui_id("btn"), NULL);
+        nt_ui_end(s_fx.ctx);
+    }
+    TEST_ASSERT_TRUE(parent.right_clicked);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(7U, parent.pointer_id, "the pen right-clicked");
+    TEST_ASSERT_EQUAL_INT((int)pen_x, (int)parent.pos[0]);
+    TEST_ASSERT_EQUAL_INT((int)pen_x, (int)parent.press_pos[0]);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_interaction_click_on_release_within_bounds);
@@ -1034,8 +1053,9 @@ int main(void) {
     RUN_TEST(test_contact_change_starts_a_new_gesture);
     RUN_TEST(test_occlusion_zero_hides_a_2d_pointer);
     RUN_TEST(test_holder_under_a_later_record_is_not_hovered);
-    RUN_TEST(test_dropped_capture_reports_released_now_once);
+    RUN_TEST(test_dropped_capture_reports_lost_once);
     RUN_TEST(test_right_click_goes_to_the_target);
+    RUN_TEST(test_right_click_carries_its_own_pointer);
     RUN_TEST(test_interaction_second_button_keeps_the_gesture);
     RUN_TEST(test_interaction_padded_hover_and_capture);
     RUN_TEST(test_interaction_disabled_with_padding_stays_disabled);

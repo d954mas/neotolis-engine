@@ -35,6 +35,7 @@
 #include "ui/nt_ui_state.h"
 #include "unity.h"
 #include "utf8/nt_utf8.h"
+#include "window/nt_window.h"
 
 alignas(NT_UI_ARENA_ALIGN) static uint8_t s_arena[NT_UI_TEST_ARENA_SIZE];
 static ui_walker_fixture_t s_fx;
@@ -75,7 +76,27 @@ static void test_release_and_press_between_frames_reach_widgets_in_order(void) {
     TEST_ASSERT_FALSE(s_e2e_a.pressed);
 }
 
-/* A platform cancel through nt_input ends the press: the widget reads released_now and no click. */
+/* A scene press followed by a move over a button before the frame: the press lands where it happened, so the
+ * gesture is the game's and the button never sees it. */
+static void test_scene_press_moved_onto_a_button_stays_the_games(void) {
+    nt_input_init();
+    nt_input_feed(nt_test_mouse(250.0F, 50.0F, 0));
+    e2e_frame();
+    e2e_frame();
+    nt_input_feed(nt_test_mouse(250.0F, 50.0F, 1));
+    nt_input_feed(nt_test_mouse(150.0F, 50.0F, 1));
+    e2e_frame();
+    TEST_ASSERT_FALSE_MESSAGE(s_e2e_b.pressed_now || s_e2e_b.pressed, "the press happened on the scene");
+    TEST_ASSERT_FALSE(nt_ui_wants_pointer(s_fx.ctx, 0U));
+    e2e_frame();
+    TEST_ASSERT_FALSE(s_e2e_b.pressed || s_e2e_b.hovered);
+    TEST_ASSERT_FALSE(nt_ui_wants_pointer(s_fx.ctx, 0U));
+    nt_input_feed(nt_test_mouse(150.0F, 50.0F, 0));
+    e2e_frame();
+    TEST_ASSERT_FALSE(s_e2e_b.clicked || s_e2e_b.released_now);
+}
+
+/* A platform cancel through nt_input ends the press: the widget reads lost, no release and no click. */
 static void test_cancel_through_nt_input_clicks_nothing(void) {
     nt_input_init();
     nt_input_feed(nt_test_mouse(50.0F, 50.0F, 0));
@@ -86,7 +107,8 @@ static void test_cancel_through_nt_input_clicks_nothing(void) {
     TEST_ASSERT_TRUE(s_e2e_a.pressed_now);
     nt_input_feed(nt_test_mouse_cancel());
     e2e_frame();
-    TEST_ASSERT_TRUE(s_e2e_a.released_now);
+    TEST_ASSERT_TRUE(s_e2e_a.lost);
+    TEST_ASSERT_FALSE_MESSAGE(s_e2e_a.released_now, "a cancel is no release");
     TEST_ASSERT_FALSE(s_e2e_a.clicked);
     e2e_frame();
     TEST_ASSERT_FALSE(s_e2e_a.pressed || s_e2e_a.clicked);
@@ -2042,6 +2064,59 @@ static void test_one_esc_acts_in_one_context(void) {
         nt_ui_destroy_context(other);
     }
 }
+
+/* The soft-keyboard hint the frame declared last: the window call every focused field makes, recorded here in
+ * place of the stub window backend's. */
+static nt_text_input_mode_t s_hint = NT_TEXT_INPUT_TEXT;
+void nt_window_set_text_input_mode(nt_text_input_mode_t mode) { s_hint = mode; }
+
+/* One frame of two contexts, each with a field (numeric in front, email behind); each context gets its own pointer
+ * and the back one no_keys = nt_ui_wants_keyboard(front). */
+static void hint_frame(nt_ui_context_t *back, const nt_pointer_t *front_p, const nt_pointer_t *back_p, char *front_buf, char *back_buf) {
+    nt_input_poll();
+    nt_ui_input_props_t front_props = {.keyboard = NT_UI_KB_NUMERIC};
+    nt_ui_input_props_t back_props = {.keyboard = NT_UI_KB_EMAIL};
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = UI_FX_VIEW_W, .layout_h = UI_FX_VIEW_H, .dt = UI_FX_DT, .pointers = front_p, .pointer_count = 1U});
+    CLAY({.id = CLAY_ID("root"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = IN_X, .y = IN_Y}}}) {
+        (void)nt_ui_input_text(s_fx.ctx, NULL, 0, nt_ui_id("front_field"), front_buf, 32U, &front_props, &s_style, &s_field_decl, true, NULL);
+    }
+    nt_ui_end(s_fx.ctx);
+    const bool front_keys = nt_ui_wants_keyboard(s_fx.ctx);
+    nt_ui_begin(back, &(nt_ui_frame_desc_t){.layout_w = UI_FX_VIEW_W, .layout_h = UI_FX_VIEW_H, .dt = UI_FX_DT, .pointers = back_p, .pointer_count = 1U, .no_keys = front_keys});
+    CLAY({.id = CLAY_ID("root"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = IN_X, .y = IN_Y + 100.0F}}}) {
+        (void)nt_ui_input_text(back, NULL, 0, nt_ui_id("back_field"), back_buf, 32U, &back_props, &s_style, &s_field_decl, true, NULL);
+    }
+    nt_ui_end(back);
+}
+
+/* Focused fields in two contexts: the hint is the one of the field that owns the keys, not of the last declared. */
+static void test_keyboard_hint_follows_the_key_owner(void) {
+    const nt_ui_create_desc_t desc = nt_ui_create_desc_defaults();
+    nt_ui_context_t *back = nt_ui_create_context(s_arena2, sizeof s_arena2, &desc);
+    TEST_ASSERT_NOT_NULL(back);
+    nt_ui_set_font(back, 0U, s_fx.stub_font);
+    char front_buf[32] = {0};
+    char back_buf[32] = {0};
+    const float x = IN_X + PAD_X + 1.0F;
+    const float fy = IN_Y + (IN_H * 0.5F);
+    const float by = fy + 100.0F;
+    hint_frame(back, &IDLE_PTR, &IDLE_PTR, front_buf, back_buf);
+    hint_frame(back, &IDLE_PTR, &IDLE_PTR, front_buf, back_buf);
+    nt_pointer_t p = ui_fx_pointer(x, by, true, true, false);
+    hint_frame(back, &IDLE_PTR, &p, front_buf, back_buf);
+    p = ui_fx_pointer(x, by, false, false, true);
+    hint_frame(back, &IDLE_PTR, &p, front_buf, back_buf);
+    p = ui_fx_pointer(x, fy, true, true, false);
+    hint_frame(back, &p, &IDLE_PTR, front_buf, back_buf);
+    p = ui_fx_pointer(x, fy, false, false, true);
+    hint_frame(back, &p, &IDLE_PTR, front_buf, back_buf);
+    hint_frame(back, &IDLE_PTR, &IDLE_PTR, front_buf, back_buf);
+    TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, nt_ui_id("front_field")));
+    TEST_ASSERT_TRUE_MESSAGE(nt_ui_input_focused(back, nt_ui_id("back_field")), "the back field keeps its focus without keys");
+    TEST_ASSERT_FALSE(nt_ui_wants_keyboard(back));
+    TEST_ASSERT_EQUAL_INT_MESSAGE(NT_TEXT_INPUT_NUMERIC, s_hint, "the front field owns the keys, so its hint stays");
+    nt_ui_destroy_context(back);
+}
 // #endregion
 
 int main(void) {
@@ -2117,8 +2192,10 @@ int main(void) {
     RUN_TEST(test_list_drag_keeps_focus_and_a_tap_blurs);
     RUN_TEST(test_cancelled_list_tap_keeps_focus);
     RUN_TEST(test_one_esc_acts_in_one_context);
+    RUN_TEST(test_keyboard_hint_follows_the_key_owner);
     RUN_TEST(test_slider_drag_in_a_list_blurs_the_field);
     RUN_TEST(test_cancel_through_nt_input_clicks_nothing);
+    RUN_TEST(test_scene_press_moved_onto_a_button_stays_the_games);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_assert_null_buffer);
     RUN_TEST(test_assert_zero_cap);

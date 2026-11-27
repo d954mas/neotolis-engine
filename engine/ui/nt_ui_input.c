@@ -18,8 +18,12 @@
 #include "utf8/nt_utf8.h"
 #include "window/nt_window.h"
 
-/* The keyboard hint is UX only (web soft keyboard); the allow filter restricts input. */
-static inline void apply_keyboard_hint(nt_ui_input_keyboard_t kb, bool password) {
+/* The keyboard hint is UX only (web soft keyboard); the allow filter restricts input. The canvas has one mode, so only
+ * the field that owns the frame's keys declares it: one focused behind no_keys must not overwrite the key owner's. */
+static inline void apply_keyboard_hint(const nt_ui_context_t *ctx, uint32_t id, nt_ui_input_keyboard_t kb, bool password) {
+    if (!nt_ui_internal_owns_keys(ctx, id)) {
+        return;
+    }
     nt_text_input_mode_t mode = NT_TEXT_INPUT_TEXT;
     if (password) {
         mode = NT_TEXT_INPUT_PASSWORD;
@@ -755,7 +759,7 @@ static void focus_step(input_frame_t *f) {
     f->bb = bb;
     f->focused = enabled && (ctx->focused_input_id == id);
     if (f->focused) {
-        apply_keyboard_hint(props->keyboard, props->password);
+        apply_keyboard_hint(ctx, id, props->keyboard, props->password);
     }
     // #endregion
 }

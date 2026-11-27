@@ -2241,9 +2241,9 @@ static void test_arb_diagonal_arc_scrolls_vertical_list(void) {
     TEST_ASSERT_FALSE(s_child_in.clicked); /* the row was cancelled */
 }
 
-/* The list's claim ends the row's capture: the row's step reports released_now in the claim frame, once, and no
- * click on the release. */
-static void test_arb_claim_reports_released_now_once(void) {
+/* The list's claim ends the row's capture while the finger is still down: the row's step reports lost in the claim
+ * frame, once, never released_now, and no click on the release. */
+static void test_arb_claim_reports_lost_once(void) {
     s_scene.body = body_button_row;
     nt_pointer_t p = ui_fx_pointer(100.0F, 30.0F, false, false, false);
     arb_warm(&p);
@@ -2254,14 +2254,15 @@ static void test_arb_claim_reports_released_now_once(void) {
     p.y = 10.0F;
     arb_frame(&p, 1);
     TEST_ASSERT_EQUAL_UINT32(SCROLL_ID, s_fx.ctx->captures[0].active_id);
-    TEST_ASSERT_TRUE(s_child_in.released_now);
+    TEST_ASSERT_TRUE(s_child_in.lost);
+    TEST_ASSERT_FALSE_MESSAGE(s_child_in.released_now, "the finger is still down");
     TEST_ASSERT_FALSE(s_child_in.pressed || s_child_in.clicked);
     p.y = 5.0F;
     arb_frame(&p, 1);
-    TEST_ASSERT_FALSE(s_child_in.released_now);
+    TEST_ASSERT_FALSE(s_child_in.lost || s_child_in.released_now);
     arb_release(&p);
     arb_frame(&p, 1);
-    TEST_ASSERT_FALSE(s_child_in.released_now || s_child_in.clicked);
+    TEST_ASSERT_FALSE(s_child_in.released_now || s_child_in.clicked || s_child_in.lost);
 }
 
 /* Both axes cross in one frame: the stronger crossing wins — a mostly-vertical flick scrolls the
@@ -3415,7 +3416,7 @@ int main(void) {
     RUN_TEST(test_arb_nested_vertical_wheel_passes_to_list);
     RUN_TEST(test_arb_tap_below_slop_clicks);
     RUN_TEST(test_arb_claim_reports_no_hold);
-    RUN_TEST(test_arb_claim_reports_released_now_once);
+    RUN_TEST(test_arb_claim_reports_lost_once);
     RUN_TEST(test_arb_dt_zero_drag_no_phantom_fling);
     RUN_TEST(test_arb_release_crossing_outside_flings);
     RUN_TEST(test_arb_thumb_press_during_fling_grabs_bar);

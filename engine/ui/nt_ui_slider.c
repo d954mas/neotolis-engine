@@ -126,7 +126,7 @@ static float slider_resolve_drag(nt_ui_context_t *ctx, uint32_t id, const nt_ui_
         /* A pending release is a tap: it applies the track jump when it lands on the slider. */
         return (in->clicked && drag->tap_frac >= 0.0F) ? drag->tap_frac : frac;
     }
-    /* A capture nt_ui_begin dropped (an overlay, a scroll claim) reports neither: its released_now moves nothing. */
+    /* A lost capture (an overlay, a scroll claim, a cancel) reports neither: it moves nothing. */
     if (drag->active != 0U && (in->pressed || in->clicked)) {
         const float v = slider_pos_to_value(in->pos[axis] - drag->grab_offset + (thumb_extent * 0.5F), track_origin, usable, thumb_extent, min, max, invert);
         return slider_value_to_frac(v, min, max);

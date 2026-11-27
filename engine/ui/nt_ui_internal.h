@@ -192,7 +192,7 @@ typedef struct {
      * none). Lives from the press edge to the release, independent of active_id (an empty-area press
      * has none). */
     uint32_t pending_scroll;
-    uint32_t ended_id;     /* the holder whose capture nt_ui_begin ended without its release: its step reads released_now once */
+    uint32_t lost_id;      /* the holder whose capture nt_ui_begin ended without its release: its step reads lost once */
     float wheel_idle;      /* UI time since this pointer's last wheel tick: a latch older than the latch time drops */
     float wheel_anchor[2]; /* where the wheel latch started: moving past the drag slop drops it */
     bool hold_live;        /* false once the pointer left the hitbox; only a new press restarts the hold */
@@ -202,10 +202,10 @@ typedef struct {
 } nt_ui_capture_t;
 
 /* Ends a capture without its release (an overlay, a scroll claim, a widget that did not step, a swallowed release):
- * the holder's step reports released_now once. The first drop of a begin keeps its holder. */
+ * the holder's step reports lost once. The first drop of a begin keeps its holder. */
 static inline void nt_ui_internal_capture_drop(nt_ui_capture_t *cap) {
-    if (cap->active_id != 0U && cap->ended_id == 0U) {
-        cap->ended_id = cap->active_id;
+    if (cap->active_id != 0U && cap->lost_id == 0U) {
+        cap->lost_id = cap->active_id;
     }
     cap->active_id = 0U;
 }
@@ -645,6 +645,8 @@ bool nt_ui_internal_owned_by_top(nt_ui_context_t *ctx, uint32_t id);
 static inline bool nt_ui_internal_is_top(const nt_ui_context_t *ctx, uint32_t id) { return id == ctx->overlay_top && ctx->inert_from == 0U; }
 static inline bool nt_ui_internal_owns_keys(const nt_ui_context_t *ctx, uint32_t id) { return id == ctx->keys_owner && ctx->inert_from == 0U; }
 const nt_pointer_t *nt_ui_internal_top_pointer(const nt_ui_context_t *ctx, uint32_t id);
+/* nt_ui_hovered_within for the primary pointer only: menu rows follow the pointer their aim corridor reads. */
+bool nt_ui_internal_primary_within(const nt_ui_context_t *ctx, uint32_t id);
 /* `id` is live: outside an inert subtree, at or above the top's catcher (spec: "Input ownership"). */
 static inline bool nt_ui_internal_live(nt_ui_context_t *ctx, uint32_t id) { return ctx->inert_from == 0U && nt_ui_internal_owned_by_top(ctx, id); }
 

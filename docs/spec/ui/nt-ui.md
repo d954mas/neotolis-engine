@@ -353,13 +353,13 @@ Rules for game code:
    for a pointer it wants pass `occlusion[i] = 0` to the ones behind it, and
    pass them `no_keys = nt_ui_wants_keyboard(front)`, so one press or one Esc
    never reaches two contexts. A pointer hidden from a back context still
-   closes its light popups and unfocuses its field there, as a press
-   elsewhere.
+   closes its light popups there, also one it lies over (a hidden pointer is
+   in no panel), and unfocuses its field, as a press elsewhere.
 
 Drag and drop is game code: keep the dragged item in your own state from the
 source's `pressed_now`, highlight a target while `nt_ui_pointer_hot(ctx, i).id`
-is its id, and on the source's `released_now` drop onto
-`nt_ui_pointer_hot(ctx, i).id` unless the pointer's release is `cancelled`.
+is its id, on the source's `released_now` drop onto
+`nt_ui_pointer_hot(ctx, i).id`, and on its `lost` cancel the drag.
 Draw the dragged item without stepping it, so it never hides the target.
 
 Engine rules:
@@ -395,24 +395,28 @@ Engine rules:
     release (a cancelled one clicks nothing), or when `nt_ui_begin` drops it:
     an overlay over it, a scroll that claimed the drag, a widget that did not
     step, or a frame without `nt_ui_begin` that swallowed the release. However
-    it ends, the holder's step reports `released_now` once that frame (Dear
-    ImGui's `IsItemDeactivated`), with two exceptions: a capture inside a
+    it ends, the holder's step reports it once that frame (together Dear
+    ImGui's `IsItemDeactivated`): `released_now` for its real, not cancelled
+    release, `lost` for anything else (a cancelled release or a drop, also
+    while the button is still down), with two exceptions: a capture inside a
     closing body, whose inert step reports nothing, and a pointer slot the game
-    stops passing, which ends its capture with no report (rare). A dropped
+    stops passing, which ends its capture with no report (rare). A lost
     capture is not `pressed`, so a draggable follows the pointer only while
     `pressed` or on its own `clicked` release. While a widget holds a pointer,
     other widgets do not see it (`exclusive_gated`).
   - *Hover and click.* `hovered`: the pointer holds no widget and the widget is
     its target, or the widget holds the pointer and the target is the widget or
     inside it. The hold follows the same test, so a holder dragged off, or
-    under a later record, is neither hovered nor holding. `clicked`: the
-    holder's release while hovered, not cancelled. `right_clicked`: the release
-    of a UI gesture whose first press was the right button, on its target (the
-    widget itself; a child record takes it). The release's target decides, so a
-    right press that closes a popup on its catcher still right-clicks what lies
-    under it on release, unlike a left press there, whose release clicks
-    nothing. A right tap pressed and released in one frame on an open popup's
-    catcher right-clicks nothing (rare). `nt_ui_hovered_within(ctx, id)`:
+    under a later record, is neither hovered nor holding. `clicked`:
+    `released_now` while hovered. `right_clicked`: the release of a UI gesture
+    whose first press was the right button, on its target (the widget itself;
+    a child record takes it); the result's `pointer_id`, `pos` and `press_pos`
+    are that pointer's, unless another pointer holds the widget. The release's
+    target decides, so a right press that closes a popup on its catcher still
+    right-clicks what lies under it on release, unlike a left press there,
+    whose release clicks nothing; one that closes a modal right-clicks nothing,
+    as the modal swallows the whole gesture. A right tap pressed and released
+    in one frame on an open popup's catcher right-clicks nothing (rare). `nt_ui_hovered_within(ctx, id)`:
     the target is `id` or inside it, as CSS `:hover`; for a holder only while
     hovered.
   - *Wheel.* A pointer's wheel goes per axis to the first scroll on its
@@ -491,7 +495,8 @@ Engine rules:
   reads its Esc in `nt_ui_menu_begin` instead, where Esc, like Left, closes
   its deepest level, M2), or on a first press of any pointer outside its panel
   grown by `close_pad`: on its catcher or with no target (a popup), or on its
-  catcher (a modal, if its style says so). That press also closes every open
+  catcher (a modal, if its style says so). A pointer hidden from the context
+  (occlusion 0, rule 8) lies outside every panel. That press also closes every open
   light overlay below the top (a popup or a menu level), down to the first one
   whose panel (grown by its `close_pad`) holds it or the first modal, which
   stays, as Dear ImGui's `ClosePopupsOverWindow`: one press beside a combo
@@ -726,7 +731,7 @@ pointer's displacement from the press is compared per axis with the drag slop
 pressed widget's own `drag_axes` and the chain's eligible axes, inner first. The
 strongest crossing (|d| / slop) wins, ties going to the widget, then the inner scroll;
 nothing crossed keeps the gesture pending. A scroll that wins takes the capture — the
-widget's step reports `released_now` that frame and nothing after (no click), keeping any value it wrote (Model D:
+widget's step reports `lost` that frame and nothing after (no click), keeping any value it wrote (Model D:
 draggables hold value changes while pending). The excess past
 the slop is routed (no jump, no lost distance).
 A crossing on the release frame still claims (fling, no click), and the owner keeps the
@@ -806,7 +811,9 @@ unfocuses and wins over a Tab in the same frame. A focused field loses focus whe
 it is declared disabled or not declared for a frame, and by "Input ownership", K and L
 (a press elsewhere, an overlay over it, turning inert). While a field is focused, the
 game may shorten its buffer but must not rewrite its content. The focused field
-declares its keyboard hint (`nt_window_set_text_input_mode`) every frame. The line
+that owns the frame's keys (K) declares its keyboard hint
+(`nt_window_set_text_input_mode`) every frame; the canvas has one mode, so a
+field focused in a context begun with `no_keys` declares none. The line
 scrolls horizontally to keep the caret visible and clips to the field's
 `pad_x`-inset content box, also inside an outer scroll. Cut is a no-op
 when `nt_clipboard_available()` is false (no silent delete-without-copy).

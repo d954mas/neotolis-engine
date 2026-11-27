@@ -548,15 +548,16 @@ nt_ui_bbox_t nt_ui_get_bbox(const nt_ui_context_t *ctx, uint32_t id);
  *   - additional fingers landing on a captured widget are silently ignored
  *   - a pointer bound to one widget is invisible to all other widgets
  * Aggregated interaction_t.hovered = any pointer over; pressed/released/clicked
- * track the single owner pidx. interaction_t.pointer_id holds the OS id of the
- * owning (or first hovering) pointer. */
+ * track the single owner pidx. pointer_id, the positions and distance are the
+ * owning pointer's, else the right-clicking one's, else the first hovering one's. */
 /* This-frame pointer vs PREVIOUS-frame bbox (1-frame IM lag). */
 typedef struct {
     bool hovered;           /* the pointer's target is this widget; for its holder, the target lies in it */
     bool pressed;           /* currently captured (held) */
     bool pressed_now;       /* press began this frame */
-    bool released_now;      /* the capture ended this frame: its release (also off-widget), or once when nt_ui_begin dropped it */
-    bool clicked;           /* released while hovered, not cancelled -> one-shot */
+    bool released_now;      /* the capture ended this frame on its real release (also off-widget), not cancelled */
+    bool lost;              /* the capture ended this frame any other way: a cancelled release, or nt_ui_begin dropped it */
+    bool clicked;           /* released_now while hovered -> one-shot */
     bool double_clicked;    /* step only: 2nd press within the dbl window+radius -> one-shot */
     bool gesture_pending;   /* an enclosing scroll may still take this press: hold off value changes; a pending release is a tap */
     bool right_clicked;     /* the release of a gesture whose first press was the right button, with this widget the target */

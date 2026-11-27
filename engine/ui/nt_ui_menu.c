@@ -341,7 +341,7 @@ static uint32_t menu_im_row(nt_ui_menu_t *menu, uint32_t key, const char *label,
     /* A custom row stays under the pointer over its own interactive child (hot, declared later), so
      * focus, highlight and the leaf collapse follow the row the pointer is in. The opening frame's hits are
      * last frame's, at the old place. */
-    const bool pointed = enabled && nt_ui_hovered_within(ctx, row_id);
+    const bool pointed = enabled && nt_ui_internal_primary_within(ctx, row_id);
     /* Right or Enter on the focused parent opened its child: the begin closed any sibling's, so that is the open one. */
     if (enabled && (f->key == MENU_KEY_RIGHT || f->key == MENU_KEY_ENTER) && f->child_first == 0U && depth == menu->focus_depth + 1U) {
         f->child_first = row_id;

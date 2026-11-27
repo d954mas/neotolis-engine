@@ -414,7 +414,7 @@ static void gesture_claim(nt_ui_context_t *ctx, uint32_t i, gesture_link_t link,
     }
     link.s->flags &= (uint8_t)~NT_UI_SCROLL_FLAG_SCROLL_TO;
     link.s->bar_axis = 0U;
-    nt_ui_internal_capture_drop(cap); /* the pressed widget's tap ends: its step reads released_now, no click */
+    nt_ui_internal_capture_drop(cap); /* the pressed widget's tap ends: its step reads lost, no click */
     cap->active_id = link.id;
     cap->hold_live = false; /* a claim is not a press: the slot's hold belongs to an earlier one */
 }

@@ -40,7 +40,7 @@ Text input is separate from key state: characters arrive as UTF-32 codepoints, u
 
 ```c
 bool nt_input_pop_char(uint32_t *out_codepoint);  // false when empty
-void nt_window_set_text_input_mode(nt_text_input_mode_t mode);  // soft-keyboard hint, declared each frame a text field is focused (window/nt_window.h); no-op on native/stub
+void nt_window_set_text_input_mode(nt_text_input_mode_t mode);  // soft-keyboard hint, declared each frame by the focused text field that owns the keys (window/nt_window.h); no-op on native/stub
 ```
 
 - Chars carry *text* (layout-resolved, includes key repeat); physical keys carry
@@ -64,17 +64,21 @@ position and deltas in framebuffer pixels (fractional, never rounded), wheel not
   not per button: a frame that releases one button normally and cancels another reads both
   releases as cancelled.
 
-- **A release is published where it happened.** After a button's release edge the pointer holds
-  its position for the rest of that frame; where it goes afterwards is published next frame, and
-  that frame's `dx`/`dy` cover the motion. So the frame of a release never shows a later hover. A
-  mouse that left and came back in that frame is published at its new position next frame too, and
-  that frame carries no delta at all: the untracked jump and any tracked motion around it.
+- **An edge is published where it happened.** After a frame's first button edge, a press or a
+  release, the pointer holds its position for the rest of that frame; where it goes afterwards is
+  published next frame, and that frame's `dx`/`dy` cover the motion, as Dear ImGui trickles input.
+  So the frame of a press targets what lies where it pressed, not what the pointer moved onto
+  before the poll (a scene press dragged over a button stays the scene's), and the frame of a
+  release never shows a later hover. A press and its release in one frame are published where the
+  press happened. A mouse that left and came back in that frame is published at its new position
+  next frame too, and that frame carries no delta at all: the untracked jump and any tracked motion
+  around it.
 - **A frame never reads a release together with a newer press.** A press of the released button
-  that arrives before the poll waits for the next frame, where it is published at the pointer's
-  new position, as a whole tap when the button was lifted again meanwhile; a pointer that leaves or
-  loses focus in that frame is published once more for that tap. Anything further in that frame
-  folds into that press; motion after a waiting tap is dropped (the next move reports the pointer),
-  so the tap is published where it was made. A press and its release from an up button still read together:
+  that arrives before the poll waits for the next frame, where it is published where it happened
+  (the motion up to it is that frame's delta), as a whole tap when the button was lifted again
+  meanwhile; a pointer that leaves or loses focus in that frame is published once more for that tap.
+  Anything further in that frame folds into that press; motion after a waiting press is dropped
+  (the next move reports the pointer), so the press is published where it was made. A press and its release from an up button still read together:
   `is_pressed && is_released` always means "pressed, then released". Keys keep both edges in one
   frame. Only that button waits: another button's edge, the wheel and the pressure of that frame
   are published with the release, at the release position. A bot's waiting press is published by

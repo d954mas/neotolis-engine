@@ -1029,7 +1029,7 @@ static void slider_drop_frame(const nt_pointer_t *p, uint32_t count, float *valu
     nt_ui_end(s_fx.ctx);
 }
 
-/* A modal opening over a held thumb drag ends it: the frame that reports released_now moves nothing. */
+/* A modal opening over a held thumb drag ends it: the frame that reports lost moves nothing. */
 static void test_modal_over_a_drag_keeps_the_value(void) {
     float value = 0.5F;
     warmup_float(&value, 0.0F, 1.0F);
