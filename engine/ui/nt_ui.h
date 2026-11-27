@@ -348,7 +348,8 @@ typedef struct {
     uint32_t primary;             /* anchors menus, the Clay feed and the inspector */
     nt_ui_viewport_t viewport;    /* device content rect (nt_ui_viewport_from_scale); zero size = identity (px_per_dp 0 = 1) */
     const float *view_proj;       /* 3D ctx: mat4 (above); 2D ctx: NULL */
-    const float *occlusion;       /* per pointer: 3D the max ray distance, e.g. the nearest world hit; 0 hides it (2D and 3D); NULL = none */
+    const float *occlusion;       /* per pointer: 3D the max ray distance, e.g. the nearest world hit; 0 hides it (2D: 0 or +INFINITY); NULL = none */
+    bool no_keys;                 /* no key owner this frame: a context in front has the keys (its nt_ui_wants_keyboard) */
 } nt_ui_frame_desc_t;
 
 void nt_ui_begin(nt_ui_context_t *ctx, const nt_ui_frame_desc_t *frame);
@@ -557,18 +558,15 @@ typedef struct {
     bool released_now;      /* the capture ended this frame: its release (also off-widget), or once when nt_ui_begin dropped it */
     bool clicked;           /* released while hovered, not cancelled -> one-shot */
     bool double_clicked;    /* step only: 2nd press within the dbl window+radius -> one-shot */
+    bool gesture_pending;   /* an enclosing scroll may still take this press: hold off value changes; a pending release is a tap */
+    bool right_clicked;     /* the release of a gesture whose first press was the right button, with this widget the target */
     float hold_secs;        /* seconds since the press while the capturing pointer stays over the widget; 0 otherwise */
     float hold_prev_secs;   /* hold_secs of the previous frame */
     float press_pos[2];     /* where press began (UI-space) */
     float pos[2];           /* current pointer pos (UI-space) */
     float drag_dx, drag_dy; /* = pos - press_pos (convenience) */
     uint32_t pointer_id;    /* which pointer captured (multitouch) */
-    bool gesture_pending;   /* an enclosing scroll may still take this press: hold off value changes; a pending release is a tap */
     float distance;         /* 3D ctx: world distance (near-plane-relative) to this widget; 0 in 2D */
-    bool right_clicked;     /* the release of a gesture whose first press was the right button, with this widget the target */
-    bool drag_over;         /* a drag with a payload (another widget's capture) has this widget as its target */
-    bool dropped;           /* that drag's release here, not cancelled */
-    uint32_t drag_payload;  /* the payload of that drag while drag_over; 0 otherwise */
 } nt_ui_interaction_t;
 
 /* Front-most interactive record under a pointer, resolved per frame (3D: nearest; then tree root, then record). */
@@ -589,7 +587,6 @@ nt_ui_interaction_t nt_ui_query_interaction(nt_ui_context_t *ctx, uint32_t id);
 typedef struct {
     const int16_t *pad_lrtb; /* inflates the bbox BEFORE the inverse-affine (touch targets); NULL = none, each >= 0 */
     uint8_t drag_axes;       /* NT_UI_DRAG_X | NT_UI_DRAG_Y; 0 = taps only (a scroll may take the drag) */
-    uint32_t drag_payload;   /* non-zero: this widget's capture is a drag its target reads (drag_over, dropped); 0 = none */
 } nt_ui_step_desc_t;
 
 /* MUTATING — call ONCE per widget per frame from the widget's begin. desc NULL = unpadded, no drag axes. */
@@ -608,11 +605,16 @@ float nt_ui_hold_progress(const nt_ui_interaction_t *in, float secs);
 #define NT_UI_DRAG_SLOP_DP 8.0F
 #endif
 
+/* Wheel latch time (secs, UI time): a wheel tick within it of the previous one stays on the scroll that took that
+ * one (macOS and browsers latch a wheel transaction the same way). */
+#ifndef NT_UI_WHEEL_LATCH_SECS
+#define NT_UI_WHEEL_LATCH_SECS 0.5F
+#endif
+
 /* App-wide gesture constants: the double-click window (secs) and the move radius (dp) within which a
- * second press still counts as a double-click, and the wheel latch time (secs): a wheel tick within it of the
- * previous one stays on the scroll that took that one. Hold/long-press is NOT cancelled by movement — only by
- * leaving the widget's hitbox. All in UI time. Asserts each is finite and >= 0. Defaults: 0.5 s, 16 dp, 0.5 s. */
-void nt_ui_set_gesture_constants(nt_ui_context_t *ctx, float dbl_window_secs, float move_radius_dp, float wheel_latch_secs);
+ * second press still counts as a double-click. Hold/long-press is NOT cancelled by movement — only by
+ * leaving the widget's hitbox. In UI time. Asserts each is finite and >= 0. Defaults: 0.5 s, 16 dp. */
+void nt_ui_set_gesture_constants(nt_ui_context_t *ctx, float dbl_window_secs, float move_radius_dp);
 
 /* Inert occluder: enters id into the interactive registry so it wins next-frame front-most
  * arbitration over widgets behind it (the pointer can't leak through), but never captures or
@@ -622,12 +624,13 @@ void nt_ui_set_gesture_constants(nt_ui_context_t *ctx, float dbl_window_secs, fl
 void nt_ui_block_pointer(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lrtb[4]);
 
 /* Pointer `pointer_index` of the frame desc is the UI's: its gesture's first press had a target (a widget, a blocker, a
- * scroll, an open overlay's catcher), up to the release of its last button; a free pointer has a target. Decided at
- * nt_ui_begin: read it after begin. */
+ * scroll, an open overlay's catcher), up to the release of its last button; a free pointer has a target or its wheel
+ * is latched. Decided at nt_ui_begin: read it after begin. */
 bool nt_ui_wants_pointer(const nt_ui_context_t *ctx, uint32_t pointer_index);
 
 /* True when the UI owns this frame's keys: a focused text field, else last frame's live top overlay (a modal, a
- * menu, a combo list). Fixed at nt_ui_begin, so read it after begin; the game gates its hotkeys on it. */
+ * menu, a combo list); never in a context begun with no_keys. Fixed at nt_ui_begin, so read it after begin; the
+ * game gates its hotkeys on it, and passes it as no_keys to the contexts behind this one. */
 bool nt_ui_wants_keyboard(const nt_ui_context_t *ctx);
 
 /* Overlays (a popup, a modal, a menu; opened by nt_ui_popup_open, nt_ui_modal_open, nt_ui_menu_open): close starts

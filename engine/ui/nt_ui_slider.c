@@ -28,8 +28,7 @@ typedef struct {
     float grab_offset; /* press_pos.x - thumb_left at grab; thumb_w/2 = track-jump */
     float tap_frac;    /* track jump a tap applies on release while a scroll still decides; < 0 for the thumb */
     uint8_t active;    /* 1 while a drag is live */
-    uint8_t pending;   /* 1 while a scroll still decides the press: a scroll claim then ends it with no move */
-    uint8_t _pad[2];
+    uint8_t _pad[3];
 } nt_ui_slider_drag_t;
 
 /* Persistent thumb-view cell (separate salt; written EVERY frame, never cleared). Lets the
@@ -91,8 +90,8 @@ static inline uint32_t slider_drag_id(uint32_t id) { return nt_ui_derived_id(id,
 static inline uint32_t slider_view_id(uint32_t id) { return nt_ui_derived_id(id, NT_UI_SLIDER_VIEW_SALT); }
 
 /* Press-scoped drag resolve. Reads the prev-frame track bbox + grab cell, returns the new value
- * fraction. press_now: thumb-grab keeps value (offset stored) | track press jumps; held: thumb
- * follows pointer minus the grab offset. */
+ * fraction. press_now: thumb-grab keeps value (offset stored) | track press jumps; held, or its own
+ * release over it: thumb follows pointer minus the grab offset. */
 static float slider_resolve_drag(nt_ui_context_t *ctx, uint32_t id, const nt_ui_interaction_t *in, const nt_ui_slider_style_t *style, nt_ui_fill_direction_t fill_dir, float frac, float min,
                                  float max) {
     /* Axis-branch: vertical reads the Y component + track height/thumb height; BOTTOM_UP inverts. */
@@ -112,7 +111,6 @@ static float slider_resolve_drag(nt_ui_context_t *ctx, uint32_t id, const nt_ui_
         const float thumb_lead = track_origin + (pos_frac * usable);
         const bool on_thumb = bb.found && in->press_pos[axis] >= thumb_lead && in->press_pos[axis] <= (thumb_lead + thumb_extent);
         drag->active = 1U;
-        drag->pending = in->gesture_pending ? 1U : 0U;
         if (on_thumb) {
             drag->grab_offset = in->press_pos[axis] - thumb_lead; /* relative grab, value unchanged this frame */
             drag->tap_frac = -1.0F;                               /* a thumb tap changes nothing */
@@ -128,10 +126,8 @@ static float slider_resolve_drag(nt_ui_context_t *ctx, uint32_t id, const nt_ui_
         /* A pending release is a tap: it applies the track jump when it lands on the slider. */
         return (in->clicked && drag->tap_frac >= 0.0F) ? drag->tap_frac : frac;
     }
-    if (in->pressed || in->clicked) {
-        drag->pending = 0U; /* the slider kept the press: held, or its own release */
-    }
-    if (drag->active != 0U && drag->pending == 0U) { /* held: thumb follows pointer keeping the grab offset */
+    /* A capture nt_ui_begin dropped (an overlay, a scroll claim) reports neither: its released_now moves nothing. */
+    if (drag->active != 0U && (in->pressed || in->clicked)) {
         const float v = slider_pos_to_value(in->pos[axis] - drag->grab_offset + (thumb_extent * 0.5F), track_origin, usable, thumb_extent, min, max, invert);
         return slider_value_to_frac(v, min, max);
     }

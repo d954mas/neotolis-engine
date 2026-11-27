@@ -1865,6 +1865,7 @@ static void test_world_press_blurs_the_focused_field(void) {
     TEST_ASSERT_TRUE(nt_ui_wants_keyboard(s_fx.ctx));
     nt_pointer_t world = ui_fx_pointer(700.0F, 500.0F, true, true, false);
     (void)field_frame(&world, id, buf, sizeof buf, true, NULL);
+    TEST_ASSERT_FALSE_MESSAGE(nt_ui_input_focused(s_fx.ctx, id), "a first press off the field unfocuses it at begin");
     TEST_ASSERT_TRUE_MESSAGE(nt_ui_wants_keyboard(s_fx.ctx), "the press frame's keys stay with the owner fixed at begin");
     world = ui_fx_pointer(700.0F, 500.0F, false, false, true);
     (void)field_frame(&world, id, buf, sizeof buf, true, NULL);
@@ -1911,6 +1912,29 @@ static void test_list_drag_keeps_focus_and_a_tap_blurs(void) {
     TEST_ASSERT_FALSE_MESSAGE(nt_ui_input_focused(s_fx.ctx, id), "the tap's release blurs the field");
 }
 
+/* A focused field in a list: a tap on the list whose release is cancelled is no tap, so the field keeps the focus. */
+static void test_cancelled_list_tap_keeps_focus(void) {
+    char buf[32] = "hello";
+    const uint32_t id = 0x1F00D06U;
+    const float fx = IN_X + 50.0F;
+    const float fy = IN_Y + (IN_H * 0.5F);
+    nt_pointer_t p = ui_fx_pointer(fx, fy, false, false, false);
+    field_in_scroll_frame(&p, id, buf, sizeof buf);
+    field_in_scroll_frame(&p, id, buf, sizeof buf);
+    p = ui_fx_pointer(fx, fy, true, true, false);
+    field_in_scroll_frame(&p, id, buf, sizeof buf);
+    p = ui_fx_pointer(fx, fy, false, false, true);
+    field_in_scroll_frame(&p, id, buf, sizeof buf);
+    TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, id));
+    const float ly = IN_Y + 150.0F; /* the list's empty area under the field */
+    p = ui_fx_pointer(fx, ly, true, true, false);
+    field_in_scroll_frame(&p, id, buf, sizeof buf);
+    p = ui_fx_pointer(fx, ly, false, false, true);
+    p.cancelled = true;
+    field_in_scroll_frame(&p, id, buf, sizeof buf);
+    TEST_ASSERT_TRUE_MESSAGE(nt_ui_input_focused(s_fx.ctx, id), "a cancelled release blurs nothing");
+}
+
 /* A focused field in a list: a press on a horizontal slider row the list may still take keeps the focus; once the
  * row's own drag takes it, the field loses focus as on any press off it. */
 static void test_slider_drag_in_a_list_blurs_the_field(void) {
@@ -1944,12 +1968,15 @@ alignas(NT_UI_ARENA_ALIGN) static uint8_t s_arena2[NT_UI_TEST_ARENA_SIZE];
 #define KEYS_POPUP 0x6B0001U
 
 /* One frame of two contexts, one input poll: s_fx.ctx holds a field, `other` a popup the game opens when `open`.
- * `other` sees only an idle pointer, as a game hiding a pointer from the context behind. */
-static void two_ctx_frame(nt_ui_context_t *other, bool other_first, const nt_pointer_t *p, uint32_t id, char *buf, bool open) {
+ * The game begins the front context first and passes the back one no_keys = nt_ui_wants_keyboard(front); `other`
+ * sees only an idle pointer, as a game hiding a pointer from the context behind. */
+static void two_ctx_frame(nt_ui_context_t *other, bool other_front, const nt_pointer_t *p, uint32_t id, char *buf, bool open) {
     nt_input_poll();
+    bool front_keys = false;
     for (int k = 0; k < 2; ++k) {
-        if ((k == 0) == other_first) {
-            nt_ui_begin(other, &(nt_ui_frame_desc_t){.layout_w = UI_FX_VIEW_W, .layout_h = UI_FX_VIEW_H, .dt = UI_FX_DT, .pointers = &IDLE_PTR, .pointer_count = 1U});
+        if ((k == 0) == other_front) {
+            nt_ui_begin(other, &(nt_ui_frame_desc_t){.layout_w = UI_FX_VIEW_W, .layout_h = UI_FX_VIEW_H, .dt = UI_FX_DT, .pointers = &IDLE_PTR, .pointer_count = 1U, .no_keys = front_keys});
+            front_keys = nt_ui_wants_keyboard(other);
             if (open) {
                 nt_ui_popup_open(other, KEYS_POPUP);
             }
@@ -1962,7 +1989,8 @@ static void two_ctx_frame(nt_ui_context_t *other, bool other_first, const nt_poi
             }
             nt_ui_end(other);
         } else {
-            nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = UI_FX_VIEW_W, .layout_h = UI_FX_VIEW_H, .dt = UI_FX_DT, .pointers = p, .pointer_count = 1U});
+            nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = UI_FX_VIEW_W, .layout_h = UI_FX_VIEW_H, .dt = UI_FX_DT, .pointers = p, .pointer_count = 1U, .no_keys = front_keys});
+            front_keys = nt_ui_wants_keyboard(s_fx.ctx);
             CLAY({.id = CLAY_ID("root"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = IN_X, .y = IN_Y}}}) {
                 (void)nt_ui_input_text(s_fx.ctx, NULL, 0, id, buf, 32U, &s_props, &s_style, &s_field_decl, true, NULL);
             }
@@ -1971,55 +1999,47 @@ static void two_ctx_frame(nt_ui_context_t *other, bool other_first, const nt_poi
     }
 }
 
-static void two_ctx_focus_field(nt_ui_context_t *other, bool other_first, uint32_t id, char *buf) {
-    nt_pointer_t p = ui_fx_pointer(IN_X + PAD_X + 1.0F, IN_Y + (IN_H * 0.5F), true, true, false);
-    two_ctx_frame(other, other_first, &p, id, buf, false);
-    p = ui_fx_pointer(IN_X + PAD_X + 1.0F, IN_Y + (IN_H * 0.5F), false, false, true);
-    two_ctx_frame(other, other_first, &p, id, buf, false);
-}
-
-static void two_ctx_esc(nt_ui_context_t *other, bool other_first, uint32_t id, char *buf) {
+static void two_ctx_esc(nt_ui_context_t *other, bool other_front, uint32_t id, char *buf) {
     nt_input_feed(nt_test_key(NT_KEY_ESCAPE, true));
-    two_ctx_frame(other, other_first, &IDLE_PTR, id, buf, false);
+    two_ctx_frame(other, other_front, &IDLE_PTR, id, buf, false);
     nt_input_feed(nt_test_key(NT_KEY_ESCAPE, false));
-    two_ctx_frame(other, other_first, &IDLE_PTR, id, buf, false);
+    two_ctx_frame(other, other_front, &IDLE_PTR, id, buf, false);
 }
 
-/* A field in one context and a popup in another: the keyboard is the context's that acquired last, so one Esc acts
- * in that context only, in either begin order. */
+/* A focused field in one context and a popup in another: the front context has the keys and the one behind gets
+ * no_keys, so one Esc acts in the front context only; the back one has the keys once the front stops wanting them. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_one_esc_acts_in_one_context(void) {
     const nt_ui_create_desc_t desc = nt_ui_create_desc_defaults();
-    for (int order = 0; order < 2; ++order) {
-        const bool other_first = order != 0;
-        for (int popup_last = 0; popup_last < 2; ++popup_last) {
-            nt_ui_context_t *other = nt_ui_create_context(s_arena2, sizeof s_arena2, &desc);
-            TEST_ASSERT_NOT_NULL(other);
-            nt_ui_set_font(other, 0U, s_fx.stub_font);
-            char buf[32] = {0};
-            const uint32_t id = nt_ui_id("keys_field");
-            two_ctx_frame(other, other_first, &IDLE_PTR, id, buf, false);
-            if (popup_last != 0) {
-                two_ctx_focus_field(other, other_first, id, buf);
-                two_ctx_frame(other, other_first, &IDLE_PTR, id, buf, true);
-            } else {
-                two_ctx_frame(other, other_first, &IDLE_PTR, id, buf, true);
-                two_ctx_focus_field(other, other_first, id, buf);
-            }
-            two_ctx_frame(other, other_first, &IDLE_PTR, id, buf, false);
-            two_ctx_frame(other, other_first, &IDLE_PTR, id, buf, false);
-            TEST_ASSERT_TRUE(nt_ui_is_open(other, KEYS_POPUP));
-            TEST_ASSERT_TRUE_MESSAGE(nt_ui_wants_keyboard(s_fx.ctx) != nt_ui_wants_keyboard(other), "one context has the keys");
-            TEST_ASSERT_EQUAL_MESSAGE(popup_last == 0, nt_ui_input_focused(s_fx.ctx, id), "the field keeps focus only while its context has the keyboard");
-            two_ctx_esc(other, other_first, id, buf);
-            if (popup_last != 0) {
-                TEST_ASSERT_FALSE_MESSAGE(nt_ui_is_open(other, KEYS_POPUP), "the popup's Esc closes it");
-            } else {
-                TEST_ASSERT_FALSE_MESSAGE(nt_ui_input_focused(s_fx.ctx, id), "the field's Esc unfocuses it");
-                TEST_ASSERT_TRUE_MESSAGE(nt_ui_is_open(other, KEYS_POPUP), "and leaves the other context's popup open");
-            }
-            nt_ui_destroy_context(other);
+    for (int front = 0; front < 2; ++front) {
+        const bool other_front = front != 0;
+        nt_ui_context_t *other = nt_ui_create_context(s_arena2, sizeof s_arena2, &desc);
+        TEST_ASSERT_NOT_NULL(other);
+        nt_ui_set_font(other, 0U, s_fx.stub_font);
+        char buf[32] = {0};
+        const uint32_t id = nt_ui_id("keys_field");
+        two_ctx_frame(other, other_front, &IDLE_PTR, id, buf, false);
+        two_ctx_frame(other, other_front, &IDLE_PTR, id, buf, true);
+        nt_pointer_t p = ui_fx_pointer(IN_X + PAD_X + 1.0F, IN_Y + (IN_H * 0.5F), true, true, false);
+        two_ctx_frame(other, other_front, &p, id, buf, false);
+        p = ui_fx_pointer(IN_X + PAD_X + 1.0F, IN_Y + (IN_H * 0.5F), false, false, true);
+        two_ctx_frame(other, other_front, &p, id, buf, false);
+        two_ctx_frame(other, other_front, &IDLE_PTR, id, buf, false);
+        TEST_ASSERT_TRUE(nt_ui_is_open(other, KEYS_POPUP));
+        TEST_ASSERT_TRUE(nt_ui_input_focused(s_fx.ctx, id));
+        TEST_ASSERT_EQUAL_MESSAGE(other_front, nt_ui_wants_keyboard(other), "the front context has the keys");
+        TEST_ASSERT_EQUAL_MESSAGE(!other_front, nt_ui_wants_keyboard(s_fx.ctx), "the back one has none");
+        two_ctx_esc(other, other_front, id, buf);
+        if (other_front) {
+            TEST_ASSERT_FALSE_MESSAGE(nt_ui_is_open(other, KEYS_POPUP), "the popup's Esc closes it");
+            TEST_ASSERT_TRUE_MESSAGE(nt_ui_input_focused(s_fx.ctx, id), "and leaves the field behind focused");
+            TEST_ASSERT_TRUE_MESSAGE(nt_ui_wants_keyboard(s_fx.ctx), "which has the keys once the popup is gone");
+        } else {
+            TEST_ASSERT_FALSE_MESSAGE(nt_ui_input_focused(s_fx.ctx, id), "the field's Esc unfocuses it");
+            TEST_ASSERT_TRUE_MESSAGE(nt_ui_is_open(other, KEYS_POPUP), "and leaves the popup behind open");
+            TEST_ASSERT_TRUE_MESSAGE(nt_ui_wants_keyboard(other), "which has the keys once the field lets them go");
         }
+        nt_ui_destroy_context(other);
     }
 }
 // #endregion
@@ -2095,6 +2115,7 @@ int main(void) {
     RUN_TEST(test_release_and_press_between_frames_reach_widgets_in_order);
     RUN_TEST(test_world_press_blurs_the_focused_field);
     RUN_TEST(test_list_drag_keeps_focus_and_a_tap_blurs);
+    RUN_TEST(test_cancelled_list_tap_keeps_focus);
     RUN_TEST(test_one_esc_acts_in_one_context);
     RUN_TEST(test_slider_drag_in_a_list_blurs_the_field);
     RUN_TEST(test_cancel_through_nt_input_clicks_nothing);

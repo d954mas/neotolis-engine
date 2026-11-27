@@ -457,16 +457,19 @@ static void gesture_route_wheel(nt_ui_context_t *ctx, uint32_t i, const float sl
     nt_ui_capture_t *cap = &ctx->captures[i];
     const nt_pointer_t *p = &ctx->frame_pointers[i];
     uint32_t *owner = ctx->wheel_owner[i];
+    const float wheel[2] = {p->wheel_dx, p->wheel_dy};
+    if (owner[0] == 0U && owner[1] == 0U && wheel[0] == 0.0F && wheel[1] == 0.0F) {
+        return; /* no latch and no tick: nothing to hold or route (a tick resets the idle time) */
+    }
     cap->wheel_idle += ctx->frame_dt;
     const float moved[2] = {p->x - cap->wheel_anchor[0], p->y - cap->wheel_anchor[1]};
     const bool seen = p->active && ctx->pointer_occlusion[i] > 0.0F;
-    const bool hold = seen && cap->wheel_idle <= ctx->gesture_wheel_latch_secs && gesture_crossing(moved, slop, NT_UI_DRAG_X | NT_UI_DRAG_Y) == 0.0F && !nt_ui_internal_game_gesture(ctx, i);
+    const bool hold = seen && cap->wheel_idle <= NT_UI_WHEEL_LATCH_SECS && gesture_crossing(moved, slop, NT_UI_DRAG_X | NT_UI_DRAG_Y) == 0.0F && !nt_ui_internal_game_gesture(ctx, i);
     for (int a = 0; a < 2; ++a) {
         if (owner[a] != 0U && (!hold || !nt_ui_internal_owned_by_top(ctx, owner[a]) || (gesture_link(ctx, owner[a]).axes & (1U << a)) == 0U)) {
             owner[a] = 0U;
         }
     }
-    const float wheel[2] = {p->wheel_dx, p->wheel_dy};
     if (wheel[0] == 0.0F && wheel[1] == 0.0F) {
         return;
     }
@@ -535,6 +538,10 @@ static bool scroll_route_owner(nt_ui_context_t *ctx, uint32_t id, nt_ui_scroll_s
         cap->pos[0] = p->x;
         cap->pos[1] = p->y;
         dragged = true;
+        if (p->buttons[NT_BUTTON_LEFT].is_released && p->cancelled) {
+            s->vel[0] = 0.0F; /* a cancelled drag stops where it is, as Android's RecyclerView and Flutter: no fling */
+            s->vel[1] = 0.0F;
+        }
         if (p->buttons[NT_BUTTON_LEFT].is_down) {
             ctx->capture_seen[i] = 1U;
         }

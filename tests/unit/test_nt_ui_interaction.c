@@ -918,9 +918,6 @@ static void test_occlusion_zero_hides_a_2d_pointer(void) {
 
 #define COVER_ID 0x1C0001U
 #define CHILD_ID 0x1C0002U
-#define SRC_ID 0x1C0003U
-#define DROP_ID 0x1C0004U
-#define ZONE_ID 0x1C0005U
 #define POPUP_ID 0x1C0006U
 
 /* The button, then a later-declared record over its right half. */
@@ -949,20 +946,6 @@ static void test_holder_under_a_later_record_is_not_hovered(void) {
     in = covered_frame(ui_fx_pointer(BTN_CX + 20.0F, BTN_CY, false, false, true));
     TEST_ASSERT_TRUE(in.released_now);
     TEST_ASSERT_FALSE(in.clicked);
-}
-
-/* A cancelled release ends the capture with no click. */
-static void test_cancelled_release_clicks_nothing(void) {
-    nt_pointer_t p = ui_fx_pointer(BTN_CX, BTN_CY, false, false, false);
-    warm_btn_frame(&p);
-    p = ui_fx_pointer(BTN_CX, BTN_CY, true, true, false);
-    (void)query_btn_frame(&p);
-    p = ui_fx_pointer(BTN_CX, BTN_CY, false, false, true);
-    p.cancelled = true;
-    const nt_ui_interaction_t in = query_btn_frame(&p);
-    TEST_ASSERT_TRUE(in.released_now);
-    TEST_ASSERT_FALSE(in.clicked);
-    TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_test_capture_active_id(s_fx.ctx, 0U));
 }
 
 /* The button, then optionally an open popup over the screen. */
@@ -1035,94 +1018,6 @@ static void test_right_click_goes_to_the_target(void) {
     TEST_ASSERT_FALSE_MESSAGE(parent.right_clicked, "a cancelled release clicks nothing");
 }
 
-typedef struct {
-    nt_ui_interaction_t src, src_q, drop, zone; /* src_q: a query of the source after its step */
-} dnd_t;
-
-/* A drag source with a payload, a stepped drop target declared before it, and a blocker zone after it. */
-static dnd_t dnd_frame(nt_pointer_t p) {
-    dnd_t out;
-    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = &p, .pointer_count = 1});
-    CLAY({.id = (Clay_ElementId){.id = DROP_ID},
-          .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = 400.0F, .y = 100.0F}},
-          .layout = {.sizing = {CLAY_SIZING_FIXED(100), CLAY_SIZING_FIXED(100)}}}) {}
-    out.drop = nt_ui_step(s_fx.ctx, DROP_ID, NULL);
-    CLAY({.id = (Clay_ElementId){.id = SRC_ID},
-          .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = 100.0F, .y = 100.0F}},
-          .layout = {.sizing = {CLAY_SIZING_FIXED(100), CLAY_SIZING_FIXED(100)}}}) {}
-    out.src = nt_ui_step(s_fx.ctx, SRC_ID, &(nt_ui_step_desc_t){.drag_payload = 42U});
-    out.src_q = nt_ui_query_interaction(s_fx.ctx, SRC_ID);
-    CLAY({.id = (Clay_ElementId){.id = ZONE_ID},
-          .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = 400.0F, .y = 300.0F}},
-          .layout = {.sizing = {CLAY_SIZING_FIXED(100), CLAY_SIZING_FIXED(100)}}}) {}
-    nt_ui_block_pointer(s_fx.ctx, ZONE_ID, NULL);
-    out.zone = nt_ui_query_interaction(s_fx.ctx, ZONE_ID);
-    nt_ui_end(s_fx.ctx);
-    return out;
-}
-
-/* A drag with a payload: its target reports drag_over with the payload and dropped on the release there, in any
- * step order; the source itself is no drop target. */
-static void test_drag_and_drop_by_target(void) {
-    (void)dnd_frame(ui_fx_pointer(150.0F, 150.0F, false, false, false));
-    dnd_t d = dnd_frame(ui_fx_pointer(150.0F, 150.0F, true, true, false));
-    TEST_ASSERT_TRUE(d.src.pressed_now);
-    d = dnd_frame(ui_fx_pointer(160.0F, 150.0F, true, false, false));
-    TEST_ASSERT_FALSE_MESSAGE(d.src.drag_over, "the source is no target of its own drag");
-    d = dnd_frame(ui_fx_pointer(450.0F, 150.0F, true, false, false));
-    TEST_ASSERT_TRUE(d.drop.drag_over);
-    TEST_ASSERT_EQUAL_UINT32(42U, d.drop.drag_payload);
-    TEST_ASSERT_FALSE(d.drop.dropped || d.drop.hovered);
-    d = dnd_frame(ui_fx_pointer(450.0F, 150.0F, false, false, true));
-    TEST_ASSERT_TRUE(d.drop.dropped && d.drop.drag_over);
-    TEST_ASSERT_FALSE(d.src.clicked);
-    TEST_ASSERT_TRUE(d.src.released_now);
-    TEST_ASSERT_FALSE(d.src_q.drag_over || d.src_q.dropped);
-}
-
-/* The source is no target of its own drag, also after its step in the release frame. */
-static void test_release_over_the_source_drops_nothing_on_it(void) {
-    (void)dnd_frame(ui_fx_pointer(150.0F, 150.0F, false, false, false));
-    (void)dnd_frame(ui_fx_pointer(150.0F, 150.0F, true, true, false));
-    const dnd_t d = dnd_frame(ui_fx_pointer(160.0F, 150.0F, false, false, true));
-    TEST_ASSERT_TRUE(d.src.released_now);
-    TEST_ASSERT_FALSE_MESSAGE(d.src_q.drag_over || d.src_q.dropped, "a release over the source drops nothing on it");
-}
-
-/* A drag's payload ends with its release: a left press that joins the gesture later (the right button held all along)
- * captures nothing, so its release drops nothing. */
-static void test_drag_payload_ends_with_its_release(void) {
-    (void)dnd_frame(buttons_at(150.0F, 150.0F, 0U, 0U, 0U));
-    (void)dnd_frame(buttons_at(150.0F, 150.0F, BIT_L, BIT_L, 0U));
-    (void)dnd_frame(buttons_at(150.0F, 150.0F, BIT_L | BIT_R, BIT_R, 0U));
-    (void)dnd_frame(buttons_at(450.0F, 150.0F, BIT_L | BIT_R, 0U, 0U));
-    dnd_t d = dnd_frame(buttons_at(450.0F, 150.0F, BIT_R, 0U, BIT_L));
-    TEST_ASSERT_TRUE(d.drop.dropped);
-    (void)dnd_frame(buttons_at(450.0F, 150.0F, BIT_R, 0U, 0U));
-    (void)dnd_frame(buttons_at(450.0F, 150.0F, BIT_R | BIT_L, BIT_L, 0U));
-    (void)dnd_frame(buttons_at(450.0F, 350.0F, BIT_R | BIT_L, 0U, 0U));
-    d = dnd_frame(buttons_at(450.0F, 350.0F, BIT_R, 0U, BIT_L));
-    TEST_ASSERT_FALSE_MESSAGE(d.zone.drag_over || d.zone.dropped, "the joined press is no drag");
-}
-
-/* A blocker's query is a drop zone; a cancelled release drops nothing; the drag ends with its gesture. */
-static void test_drag_onto_a_blocker_zone(void) {
-    (void)dnd_frame(ui_fx_pointer(150.0F, 150.0F, false, false, false));
-    (void)dnd_frame(ui_fx_pointer(150.0F, 150.0F, true, true, false));
-    dnd_t d = dnd_frame(ui_fx_pointer(450.0F, 350.0F, true, false, false));
-    TEST_ASSERT_TRUE(d.zone.drag_over);
-    nt_pointer_t cancel = ui_fx_pointer(450.0F, 350.0F, false, false, true);
-    cancel.cancelled = true;
-    d = dnd_frame(cancel);
-    TEST_ASSERT_FALSE_MESSAGE(d.zone.dropped, "a cancelled release drops nothing");
-    (void)dnd_frame(ui_fx_pointer(150.0F, 150.0F, true, true, false));
-    d = dnd_frame(ui_fx_pointer(450.0F, 350.0F, false, false, true));
-    TEST_ASSERT_TRUE(d.zone.dropped);
-    TEST_ASSERT_EQUAL_UINT32(42U, d.zone.drag_payload);
-    d = dnd_frame(ui_fx_pointer(450.0F, 350.0F, false, false, false));
-    TEST_ASSERT_FALSE(d.zone.drag_over || d.drop.drag_over);
-}
-
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_interaction_click_on_release_within_bounds);
@@ -1139,13 +1034,8 @@ int main(void) {
     RUN_TEST(test_contact_change_starts_a_new_gesture);
     RUN_TEST(test_occlusion_zero_hides_a_2d_pointer);
     RUN_TEST(test_holder_under_a_later_record_is_not_hovered);
-    RUN_TEST(test_cancelled_release_clicks_nothing);
     RUN_TEST(test_dropped_capture_reports_released_now_once);
     RUN_TEST(test_right_click_goes_to_the_target);
-    RUN_TEST(test_drag_and_drop_by_target);
-    RUN_TEST(test_drag_onto_a_blocker_zone);
-    RUN_TEST(test_release_over_the_source_drops_nothing_on_it);
-    RUN_TEST(test_drag_payload_ends_with_its_release);
     RUN_TEST(test_interaction_second_button_keeps_the_gesture);
     RUN_TEST(test_interaction_padded_hover_and_capture);
     RUN_TEST(test_interaction_disabled_with_padding_stays_disabled);

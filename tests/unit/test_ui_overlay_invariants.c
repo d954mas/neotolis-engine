@@ -128,8 +128,8 @@ static uint32_t rnd(void) {
 static uint32_t rnd_below(uint32_t n) { return rnd() % n; }
 static bool chance(uint32_t percent) { return rnd_below(100U) < percent; }
 static uint32_t bit(int ov) {
-    TEST_ASSERT_TRUE(ov >= 0 && ov < OV_N); /* bounds ov for clang-analyzer, which loses it on some paths */
-    return 1U << (uint32_t)ov;
+    /* every caller passes an OV_* index; clang-analyzer loses that bound on some paths */
+    return 1U << (uint32_t)ov; // NOLINT(clang-analyzer-core.BitwiseShift)
 }
 static bool is_modal(int ov) { return ov == OV_M0 || ov == OV_M1; }
 

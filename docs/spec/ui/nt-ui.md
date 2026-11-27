@@ -273,8 +273,9 @@ measured peak.
 
 A frame starts with `nt_ui_begin(ctx, &frame)`: `nt_ui_frame_desc_t` carries everything
 the frame's input decisions read — layout size, dt, the raw device pointers, the device
-viewport (zero = identity), for a 3D ctx the `view_proj`, and the per-pointer occlusion
-(3D: the ray cutoff; 0 hides the pointer from the context in 2D and 3D).
+viewport (zero = identity), for a 3D ctx the `view_proj`, the per-pointer occlusion
+(3D: the ray cutoff; 0 hides the pointer from the context in 2D and 3D, and a 2D ctx takes
+only 0 or `+INFINITY`, asserted), and `no_keys` (K).
 Begin converts the pointers to layout space and decides everything "Input ownership" lists; no setter may change that input later in the frame.
 Game ids interact via `nt_ui_query_interaction` (a pure read, multiple calls per frame OK) and
 `nt_ui_step(ctx, id, desc)` (mutating, exactly one call per id per frame; `desc` carries
@@ -316,7 +317,7 @@ Rules for game code:
    stays theirs until every button is up: the UI never hovers, scrolls or
    clicks under the game's drag, and the game never gets the release of the
    UI's. In a 3D context an overlay takes only the rays that hit its context's
-   UI; a ray past it is the game's.
+   UI (under the overlay too); a ray past it is the game's.
 3. *Three overlay kinds.* A tooltip takes no input and draws above every
    overlay; it is not on the stack. A popup (a combo list, a menu, a context
    popup) closes on Esc, on a press outside it, or when another overlay opens,
@@ -342,20 +343,24 @@ Rules for game code:
    wait. An overlay takes input from the frame after its first declaration. A
    closing overlay fades out and takes no input, nor does anything declared in
    it.
-7. *Keys* go to one context at a time: the one where a text field was last
-   focused or an overlay last opened. There they go to the focused field, else
-   the top overlay, else the game; a press anywhere but on the field unfocuses
-   it. Read the keys of an overlay's body with `nt_ui_key_pressed(ctx,
-   overlay_id, key)`, not raw `nt_input`. Esc follows the same owner, so Esc
-   in a field inside a modal unfocuses the field and a second Esc closes the
-   modal.
-8. *Drag and drop.* The source opts in with a non-zero `drag_payload` in its
-   step desc; a target's step reports `drag_over` while that drag is over it
-   and `dropped` on its release there, with the payload. Draw the dragged item
-   without stepping it, so it never hides the target.
-9. *Several contexts.* Begin the front one first, and for a pointer it wants
-   pass `occlusion[i] = 0` to the ones behind it, so one press never reaches
-   two contexts.
+7. *Keys* go to the focused field, else the top overlay, else the game; a
+   press anywhere but on the field unfocuses it. A context begun with
+   `no_keys` has no key owner that frame (rule 8). Read the keys of an
+   overlay's body with `nt_ui_key_pressed(ctx, overlay_id, key)`, not raw
+   `nt_input`. Esc follows the same owner, so Esc in a field inside a modal
+   unfocuses the field and a second Esc closes the modal.
+8. *Several contexts.* Route keys like pointers: begin the front one first;
+   for a pointer it wants pass `occlusion[i] = 0` to the ones behind it, and
+   pass them `no_keys = nt_ui_wants_keyboard(front)`, so one press or one Esc
+   never reaches two contexts. A pointer hidden from a back context still
+   closes its light popups and unfocuses its field there, as a press
+   elsewhere.
+
+Drag and drop is game code: keep the dragged item in your own state from the
+source's `pressed_now`, highlight a target while `nt_ui_pointer_hot(ctx, i).id`
+is its id, and on the source's `released_now` drop onto
+`nt_ui_pointer_hot(ctx, i).id` unless the pointer's release is `cancelled`.
+Draw the dragged item without stepping it, so it never hides the target.
 
 Engine rules:
 
@@ -364,7 +369,9 @@ Engine rules:
   `nt_ui_step`, `nt_ui_block_pointer` or a scroll surface makes; the catcher
   of an open overlay is one too (in 2D it covers the whole window, letterbox
   bars included) and lies inside no element, and the inspector sidebar is one
-  above everything. `nt_ui_pointer_hot` returns the target. P2 decides the
+  above everything. A hit on a record that is not live (L) targets the top's
+  catcher instead, in 2D and 3D; a 3D ray that hits no record has no target.
+  `nt_ui_pointer_hot` returns the target. P2 decides the
   gesture's owner from it; while the gesture is the game's, the pointer has no
   target, as Dear ImGui clears its hovered window while the app owns the
   button.
@@ -379,19 +386,22 @@ Engine rules:
   changed (a frame without `nt_ui_begin` swallowed the press), starts a new
   gesture by the same rule, without a press edge: it captures and clicks
   nothing. A cancelled release (`nt_input`) ends the gesture with nothing
-  clicked or dropped. `nt_ui_wants_pointer(ctx, i)` is true during a UI
+  clicked. `nt_ui_wants_pointer(ctx, i)` is true during a UI
   gesture, false during a game gesture, and for a free pointer true when it
   has a target or its wheel is latched.
 - *P3 Readers.* No reader hit-tests on its own: each reads the target and the
   owner.
   - *Capture.* A left first press captures its target. The capture ends on the
-    release, or when `nt_ui_begin` drops it: a cancel, an overlay over it, a
-    scroll that claimed the drag, a widget that did not step, or a frame
-    without `nt_ui_begin` that swallowed the release. However it ends, the
-    holder's step reports `released_now` once that frame, except a capture
-    inside a closing body: its inert step reports nothing. While a widget holds
-    a pointer, other widgets do not see it (`exclusive_gated`), except as a
-    drag target.
+    release (a cancelled one clicks nothing), or when `nt_ui_begin` drops it:
+    an overlay over it, a scroll that claimed the drag, a widget that did not
+    step, or a frame without `nt_ui_begin` that swallowed the release. However
+    it ends, the holder's step reports `released_now` once that frame (Dear
+    ImGui's `IsItemDeactivated`), with two exceptions: a capture inside a
+    closing body, whose inert step reports nothing, and a pointer slot the game
+    stops passing, which ends its capture with no report (rare). A dropped
+    capture is not `pressed`, so a draggable follows the pointer only while
+    `pressed` or on its own `clicked` release. While a widget holds a pointer,
+    other widgets do not see it (`exclusive_gated`).
   - *Hover and click.* `hovered`: the pointer holds no widget and the widget is
     its target, or the widget holds the pointer and the target is the widget or
     inside it. The hold follows the same test, so a holder dragged off, or
@@ -401,29 +411,24 @@ Engine rules:
     widget itself; a child record takes it). The release's target decides, so a
     right press that closes a popup on its catcher still right-clicks what lies
     under it on release, unlike a left press there, whose release clicks
-    nothing. `nt_ui_hovered_within(ctx, id)`:
+    nothing. A right tap pressed and released in one frame on an open popup's
+    catcher right-clicks nothing (rare). `nt_ui_hovered_within(ctx, id)`:
     the target is `id` or inside it, as CSS `:hover`; for a holder only while
     hovered.
-  - *Drag and drop.* A capture whose step desc carries a `drag_payload` is a
-    drag: its target (the record itself, not its parents, and not the source)
-    reports `drag_over` and the payload, and `dropped` on a release there that is not
-    cancelled. A query reports them too, so a blocker works as a drop zone.
   - *Wheel.* A pointer's wheel goes per axis to the first scroll on its
     target's chain that can move on that axis, and stays latched to it while
-    the wheel keeps turning (ticks closer than the latch time of
-    `nt_ui_set_gesture_constants`, 0.5 s by default, in UI time) and the pointer stays within
+    the wheel keeps turning (ticks closer than `NT_UI_WHEEL_LATCH_SECS`, a
+    compile-time constant, 0.5 s by default, in UI time) and the pointer stays within
     the drag slop. A latched scroll at its end takes the tick without passing
     it on. The latch holds only for a free pointer or a UI gesture and drops
     when its scroll stops being live. No target and no latch scroll nothing.
 - *K Keys* (router).
-  - *Context.* One context has the keyboard: the last one where a field got
-    focus or an overlay opened. Every other context has no key owner, and its
-    focused field loses focus at its `nt_ui_begin`. The frame a context takes
-    the keyboard may have no owner, never two.
-  - *Owner.* In that context `nt_ui_begin` fixes the frame's one key owner: the
-    focused field, else the top overlay, else none (the game's). A first press
+  - *Owner.* `nt_ui_begin` fixes the frame's one key owner: the focused field,
+    else the top overlay, else none (the game's); none in a context begun with
+    `no_keys`, whose focused field keeps its focus but reads no key. A first press
     whose target is not the focused field unfocuses it, except a press a scroll
-    may still claim, which focuses or unfocuses on the tap's release, or when
+    may still claim, which focuses or unfocuses on the tap's release (a
+    cancelled release does neither), or when
     the pressed widget's own drag takes it. The
     frame's keys stay with the owner fixed at begin, so a field a press focuses
     or leaves reads keys from the next frame; a field focused at begin that
@@ -439,8 +444,8 @@ Engine rules:
   - *Live.* An element is live when it lies at or above the top overlay's
     catcher in last frame's paint order (always with no top and for inspector
     panes) and outside an inert body, in 2D and 3D alike: an overlay gates its
-    whole context. A record that is not live is no target, but in a 3D context
-    it still stops the ray. Only a live field is focused or a Tab stop.
+    whole context. A record that is not live is no target: a hit on it targets
+    the top's catcher (P1). Only a live field is focused or a Tab stop.
     `nt_ui_begin` drops a capture, a pending scroll, a wheel latch and the text
     focus that are not live, as a modal dialog cancels its owner's capture and
     takes focus.
@@ -487,11 +492,13 @@ Engine rules:
   its deepest level, M2), or on a first press of any pointer outside its panel
   grown by `close_pad`: on its catcher or with no target (a popup), or on its
   catcher (a modal, if its style says so). That press also closes every open
-  popup below the top that it lies outside, down to the first overlay whose
-  panel (grown by its `close_pad`) holds it or the first modal, which stays, as
-  Dear ImGui's `ClosePopupsOverWindow`: one press beside a combo opened in a
-  popup closes both; a press on the popup's panel closes only the list. Esc
-  closes only the top. It reads the close its declaration recorded last frame,
+  light overlay below the top (a popup or a menu level), down to the first one
+  whose panel (grown by its `close_pad`) holds it or the first modal, which
+  stays, as Dear ImGui's `ClosePopupsOverWindow`: one press beside a combo
+  opened in a popup closes both; a press on the popup's panel closes only the
+  list; a press on a menu's root panel closes a popup opened from a level and
+  that level. With several pointers pressing outside, the first one decides
+  the walk. Esc closes only the top. It reads the close its declaration recorded last frame,
   and its catcher is gone from the next frame's records.
 - *S4 Limits.* `nt_ui_begin` keeps at most `NT_UI_OVERLAY_MAX / 2` fading
   overlays: the lowest fades in the stack end there, so slow fades never fill
@@ -680,6 +687,7 @@ and animated `nt_ui_scroll_to`. Release-fling velocity is tracked over a TIME WI
 (`TAU_GAIN`/`TAU_DECAY`), not a per-frame delta: a moving frame blends toward the
 instantaneous sample, a zero-delta frame decays toward 0, so a fling survives pointer
 events arriving slower than the render loop instead of depending on release-frame parity.
+A cancelled release stops the drag where it is, with no fling (Android `RecyclerView`, Flutter).
 Per-container scroll state (pos/vel/target/flags)
 rides the state pool keyed by the scroll id; no heap. With `rubber_band_c == 0` the
 edge is hard for drag and fling (no reversal dead zone); a rubber band needs
@@ -796,8 +804,7 @@ a press on another field and a Tab in one frame move focus by the Tab of the
 field focused before. Esc
 unfocuses and wins over a Tab in the same frame. A focused field loses focus when
 it is declared disabled or not declared for a frame, and by "Input ownership", K and L
-(a press elsewhere, another context taking the keyboard, an overlay over it, turning
-inert). While a field is focused, the
+(a press elsewhere, an overlay over it, turning inert). While a field is focused, the
 game may shorten its buffer but must not rewrite its content. The focused field
 declares its keyboard hint (`nt_window_set_text_input_mode`) every frame. The line
 scrolls horizontally to keep the caret visible and clips to the field's

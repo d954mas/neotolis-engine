@@ -147,7 +147,7 @@ typedef struct {
     float pressure;          /* 0.0-1.0 */
     uint8_t type;            /* nt_pointer_type_t */
     bool active;             /* Pointer currently exists */
-    bool deactivate_pending; /* an up, a mouse leave or a focus loss defers deactivation by one frame */
+    bool deactivate_pending; /* an up, a contact cancel, a mouse leave or a focus loss defers deactivation by one frame */
     bool cancelled;          /* this frame's releases did not happen (a platform cancel, a focus loss): no click, no drop */
     nt_button_state_t buttons[NT_BUTTON_MAX];
 } nt_pointer_t;

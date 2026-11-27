@@ -418,8 +418,8 @@ static void test_popup_3d_closes_on_a_ray_past_its_surface(void) {
     TEST_ASSERT_FALSE_MESSAGE(nt_ui_wants_pointer(s_fx.ctx, 0U), "and the gesture is the game's");
 }
 
-/* ---- A record under a 3D overlay is no target but still stops the ray: one nearer than the overlay's surface
- *      leaves the pointer with no target, so its press is the game's and the modal stays. ---- */
+/* ---- A record under a 3D overlay is no target: a ray whose nearest hit is one, nearer than the overlay's surface,
+ *      targets the top's catcher as in 2D, so its press is a backdrop press and never the game's. ---- */
 static void raised_under_modal_frame(nt_pointer_t p) {
     float vp[16];
     make_ortho_clay_y_down(vp);
@@ -442,17 +442,17 @@ static void raised_under_modal_frame(nt_pointer_t p) {
     nt_ui_end(s_fx.ctx);
 }
 
-static void test_3d_record_under_an_overlay_stops_the_ray(void) {
+static void test_3d_ray_on_a_record_under_an_overlay_hits_its_catcher(void) {
     const nt_pointer_t idle = {.x = BBOX_X + 20.0F, .y = BBOX_Y + 20.0F, .active = true};
     raised_under_modal_frame(idle);
     nt_ui_modal_open(s_fx.ctx, OVERLAY3D_ID);
     for (int f = 0; f < 3; ++f) {
         raised_under_modal_frame(idle);
     }
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, nt_ui_pointer_hot(s_fx.ctx, 0U).id, "the raised record is not live and hides the backdrop");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(nt_ui_internal_popup_catcher_id(OVERLAY3D_ID), nt_ui_pointer_hot(s_fx.ctx, 0U).id, "a ray on a record that is not live targets the catcher");
     raised_under_modal_frame(press_3d(BBOX_X + 20.0F, BBOX_Y + 20.0F));
-    TEST_ASSERT_FALSE(nt_ui_wants_pointer(s_fx.ctx, 0U));
-    TEST_ASSERT_TRUE(nt_ui_is_open(s_fx.ctx, OVERLAY3D_ID));
+    TEST_ASSERT_TRUE_MESSAGE(nt_ui_wants_pointer(s_fx.ctx, 0U), "the press never reaches the world");
+    TEST_ASSERT_FALSE_MESSAGE(nt_ui_is_open(s_fx.ctx, OVERLAY3D_ID), "it is a backdrop press");
 }
 
 /* ---- A 3D modal opening over a focused field of its context takes the focus and the keys, as in 2D. ---- */
@@ -510,7 +510,7 @@ int main(void) {
     RUN_TEST(test_occlusion_blocks_widget_beyond_cutoff);
     RUN_TEST(test_occlusion_allows_widget_within_cutoff);
     RUN_TEST(test_3d_overlay_drops_a_capture_under_it);
-    RUN_TEST(test_3d_record_under_an_overlay_stops_the_ray);
+    RUN_TEST(test_3d_ray_on_a_record_under_an_overlay_hits_its_catcher);
     RUN_TEST(test_modal_3d_gates_only_its_surface);
     RUN_TEST(test_popup_3d_closes_on_a_ray_past_its_surface);
     RUN_TEST(test_3d_modal_takes_the_focus_of_a_field_under_it);

@@ -1009,8 +1009,64 @@ static void test_thumb_above_modal_band_first_frame(void) {
     TEST_ASSERT_TRUE_MESSAGE(ui_fx_float_near(thumb_cy, track_cy, 0.5F), "thumb must stay centered on the track cross axis");
 }
 
+// #region a capture nt_ui_begin drops leaves the value
+#define DROP_MODAL 0x5D0002U
+
+/* `count` pointers, the last primary; the slider steps when `slider`, a modal is declared when `modal`. */
+static void slider_drop_frame(const nt_pointer_t *p, uint32_t count, float *value, bool slider, bool modal) {
+    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = 800.0F, .layout_h = 600.0F, .pointers = p, .pointer_count = count, .primary = count - 1U});
+    CLAY({.id = CLAY_ID("root"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = SL_X, .y = SL_Y}}}) {
+        if (slider) {
+            (void)nt_ui_slider_float(s_fx.ctx, NULL, 0, nt_ui_id("sl"), NULL, value, 0.0F, 1.0F, 0.0F, &s_style, &s_track_decl, true);
+        }
+    }
+    nt_ui_modal_style_t mst = nt_ui_modal_style_defaults();
+    mst.ease_speed = 0.0F;
+    if (modal && nt_ui_modal_begin(s_fx.ctx, DROP_MODAL, &mst, NULL)) {
+        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(100.0F), CLAY_SIZING_FIXED(60.0F)}}}) {}
+        nt_ui_modal_end(s_fx.ctx);
+    }
+    nt_ui_end(s_fx.ctx);
+}
+
+/* A modal opening over a held thumb drag ends it: the frame that reports released_now moves nothing. */
+static void test_modal_over_a_drag_keeps_the_value(void) {
+    float value = 0.5F;
+    warmup_float(&value, 0.0F, 1.0F);
+    nt_pointer_t p = ui_fx_pointer(SL_X_AT_FRAC(0.5F), SL_CY, true, true, false);
+    slider_drop_frame(&p, 1U, &value, true, false);
+    p = ui_fx_pointer(SL_X_AT_FRAC(0.6F), SL_CY, true, false, false);
+    slider_drop_frame(&p, 1U, &value, true, false);
+    TEST_ASSERT_TRUE(ui_fx_float_near(value, 0.6F, 0.02F));
+    nt_ui_modal_open(s_fx.ctx, DROP_MODAL);
+    slider_drop_frame(&p, 1U, &value, true, true);
+    p = ui_fx_pointer(SL_X_AT_FRAC(0.9F), SL_CY, true, false, false);
+    slider_drop_frame(&p, 1U, &value, true, true);
+    TEST_ASSERT_TRUE_MESSAGE(ui_fx_float_near(value, 0.6F, 0.02F), "the drop frame follows no pointer");
+    slider_drop_frame(&p, 1U, &value, true, true);
+    TEST_ASSERT_TRUE(ui_fx_float_near(value, 0.6F, 0.02F));
+}
+
+/* Two pointers: a modal drops pointer 0's thumb drag while the primary rests elsewhere; the drop frame does not
+ * jump the thumb to the primary. */
+static void test_dropped_capture_ignores_the_primary_pointer(void) {
+    float value = 0.5F;
+    nt_pointer_t p[2] = {ui_fx_pointer(SL_X - 50.0F, SL_CY, false, false, false), ui_fx_pointer(SL_X_AT_FRAC(0.0F), SL_CY + 100.0F, false, false, false)};
+    slider_drop_frame(p, 2U, &value, true, false);
+    p[0] = ui_fx_pointer(SL_X_AT_FRAC(0.5F), SL_CY, true, true, false);
+    slider_drop_frame(p, 2U, &value, true, false);
+    p[0].buttons[NT_BUTTON_LEFT].is_pressed = false;
+    nt_ui_modal_open(s_fx.ctx, DROP_MODAL);
+    slider_drop_frame(p, 2U, &value, true, true);
+    slider_drop_frame(p, 2U, &value, true, true);
+    TEST_ASSERT_TRUE_MESSAGE(ui_fx_float_near(value, 0.5F, 0.02F), "the drop frame follows no pointer");
+}
+// #endregion
+
 int main(void) {
     UNITY_BEGIN();
+    RUN_TEST(test_modal_over_a_drag_keeps_the_value);
+    RUN_TEST(test_dropped_capture_ignores_the_primary_pointer);
     RUN_TEST(test_track_jump_value_map);
     RUN_TEST(test_value_clamped);
     RUN_TEST(test_value_map_nonunit_range);

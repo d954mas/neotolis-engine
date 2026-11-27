@@ -691,6 +691,27 @@ static void frame_popup_nest(void *game) {
 }
 
 /* Modal A holding its button and popup A, which its body opens on request. */
+/* Root menu: File, a submenu whose custom row hosts a game button that opens popup A inside that level, and Edit. */
+static void frame_menu_row_popup(void *game) {
+    (void)game;
+    g.file_body = false;
+    if (nt_ui_menu_begin(&g.menu, s.ctx, NULL, 0U, &g.menu_style)) {
+        if (nt_ui_menu_submenu_begin(&g.menu, KEY_FILE, "File")) {
+            g.file_body = true;
+            nt_ui_menu_item_begin(&g.menu, KEY_BUTTON_ROW, true, false);
+            CLAY({.id = (Clay_ElementId){.id = MENU_ROW_BTN}, .layout = {.sizing = {CLAY_SIZING_FIXED(80), CLAY_SIZING_FIXED(24)}}}) {}
+            if (nt_ui_step(s.ctx, MENU_ROW_BTN, NULL).clicked) {
+                nt_ui_popup_open(s.ctx, POP_A);
+            }
+            g.pop_a_shown = popup(POP_A, POP_A_BTN, 600.0F, 400.0F, 0.0F, &g.reason_pop_a, NULL);
+            (void)nt_ui_menu_item_end(&g.menu);
+            nt_ui_menu_submenu_end(&g.menu);
+        }
+        log_click(ACT_EDIT, nt_ui_menu_item(&g.menu, KEY_EDIT, "Edit"));
+        nt_ui_menu_end(&g.menu);
+    }
+}
+
 static void frame_modal_popup(void *game) {
     (void)game;
     if (modal_begin(MODAL_A, &g.reason_modal_a)) {
@@ -1448,6 +1469,32 @@ static void test_own_close_press_on_the_popup_closes_only_its_combo(void) {
     TEST_ASSERT_EQUAL_UINT8(NT_UI_POPUP_CLOSE_NONE, g.reason_pop_a);
 }
 
+/* Own close: a popup opened from a custom row of a menu level, then a press on the root's panel off the level and
+ * the popup: the popup and the level close, the root whose panel holds the press stays. */
+static void test_own_close_press_on_the_menu_root_closes_the_level_and_its_popup(void) {
+    scenario(frame_menu_row_popup);
+    nt_ui_menu_open(&g.menu, s_fx.ctx, MENU_A, 120.0F, 80.0F);
+    sc_frames(&s, 1);
+    sc_move_to(&s, ROW_FILE);
+    sc_frames(&s, 1);
+    TEST_ASSERT_TRUE(g.file_body);
+    sc_click_id(&s, MENU_ROW_BTN);
+    sc_frames(&s, 1);
+    TEST_ASSERT_TRUE(nt_ui_is_open(s_fx.ctx, POP_A));
+    TEST_ASSERT_TRUE(g.file_body);
+    const nt_ui_bbox_t edit = sc_box(&s, ACT_EDIT);
+    const nt_ui_bbox_t level = sc_box(&s, nt_ui_menu_test_panel_id(MENU_A, 1U));
+    const nt_ui_bbox_t pop = sc_box(&s, POP_A);
+    const float px = edit.x + (edit.width * 0.5F);
+    const float py = edit.y + (edit.height * 0.5F);
+    TEST_ASSERT_TRUE_MESSAGE(px < level.x || py > level.y + level.height, "the press lies off the level");
+    TEST_ASSERT_TRUE_MESSAGE(px < pop.x || py < pop.y, "and off the popup");
+    sc_step(&s, px, py, NT_BUTTON_LEFT, -1);
+    TEST_ASSERT_FALSE_MESSAGE(nt_ui_is_open(s_fx.ctx, POP_A), "the press closes the popup, the top");
+    TEST_ASSERT_FALSE_MESSAGE(g.file_body, "and the menu level it passes");
+    TEST_ASSERT_TRUE_MESSAGE(nt_ui_is_open(s_fx.ctx, MENU_A), "the root whose panel holds it stays");
+}
+
 /* Own close: a backdrop press closes a popup opened in a modal, but the closing stops at the modal, though its
  * style closes on the backdrop; the next backdrop press is the modal's own. */
 static void test_own_close_backdrop_press_closes_the_popup_in_a_modal_not_the_modal(void) {
@@ -1628,6 +1675,7 @@ int main(void) {
     RUN_TEST(test_own_close_esc_closes_top_combo_only);
     RUN_TEST(test_own_close_press_outside_both_closes_the_combo_and_its_popup);
     RUN_TEST(test_own_close_press_on_the_popup_closes_only_its_combo);
+    RUN_TEST(test_own_close_press_on_the_menu_root_closes_the_level_and_its_popup);
     RUN_TEST(test_own_close_backdrop_press_closes_the_popup_in_a_modal_not_the_modal);
     RUN_TEST(test_own_close_picked_combo_list_passes_the_next_press_through);
     RUN_TEST(test_stack_open_between_frames_shows_next_frame);

@@ -1089,6 +1089,33 @@ static void test_scroll_held_entry_no_edge_no_gesture(void) {
     TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_test_capture_active_id(s_fx.ctx, 0U)); /* nothing claimed */
 }
 
+/* A drag whose release is cancelled stops where it is: no fling follows. */
+static void test_scroll_cancelled_release_does_not_fling(void) {
+    nt_ui_scroll_style_t style = nt_ui_scroll_style_defaults();
+    nt_pointer_t p = {.x = 100.0F, .y = 100.0F, .active = true};
+    scroll_frame(&p, &style);
+    p.buttons[NT_BUTTON_LEFT] = (nt_button_state_t){.is_down = true, .is_pressed = true};
+    scroll_frame(&p, &style);
+    p.buttons[NT_BUTTON_LEFT].is_pressed = false;
+    for (int i = 1; i <= 5; ++i) {
+        p.y = 100.0F - (float)(i * 14);
+        scroll_frame(&p, &style);
+    }
+    const nt_ui_scroll_state_t *s = (const nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, SCROLL_ID);
+    TEST_ASSERT_NOT_NULL(s);
+    TEST_ASSERT_TRUE(fabsf(s->vel[1]) > 100.0F);
+    p.buttons[NT_BUTTON_LEFT] = (nt_button_state_t){.is_released = true};
+    p.cancelled = true;
+    scroll_frame(&p, &style);
+    const float pos_at_release = s->pos[1];
+    p.buttons[NT_BUTTON_LEFT].is_released = false;
+    p.cancelled = false;
+    for (int i = 0; i < 8; ++i) {
+        scroll_frame(&p, &style);
+    }
+    TEST_ASSERT_TRUE_MESSAGE(fabsf(s->pos[1] - pos_at_release) < 0.5F, "a cancelled release leaves no fling");
+}
+
 /* ---- Test 32: releasing a claimed gesture releases the capture (re-arms), flings, and the NEXT
  *      press edge starts a FRESH gesture (the owner is reassigned only at a new down edge). ---- */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -3146,10 +3173,9 @@ static void slide_frame(nt_pointer_t *p, float dt) {
 }
 
 /* A flick that slides an inner list under the resting cursor stays on the outer list; a pause longer than the
- * latch time lets the next tick go to the list now under the cursor. */
+ * latch time lets the next tick go to the list now under the cursor; a move past the drag slop drops that latch. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_wheel_latch_keeps_the_flick_on_its_scroll(void) {
-    nt_ui_set_gesture_constants(s_fx.ctx, 0.5F, 16.0F, 0.25F);
     nt_pointer_t p = ui_fx_pointer(100.0F, 60.0F, false, false, false);
     slide_frame(&p, 1.0F / 60.0F);
     slide_frame(&p, 1.0F / 60.0F);
@@ -3166,13 +3192,18 @@ static void test_wheel_latch_keeps_the_flick_on_its_scroll(void) {
     TEST_ASSERT_EQUAL_INT_MESSAGE(0, (int)inner->pos[1], "the inner list slid under the cursor and took nothing");
 
     p.wheel_dy = 0.0F;
-    for (int f = 0; f < 3; ++f) {
-        slide_frame(&p, 0.1F);
+    for (int f = 0; f < 6; ++f) {
+        slide_frame(&p, 0.1F); /* past NT_UI_WHEEL_LATCH_SECS */
     }
     p.wheel_dy = 1.0F;
     slide_frame(&p, 1.0F / 60.0F);
     TEST_ASSERT_EQUAL_INT_MESSAGE(-240, (int)outer->pos[1], "after the pause the outer list takes no tick");
     TEST_ASSERT_EQUAL_INT_MESSAGE(-40, (int)inner->pos[1], "the tick after the pause goes to the list under the cursor");
+
+    p.x += 150.0F; /* past the 8 dp slop, off the inner list, still over the outer one */
+    slide_frame(&p, 1.0F / 60.0F);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(-40, (int)inner->pos[1], "the latch dropped");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(-280, (int)outer->pos[1], "the tick goes to the list under the pointer");
 }
 
 /* A pointer latched to the list, then a game press just past its edge (within the slop): the latch drops, so the
@@ -3232,26 +3263,6 @@ static void test_wheel_latch_drops_under_a_modal(void) {
     arb_frame(&p, 1);
     arb_frame(&p, 1);
     TEST_ASSERT_EQUAL_INT_MESSAGE(-40, (int)arb_list()->pos[1], "the list under the modal took no tick");
-}
-
-/* Ticks latched to the outer list slide the inner one under the cursor; a move past the drag slop drops the latch,
- * so the next tick goes to the inner list now under the pointer. */
-static void test_wheel_latch_drops_past_the_drag_slop(void) {
-    nt_pointer_t p = ui_fx_pointer(100.0F, 60.0F, false, false, false);
-    slide_frame(&p, 1.0F / 60.0F);
-    slide_frame(&p, 1.0F / 60.0F);
-    p.wheel_dy = 1.0F;
-    for (int f = 0; f < 3; ++f) {
-        slide_frame(&p, 1.0F / 60.0F);
-    }
-    const nt_ui_scroll_state_t *outer = (const nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, SLIDE_OUTER_ID);
-    const nt_ui_scroll_state_t *inner = (const nt_ui_scroll_state_t *)nt_ui_state_find(s_fx.ctx, SLIDE_INNER_ID);
-    TEST_ASSERT_EQUAL_INT(-120, (int)outer->pos[1]);
-    TEST_ASSERT_EQUAL_INT(0, (int)inner->pos[1]);
-    p.x += 40.0F; /* past the 8 dp slop, still over the inner list */
-    slide_frame(&p, 1.0F / 60.0F);
-    TEST_ASSERT_EQUAL_INT_MESSAGE(-120, (int)outer->pos[1], "the latch dropped");
-    TEST_ASSERT_EQUAL_INT_MESSAGE(-40, (int)inner->pos[1], "the tick goes to the list under the pointer");
 }
 
 /* A latched inner list at its end keeps the ticks: the outer list around it never takes them. */
@@ -3452,6 +3463,7 @@ int main(void) {
     RUN_TEST(test_scroll_cross_container_no_adoption);
     RUN_TEST(test_scroll_held_entry_no_edge_no_gesture);
     RUN_TEST(test_scroll_release_reclaims_on_next_edge);
+    RUN_TEST(test_scroll_cancelled_release_does_not_fling);
     RUN_TEST(test_scrollbar_auto_hide_fades_in_on_activity);
     RUN_TEST(test_scrollbar_auto_hide_hover_keeps_visible);
     RUN_TEST(test_scrollbar_auto_hide_born_idle_no_flash);
@@ -3474,7 +3486,6 @@ int main(void) {
     RUN_TEST(test_wheel_latch_keeps_the_flick_on_its_scroll);
     RUN_TEST(test_wheel_latch_drops_under_a_game_gesture);
     RUN_TEST(test_wheel_latch_drops_under_a_modal);
-    RUN_TEST(test_wheel_latch_drops_past_the_drag_slop);
     RUN_TEST(test_wheel_latch_at_the_end_keeps_the_tick);
     RUN_TEST(test_wheel_latch_drops_for_a_hidden_pointer);
     RUN_TEST(test_wheel_latch_drops_in_a_closing_overlay);

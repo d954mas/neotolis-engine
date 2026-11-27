@@ -709,7 +709,7 @@ static void focus_step(input_frame_t *f) {
     /* Map a pointer x (UI-space) to a codepoint boundary via the prev-frame bbox. */
     const nt_ui_bbox_t bb = nt_ui_get_bbox(ctx, id);
     if (enabled && focus_now) {
-        nt_ui_internal_focus(ctx, id);
+        ctx->focused_input_id = id;
         st->blink = 0.0F;
         if (bb.found) {
             /* The press (or tap release) point. */
