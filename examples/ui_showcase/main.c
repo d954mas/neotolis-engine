@@ -355,6 +355,7 @@ typedef struct {
     /* One game-owned menu each, kept across frames; zero-init is the closed state. */
     nt_ui_menu_t global_menu; /* opens on a right-click outside the panel */
     nt_ui_menu_t zone_menu;   /* opens on a right-click or long-press over the panel */
+    bool right_armed;         /* a game right-click is in progress: armed by its press, fired by its release */
     const char *last_chosen;  /* readout label of the last chosen row; points at the row's static literal (NULL = none) */
     bool show_grid;           /* checkmark-toggle row state (global menu) */
     uint8_t opacity_pct;      /* custom-row state the inner "reset" button restores to 100 */
@@ -3185,14 +3186,24 @@ static void render_menu(nt_ui_context_t *ctx, tab_state_t *st) {
 
     /* A right-click on the panel opens the zone menu, also through an open menu's catcher (its press closes that
      * menu, its release lands on the panel), but not through the confirm modal, whose backdrop press swallows the
-     * gesture; a right release the game owns, outside a left drag, opens the global one. Opening one menu closes the other. The
-     * inspector over the tab takes the gesture, so neither opens through it. */
+     * gesture. Opening one menu closes the other. */
+    const bool held = nt_ui_hold_crossed(&zone_ev, 0.5F);
+    /* The global menu is the game's own right-click, read from nt_input: a right press the UI does not take (no
+     * widget, overlay or inspector under it) and that joins no left drag arms it; its own release fires it unless
+     * the platform cancelled it. The frame passes the primary pointer alone, so it is frame slot 0. */
     const nt_pointer_t *pointer = &g_nt_input.pointers[g_nt_input.primary];
+    const nt_button_state_t right = pointer->buttons[NT_BUTTON_RIGHT];
+    if (right.is_pressed) {
+        st->menu.right_armed = !pointer->buttons[NT_BUTTON_LEFT].is_down && !nt_ui_wants_pointer(ctx, 0U);
+    } else if (pointer->buttons[NT_BUTTON_LEFT].is_pressed) {
+        st->menu.right_armed = false; /* a left press joins the gesture: it is no right-click */
+    }
+    const bool game_right = st->menu.right_armed && right.is_released && !pointer->cancelled;
+    if (right.is_released) {
+        st->menu.right_armed = false;
+    }
     float pos[2];
     nt_ui_screen_to_layout(ctx, (const float[2]){pointer->x, pointer->y}, pos);
-    const bool held = nt_ui_hold_crossed(&zone_ev, 0.5F);
-    const nt_button_state_t left = pointer->buttons[NT_BUTTON_LEFT];
-    const bool game_right = pointer->buttons[NT_BUTTON_RIGHT].is_released && !pointer->cancelled && !left.is_down && !left.is_released && !nt_ui_wants_pointer(ctx, 0U);
     if (held || zone_ev.right_clicked) {
         nt_ui_menu_open(&st->menu.zone_menu, ctx, s_id_menu_zone, zone_ev.pos[0], zone_ev.pos[1]); /* a hold opens under its finger */
     } else if (game_right) {
