@@ -486,15 +486,23 @@ Engine rules:
   reads its Esc in `nt_ui_menu_begin` instead, where Esc, like Left, closes
   its deepest level, M2), or on a first press of any pointer outside its panel
   grown by `close_pad`: on its catcher or with no target (a popup), or on its
-  catcher (a modal, if its style says so). It reads the close its declaration
-  recorded last frame, and its catcher is gone from the next frame's records.
+  catcher (a modal, if its style says so). That press also closes every open
+  popup below the top that it lies outside, down to the first overlay whose
+  panel (grown by its `close_pad`) holds it or the first modal, which stays, as
+  Dear ImGui's `ClosePopupsOverWindow`: one press beside a combo opened in a
+  popup closes both; a press on the popup's panel closes only the list. Esc
+  closes only the top. It reads the close its declaration recorded last frame,
+  and its catcher is gone from the next frame's records.
 - *S4 Limits.* `nt_ui_begin` keeps at most `NT_UI_OVERLAY_MAX / 2` fading
   overlays: the lowest fades in the stack end there, so slow fades never fill
   the stack (a fade cut before its `_begin` call saw the close reports no
-  `info.reason`). Asserted: more than `NT_UI_OVERLAY_MAX` stack slots taken in
-  one frame (open, fading, or left dead by a reopen until the next
-  `nt_ui_begin`), a stride whose tooltip band passes `int16`, and a root
-  overlay inside a game floating at or above `overlay_zband_stride`.
+  `info.reason`). Menu levels closed in the frame count as fading until the
+  next `nt_ui_begin`, though they snap, so a deep menu closing while a modal
+  fades can cut that fade short. Asserted: more than `NT_UI_OVERLAY_MAX` stack
+  slots taken in one frame (open, fading, or left dead by a reopen until the
+  next `nt_ui_begin`), a stride whose tooltip band passes `int16`, and a root
+  overlay or tooltip inside a game floating at or above
+  `overlay_zband_stride`.
 
 **Overlay lifecycle.** An overlay's phase is decided at its declaration from
 whether it is open and whether it was declared open last frame:
@@ -865,7 +873,8 @@ inline (`if (nt_ui_menu_item(...)) act();`, a combo selectable returns clicked).
 then the game declares the rows and calls the matching end.
 
 Both are popups (see "Input ownership"). The combo trigger opens its list; a
-pick, Esc or an outside press closes it. The list is the overlay under the
+pick, Esc or an outside press closes it (two pointers released on two rows in
+one frame both pick; the game keeps the last). The list is the overlay under the
 combo id (`nt_ui_is_open` and `nt_ui_close` take it); the trigger widget's id
 is `nt_ui_combo_trigger_id(id)`. The game opens a menu with `nt_ui_menu_open(menu, ctx, menu_id, x, y)` at
 a point in UI space, from anywhere outside its begin..end (`nt_ui_screen_to_layout`

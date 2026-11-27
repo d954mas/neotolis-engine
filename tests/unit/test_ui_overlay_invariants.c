@@ -101,7 +101,9 @@ typedef struct {
     bool armed_by_row;
     decl_t chain[NT_UI_OVERLAY_MAX];
     bool was_open[OV_N];
-    bool quiet; /* the spell builds its chain: no random op, press or key breaks it */
+    bool shown_prev[OV_N]; /* its begin returned true last frame, and it was not opened since */
+    bool shown_now[OV_N];  /* the same for this frame's declarations */
+    bool quiet;            /* the spell builds its chain: no random op, press or key breaks it */
     bool armed, wants_pointer, wants_keyboard, held_before, press_any, press_left, release_left, drag_active;
 } world_t;
 
@@ -110,7 +112,7 @@ typedef struct {
     int fail_count[INV_N];
     char fail_msg[INV_N][320];
     int deaf_releases, overlay_clicks, base_clicks, base_releases_under_top, cascades, opens_in_closed, top_presses, free_presses, joins, holds, free_pointers;
-    int wants_pointer, wants_keyboard, modal_from[OV_N], activation_opens, pick_opens, paused;
+    int wants_pointer, wants_keyboard, modal_from[OV_N], activation_opens, pick_opens, fade_cuts;
 } results_t;
 
 static world_t w;
@@ -125,7 +127,10 @@ static uint32_t rnd(void) {
 
 static uint32_t rnd_below(uint32_t n) { return rnd() % n; }
 static bool chance(uint32_t percent) { return rnd_below(100U) < percent; }
-static uint32_t bit(int ov) { return 1U << (uint32_t)ov; }
+static uint32_t bit(int ov) {
+    TEST_ASSERT_TRUE(ov >= 0 && ov < OV_N); /* bounds ov for clang-analyzer, which loses it on some paths */
+    return 1U << (uint32_t)ov;
+}
 static bool is_modal(int ov) { return ov == OV_M0 || ov == OV_M1; }
 
 static uint32_t ov_id(int ov) {
@@ -180,6 +185,8 @@ static void look(void) {
         } else if (!w.was_open[ov] && (ov == OV_LIST || ov == OV_SUB)) {
             w.parent[ov] = (ov == OV_SUB) ? ID_MENU : 0U;
             w.armed = false;
+            w.shown_prev[ov] = false; /* the engine opened it again: a new stack entry */
+            w.shown_now[ov] = false;
         }
         w.was_open[ov] = open;
     }
@@ -298,6 +305,8 @@ static void open_now(int ov) {
         w.parent[ov] = parent;
         w.live_prev &= ~bit(ov);
         w.live_now &= ~bit(ov);
+        w.shown_prev[ov] = false; /* a new stack entry: the shown one is dead or gone */
+        w.shown_now[ov] = false;
     }
     look();
 }
@@ -402,6 +411,7 @@ static void decl_push(int ov, bool open) {
     const bool deaf = !open || (w.live_prev & bit(ov)) == 0U || (out != NULL && out->deaf);
     w.chain[w.chain_n++] = (decl_t){.id = ov_id(ov), .modal = is_modal(ov), .closing = closing, .deaf = deaf};
     w.live_now |= closing ? 0U : bit(ov);
+    w.shown_now[ov] = true;
 }
 
 static bool body_deaf(void) { return w.chain_n > 0 && w.chain[w.chain_n - 1].deaf; }
@@ -674,11 +684,12 @@ static void run_frame(void) {
     w.opens_left = OPENS_PER_FRAME;
     w.live_prev = w.live_now;
     w.live_now = 0U;
+    memcpy(w.shown_prev, w.shown_now, sizeof w.shown_prev);
+    memset(w.shown_now, 0, sizeof w.shown_now);
     w.armed = false;
     w.spell = (w.spell == 0 && chance(1U)) ? 1 : w.spell;
     w.quiet = w.spell > 0 && w.spell <= SPELL_BUILD;
     const bool paused = w.spell > SPELL_BUILD;
-    r.paused += paused ? 1 : 0;
     spell_op();
     w.spell = (w.spell > 0 && w.spell < SPELL_LEN) ? w.spell + 1 : 0;
     maybe_op(8U);
@@ -728,6 +739,11 @@ static void run_frame(void) {
     if (key != NT_KEY_COUNT) {
         nt_input_feed(nt_test_key(key, true));
     }
+    int fading = 0; /* shown last frame and closed since: each is a fading stack entry at this begin */
+    for (int ov = 0; ov < OV_N; ++ov) {
+        fading += (w.shown_prev[ov] && !is_open(ov)) ? 1 : 0;
+    }
+    r.fade_cuts += (fading > NT_UI_OVERLAY_MAX / 2) ? 1 : 0;
     sc_step_dt(&w.sc, paused ? 0.0F : UI_FX_DT, x, y, press, release, wheel);
     if (key != NT_KEY_COUNT) {
         nt_input_feed(nt_test_key(key, false));
@@ -794,7 +810,7 @@ static void test_overlay_invariants_hold_over_random_frames(void) {
         {"modal from P1", r.modal_from[OV_P1]},
         {"opens from a menu activation", r.activation_opens},
         {"opens from a combo pick", r.pick_opens},
-        {"paused frames with piled fades", r.paused},
+        {"begins that cut piled fades (S4)", r.fade_cuts},
     };
     for (size_t i = 0U; i < sizeof cov / sizeof cov[0]; ++i) {
         printf("%s %d\n", cov[i].name, cov[i].n);

@@ -80,8 +80,8 @@ bool nt_ui_modal_begin(nt_ui_context_t *ctx, uint32_t id, const nt_ui_modal_styl
 
     NT_ASSERT(style->backdrop_close_pad >= 0 && "nt_ui_modal_begin: backdrop_close_pad must be >= 0");
 
-    /* Map the modal onto popup-core: centered placement + dim backdrop + Esc/backdrop close. Both recipes,
-     * validated before any push: the core picks one after its own close-scan. */
+    /* Map the modal onto popup-core: centered placement + dim backdrop + Esc/backdrop close. Both recipes are
+     * validated up front; the core picks one by the open state. */
     nt_ui_popup_style_t pstyle = {
         .ease_speed = style->ease_speed,
         .open_xf_start = modal_anim_start(&style->open),
@@ -100,9 +100,8 @@ bool nt_ui_modal_begin(nt_ui_context_t *ctx, uint32_t id, const nt_ui_modal_styl
 
 void nt_ui_modal_open(nt_ui_context_t *ctx, uint32_t id) {
     NT_ASSERT(ctx != NULL && id != 0U && "nt_ui_modal_open: ctx non-NULL, id non-zero");
-    /* A modal is never a light popup's child, as HTML's showModal: its parent is the innermost open overlay around the
-     * call that is not light, so the menu or list it is opened from closes and the modal stays. */
-    /* A modal ALWAYS gates click-through and is not light dismiss: only the game, or its style, closes it. */
+    /* Not light, as HTML's showModal: its parent is the innermost open non-light overlay around the call, so the
+     * menu or list it is opened from closes and the modal stays; only the game, or its style, closes it. */
     nt_ui_internal_overlay_open(ctx, id, nt_ui_internal_overlay_here(ctx, NT_UI_OVERLAY_LIGHT), 0U, NT_UI_OVERLAY_CATCHER);
 }
 

@@ -107,10 +107,4 @@ static inline void sc_press_at_id(sc_t *s, uint32_t id) {
     sc_step(s, bb.x + (bb.width * 0.5F), bb.y + (bb.height * 0.5F), NT_BUTTON_LEFT, -1);
 }
 
-/* The release of sc_press_at_id, at the center of `id`'s box in the next frame. */
-static inline void sc_release_at_id(sc_t *s, uint32_t id) {
-    const nt_ui_bbox_t bb = sc_box(s, id);
-    sc_step(s, bb.x + (bb.width * 0.5F), bb.y + (bb.height * 0.5F), -1, NT_BUTTON_LEFT);
-}
-
 #endif /* NT_TEST_HELPER_UI_SCENARIO_H */

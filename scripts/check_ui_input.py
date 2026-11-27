@@ -31,8 +31,12 @@ def strip_comments_and_strings(text: str) -> str:
 
 
 def main() -> int:
+    paths = sorted([*UI_DIR.glob("*.c"), *UI_DIR.glob("*.h")])
+    if not paths:
+        print("check_ui_input: no engine/ui sources; the scan is not looking at the widgets", file=sys.stderr)
+        return 1
     failures = []
-    for path in sorted([*UI_DIR.glob("*.c"), *UI_DIR.glob("*.h")]):
+    for path in paths:
         code = strip_comments_and_strings(path.read_text(encoding="utf-8"))
         matches = [] if path in ROUTER else list(RAW_READ.finditer(code))
         matches += [] if path in INERT_OWNERS else list(INERT.finditer(code))

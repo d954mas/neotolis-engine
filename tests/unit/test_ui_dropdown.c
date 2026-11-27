@@ -118,16 +118,6 @@ static void combo_im_frame(const nt_pointer_t *p, float tx, float ty, const char
     combo_im_frame_icons(p, tx, ty, labels, NULL, count, selected, st, out_made);
 }
 
-/* Whether the combo's list is open: the list is the only overlay these tests open. */
-static bool list_open(void) {
-    for (uint8_t i = 0U; i < s_fx.ctx->overlay_count; ++i) {
-        if (s_fx.ctx->overlays[i].open) {
-            return true;
-        }
-    }
-    return false;
-}
-
 /* Opens the list as a user does: a warm frame, then a press and a release on the trigger at (tx,ty). */
 static void combo_open_by_click(float tx, float ty, const char *const *labels, int count, int *selected, nt_ui_dropdown_style_t *st) {
     const nt_pointer_t seq[3] = {
@@ -138,7 +128,7 @@ static void combo_open_by_click(float tx, float ty, const char *const *labels, i
     for (int k = 0; k < 3; ++k) {
         combo_im_frame(&seq[k], tx, ty, labels, count, selected, st, NULL);
     }
-    TEST_ASSERT_TRUE_MESSAGE(list_open(), "a trigger click opens the list");
+    TEST_ASSERT_TRUE_MESSAGE(nt_ui_is_open(s_fx.ctx, DD_A), "a trigger click opens the list");
 }
 
 /* ---- A trigger click opens the list (combo_begin's step). ---- */
@@ -155,7 +145,7 @@ static void test_dropdown_trigger_click_opens(void) {
     combo_im_frame(&f2, 30.0F, 30.0F, s_short, 3, &selected, &st, NULL);
     nt_pointer_t f3 = ui_fx_pointer(40.0F, 40.0F, false, false, true);
     combo_im_frame(&f3, 30.0F, 30.0F, s_short, 3, &selected, &st, NULL);
-    TEST_ASSERT_TRUE(list_open());
+    TEST_ASSERT_TRUE(nt_ui_is_open(s_fx.ctx, DD_A));
 }
 
 /* Publish exactly one fresh pressed-key edge for this frame. */
@@ -176,7 +166,7 @@ static void test_dropdown_combo_keyboard(void) {
 
     dropdown_key(NT_KEY_ESCAPE);
     combo_im_frame(&idle, 30.0F, 30.0F, s_short, 3, &selected, &st, NULL);
-    TEST_ASSERT_FALSE_MESSAGE(list_open(), "Esc closes the open combo list");
+    TEST_ASSERT_FALSE_MESSAGE(nt_ui_is_open(s_fx.ctx, DD_A), "Esc closes the open combo list");
 
     nt_input_init();
     combo_open_by_click(30.0F, 30.0F, s_short, 3, &selected, &st);
@@ -191,7 +181,7 @@ static void test_dropdown_combo_keyboard(void) {
     dropdown_key(NT_KEY_ENTER);
     bool made = false;
     combo_im_frame(&idle, 30.0F, 30.0F, s_short, 3, &selected, &st, &made);
-    TEST_ASSERT_TRUE_MESSAGE(list_open(), "arrows/Enter must not close the combo");
+    TEST_ASSERT_TRUE_MESSAGE(nt_ui_is_open(s_fx.ctx, DD_A), "arrows/Enter must not close the combo");
     TEST_ASSERT_EQUAL_INT_MESSAGE(-1, selected, "arrows/Enter must not change *selected (mouse-only)");
     TEST_ASSERT_FALSE_MESSAGE(made, "Enter must not commit a selectable");
 }
@@ -222,7 +212,7 @@ static void test_dropdown_row_select_sets_int_and_closes(void) {
     nt_pointer_t rl = ui_fx_pointer(row_x, row1_y, false, false, true);
     combo_im_frame(&rl, 30.0F, 30.0F, s_short, 3, &selected, &st, &made);
     TEST_ASSERT_EQUAL_INT(1, selected);
-    TEST_ASSERT_FALSE(list_open());
+    TEST_ASSERT_FALSE(nt_ui_is_open(s_fx.ctx, DD_A));
     TEST_ASSERT_TRUE(made);
 }
 
@@ -248,7 +238,7 @@ static void test_dropdown_long_list_scroll_no_leak(void) {
         dropdown_key(NT_KEY_ESCAPE);
         combo_im_frame(&idle, 30.0F, 30.0F, s_long, 12, &selected, &st, NULL);
         nt_input_init();
-        TEST_ASSERT_FALSE(list_open());
+        TEST_ASSERT_FALSE(nt_ui_is_open(s_fx.ctx, DD_A));
         for (int f = 0; f < 59; ++f) {
             combo_im_frame(&idle, 30.0F, 30.0F, s_long, 12, &selected, &st, NULL);
         }
@@ -415,13 +405,13 @@ static void test_dropdown_eased_open_no_flicker(void) {
     combo_im_frame(&pr, 30.0F, 30.0F, s_short, 3, &selected, &st, NULL);
     nt_pointer_t rl = ui_fx_pointer(40.0F, 40.0F, false, false, true);
     combo_im_frame(&rl, 30.0F, 30.0F, s_short, 3, &selected, &st, NULL);
-    TEST_ASSERT_TRUE_MESSAGE(list_open(), "trigger click must open the list");
+    TEST_ASSERT_TRUE_MESSAGE(nt_ui_is_open(s_fx.ctx, DD_A), "trigger click must open the list");
 
     /* Several idle frames with NO button activity: the list must stay open and the popup stay present. */
     nt_pointer_t idle = ui_fx_pointer(40.0F, 40.0F, false, false, false);
     for (int f = 0; f < 12; ++f) {
         combo_im_frame(&idle, 30.0F, 30.0F, s_short, 3, &selected, &st, NULL);
-        TEST_ASSERT_TRUE_MESSAGE(list_open(), "eased-open list must stay open across idle frames (no flicker)");
+        TEST_ASSERT_TRUE_MESSAGE(nt_ui_is_open(s_fx.ctx, DD_A), "eased-open list must stay open across idle frames (no flicker)");
     }
 }
 
@@ -445,12 +435,12 @@ static void test_dropdown_eased_reclick_closes_once(void) {
     combo_im_frame(&pr, 30.0F, 30.0F, s_short, 3, &selected, &st, NULL);
     nt_pointer_t rl = ui_fx_pointer(40.0F, 40.0F, false, false, true);
     combo_im_frame(&rl, 30.0F, 30.0F, s_short, 3, &selected, &st, NULL);
-    TEST_ASSERT_FALSE_MESSAGE(list_open(), "a single trigger re-click must close the list (and stay closed)");
+    TEST_ASSERT_FALSE_MESSAGE(nt_ui_is_open(s_fx.ctx, DD_A), "a single trigger re-click must close the list (and stay closed)");
 
     /* Idle frames: it must STAY closed (no bounce-reopen from a fighting click). */
     for (int f = 0; f < 6; ++f) {
         combo_im_frame(&idle, 30.0F, 30.0F, s_short, 3, &selected, &st, NULL);
-        TEST_ASSERT_FALSE_MESSAGE(list_open(), "closed list must stay closed (no reopen flicker)");
+        TEST_ASSERT_FALSE_MESSAGE(nt_ui_is_open(s_fx.ctx, DD_A), "closed list must stay closed (no reopen flicker)");
     }
 }
 
@@ -481,7 +471,7 @@ static void test_dropdown_edge_flip_up_near_bottom(void) {
  * cell to read. */
 static float row_label_x(const nt_pointer_t *p, nt_ui_dropdown_style_t *st, const nt_atlas_region_ref_t *icons, int idx) {
     int selected = 0;
-    if (!list_open()) {
+    if (!nt_ui_is_open(s_fx.ctx, DD_A)) {
         combo_open_by_click(30.0F, 30.0F, s_short, 3, &selected, st);
     }
     combo_im_frame_icons(p, 30.0F, 30.0F, s_short, icons, 3, &selected, st, NULL);
@@ -611,7 +601,7 @@ static void test_dropdown_preview_trigger_click_opens(void) {
     preview_im_frame(&pr, 30.0F, 30.0F, &st);
     nt_pointer_t rl = ui_fx_pointer(40.0F, 38.0F, false, false, true);
     preview_im_frame(&rl, 30.0F, 30.0F, &st);
-    TEST_ASSERT_TRUE_MESSAGE(list_open(), "custom preview trigger click must open the list (combo_preview_end step)");
+    TEST_ASSERT_TRUE_MESSAGE(nt_ui_is_open(s_fx.ctx, DD_A), "custom preview trigger click must open the list (combo_preview_end step)");
 }
 
 /* One combo frame whose row SET changes: when `hide_first` the row keyed ROW_KEY(0) is skipped, so the
@@ -743,7 +733,7 @@ static void test_dropdown_custom_selectable_click_selects(void) {
     nt_pointer_t rl = ui_fx_pointer(cx, cy, false, false, true);
     combo_im_frame_custom(&rl, &clicked, false);
     TEST_ASSERT_TRUE_MESSAGE(clicked, "combo_selectable_end must return true on the click frame");
-    TEST_ASSERT_FALSE_MESSAGE(list_open(), "a custom-row click must close the list");
+    TEST_ASSERT_FALSE_MESSAGE(nt_ui_is_open(s_fx.ctx, DD_A), "a custom-row click must close the list");
 }
 
 /* The custom row's fill in the last frame is its hover fill; idle rows draw no fill. */
@@ -783,7 +773,7 @@ static void test_dropdown_custom_row_interactive_child_takes_the_press(void) {
     nt_pointer_t rl = ui_fx_pointer(cx, cy, false, false, true);
     TEST_ASSERT_TRUE(combo_im_frame_custom(&rl, &clicked, true));
     TEST_ASSERT_FALSE(clicked);
-    TEST_ASSERT_TRUE(list_open());
+    TEST_ASSERT_TRUE(nt_ui_is_open(s_fx.ctx, DD_A));
 }
 
 int main(void) {

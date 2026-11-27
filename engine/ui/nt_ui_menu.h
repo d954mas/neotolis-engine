@@ -14,7 +14,7 @@ typedef struct nt_ui_context nt_ui_context_t;
 
 extern const nt_ui_widget_def_t NT_UI_MENU_DEF;
 
-/* AIM_FALLBACK is how long the cursor may sit OFF the aim triangle before the hovered sibling wins. */
+/* AIM_FALLBACK: time since the corridor primed after which a hovered sibling wins off the aim triangle (twice it on it). */
 #define NT_UI_MENU_AIM_FALLBACK_SECS 0.12F
 
 /* Submenu nesting cap: a parent row declared on the deepest level asserts (fail-early, no fallback), so a
@@ -100,8 +100,7 @@ typedef struct {
     uint8_t label_layer;
     bool nav_passed;  /* the focused row's level has declared it */
     bool hover_opens; /* hover_id is a parent */
-    bool focus_seen;  /* the focused row is declared and enabled this frame */
-    bool focus_opens; /* the focused row is a parent */
+    bool focus_opens; /* the focused row is an enabled parent */
     bool opening;     /* its first declaration since it opened: the rows' highlight snaps */
     bool activated;   /* a row activated: the chain closes */
     bool item_steps;  /* the open custom row is enabled and has an action of its own */

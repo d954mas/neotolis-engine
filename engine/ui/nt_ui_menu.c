@@ -347,7 +347,6 @@ static uint32_t menu_im_row(nt_ui_menu_t *menu, uint32_t key, const char *label,
         f->child_first = row_id;
     }
     if (enabled && row_id == menu->focus) {
-        f->focus_seen = true;
         f->focus_opens = has_sub;
     }
     if (pointed) {
@@ -663,7 +662,7 @@ static void menu_resolve(nt_ui_menu_t *menu) {
         menu->focus_depth = f->click_depth;
     } else if (top && !menu->kbd_mode && f->hover_id != 0U) {
         menu_resolve_hover(menu, f->hover_depth, f->hover_id, f->hover_opens, ours, mx, my, ctx->frame_dt);
-    } else if (top && !menu->kbd_mode && f->focus_seen && menu_parent(menu, menu->focus_depth) != 0U && menu_parent(menu, menu->focus_depth) != menu->focus) {
+    } else if (top && !menu->kbd_mode && f->nav_passed && menu_parent(menu, menu->focus_depth) != 0U && menu_parent(menu, menu->focus_depth) != menu->focus) {
         /* Off the rows, the switch the pointer left on a sibling keeps running, so the frame never freezes
          * with a sibling's child open; under another overlay it waits, as the pointer is that overlay's. */
         menu_resolve_hover(menu, menu->focus_depth, menu->focus, f->focus_opens, ours, mx, my, ctx->frame_dt);

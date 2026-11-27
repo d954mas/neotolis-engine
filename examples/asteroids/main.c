@@ -1882,6 +1882,9 @@ static void handle_input(float dt) {
     if (esc_closes_panel) {
         s_ui_panel_open = false;
     }
+    if (s_ui_modal_shown) {
+        return; /* the compact modal blocks the scene keys from its first frame through its fade */
+    }
     for (uint32_t i = 0; i < 10; i++) {
         if (!ctrl && !alt && nt_input_key_is_pressed((nt_key_t)(NT_KEY_0 + (int)i))) {
             s_requested_level = i;

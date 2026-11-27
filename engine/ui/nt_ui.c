@@ -414,7 +414,8 @@ void nt_ui_set_font(nt_ui_context_t *ctx, uint16_t font_id, nt_font_t font) {
 // #region begin_end
 static void resolve_hot(nt_ui_context_t *ctx);
 static void overlay_close_at(nt_ui_context_t *ctx, int32_t at, uint8_t reason);
-static bool outside_press(nt_ui_context_t *ctx, const nt_ui_overlay_t *o);
+static const nt_pointer_t *outside_press(nt_ui_context_t *ctx, const nt_ui_overlay_t *o);
+static bool panel_holds(nt_ui_context_t *ctx, const nt_ui_overlay_t *o, const nt_pointer_t *p);
 
 /* Last frame's paint order of the top's catcher, which every live element reaches (0 = no top). */
 static uint32_t top_catcher_order(const nt_ui_context_t *ctx) {
@@ -753,8 +754,19 @@ void nt_ui_begin(nt_ui_context_t *ctx, const nt_ui_frame_desc_t *frame) {
     const uint8_t closes = (top >= 0) ? ctx->overlays[top].flags : 0U;
     if ((closes & NT_UI_OVERLAY_ESC) != 0U && ctx->keys_owner == ctx->overlay_top && nt_input_key_is_pressed(NT_KEY_ESCAPE)) {
         overlay_close_at(ctx, top, NT_UI_POPUP_CLOSE_ESC);
-    } else if ((closes & NT_UI_OVERLAY_OUTSIDE) != 0U && outside_press(ctx, &ctx->overlays[top])) {
-        overlay_close_at(ctx, top, NT_UI_POPUP_CLOSE_OUTSIDE); /* on the press, as Dear ImGui */
+    } else if ((closes & NT_UI_OVERLAY_OUTSIDE) != 0U) {
+        /* On the press, as Dear ImGui's ClosePopupsOverWindow: every popup the press lies outside closes, down to the
+         * one it lies in or a modal. */
+        const nt_pointer_t *press = outside_press(ctx, &ctx->overlays[top]);
+        for (int32_t k = top; press != NULL && k >= 0; --k) {
+            const nt_ui_overlay_t *o = &ctx->overlays[k];
+            if (k < top && o->open && ((o->flags & NT_UI_OVERLAY_LIGHT) == 0U || panel_holds(ctx, o, press))) {
+                break;
+            }
+            if (o->open && (o->flags & NT_UI_OVERLAY_OUTSIDE) != 0U) {
+                overlay_close_at(ctx, k, NT_UI_POPUP_CLOSE_OUTSIDE);
+            }
+        }
     }
     nt_ui_internal_scroll_arbitrate(ctx);
     /* A first press off the focused field unfocuses it; one a scroll may still take waits for its tap's release, so a
@@ -3214,17 +3226,22 @@ bool nt_ui_is_open(const nt_ui_context_t *ctx, uint32_t id) {
 /* The top `o` got a first press of any pointer and button outside its panel grown by its close_pad: on its catcher (a
  * modal's backdrop), or for a popup also with no target (a 3D ray past its surface, a hidden pointer). A press joining
  * a gesture is none. */
-static bool outside_press(nt_ui_context_t *ctx, const nt_ui_overlay_t *o) {
-    const int16_t pad_lrtb[4] = {o->close_pad, o->close_pad, o->close_pad, o->close_pad};
+static const nt_pointer_t *outside_press(nt_ui_context_t *ctx, const nt_ui_overlay_t *o) {
     for (uint32_t i = 0; i < ctx->frame_pointer_count; ++i) {
         const nt_pointer_t *pp = &ctx->frame_pointers[i];
         const uint32_t hot = ctx->pointer_hot[i].id;
         const bool first = pp->buttons[NT_BUTTON_LEFT].is_pressed || pp->buttons[NT_BUTTON_RIGHT].is_pressed || pp->buttons[NT_BUTTON_MIDDLE].is_pressed;
-        if (first && (hot == nt_ui_internal_popup_catcher_id(o->id) || (hot == 0U && (o->flags & NT_UI_OVERLAY_LIGHT) != 0U)) && !nt_ui_internal_hit_test_padded(ctx, o->id, pp->x, pp->y, pad_lrtb)) {
-            return true;
+        if (first && (hot == nt_ui_internal_popup_catcher_id(o->id) || (hot == 0U && (o->flags & NT_UI_OVERLAY_LIGHT) != 0U)) && !panel_holds(ctx, o, pp)) {
+            return pp;
         }
     }
-    return false;
+    return NULL;
+}
+
+/* The pointer lies in the overlay's panel grown by its close_pad. */
+static bool panel_holds(nt_ui_context_t *ctx, const nt_ui_overlay_t *o, const nt_pointer_t *p) {
+    const int16_t pad_lrtb[4] = {o->close_pad, o->close_pad, o->close_pad, o->close_pad};
+    return nt_ui_internal_hit_test_padded(ctx, o->id, p->x, p->y, pad_lrtb);
 }
 
 bool nt_ui_wants_pointer(const nt_ui_context_t *ctx, uint32_t pointer_index) {
