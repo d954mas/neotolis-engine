@@ -63,7 +63,7 @@ _Static_assert(sizeof(nt_ui_popup_style_t) == 80, "nt_ui_popup_style_t stable AB
 nt_ui_popup_style_t nt_ui_popup_style_defaults(void);
 
 /* Opens the popup `id` on top of the overlay stack, inside the innermost open overlay being declared at the call (0 = none), and
- * closes every popup that is not its ancestor; opening an open one does nothing, a reopen during the fade starts
+ * closes every light overlay (a popup, a menu, a combo list) that is not its ancestor; opening an open one does nothing, a reopen during the fade starts
  * it again on top. It takes input from the frame after its first declaration (spec: "Input ownership"). */
 void nt_ui_popup_open(nt_ui_context_t *ctx, uint32_t id);
 

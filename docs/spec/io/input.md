@@ -40,8 +40,10 @@ Text input is separate from key state: characters arrive as UTF-32 codepoints, u
 
 ```c
 bool nt_input_pop_char(uint32_t *out_codepoint);  // false when empty
-void nt_window_set_text_input_mode(nt_text_input_mode_t mode);  // soft-keyboard hint, declared each frame by the focused text field that owns the keys (window/nt_window.h); no-op on native/stub
+void nt_window_set_text_input_mode(nt_text_input_mode_t mode);  // soft-keyboard hint (window/nt_window.h); no-op on native/stub
 ```
+
+Which field declares the hint: see "Text input" in [nt_ui](../ui/nt-ui.md#text-input).
 
 - Chars carry *text* (layout-resolved, includes key repeat); physical keys carry
   navigation/editing. Web has no GLFW char callback, so the web keydown listener
@@ -54,13 +56,15 @@ void nt_window_set_text_input_mode(nt_text_input_mode_t mode);  // soft-keyboard
 ## Pointers
 
 `g_nt_input.pointers[NT_INPUT_MAX_POINTERS]` holds `nt_pointer_t` (`engine/input/nt_input.h`):
-position and deltas in framebuffer pixels (fractional, never rounded), wheel notches, pressure, type, and per-button
-`is_down`/`is_pressed`/`is_released`.
+the platform contact `id` (0 for the mouse), position and deltas in framebuffer pixels (fractional, never
+rounded), wheel notches, pressure, type, `active`, `deactivate_pending`, `cancelled`, and per-button
+`is_down`/`is_pressed`/`is_released`. `deactivate_pending` marks the pointer's last active frame: after a
+contact's up or cancel, a mouse leave or a focus loss it is published once more and then deactivates.
 
 - **A cancel is a release that did not happen.** A platform cancel (web `pointercancel`: an
-  edge swipe, a system overlay, the browser taking the touch for a pan) and a focus loss set
-  `is_released` for each held or waiting button and `cancelled` for that frame, so a consumer
-  that acts on a release (a click, a drop) checks `cancelled` first. `cancelled` is per pointer,
+  edge swipe, a system overlay) and a focus loss set `is_released` for each held button and
+  `cancelled` in that frame; a waiting press still held is published next frame as a cancelled
+  tap. A consumer that acts on a release (a click, a drop) checks `cancelled` first. `cancelled` is per pointer,
   not per button: a frame that releases one button normally and cancels another reads both
   releases as cancelled.
 
@@ -71,8 +75,8 @@ position and deltas in framebuffer pixels (fractional, never rounded), wheel not
   before the poll (a scene press dragged over a button stays the scene's), and the frame of a
   release never shows a later hover. A press and its release in one frame are published where the
   press happened. A mouse that left and came back in that frame is published at its new position
-  next frame too, and that frame carries no delta at all: the untracked jump and any tracked motion
-  around it.
+  next frame too, and that frame's catch-up adds no delta: neither the untracked jump nor the tracked
+  motion around it.
 - **A frame never reads a release together with a newer press.** A press of the released button
   that arrives before the poll waits for the next frame, where it is published where it happened
   (the motion up to it is that frame's delta), as a whole tap when the button was lifted again
@@ -81,15 +85,16 @@ position and deltas in framebuffer pixels (fractional, never rounded), wheel not
   (the next move reports the pointer), so the press is published where it was made. A press and its release from an up button still read together:
   `is_pressed && is_released` always means "pressed, then released". Keys keep both edges in one
   frame. Only that button waits: another button's edge, the wheel and the pressure of that frame
-  are published with the release, at the release position. A bot's waiting press is published by
+  are published with the release, at the position of the frame's first edge. A bot's waiting press is published by
   the next poll even when that tick does not advance the game.
 - **`pointers[0]` is the mouse.** It is active while the cursor is over the window, or while a
   button is held (a drag outside the window keeps it). A button release keeps it; after a leave
   or a focus loss it is published once more (that frame still reads the release) and then
   deactivates, unless a move brings it back first. The wheel
   lands only on an active mouse. On a device without a mouse it stays inactive. Its pressure is 1
-  while a button is down, else 0. A press counts only when it starts on the window (on web: from a
-  press on the canvas until all buttons are up or the canvas loses focus), so a drag from outside
+  while its last event held a button (a waiting press included), else 0. A press counts only when it starts on the window (on web: from a
+  press on the canvas until all buttons are up, focus is lost (canvas or window blur) or the
+  browser cancels the pointer), so a drag from outside
   never presses.
 - **Touch and pen contacts take slots 1..7** (7 contacts), each from its down to its up, with the
   platform contact id. A move for an unknown id is ignored, so a hovering pen has no slot (pen
@@ -102,13 +107,13 @@ position and deltas in framebuffer pixels (fractional, never rounded), wheel not
   a press or a release it did not get, and a widget capture never moves to another device. The cost
   is that a single-pointer consumer misses such a press, for example a second finger landing in the
   frame the first lifts; a UI that needs it passes the whole array. With no candidate the index
-  stays on the last primary, now inactive. `nt_ui_begin`'s frame desc takes the
+  stays on the last primary, which may be inactive. `nt_ui_begin`'s frame desc takes the
   primary explicitly (`.pointers`, `.pointer_count`, `.primary`): a single-pointer UI passes
   `&pointers[g_nt_input.primary]`, count 1, primary 0; a multi-pointer UI passes the whole array with
-  `g_nt_input.primary`, so a widget capture stays with its slot. `nt_ui` anchors menus, the Clay feed and the inspector on that pointer.
+  `g_nt_input.primary`, so a widget capture stays with its slot (see "Interaction model" in [nt_ui](../ui/nt-ui.md#interaction-model)).
 
-Every real mouse event is a move with the held buttons (a button change too), plus a leave; each
-real wheel event first moves the mouse to the cursor. Contacts arrive as down, move and up, or a cancel instead of the up.
+Every real mouse event is a move with the held buttons (a button change too), a leave, or a cancel,
+which keeps the mouse; each real wheel event over the window first moves the mouse to the cursor. Contacts arrive as down, move and up, or a cancel instead of the up.
 Devapi input automation drives the same mouse and its own contacts (see "Input automation" in
 [Logging, errors and debugging](../debug/logging-errors-debugging.md)).
 

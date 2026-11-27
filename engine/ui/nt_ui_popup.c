@@ -182,7 +182,8 @@ static bool popup_declare(nt_ui_context_t *ctx, uint32_t id, const nt_ui_popup_s
     const bool catcher = live && slot != NULL && (slot->flags & NT_UI_OVERLAY_CATCHER) != 0U;
     const int32_t at = (slot != NULL) ? (int32_t)(slot - ctx->overlays) : NT_UI_OVERLAY_MAX; /* a tooltip: above every slot */
     const int32_t band = ctx->overlay_zband_stride + (at * NT_UI_OVERLAY_MAX);
-    // #region absolute band, whatever floating encloses it; the catcher shares it, declared before the panel
+    // #region absolute band
+    /* The band holds whatever floating encloses it; the catcher shares it, declared before the panel. */
     const int32_t enclosing = nt_ui_clay_priv_open_floating_z(ctx->clay);
     NT_ASSERT((ctx->overlay_depth > 0U || enclosing < ctx->overlay_zband_stride) && band - enclosing >= INT16_MIN && band - enclosing <= INT16_MAX &&
               "nt_ui_popup: a root overlay's enclosing floating must lie under overlay_zband_stride, within int16 of the band");

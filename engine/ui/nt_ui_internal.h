@@ -247,8 +247,8 @@ struct nt_ui_context {
      * stride + i * NT_UI_OVERLAY_MAX), and the ids of the overlays open in the declaration. */
     nt_ui_overlay_t overlays[NT_UI_OVERLAY_MAX];
     uint32_t overlay_decl[NT_UI_OVERLAY_MAX];
-    /* Keyboard-focus arbiter (0 = none): a press sets it; Esc or a disabled declaration clears it.
-     * Survives frames; begin only drops an orphan and applies a pending Tab. */
+    /* Keyboard-focus arbiter (0 = none): a press on a field sets it; Esc, a disabled declaration, a press off it,
+     * a drag that takes its press or an overlay opening above it clears it. Survives frames. */
     uint32_t focused_input_id;
     /* Tab bookkeeping for one frame: the focused field seeing Tab sets _seek and points _pending at
      * _first_id (the earliest enabled field, for wrap); the next enabled field declared after it
@@ -640,8 +640,8 @@ nt_ui_hit_kind_t nt_ui_internal_record_kind(nt_ui_context_t *ctx, uint32_t id);
 bool nt_ui_internal_owned_by_top(nt_ui_context_t *ctx, uint32_t id);
 
 /* Router reads for overlays and fields (spec: "Input ownership"): `id` is the top overlay fixed at begin, owns
- * this frame's keys, or gets the primary pointer (an idle one unless it is the top and the inspector does not
- * hold the pointer); outside an inert subtree. */
+ * this frame's keys, or gets the primary pointer (an idle one unless it is the top and the primary is in no
+ * game gesture); outside an inert subtree. */
 static inline bool nt_ui_internal_is_top(const nt_ui_context_t *ctx, uint32_t id) { return id == ctx->overlay_top && ctx->inert_from == 0U; }
 static inline bool nt_ui_internal_owns_keys(const nt_ui_context_t *ctx, uint32_t id) { return id == ctx->keys_owner && ctx->inert_from == 0U; }
 const nt_pointer_t *nt_ui_internal_top_pointer(const nt_ui_context_t *ctx, uint32_t id);

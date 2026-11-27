@@ -24,8 +24,7 @@ typedef struct {
     void *game;
     float x, y;
     bool down[NT_BUTTON_MAX];
-    /* Read after the last frame's nt_ui_end, where a game runs its own input: the key owner is fixed at begin,
-     * the pointer answer needs every record of the frame. */
+    /* Read after the frame's nt_ui_end, where a game runs its own input; both answers are fixed at nt_ui_begin. */
     bool wants_keyboard;
     bool wants_pointer;
 } sc_t;

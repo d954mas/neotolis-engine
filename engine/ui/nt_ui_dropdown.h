@@ -4,7 +4,7 @@
 /* Dropdown / combobox built ON popup-core + the scroll wrapper. A trigger button shows the current
  * selection; clicking it opens the list. The open list is a popup-core floating
  * anchored to the trigger's bottom-left with edge-flip up near the bottom border; its rows are plain
- * rects + labels. A row click writes the row index into the game-owned `int *selected` and raises close.
+ * rects + labels. A row click returns true (the game writes `*selected`) and closes the list.
  * A long list is wrapped in nt_ui_scroll_begin/end, NOT a raw Clay .clip — a raw .clip leaks a
  * scroll-container pool slot (type=7 crash).
  *

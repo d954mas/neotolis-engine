@@ -548,8 +548,9 @@ nt_ui_bbox_t nt_ui_get_bbox(const nt_ui_context_t *ctx, uint32_t id);
  *   - additional fingers landing on a captured widget are silently ignored
  *   - a pointer bound to one widget is invisible to all other widgets
  * Aggregated interaction_t.hovered = any pointer over; pressed/released/clicked
- * track the single owner pidx. pointer_id, the positions and distance are the
- * owning pointer's, else the right-clicking one's, else the first hovering one's. */
+ * track the single owner pidx. pointer_id and the positions are the owning pointer's,
+ * else the right-clicking one's, else the first hovering one's, else the primary's;
+ * distance is the first hovering one's. */
 /* This-frame pointer vs PREVIOUS-frame bbox (1-frame IM lag). */
 typedef struct {
     bool hovered;           /* the pointer's target is this widget; for its holder, the target lies in it */
@@ -626,7 +627,7 @@ void nt_ui_block_pointer(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lr
 
 /* Pointer `pointer_index` of the frame desc is the UI's: its gesture's first press had a target (a widget, a blocker, a
  * scroll, an open overlay's catcher), up to the release of its last button; a free pointer has a target or its wheel
- * is latched. Decided at nt_ui_begin: read it after begin. */
+ * is latched. Decided at nt_ui_begin (an inert scroll may drop its wheel latch later in the frame): read it after begin. */
 bool nt_ui_wants_pointer(const nt_ui_context_t *ctx, uint32_t pointer_index);
 
 /* True when the UI owns this frame's keys: a focused text field, else last frame's live top overlay (a modal, a

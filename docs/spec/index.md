@@ -60,7 +60,7 @@ The chapters below define engine behavior.
 | [assets/ntpack.md](assets/ntpack.md) | NTPACK flat binary pack format and parsing |
 | [assets/runtime-formats.md](assets/runtime-formats.md) | Runtime-format rule, validation, mesh format strategy |
 | [builder/builder.md](builder/builder.md) | Builder architecture, API, codegen, caches, atlas builder |
-| [io/input.md](io/input.md) | Polling input model, pointer state, capture |
+| [io/input.md](io/input.md) | Polling input model, pointer state, keys and typed characters |
 | [io/audio.md](io/audio.md) | Platform-agnostic audio module, clips, voices, JS bridge |
 | [debug/logging-errors-debugging.md](debug/logging-errors-debugging.md) | Logging, asserts, errors, debug overlay, and the dev-only devapi |
 | [debug/recorder.md](debug/recorder.md) | Dev-only video recorder: call placement, frame selection, audio sync, backends, devapi `record.*` |

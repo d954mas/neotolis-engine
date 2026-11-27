@@ -17,7 +17,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 UI_DIR = ROOT / "engine" / "ui"
-# The router and the headers that define its state; popup-core marks the inert subtree.
+# The router and the header that defines its state; popup-core also marks the inert subtree.
 ROUTER = {UI_DIR / "nt_ui.c", UI_DIR / "nt_ui_scroll.c", UI_DIR / "nt_ui_internal.h"}
 RAW_READ = re.compile(r"\bnt_input_(?:key|any_key|mouse|pop_char)\w*\s*\(|\bg_nt_input\b|\bframe_pointers\b|\bpointer_hot\b|->captures\b|\bkeys_owner\b|\boverlay_top\b")
 INERT = re.compile(r"\binert_from\b")

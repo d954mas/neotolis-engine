@@ -3022,9 +3022,8 @@ void nt_ui_set_gesture_constants(nt_ui_context_t *ctx, float dbl_window_secs, fl
 }
 
 /* Inert registry entry: the id wins next-frame hot arbitration over anything ranked behind it, but
- * never captures or clicks; a query on it reads like an unstepped widget (hover and the press edge while
- * front-most, unpadded). Disabled widgets call
- * this so the pointer can't leak through to widgets underneath them (modal-overlay correctness). */
+ * never captures or clicks; a query on it reads like an unstepped widget (hover and the press edge while it
+ * is the target, over the area pad_lrtb gives it). Disabled widgets call this so the pointer can't leak through to widgets underneath them (modal-overlay correctness). */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) — count is all NT_ASSERT guards, not logic
 void nt_ui_block_pointer(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lrtb[4]) {
     NT_ASSERT(ctx != NULL && "nt_ui_block_pointer: ctx must be non-NULL");
@@ -3121,7 +3120,8 @@ const nt_pointer_t *nt_ui_internal_top_pointer(const nt_ui_context_t *ctx, uint3
     return (nt_ui_internal_is_top(ctx, id) && !nt_ui_internal_game_gesture(ctx, ctx->frame_primary)) ? &ctx->frame_pointers[ctx->frame_primary] : &idle;
 }
 
-// #region overlay stack (spec: "Input ownership"; out of line: inlined they cost ~1.2 KB wasm)
+// #region overlay stack
+/* Spec: "Input ownership". Out of line: inlined, these cost ~1.2 KB wasm. */
 NT_NOINLINE int32_t nt_ui_internal_overlay_index(const nt_ui_context_t *ctx, uint32_t id) {
     for (uint8_t i = 0U; id != 0U && i < ctx->overlay_count; ++i) {
         if (ctx->overlays[i].id == id) {
@@ -3228,7 +3228,7 @@ bool nt_ui_is_open(const nt_ui_context_t *ctx, uint32_t id) {
 // #endregion
 
 /* The index of a pointer whose first press of any button landed outside the top `o`'s panel grown by its close_pad: on
- * its catcher (a modal's backdrop), or for a popup also with no target (a 3D ray past its surface, a hidden pointer);
+ * its catcher (a modal's backdrop), or for a light overlay also with no target (a 3D ray past its surface, a hidden pointer);
  * -1 for none. A press joining a gesture is none. */
 static int32_t outside_press(nt_ui_context_t *ctx, const nt_ui_overlay_t *o) {
     for (uint32_t i = 0; i < ctx->frame_pointer_count; ++i) {

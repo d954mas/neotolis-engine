@@ -142,7 +142,8 @@ void nt_ui_menu_separator_text(nt_ui_menu_t *menu, const char *label); /* option
 void nt_ui_menu_end(nt_ui_menu_t *menu);
 
 /* Opens the menu `menu_id` with its root at (x, y) in UI space, on top of the overlay stack, inside the overlay
- * being declared at the call (0 = none), closing every popup that is not its ancestor, and starts its navigation
+ * being declared at the call (0 = none), closing every light overlay (a popup, a menu, a combo list) that is not
+ * its ancestor, and starts its navigation
  * fresh; it takes input from the frame after its first declaration, so the press that opened it does not dismiss
  * it. When to open is the game's call: a right-click (nt_ui_screen_to_layout gives the point), a long-press, a button. */
 void nt_ui_menu_open(nt_ui_menu_t *menu, nt_ui_context_t *ctx, uint32_t menu_id, float x, float y);

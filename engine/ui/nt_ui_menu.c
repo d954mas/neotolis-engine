@@ -123,7 +123,8 @@ nt_ui_menu_style_t nt_ui_menu_style_defaults(void) {
     };
 }
 
-// #region open chain: each level's overlay stack entry records the row that opened it (out of line for size)
+// #region open chain
+/* Each level's overlay stack entry records the row that opened it; out of line for size. */
 /* The row that opened level `d + 1`, 0 when that level is closed. */
 NT_NOINLINE static uint32_t menu_parent(const nt_ui_menu_t *menu, uint8_t d) {
     const nt_ui_context_t *ctx = menu->frame.ui;
@@ -611,9 +612,9 @@ static void menu_resolve_hover(nt_ui_menu_t *menu, uint8_t d, uint32_t row_id, b
     menu_set_open(menu, d, want);
 }
 
-/* After the declaration, only what needs this frame's rows: close open parents the frame did not declare,
- * the key's focus move (Up/Down, a child's first row), then the pointer (a click, else the hover through the
- * aim corridor) while nothing opened over the menu this frame. */
+/* After the declaration, only what needs this frame's rows: the key's focus move (Up/Down, a child's first row),
+ * then the pointer (a click, else the hover through the aim corridor) while nothing opened over the menu this
+ * frame. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) — flat key/mouse branches, not deep nesting
 static void menu_resolve(nt_ui_menu_t *menu) {
     const nt_ui_menu_frame_t *f = &menu->frame;

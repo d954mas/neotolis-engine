@@ -3103,7 +3103,7 @@ static void render_menu_global(nt_ui_context_t *ctx, tab_state_t *st) {
         }
         if (nt_ui_menu_item(menu, MK_PREFS, "Preferences")) {
             st->menu.last_chosen = "Preferences";
-            nt_ui_modal_open(ctx, s_id_modal_confirm); /* a modal opened from a menu item outlives the menu (S2) */
+            nt_ui_modal_open(ctx, s_id_modal_confirm); /* a modal opened from a menu item outlives the menu */
         }
         if (nt_ui_menu_item(menu, MK_QUIT, "Quit")) {
             st->menu.last_chosen = "Quit";
