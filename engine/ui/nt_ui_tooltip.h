@@ -1,8 +1,8 @@
 #ifndef NT_UI_TOOLTIP_H
 #define NT_UI_TOOLTIP_H
 
-/* Tooltip built ON popup-core WITHOUT a light-dismiss catcher: hover-driven with no close_requested
- * path, so it never gates base UI. The engine tracks the hover-delay in a state-pool cell keyed by a
+/* Tooltip built ON popup-core WITHOUT a light-dismiss catcher: hover-driven with no close
+ * source, so it never gates base UI. The engine tracks the hover-delay in a state-pool cell keyed by a
  * SALTED tooltip id (engine-owned, not a game bool) — the game just declares the target_id + content +
  * delay. The cell accumulates hover seconds (ctx->frame_dt) while the cursor is over the target and
  * resets to 0 on leave; the floating panel is declared at the target's anchor only once the accumulated
@@ -11,8 +11,9 @@
  * The target's hover is read via nt_ui_hovered_within (read-only), so the tooltip never becomes a
  * second mutating interaction step on the underlying widget, and a tooltip on a container stays up while
  * the pointer is on an interactive element declared inside it. Only records are targets: a container
- * that should keep its tooltip over its own gaps calls nt_ui_block_pointer on itself. A combo or menu
- * opened inside the target counts as inside too, so the tooltip shows over the open overlay. */
+ * that should keep its tooltip over its own gaps calls nt_ui_block_pointer on itself. The rows of a combo or
+ * menu declared inside the target count as inside too; a pointer on an overlay's catcher hovers nothing. A
+ * tooltip is no overlay: it takes no input and draws above every overlay. */
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -26,8 +27,8 @@ extern const nt_ui_widget_def_t NT_UI_TOOLTIP_DEF;
 
 /* Visual + timing knobs. Colors are 0xAABBGGRR. The panel is an OPTIONAL slice9 (panel_art ref) with a
  * flat panel_bg fallback; an OPTIONAL caret sprite points at the target (flips with the popup side); an
- * OPTIONAL thin border + drop-shadow (both 0 = off). layer comes from the call (data->layer), NOT the
- * style — mirrors checkbox. */
+ * OPTIONAL thin border (0 = off); a drop-shadow belongs in the panel art. layer comes from the call
+ * (data->layer), NOT the style — mirrors checkbox. */
 typedef struct {
     nt_atlas_region_ref_t panel_art; /* optional panel slice9 art; atlas.id==0 = flat panel_bg */
     nt_atlas_region_ref_t caret;     /* optional caret/arrow sprite pointing at the target; atlas.id==0 = no caret */
@@ -36,12 +37,10 @@ typedef struct {
     uint32_t panel_tint;             /* multiplies the panel slice9 art; 0xFFFFFFFF = no tint */
     uint32_t caret_tint;             /* caret sprite tint 0xAABBGGRR */
     uint32_t border_color;           /* thin panel border 0xAABBGGRR (0 = no border) */
-    uint32_t shadow_color;           /* drop-shadow rect 0xAABBGGRR, usually translucent (0 = no shadow) */
     float delay_secs;                /* accumulated hover before reveal; asserted finite && >= 0 */
     float font_size;                 /* px; asserted > 0 */
     float open_ease_speed;           /* popup open/close tween speed (0 = snap; game opts into a tween) */
     float slice9_scale;              /* multiplies the panel region's baked slice9 borders; > 0 */
-    int16_t shadow_offset_px;        /* drop-shadow x==y offset (0 = no shadow even if shadow_color set) */
     uint16_t max_width;              /* px panel max width (0 = no cap, label drives width) */
     uint16_t pad;                    /* px inner padding */
     uint16_t font_id;                /* label font */
@@ -49,7 +48,7 @@ typedef struct {
     uint16_t border_px;              /* px border width (0 = no border even if border_color set) */
     uint16_t corner_radius;          /* px panel rounding (flat fallback only; IMAGE bg can't round) */
 } nt_ui_tooltip_style_t;
-_Static_assert(sizeof(nt_ui_tooltip_style_t) == 88, "nt_ui_tooltip_style_t stable ABI (2x16 ref + 6 u32 + 4 float + 1 i16 + 6 u16 + tail pad to align 8)");
+_Static_assert(sizeof(nt_ui_tooltip_style_t) == 80, "nt_ui_tooltip_style_t stable ABI (2x16 ref + 5 u32 + 4 float + 6 u16)");
 
 /* Valid baseline style (dark), 0.5s reveal delay. */
 nt_ui_tooltip_style_t nt_ui_tooltip_style_defaults(void);
@@ -57,10 +56,10 @@ nt_ui_tooltip_style_t nt_ui_tooltip_style_defaults(void);
 /* Declare a tooltip for `target_id` (a widget declared THIS frame). Call every frame AFTER the target
  * so the target carries a queryable bbox. The engine owns the hover timer in the state pool; the panel
  * appears below the target (edge-flip ABOVE near the bottom border) once the cursor has hovered the
- * target for style->delay_secs, and hides the instant the cursor leaves. NO catcher is declared, so the
+ * target for style->delay_secs, and fades out once the cursor leaves. NO catcher is declared, so the
  * tooltip cannot gate base UI. Returns true on the frames the tooltip panel is declared (visible).
  * ctx/content/style non-NULL; target_id non-zero.
- * Layers: the panel fill + caret + shadow draw on data->layer (also the popup panel layer), the label on
+ * Layers: the panel fill + caret draw on data->layer (also the popup panel layer), the label on
  * label_layer (split to batch). data may be NULL (fill falls to layer 0). style is mutated in place to
  * memoize resolved atlas refs (panel_art / caret). */
 bool nt_ui_tooltip(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8_t label_layer, uint32_t target_id, const char *content, nt_ui_tooltip_style_t *style);

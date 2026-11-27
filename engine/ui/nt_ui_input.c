@@ -18,8 +18,12 @@
 #include "utf8/nt_utf8.h"
 #include "window/nt_window.h"
 
-/* The keyboard hint is UX only (web soft keyboard); the allow filter restricts input. */
-static inline void apply_keyboard_hint(nt_ui_input_keyboard_t kb, bool password) {
+/* The keyboard hint is UX only (web soft keyboard); the allow filter restricts input. The canvas has one mode, so only
+ * the field that owns the frame's keys declares it: one focused behind no_keys must not overwrite the key owner's. */
+static inline void apply_keyboard_hint(const nt_ui_context_t *ctx, uint32_t id, nt_ui_input_keyboard_t kb, bool password) {
+    if (!nt_ui_internal_owns_keys(ctx, id)) {
+        return;
+    }
     nt_text_input_mode_t mode = NT_TEXT_INPUT_TEXT;
     if (password) {
         mode = NT_TEXT_INPUT_PASSWORD;
@@ -242,9 +246,11 @@ bool nt_ui_filter_url(uint32_t cp) {
 static bool allow_printable(uint32_t cp) { return cp >= 0x20U && cp != 0x7FU && !(cp >= 0x80U && cp <= 0x9FU); }
 // #endregion
 
-static inline bool shift_held(void) { return nt_input_key_is_down(NT_KEY_LSHIFT) || nt_input_key_is_down(NT_KEY_RSHIFT); }
+static inline bool shift_held(const nt_ui_context_t *ctx, uint32_t id) { return nt_ui_key_down(ctx, id, NT_KEY_LSHIFT) || nt_ui_key_down(ctx, id, NT_KEY_RSHIFT); }
 /* Ctrl, or Cmd on macOS. */
-static inline bool shortcut_held(void) { return nt_input_key_is_down(NT_KEY_LCTRL) || nt_input_key_is_down(NT_KEY_RCTRL) || nt_input_key_is_down(NT_KEY_LMETA) || nt_input_key_is_down(NT_KEY_RMETA); }
+static inline bool shortcut_held(const nt_ui_context_t *ctx, uint32_t id) {
+    return nt_ui_key_down(ctx, id, NT_KEY_LCTRL) || nt_ui_key_down(ctx, id, NT_KEY_RCTRL) || nt_ui_key_down(ctx, id, NT_KEY_LMETA) || nt_ui_key_down(ctx, id, NT_KEY_RMETA);
+}
 
 /* PC-style auto-repeat core; last-pressed wins (a newer repeatable key re-arms to it). */
 #ifdef NT_TEST_ACCESS
@@ -277,16 +283,13 @@ static bool key_repeat_step(uint16_t *repeat_key, float *repeat_t, nt_key_t k, b
 #endif
 
 /* Field-side wrapper: reads the live input edges for `k` and steps the per-field accumulator. */
-static bool key_repeat_fires(nt_ui_input_state_t *st, nt_key_t k, float dt) { return key_repeat_step(&st->repeat_key, &st->repeat_t, k, nt_input_key_is_pressed(k), nt_input_key_is_down(k), dt); }
+static bool key_repeat_fires(const nt_ui_context_t *ctx, uint32_t id, nt_ui_input_state_t *st, nt_key_t k, float dt) {
+    return key_repeat_step(&st->repeat_key, &st->repeat_t, k, nt_ui_key_pressed(ctx, id, k), nt_ui_key_down(ctx, id, k), dt);
+}
 
 bool nt_ui_input_focused(const nt_ui_context_t *ctx, uint32_t id) {
     NT_ASSERT(ctx != NULL && "nt_ui_input_focused: ctx must be non-NULL");
     return id != 0U && ctx->focused_input_id == id;
-}
-
-bool nt_ui_input_any_focused(const nt_ui_context_t *ctx) {
-    NT_ASSERT(ctx != NULL && "nt_ui_input_any_focused: ctx must be non-NULL");
-    return ctx->focused_input_id != 0U;
 }
 
 // #region edit ops
@@ -646,6 +649,10 @@ static bool input_focus_edge(nt_ui_input_state_t *st, const nt_ui_interaction_t 
     return in->clicked && st->tap_focus != 0U; /* the tap's release: a scroll that took the press gives no click */
 }
 
+/* A field that is not live (inert, or under the top overlay) takes the disabled path for input but keeps its
+ * look; only a live field is a Tab stop. */
+static bool input_live(nt_ui_context_t *ctx, const input_frame_t *f) { return f->enabled && nt_ui_internal_live(ctx, f->id); }
+
 /* focus-order bookkeeping (Tab wrap) + the single mutating interaction step + focus capture / drag.
  * Resolves f->st, f->in, f->bb, f->focused for the rest of the frame. */
 static void focus_step(input_frame_t *f) {
@@ -656,17 +663,18 @@ static void focus_step(input_frame_t *f) {
     const nt_ui_input_style_t *style = f->style;
 
     // #region Tab bookkeeping (wrap + next-field target)
-    if (f->enabled && ctx->focus_first_id == 0U) {
+    /* Tab wraps inside the top overlay, as in an HTML modal dialog. */
+    const bool enabled = input_live(ctx, f);
+    if (enabled && ctx->focus_first_id == 0U) {
         ctx->focus_first_id = id;
     }
-    if (f->enabled && ctx->focus_tab_seek != 0U) {
+    if (enabled && ctx->focus_tab_seek != 0U) {
         ctx->focus_tab_pending = id; /* replaces the wrap fallback */
         ctx->focus_tab_seek = 0U;
     }
     // #endregion
 
     // #region interaction + focus capture
-    const bool enabled = f->enabled;
     const uint32_t cur_len = f->cur_len;
     nt_font_t font = f->font;
     nt_ui_input_state_t *st = (nt_ui_input_state_t *)nt_ui_state(ctx, input_state_id(id), (uint32_t)sizeof(nt_ui_input_state_t), NT_UI_STATE_TAG('i', 'n', 'p', 't'));
@@ -690,13 +698,15 @@ static void focus_step(input_frame_t *f) {
     } else {
         in = (nt_ui_interaction_t){0};
         nt_ui_block_pointer(ctx, id, NULL);
-        nt_ui_debug_record_disabled_zone(ctx, id, NULL);
         /* A disabled field can't be clicked to refocus and gates out Esc/Tab while focused==false, so
-         * a still-declared disabled field would hold focus forever (any_focused stuck true). Drop it
+         * a still-declared disabled field would hold focus forever (nt_ui_wants_keyboard stuck true). Drop it
          * the frame it's declared disabled. */
         if (ctx->focused_input_id == id) {
             ctx->focused_input_id = 0U;
         }
+    }
+    if (!f->enabled) {
+        nt_ui_debug_record_disabled_zone(ctx, id, NULL); /* a field only covered by an overlay is not disabled */
     }
     const bool focus_now = input_focus_edge(st, &in, was_focused);
 
@@ -749,17 +759,19 @@ static void focus_step(input_frame_t *f) {
     f->bb = bb;
     f->focused = enabled && (ctx->focused_input_id == id);
     if (f->focused) {
-        apply_keyboard_hint(props->keyboard, props->password);
+        apply_keyboard_hint(ctx, id, props->keyboard, props->password);
     }
     // #endregion
 }
 
 /* The focused edit pipeline: drain the typed chars, then run the physical editing keys
  * (delete/arrows/home/end), selection chords (Shift/Ctrl+A), clipboard (Ctrl+C/X/V), submit + Tab/Esc.
- * No-op when unfocused. Sets changed/submitted; cur_len re-derived in f->cur_len. */
+ * Runs for the field that held focus at nt_ui_begin while it is live, even when a press took the focus
+ * earlier in the declaration: the frame's keys are its alone. Sets changed/submitted; cur_len re-derived in
+ * f->cur_len. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void edit_step(input_frame_t *f, bool *changed, bool *submitted) {
-    if (!f->focused) {
+    if (!input_live(f->ctx, f) || !nt_ui_internal_owns_keys(f->ctx, f->id)) {
         return;
     }
     nt_ui_context_t *ctx = f->ctx;
@@ -772,7 +784,7 @@ static void edit_step(input_frame_t *f, bool *changed, bool *submitted) {
     {
         // #region drain typed chars (FIFO, this frame's)
         uint32_t cp = 0U;
-        while (nt_input_pop_char(&cp)) {
+        while (nt_ui_pop_char(ctx, id, &cp)) {
             const bool ok = (props->allow != NULL) ? props->allow(cp) : allow_printable(cp);
             if (!ok) {
                 continue;
@@ -795,9 +807,9 @@ static void edit_step(input_frame_t *f, bool *changed, bool *submitted) {
 
         // #region physical editing keys
         const bool sel = (st->anchor != st->caret);
-        const bool shift = shift_held();
+        const bool shift = shift_held(ctx, id);
         const float dt = ctx->frame_dt;
-        if (key_repeat_fires(st, NT_KEY_BACKSPACE, dt)) {
+        if (key_repeat_fires(ctx, id, st, NT_KEY_BACKSPACE, dt)) {
             if (sel) {
                 uint32_t lo = 0U;
                 uint32_t hi = 0U;
@@ -811,7 +823,7 @@ static void edit_step(input_frame_t *f, bool *changed, bool *submitted) {
             cur_len = (uint32_t)strlen(buffer);
             st->blink = 0.0F;
         }
-        if (key_repeat_fires(st, NT_KEY_DELETE, dt)) {
+        if (key_repeat_fires(ctx, id, st, NT_KEY_DELETE, dt)) {
             if (sel) {
                 uint32_t lo = 0U;
                 uint32_t hi = 0U;
@@ -824,7 +836,7 @@ static void edit_step(input_frame_t *f, bool *changed, bool *submitted) {
             cur_len = (uint32_t)strlen(buffer);
             st->blink = 0.0F;
         }
-        if (key_repeat_fires(st, NT_KEY_ARROW_LEFT, dt)) {
+        if (key_repeat_fires(ctx, id, st, NT_KEY_ARROW_LEFT, dt)) {
             /* Shift extends (move only the caret); a plain arrow with a selection collapses to its
              * left edge, otherwise steps one codepoint left. */
             if (!shift && sel) {
@@ -840,7 +852,7 @@ static void edit_step(input_frame_t *f, bool *changed, bool *submitted) {
             }
             st->blink = 0.0F;
         }
-        if (key_repeat_fires(st, NT_KEY_ARROW_RIGHT, dt)) {
+        if (key_repeat_fires(ctx, id, st, NT_KEY_ARROW_RIGHT, dt)) {
             if (!shift && sel) {
                 uint32_t lo = 0U;
                 uint32_t hi = 0U;
@@ -854,30 +866,30 @@ static void edit_step(input_frame_t *f, bool *changed, bool *submitted) {
             }
             st->blink = 0.0F;
         }
-        if (key_repeat_fires(st, NT_KEY_HOME, dt)) {
+        if (key_repeat_fires(ctx, id, st, NT_KEY_HOME, dt)) {
             st->caret = 0U;
             if (!shift) {
                 st->anchor = st->caret;
             }
             st->blink = 0.0F;
         }
-        if (key_repeat_fires(st, NT_KEY_END, dt)) {
+        if (key_repeat_fires(ctx, id, st, NT_KEY_END, dt)) {
             st->caret = cur_len;
             if (!shift) {
                 st->anchor = st->caret;
             }
             st->blink = 0.0F;
         }
-        if (shortcut_held() && nt_input_key_is_pressed(NT_KEY_A)) {
+        if (shortcut_held(ctx, id) && nt_ui_key_pressed(ctx, id, NT_KEY_A)) {
             st->anchor = 0U; /* Ctrl+A selects the whole buffer */
             st->caret = cur_len;
             st->blink = 0.0F;
         }
         // #region clipboard chords (Ctrl+C/X/V)
-        if (shortcut_held() && nt_input_key_is_pressed(NT_KEY_C)) {
+        if (shortcut_held(ctx, id) && nt_ui_key_pressed(ctx, id, NT_KEY_C)) {
             clipboard_copy_selection(buffer, st); /* copy selection; no-op if empty */
         }
-        if (shortcut_held() && nt_input_key_is_pressed(NT_KEY_X) && nt_clipboard_available()) {
+        if (shortcut_held(ctx, id) && nt_ui_key_pressed(ctx, id, NT_KEY_X) && nt_clipboard_available()) {
             /* No-op cut when the clipboard is unavailable: deleting locally without a store is data loss. */
             clipboard_copy_selection(buffer, st);
             if (st->anchor != st->caret) {
@@ -890,18 +902,20 @@ static void edit_step(input_frame_t *f, bool *changed, bool *submitted) {
                 st->blink = 0.0F;
             }
         }
-        if (shortcut_held() && nt_input_key_is_pressed(NT_KEY_V)) {
+        if (shortcut_held(ctx, id) && nt_ui_key_pressed(ctx, id, NT_KEY_V)) {
             st->caret = clipboard_paste(buffer, buffer_size, props, st, cur_len, changed);
             cur_len = (uint32_t)strlen(buffer);
             st->blink = 0.0F;
         }
         // #endregion
-        if (nt_input_key_is_pressed(NT_KEY_ENTER)) {
+        if (nt_ui_key_pressed(ctx, id, NT_KEY_ENTER)) {
             *submitted = true;
         }
-        if (nt_input_key_is_pressed(NT_KEY_ESCAPE)) {
-            ctx->focused_input_id = 0U;
-        } else if (nt_input_key_is_pressed(NT_KEY_TAB)) {
+        if (nt_ui_key_pressed(ctx, id, NT_KEY_ESCAPE)) {
+            if (ctx->focused_input_id == id) {
+                ctx->focused_input_id = 0U; /* a press elsewhere this frame keeps the focus it took */
+            }
+        } else if (nt_ui_key_pressed(ctx, id, NT_KEY_TAB)) {
             ctx->focus_tab_seek = id;
             ctx->focus_tab_pending = ctx->focus_first_id;
         }

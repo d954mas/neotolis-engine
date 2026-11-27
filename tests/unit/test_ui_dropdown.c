@@ -14,6 +14,7 @@
 #include "test_helpers/nt_assert_trap.h"
 #include "test_helpers/nt_input_test_frame.h"
 #include "test_helpers/ui_bar_probe.h"
+#include "test_helpers/ui_fx_frame.h"
 #include "test_helpers/ui_test_arena.h"
 #include "test_helpers/ui_walker_fixture.h"
 #include "ui/nt_ui.h"
@@ -49,17 +50,6 @@ void setUp(void) {
 
 void tearDown(void) { ui_walker_fixture_shutdown(&s_fx); }
 
-static nt_pointer_t pointer_at(float x, float y, bool is_down, bool is_pressed, bool is_released) {
-    nt_pointer_t p = {0};
-    p.x = x;
-    p.y = y;
-    p.active = true;
-    p.buttons[NT_BUTTON_LEFT].is_down = is_down;
-    p.buttons[NT_BUTTON_LEFT].is_pressed = is_pressed;
-    p.buttons[NT_BUTTON_LEFT].is_released = is_released;
-    return p;
-}
-
 /* ---- ABI sanity ---- */
 static void test_dropdown_abi_size(void) {
     TEST_ASSERT_EQUAL_UINT(400U, (unsigned)sizeof(nt_ui_dropdown_style_t));
@@ -91,18 +81,18 @@ static void test_dropdown_defaults_valid(void) {
 }
 
 /* One full immediate combo frame: combo_begin emits the trigger (preview = current selection label) and
- * opens the list when *open; each row is a combo_selectable; combo_end balances. The trigger is wrapped
+ * declares the list while it is open; each row is a combo_selectable; combo_end balances. The trigger is wrapped
  * in a floating element so its bbox is at (tx,ty). `*out_made` reports whether a selectable was clicked.
- * The combo clears *open on a selectable click; the game writes *selected. */
+ * A selectable click closes the list; the game writes *selected. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void combo_im_frame_icons(const nt_pointer_t *p, float tx, float ty, const char *const *labels, const nt_atlas_region_ref_t *icons, int count, int *selected, bool *open,
-                                 nt_ui_dropdown_style_t *st, bool *out_made) {
+static void combo_im_frame_icons(const nt_pointer_t *p, float tx, float ty, const char *const *labels, const nt_atlas_region_ref_t *icons, int count, int *selected, nt_ui_dropdown_style_t *st,
+                                 bool *out_made) {
     bool made = false;
     nt_arena_reset(&g_nt_mem_scratch); /* per-frame scratch reset, exactly as the engine main loop does */
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = p, .pointer_count = 1});
     const char *preview = (*selected >= 0 && *selected < count) ? labels[*selected] : "Select...";
     CLAY({.id = (Clay_ElementId){.id = 0xDD0007U}, .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = tx, .y = ty}}}) {
-        if (nt_ui_combo_begin(s_fx.ctx, NT_UI_DATA_LAYER(1), 2, DD_A, preview, st, open)) {
+        if (nt_ui_combo_begin(s_fx.ctx, NT_UI_DATA_LAYER(1), 2, DD_A, preview, st)) {
             for (int i = 0; i < count; ++i) {
                 /* Iconed + text-only rows share the SAME engine column (one icon gutter + left label),
                  * mirroring the showcase render_dropdown idiom — labels align at one x regardless of icon. */
@@ -124,61 +114,74 @@ static void combo_im_frame_icons(const nt_pointer_t *p, float tx, float ty, cons
 }
 
 /* No-icon convenience wrapper (text-only list) so the behavioral tests keep their call shape. */
-static void combo_im_frame(const nt_pointer_t *p, float tx, float ty, const char *const *labels, int count, int *selected, bool *open, nt_ui_dropdown_style_t *st, bool *out_made) {
-    combo_im_frame_icons(p, tx, ty, labels, NULL, count, selected, open, st, out_made);
+static void combo_im_frame(const nt_pointer_t *p, float tx, float ty, const char *const *labels, int count, int *selected, nt_ui_dropdown_style_t *st, bool *out_made) {
+    combo_im_frame_icons(p, tx, ty, labels, NULL, count, selected, st, out_made);
 }
 
-/* ---- Trigger toggles the game-owned open bool (combo_begin click). ---- */
-static void test_dropdown_trigger_toggles_open(void) {
+/* Opens the list as a user does: a warm frame, then a press and a release on the trigger at (tx,ty). */
+static void combo_open_by_click(float tx, float ty, const char *const *labels, int count, int *selected, nt_ui_dropdown_style_t *st) {
+    const nt_pointer_t seq[3] = {
+        ui_fx_pointer(tx + 10.0F, ty + 10.0F, false, false, false),
+        ui_fx_pointer(tx + 10.0F, ty + 10.0F, true, true, false),
+        ui_fx_pointer(tx + 10.0F, ty + 10.0F, false, false, true),
+    };
+    for (int k = 0; k < 3; ++k) {
+        combo_im_frame(&seq[k], tx, ty, labels, count, selected, st, NULL);
+    }
+    TEST_ASSERT_TRUE_MESSAGE(nt_ui_is_open(s_fx.ctx, DD_A), "a trigger click opens the list");
+}
+
+/* ---- A trigger click opens the list (combo_begin's step). ---- */
+static void test_dropdown_trigger_click_opens(void) {
     nt_ui_dropdown_style_t st = nt_ui_dropdown_style_defaults();
     int selected = -1;
-    bool open = false;
 
     /* Warm frame so the trigger bbox is baked. */
-    nt_pointer_t f1 = pointer_at(40.0F, 40.0F, false, false, false);
-    combo_im_frame(&f1, 30.0F, 30.0F, s_short, 3, &selected, &open, &st, NULL);
+    nt_pointer_t f1 = ui_fx_pointer(40.0F, 40.0F, false, false, false);
+    combo_im_frame(&f1, 30.0F, 30.0F, s_short, 3, &selected, &st, NULL);
 
     /* Press inside the trigger, then release inside -> click toggles open. */
-    nt_pointer_t f2 = pointer_at(40.0F, 40.0F, true, true, false);
-    combo_im_frame(&f2, 30.0F, 30.0F, s_short, 3, &selected, &open, &st, NULL);
-    nt_pointer_t f3 = pointer_at(40.0F, 40.0F, false, false, true);
-    combo_im_frame(&f3, 30.0F, 30.0F, s_short, 3, &selected, &open, &st, NULL);
-    TEST_ASSERT_TRUE(open);
+    nt_pointer_t f2 = ui_fx_pointer(40.0F, 40.0F, true, true, false);
+    combo_im_frame(&f2, 30.0F, 30.0F, s_short, 3, &selected, &st, NULL);
+    nt_pointer_t f3 = ui_fx_pointer(40.0F, 40.0F, false, false, true);
+    combo_im_frame(&f3, 30.0F, 30.0F, s_short, 3, &selected, &st, NULL);
+    TEST_ASSERT_TRUE(nt_ui_is_open(s_fx.ctx, DD_A));
 }
 
 /* Publish exactly one fresh pressed-key edge for this frame. */
 static void dropdown_key(nt_key_t key) { nt_input_test_key_press(key); }
 
-/* ---- Combo keyboard is INERT: the immediate combo wires NO keyboard nav. combo_open_list routes through
- *      nt_ui_popup_visible (the non-ext popup path), which has esc_close=false and dismisses only on an
- *      OUTSIDE click — never on Esc. Arrows/Enter never move or commit a selection (mouse-only). Locking
- *      that contract: an open list + Esc/arrows/Enter leaves *open and *selected unchanged. ---- */
+/* ---- The combo's keyboard: Esc closes the open list, as a popup's, and arrows/Enter never move or commit a
+ *      selection (mouse-only): they leave the list open and *selected unchanged. ---- */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void test_dropdown_combo_keyboard_inert(void) {
+static void test_dropdown_combo_keyboard(void) {
     nt_ui_dropdown_style_t st = nt_ui_dropdown_style_defaults();
     int selected = -1;
-    bool open = true; /* list already open */
+    combo_open_by_click(30.0F, 30.0F, s_short, 3, &selected, &st);
 
     /* Two warm frames so the list anchors to the trigger's prev-frame bbox (1-frame IM lag). */
-    nt_pointer_t idle = pointer_at(400.0F, 300.0F, false, false, false);
-    combo_im_frame(&idle, 30.0F, 30.0F, s_short, 3, &selected, &open, &st, NULL);
-    combo_im_frame(&idle, 30.0F, 30.0F, s_short, 3, &selected, &open, &st, NULL);
+    nt_pointer_t idle = ui_fx_pointer(400.0F, 300.0F, false, false, false);
+    combo_im_frame(&idle, 30.0F, 30.0F, s_short, 3, &selected, &st, NULL);
+    combo_im_frame(&idle, 30.0F, 30.0F, s_short, 3, &selected, &st, NULL);
 
-    /* Esc with the list open: the plain combo popup has no esc_close, so the list stays open. */
     dropdown_key(NT_KEY_ESCAPE);
-    TEST_ASSERT_TRUE(nt_input_key_is_pressed(NT_KEY_ESCAPE)); /* the combo really sees the key */
-    combo_im_frame(&idle, 30.0F, 30.0F, s_short, 3, &selected, &open, &st, NULL);
-    TEST_ASSERT_TRUE_MESSAGE(open, "Esc must NOT close the immediate combo (no keyboard dismiss wired)");
+    combo_im_frame(&idle, 30.0F, 30.0F, s_short, 3, &selected, &st, NULL);
+    TEST_ASSERT_FALSE_MESSAGE(nt_ui_is_open(s_fx.ctx, DD_A), "Esc closes the open combo list");
+
+    nt_input_init();
+    combo_open_by_click(30.0F, 30.0F, s_short, 3, &selected, &st);
+    combo_im_frame(&idle, 30.0F, 30.0F, s_short, 3, &selected, &st, NULL);
+    combo_im_frame(&idle, 30.0F, 30.0F, s_short, 3, &selected, &st, NULL);
 
     /* Arrows + Enter never move focus nor commit a selection (selection is mouse-only). */
     dropdown_key(NT_KEY_ARROW_DOWN);
-    combo_im_frame(&idle, 30.0F, 30.0F, s_short, 3, &selected, &open, &st, NULL);
+    combo_im_frame(&idle, 30.0F, 30.0F, s_short, 3, &selected, &st, NULL);
     dropdown_key(NT_KEY_ARROW_UP);
-    combo_im_frame(&idle, 30.0F, 30.0F, s_short, 3, &selected, &open, &st, NULL);
+    combo_im_frame(&idle, 30.0F, 30.0F, s_short, 3, &selected, &st, NULL);
     dropdown_key(NT_KEY_ENTER);
     bool made = false;
-    combo_im_frame(&idle, 30.0F, 30.0F, s_short, 3, &selected, &open, &st, &made);
-    TEST_ASSERT_TRUE_MESSAGE(open, "arrows/Enter must not close the combo");
+    combo_im_frame(&idle, 30.0F, 30.0F, s_short, 3, &selected, &st, &made);
+    TEST_ASSERT_TRUE_MESSAGE(nt_ui_is_open(s_fx.ctx, DD_A), "arrows/Enter must not close the combo");
     TEST_ASSERT_EQUAL_INT_MESSAGE(-1, selected, "arrows/Enter must not change *selected (mouse-only)");
     TEST_ASSERT_FALSE_MESSAGE(made, "Enter must not commit a selectable");
 }
@@ -188,7 +191,7 @@ static void test_dropdown_combo_keyboard_inert(void) {
 static void test_dropdown_row_select_sets_int_and_closes(void) {
     nt_ui_dropdown_style_t st = nt_ui_dropdown_style_defaults();
     int selected = -1;
-    bool open = true; /* list already open */
+    combo_open_by_click(30.0F, 30.0F, s_short, 3, &selected, &st);
 
     /* The list opens below the trigger at (30,30)+(0,32). Row i center ~ y = 62 + pad + i*row_height. */
     const float row_x = 60.0F;
@@ -196,20 +199,20 @@ static void test_dropdown_row_select_sets_int_and_closes(void) {
 
     /* Two warm frames: the list anchors to the trigger's PREVIOUS-frame bbox (1-frame IM lag), so the
      * rows are only at their final screen position from the 2nd frame on. */
-    nt_pointer_t w = pointer_at(row_x, row1_y, false, false, false);
-    combo_im_frame(&w, 30.0F, 30.0F, s_short, 3, &selected, &open, &st, NULL);
-    combo_im_frame(&w, 30.0F, 30.0F, s_short, 3, &selected, &open, &st, NULL);
+    nt_pointer_t w = ui_fx_pointer(row_x, row1_y, false, false, false);
+    combo_im_frame(&w, 30.0F, 30.0F, s_short, 3, &selected, &st, NULL);
+    combo_im_frame(&w, 30.0F, 30.0F, s_short, 3, &selected, &st, NULL);
 
     /* Frame 2: press on row 1. */
-    nt_pointer_t pr = pointer_at(row_x, row1_y, true, true, false);
-    combo_im_frame(&pr, 30.0F, 30.0F, s_short, 3, &selected, &open, &st, NULL);
+    nt_pointer_t pr = ui_fx_pointer(row_x, row1_y, true, true, false);
+    combo_im_frame(&pr, 30.0F, 30.0F, s_short, 3, &selected, &st, NULL);
 
-    /* Frame 3: release over row 1 -> clicked -> selected = 1, open cleared. */
+    /* Frame 3: release over row 1 -> clicked -> selected = 1, the list closes. */
     bool made = false;
-    nt_pointer_t rl = pointer_at(row_x, row1_y, false, false, true);
-    combo_im_frame(&rl, 30.0F, 30.0F, s_short, 3, &selected, &open, &st, &made);
+    nt_pointer_t rl = ui_fx_pointer(row_x, row1_y, false, false, true);
+    combo_im_frame(&rl, 30.0F, 30.0F, s_short, 3, &selected, &st, &made);
     TEST_ASSERT_EQUAL_INT(1, selected);
-    TEST_ASSERT_FALSE(open);
+    TEST_ASSERT_FALSE(nt_ui_is_open(s_fx.ctx, DD_A));
     TEST_ASSERT_TRUE(made);
 }
 
@@ -223,21 +226,21 @@ static void test_dropdown_long_list_scroll_no_leak(void) {
     int selected = 0;
 
     /* Baseline: one closed warm cycle, settle, sample the pool. */
-    bool open = false;
-    nt_pointer_t idle = pointer_at(400.0F, 300.0F, false, false, false);
-    combo_im_frame(&idle, 30.0F, 30.0F, s_long, 12, &selected, &open, &st, NULL);
+    nt_pointer_t idle = ui_fx_pointer(400.0F, 300.0F, false, false, false);
+    combo_im_frame(&idle, 30.0F, 30.0F, s_long, 12, &selected, &st, NULL);
 
     uint32_t baseline = 0U;
     for (int cycle = 0; cycle < 10; ++cycle) {
         /* Open: declare the scrolling list for several frames (lets the scroll cell allocate). */
-        open = true;
-        for (int f = 0; f < 4; ++f) {
-            combo_im_frame(&idle, 30.0F, 30.0F, s_long, 12, &selected, &open, &st, NULL);
-        }
-        /* Close + let the close tween settle so the popup stops declaring the list. */
-        open = false;
-        for (int f = 0; f < 60; ++f) {
-            combo_im_frame(&idle, 30.0F, 30.0F, s_long, 12, &selected, &open, &st, NULL);
+        combo_open_by_click(30.0F, 30.0F, s_long, 12, &selected, &st);
+        combo_im_frame(&idle, 30.0F, 30.0F, s_long, 12, &selected, &st, NULL);
+        /* Close on Esc + let the close tween settle so the popup stops declaring the list. */
+        dropdown_key(NT_KEY_ESCAPE);
+        combo_im_frame(&idle, 30.0F, 30.0F, s_long, 12, &selected, &st, NULL);
+        nt_input_init();
+        TEST_ASSERT_FALSE(nt_ui_is_open(s_fx.ctx, DD_A));
+        for (int f = 0; f < 59; ++f) {
+            combo_im_frame(&idle, 30.0F, 30.0F, s_long, 12, &selected, &st, NULL);
         }
         const uint32_t used = nt_ui_state_used_slots(s_fx.ctx);
         if (cycle == 1) {
@@ -260,13 +263,13 @@ static void test_dropdown_long_list_shows_scrollbar(void) {
     st.list_scroll.thumb_ref = st.list_scroll.track_ref;
 
     int selected = 0;
-    bool open = true;
+    combo_open_by_click(30.0F, 30.0F, s_long, 12, &selected, &st);
 
     /* Two warm frames: the scroll container's bar reads prev-frame solved dims (1-frame lag), so the bar
      * geometry is only valid from the 2nd frame on. */
-    nt_pointer_t idle = pointer_at(400.0F, 300.0F, false, false, false);
-    combo_im_frame(&idle, 30.0F, 30.0F, s_long, 12, &selected, &open, &st, NULL);
-    combo_im_frame(&idle, 30.0F, 30.0F, s_long, 12, &selected, &open, &st, NULL);
+    nt_pointer_t idle = ui_fx_pointer(400.0F, 300.0F, false, false, false);
+    combo_im_frame(&idle, 30.0F, 30.0F, s_long, 12, &selected, &st, NULL);
+    combo_im_frame(&idle, 30.0F, 30.0F, s_long, 12, &selected, &st, NULL);
 
     /* The combo list wrapper is a scroll container. */
     TEST_ASSERT_TRUE(nt_ui_state_has_tag(s_fx.ctx, nt_ui_dropdown_test_scroll_id(DD_A), NT_UI_SCROLL_TAG));
@@ -308,12 +311,12 @@ static void test_dropdown_long_list_scrollbar_showcase_fidelity(void) {
     /* row 0 carries an icon (routed through combo_selectable_icon, engine gutter); the rest are plain. */
     const nt_atlas_region_ref_t icons[12] = {nt_atlas_ref((nt_resource_t){.id = 1U}, 0x300U)};
     int selected = 0;
-    bool open = true;
+    combo_open_by_click(30.0F, 30.0F, s_long, 12, &selected, &st);
 
-    nt_pointer_t idle = pointer_at(400.0F, 300.0F, false, false, false);
+    nt_pointer_t idle = ui_fx_pointer(400.0F, 300.0F, false, false, false);
     /* Several frames: let the eased open settle so the scroll container's prev-frame dims are solid. */
     for (int f = 0; f < 6; ++f) {
-        combo_im_frame_icons(&idle, 30.0F, 30.0F, s_long, icons, 12, &selected, &open, &st, NULL);
+        combo_im_frame_icons(&idle, 30.0F, 30.0F, s_long, icons, 12, &selected, &st, NULL);
     }
 
     TEST_ASSERT_TRUE(nt_ui_state_has_tag(s_fx.ctx, nt_ui_dropdown_test_scroll_id(DD_A), NT_UI_SCROLL_TAG));
@@ -348,15 +351,15 @@ static void test_dropdown_long_list_scrollbar_inherits_popup_band(void) {
     st.list_scroll.thumb_ref = bar_art;
 
     int selected = 0;
-    bool open = true;
-    nt_pointer_t idle = pointer_at(400.0F, 300.0F, false, false, false);
-    combo_im_frame(&idle, 30.0F, 30.0F, s_long, 12, &selected, &open, &st, NULL);
-    combo_im_frame(&idle, 30.0F, 30.0F, s_long, 12, &selected, &open, &st, NULL);
+    combo_open_by_click(30.0F, 30.0F, s_long, 12, &selected, &st);
+    nt_pointer_t idle = ui_fx_pointer(400.0F, 300.0F, false, false, false);
+    combo_im_frame(&idle, 30.0F, 30.0F, s_long, 12, &selected, &st, NULL);
+    combo_im_frame(&idle, 30.0F, 30.0F, s_long, 12, &selected, &st, NULL);
 
     TEST_ASSERT_TRUE_MESSAGE(ui_bar_declared(s_fx.ctx, nt_ui_scroll_test_bar_id(nt_ui_dropdown_test_scroll_id(DD_A), 1)), "popup-nested long list must emit a vertical scrollbar");
     /* The combo popup panel floats one band up (stride*1 here). The bar is declared INSIDE that panel, so
      * it must inherit the panel's band instead of sinking to the base 0 and drawing under the panel. */
-    const int32_t stride = (int32_t)s_fx.ctx->modal_zband_stride;
+    const int32_t stride = (int32_t)s_fx.ctx->overlay_zband_stride;
     const uint32_t bar_id = nt_ui_scroll_test_bar_id(nt_ui_dropdown_test_scroll_id(DD_A), 1);
     const Clay_RenderCommandArray *arr = &s_fx.ctx->frozen_cmds;
     int32_t bar_at = -1;
@@ -386,105 +389,58 @@ static void test_dropdown_long_list_scrollbar_inherits_popup_band(void) {
 }
 
 /* ---- Eased open is STABLE: with open_ease_speed > 0, opening the list then running idle frames with NO
- *      input must NOT oscillate *open (flicker repro). ---- */
+ *      input must NOT close it (flicker repro). ---- */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_dropdown_eased_open_no_flicker(void) {
     nt_ui_dropdown_style_t st = nt_ui_dropdown_style_defaults();
     st.open_ease_speed = 14.0F; /* the showcase Fruit dropdown's eased-open knob */
     int selected = -1;
-    bool open = false;
 
     /* Warm frame so the trigger bbox is baked. */
-    nt_pointer_t f1 = pointer_at(40.0F, 40.0F, false, false, false);
-    combo_im_frame(&f1, 30.0F, 30.0F, s_short, 3, &selected, &open, &st, NULL);
+    nt_pointer_t f1 = ui_fx_pointer(40.0F, 40.0F, false, false, false);
+    combo_im_frame(&f1, 30.0F, 30.0F, s_short, 3, &selected, &st, NULL);
 
-    /* Click the trigger: press then release inside -> *open = true. */
-    nt_pointer_t pr = pointer_at(40.0F, 40.0F, true, true, false);
-    combo_im_frame(&pr, 30.0F, 30.0F, s_short, 3, &selected, &open, &st, NULL);
-    nt_pointer_t rl = pointer_at(40.0F, 40.0F, false, false, true);
-    combo_im_frame(&rl, 30.0F, 30.0F, s_short, 3, &selected, &open, &st, NULL);
-    TEST_ASSERT_TRUE_MESSAGE(open, "trigger click must open the list");
+    /* Click the trigger: press then release inside -> the list opens. */
+    nt_pointer_t pr = ui_fx_pointer(40.0F, 40.0F, true, true, false);
+    combo_im_frame(&pr, 30.0F, 30.0F, s_short, 3, &selected, &st, NULL);
+    nt_pointer_t rl = ui_fx_pointer(40.0F, 40.0F, false, false, true);
+    combo_im_frame(&rl, 30.0F, 30.0F, s_short, 3, &selected, &st, NULL);
+    TEST_ASSERT_TRUE_MESSAGE(nt_ui_is_open(s_fx.ctx, DD_A), "trigger click must open the list");
 
-    /* Several idle frames with NO button activity: *open must stay true and the popup stay present. */
-    nt_pointer_t idle = pointer_at(40.0F, 40.0F, false, false, false);
+    /* Several idle frames with NO button activity: the list must stay open and the popup stay present. */
+    nt_pointer_t idle = ui_fx_pointer(40.0F, 40.0F, false, false, false);
     for (int f = 0; f < 12; ++f) {
-        combo_im_frame(&idle, 30.0F, 30.0F, s_short, 3, &selected, &open, &st, NULL);
-        TEST_ASSERT_TRUE_MESSAGE(open, "eased-open list must stay open across idle frames (no flicker)");
+        combo_im_frame(&idle, 30.0F, 30.0F, s_short, 3, &selected, &st, NULL);
+        TEST_ASSERT_TRUE_MESSAGE(nt_ui_is_open(s_fx.ctx, DD_A), "eased-open list must stay open across idle frames (no flicker)");
     }
-}
-
-/* Frame that ALSO declares a swarm of animated dummy widgets so the anim table churns and collides with
- * the popup's slot window — mimics a busy showcase frame. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void combo_im_frame_busy(const nt_pointer_t *p, const char *const *labels, int count, int *selected, bool *open, nt_ui_dropdown_style_t *st, int n_dummy) {
-    nt_arena_reset(&g_nt_mem_scratch);
-    nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = p, .pointer_count = 1});
-    /* Swarm declared BEFORE the combo (real frame order: many widgets precede it). Each dummy EASES a
-     * slot (value_speed > 0) so the popup's probe window is already full when it touches the table. */
-    const nt_ui_anim_target_t tgt = {.scale_x = 1.0F, .scale_y = 1.0F, .scale_z = 1.0F, .opacity = 1.0F, .value_t = 1.0F};
-    for (int d = 0; d < n_dummy; ++d) {
-        (void)nt_ui_anim(s_fx.ctx, 0x90000001U + (uint32_t)d, &tgt, 0.0F, 14.0F);
-    }
-    const char *preview = (*selected >= 0 && *selected < count) ? labels[*selected] : "Select...";
-    CLAY({.id = (Clay_ElementId){.id = 0xDD0007U}, .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = 30.0F, .y = 30.0F}}}) {
-        if (nt_ui_combo_begin(s_fx.ctx, NT_UI_DATA_LAYER(1), 2, DD_A, preview, st, open)) {
-            for (int i = 0; i < count; ++i) {
-                if (nt_ui_combo_selectable(s_fx.ctx, ROW_KEY(i), labels[i], *selected == i)) {
-                    *selected = i;
-                }
-            }
-            nt_ui_combo_end(s_fx.ctx);
-        }
-    }
-    nt_ui_end(s_fx.ctx);
-}
-
-/* ---- Eviction-induced flicker (ROOT): a busy frame can evict the popup's anim slot; the entrance t=0
- *      re-seed must fire AT MOST ONCE per open-edge regardless of anim-table churn. ---- */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void test_dropdown_eased_open_no_reseed_under_churn(void) {
-    nt_ui_dropdown_style_t st = nt_ui_dropdown_style_defaults();
-    st.open_ease_speed = 14.0F;
-    int selected = -1;
-    bool open = true; /* one continuous open the whole test */
-
-    nt_ui_popup_test_entrance_seed_reset();
-    nt_pointer_t idle = pointer_at(400.0F, 300.0F, false, false, false);
-    /* Heavy churn every frame across a long open: dummies > NT_UI_ANIM_SLOTS thrash the anim table so the
-     * popup's slot is repeatedly evicted. The seed must NOT re-fire per frame. */
-    for (int f = 0; f < 30; ++f) {
-        combo_im_frame_busy(&idle, s_short, 3, &selected, &open, &st, NT_UI_ANIM_SLOTS + 32);
-    }
-    const uint32_t seeds = nt_ui_popup_test_entrance_seed_count();
-    TEST_ASSERT_TRUE_MESSAGE(seeds <= 1U, "entrance t=0 re-seed must fire at most once per open-edge (not per churned frame)");
 }
 
 /* ---- Re-click the trigger WHILE the eased-open list is still tweening: a SINGLE click closes once and
- *      must not bounce back open (catcher dismiss + trigger toggle fighting over the same click). ---- */
+ *      must not bounce back open (the catcher's dismiss and the trigger's open fighting over the same click). ---- */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_dropdown_eased_reclick_closes_once(void) {
     nt_ui_dropdown_style_t st = nt_ui_dropdown_style_defaults();
     st.open_ease_speed = 14.0F;
     int selected = -1;
-    bool open = true; /* already open, mid-tween from the first frame */
+    combo_open_by_click(30.0F, 30.0F, s_short, 3, &selected, &st); /* open, mid-tween */
 
     /* Warm frames: let the trigger bbox + popup bbox bake while the tween rises. */
-    nt_pointer_t idle = pointer_at(400.0F, 300.0F, false, false, false);
-    combo_im_frame(&idle, 30.0F, 30.0F, s_short, 3, &selected, &open, &st, NULL);
-    combo_im_frame(&idle, 30.0F, 30.0F, s_short, 3, &selected, &open, &st, NULL);
+    nt_pointer_t idle = ui_fx_pointer(400.0F, 300.0F, false, false, false);
+    combo_im_frame(&idle, 30.0F, 30.0F, s_short, 3, &selected, &st, NULL);
+    combo_im_frame(&idle, 30.0F, 30.0F, s_short, 3, &selected, &st, NULL);
 
     /* Click ON the trigger (press+release) to close. Both the catcher and the trigger see the click; both
      * must resolve to a SINGLE close. */
-    nt_pointer_t pr = pointer_at(40.0F, 40.0F, true, true, false);
-    combo_im_frame(&pr, 30.0F, 30.0F, s_short, 3, &selected, &open, &st, NULL);
-    nt_pointer_t rl = pointer_at(40.0F, 40.0F, false, false, true);
-    combo_im_frame(&rl, 30.0F, 30.0F, s_short, 3, &selected, &open, &st, NULL);
-    TEST_ASSERT_FALSE_MESSAGE(open, "a single trigger re-click must close the list (and stay closed)");
+    nt_pointer_t pr = ui_fx_pointer(40.0F, 40.0F, true, true, false);
+    combo_im_frame(&pr, 30.0F, 30.0F, s_short, 3, &selected, &st, NULL);
+    nt_pointer_t rl = ui_fx_pointer(40.0F, 40.0F, false, false, true);
+    combo_im_frame(&rl, 30.0F, 30.0F, s_short, 3, &selected, &st, NULL);
+    TEST_ASSERT_FALSE_MESSAGE(nt_ui_is_open(s_fx.ctx, DD_A), "a single trigger re-click must close the list (and stay closed)");
 
     /* Idle frames: it must STAY closed (no bounce-reopen from a fighting click). */
     for (int f = 0; f < 6; ++f) {
-        combo_im_frame(&idle, 30.0F, 30.0F, s_short, 3, &selected, &open, &st, NULL);
-        TEST_ASSERT_FALSE_MESSAGE(open, "closed list must stay closed (no reopen flicker)");
+        combo_im_frame(&idle, 30.0F, 30.0F, s_short, 3, &selected, &st, NULL);
+        TEST_ASSERT_FALSE_MESSAGE(nt_ui_is_open(s_fx.ctx, DD_A), "closed list must stay closed (no reopen flicker)");
     }
 }
 
@@ -492,16 +448,16 @@ static void test_dropdown_eased_reclick_closes_once(void) {
 static void test_dropdown_edge_flip_up_near_bottom(void) {
     nt_ui_dropdown_style_t st = nt_ui_dropdown_style_defaults();
     int selected = 0;
-    bool open = true;
+    combo_open_by_click(30.0F, 540.0F, s_short, 3, &selected, &st);
 
     /* Trigger near the bottom: the list would overflow downward -> flips ABOVE. Two frames so the list's
      * prev-frame bbox feeds the edge-flip projection (frame 1 measures, frame 2 flips). */
-    nt_pointer_t idle = pointer_at(400.0F, 300.0F, false, false, false);
-    combo_im_frame(&idle, 30.0F, 540.0F, s_short, 3, &selected, &open, &st, NULL);
-    combo_im_frame(&idle, 30.0F, 540.0F, s_short, 3, &selected, &open, &st, NULL);
+    nt_pointer_t idle = ui_fx_pointer(400.0F, 300.0F, false, false, false);
+    combo_im_frame(&idle, 30.0F, 540.0F, s_short, 3, &selected, &st, NULL);
+    combo_im_frame(&idle, 30.0F, 540.0F, s_short, 3, &selected, &st, NULL);
     /* The flip's visible consequence: the list is ADJACENT above the trigger. Bare "somewhere higher"
      * would also accept a CENTER-placed list or a list collapsed to y=0. */
-    const nt_ui_bbox_t trigger = nt_ui_get_bbox(s_fx.ctx, DD_A);
+    const nt_ui_bbox_t trigger = nt_ui_get_bbox(s_fx.ctx, nt_ui_combo_trigger_id(DD_A));
     const nt_ui_bbox_t last_row = nt_ui_get_bbox(s_fx.ctx, nt_ui_dropdown_test_combo_row_id(DD_A, ROW_KEY(2)));
     TEST_ASSERT_TRUE(trigger.found);
     TEST_ASSERT_TRUE(last_row.found);
@@ -510,13 +466,16 @@ static void test_dropdown_edge_flip_up_near_bottom(void) {
     TEST_ASSERT_TRUE_MESSAGE(trigger.y - (last_row.y + last_row.height) <= (float)st.pad + 8.0F, "the list must sit ADJACENT above the trigger, not float off elsewhere");
 }
 
-/* The row's label x after two warm frames (1-frame IM lag bakes the bbox). The same `icons` array is fed
- * to both warm frames so the probed cell is stable; idx selects which row's label cell to read. */
+/* The row's label x after two warm frames (1-frame IM lag bakes the bbox), the list opened first if it is not.
+ * The same `icons` array is fed to both warm frames so the probed cell is stable; idx selects which row's label
+ * cell to read. */
 static float row_label_x(const nt_pointer_t *p, nt_ui_dropdown_style_t *st, const nt_atlas_region_ref_t *icons, int idx) {
     int selected = 0;
-    bool open = true;
-    combo_im_frame_icons(p, 30.0F, 30.0F, s_short, icons, 3, &selected, &open, st, NULL);
-    combo_im_frame_icons(p, 30.0F, 30.0F, s_short, icons, 3, &selected, &open, st, NULL);
+    if (!nt_ui_is_open(s_fx.ctx, DD_A)) {
+        combo_open_by_click(30.0F, 30.0F, s_short, 3, &selected, st);
+    }
+    combo_im_frame_icons(p, 30.0F, 30.0F, s_short, icons, 3, &selected, st, NULL);
+    combo_im_frame_icons(p, 30.0F, 30.0F, s_short, icons, 3, &selected, st, NULL);
     const nt_ui_bbox_t bb = nt_ui_dropdown_test_row_label_bbox(s_fx.ctx, DD_A, idx);
     TEST_ASSERT_TRUE(bb.found);
     return bb.x;
@@ -525,7 +484,7 @@ static float row_label_x(const nt_pointer_t *p, nt_ui_dropdown_style_t *st, cons
 /* ---- icon_size opens a leading gutter on the PLAIN combo_selectable path: the row label shifts RIGHT vs
  *      the text-only (icon_size=0) row. The plain path owns the single engine gutter. ---- */
 static void test_dropdown_icon_size_gutter_shifts_label(void) {
-    nt_pointer_t idle = pointer_at(400.0F, 300.0F, false, false, false);
+    nt_pointer_t idle = ui_fx_pointer(400.0F, 300.0F, false, false, false);
 
     nt_ui_dropdown_style_t no_gut = nt_ui_dropdown_style_defaults();
     no_gut.icon_size = 0U; /* text-only */
@@ -543,7 +502,7 @@ static void test_dropdown_icon_size_gutter_shifts_label(void) {
  *      align their labels at the SAME left x — the icon rides the engine gutter, the label starts past
  *      it for every row, iconed or not (OS-menu icon column). ---- */
 static void test_dropdown_iconed_and_plain_rows_share_one_column(void) {
-    nt_pointer_t idle = pointer_at(400.0F, 300.0F, false, false, false);
+    nt_pointer_t idle = ui_fx_pointer(400.0F, 300.0F, false, false, false);
 
     nt_ui_dropdown_style_t st = nt_ui_dropdown_style_defaults();
     st.icon_size = 24U; /* engine gutter so iconed + text-only rows align */
@@ -566,11 +525,11 @@ static void test_dropdown_iconed_and_plain_rows_share_one_column(void) {
  * witness on opt-out. */
 #define SWATCH_ID 0x44D0E5U
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void preview_im_frame(const nt_pointer_t *p, float tx, float ty, nt_ui_dropdown_style_t *st, bool *open) {
+static void preview_im_frame(const nt_pointer_t *p, float tx, float ty, nt_ui_dropdown_style_t *st) {
     nt_arena_reset(&g_nt_mem_scratch);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = p, .pointer_count = 1});
     CLAY({.id = (Clay_ElementId){.id = 0xDD0008U}, .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = tx, .y = ty}}}) {
-        nt_ui_combo_preview_begin(s_fx.ctx, NT_UI_DATA_LAYER(1), 2, DD_A, st, open);
+        nt_ui_combo_preview_begin(s_fx.ctx, NT_UI_DATA_LAYER(1), 2, DD_A, st);
         {
             CLAY({.id = (Clay_ElementId){.id = SWATCH_ID}, .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(16)}}}) {}
         } /* game-owned swatch content */
@@ -592,12 +551,11 @@ static nt_atlas_region_ref_t fixture_chevron_ref(void) { return (nt_atlas_region
 static void test_dropdown_preview_trigger_draws_chevron(void) {
     nt_ui_dropdown_style_t st = nt_ui_dropdown_style_defaults();
     st.chevron = fixture_chevron_ref(); /* resolvable ref so the chevron emits */
-    bool open = false;
 
     /* Two warm frames so the chevron element bbox bakes (1-frame IM lag on get_bbox). */
-    nt_pointer_t f = pointer_at(0.0F, 0.0F, false, false, false);
-    preview_im_frame(&f, 30.0F, 30.0F, &st, &open);
-    preview_im_frame(&f, 30.0F, 30.0F, &st, &open);
+    nt_pointer_t f = ui_fx_pointer(0.0F, 0.0F, false, false, false);
+    preview_im_frame(&f, 30.0F, 30.0F, &st);
+    preview_im_frame(&f, 30.0F, 30.0F, &st);
 
     const nt_ui_bbox_t chev = nt_ui_dropdown_test_chevron_bbox(s_fx.ctx, DD_A);
     TEST_ASSERT_TRUE_MESSAGE(chev.found, "custom-trigger (preview form) must declare the chevron element");
@@ -610,18 +568,17 @@ static void test_dropdown_preview_chevron_size_zero_opts_out(void) {
     nt_ui_dropdown_style_t st = nt_ui_dropdown_style_defaults();
     st.chevron = fixture_chevron_ref();
     st.chevron_size = 0U; /* opt out of the affordance even with a ref set */
-    bool open = false;
 
-    nt_pointer_t f = pointer_at(0.0F, 0.0F, false, false, false);
-    preview_im_frame(&f, 30.0F, 30.0F, &st, &open);
-    preview_im_frame(&f, 30.0F, 30.0F, &st, &open);
+    nt_pointer_t f = ui_fx_pointer(0.0F, 0.0F, false, false, false);
+    preview_im_frame(&f, 30.0F, 30.0F, &st);
+    preview_im_frame(&f, 30.0F, 30.0F, &st);
 
     const nt_ui_bbox_t chev = nt_ui_dropdown_test_chevron_bbox(s_fx.ctx, DD_A);
     TEST_ASSERT_FALSE_MESSAGE(chev.found, "chevron_size 0 must opt out of drawing the chevron");
 
     /* No leftover GROW spacer: the game's GROW swatch fills the interior, so its right edge reaches the
      * trigger's right inner edge (within pad). A spacer would split the slack and pull the swatch left. */
-    const nt_ui_bbox_t trig = nt_ui_get_bbox(s_fx.ctx, DD_A);
+    const nt_ui_bbox_t trig = nt_ui_get_bbox(s_fx.ctx, nt_ui_combo_trigger_id(DD_A));
     const nt_ui_bbox_t sw = nt_ui_get_bbox(s_fx.ctx, SWATCH_ID);
     TEST_ASSERT_TRUE_MESSAGE(trig.found && sw.found, "opt-out trigger and its preview child must measure");
     const float right_inner = trig.x + trig.width - (float)st.pad;
@@ -630,23 +587,21 @@ static void test_dropdown_preview_chevron_size_zero_opts_out(void) {
     TEST_ASSERT_TRUE_MESSAGE(gap <= 0.5F, "opt-out must leave no leftover GROW spacer (swatch fills to the trigger's right inner edge)");
 }
 
-/* ---- The custom preview trigger toggles the game-owned open bool on a click (combo_preview_end's
- *      step), mirroring the plain combo_begin trigger toggle. Press+release inside the trigger flips
- *      *open. ---- */
-static void test_dropdown_preview_trigger_toggles_open(void) {
+/* ---- The custom preview trigger opens the list on a click (combo_preview_end's step), mirroring the plain
+ *      combo_begin trigger. ---- */
+static void test_dropdown_preview_trigger_click_opens(void) {
     nt_ui_dropdown_style_t st = nt_ui_dropdown_style_defaults();
-    bool open = false;
 
-    /* Warm frame so the trigger (DD_A) bbox bakes; the preview trigger anchors at (30,30). */
-    nt_pointer_t f1 = pointer_at(0.0F, 0.0F, false, false, false);
-    preview_im_frame(&f1, 30.0F, 30.0F, &st, &open);
+    /* Warm frame so the trigger bbox bakes; the preview trigger anchors at (30,30). */
+    nt_pointer_t f1 = ui_fx_pointer(0.0F, 0.0F, false, false, false);
+    preview_im_frame(&f1, 30.0F, 30.0F, &st);
 
-    /* Press then release inside the trigger -> click toggles *open true. */
-    nt_pointer_t pr = pointer_at(40.0F, 38.0F, true, true, false);
-    preview_im_frame(&pr, 30.0F, 30.0F, &st, &open);
-    nt_pointer_t rl = pointer_at(40.0F, 38.0F, false, false, true);
-    preview_im_frame(&rl, 30.0F, 30.0F, &st, &open);
-    TEST_ASSERT_TRUE_MESSAGE(open, "custom preview trigger click must toggle *open (combo_preview_end step)");
+    /* Press then release inside the trigger -> the click opens the list. */
+    nt_pointer_t pr = ui_fx_pointer(40.0F, 38.0F, true, true, false);
+    preview_im_frame(&pr, 30.0F, 30.0F, &st);
+    nt_pointer_t rl = ui_fx_pointer(40.0F, 38.0F, false, false, true);
+    preview_im_frame(&rl, 30.0F, 30.0F, &st);
+    TEST_ASSERT_TRUE_MESSAGE(nt_ui_is_open(s_fx.ctx, DD_A), "custom preview trigger click must open the list (combo_preview_end step)");
 }
 
 /* One combo frame whose row SET changes: when `hide_first` the row keyed ROW_KEY(0) is skipped, so the
@@ -654,12 +609,11 @@ static void test_dropdown_preview_trigger_toggles_open(void) {
  * id regardless (the id no longer folds row_idx). Returns the live bbox of ROW_KEY(2)'s interactive row. */
 static nt_ui_bbox_t combo_im_frame_skip_first(const nt_pointer_t *p, bool hide_first) {
     nt_ui_dropdown_style_t st = nt_ui_dropdown_style_defaults();
-    bool open = true;
     int selected = -1;
     nt_arena_reset(&g_nt_mem_scratch);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = p, .pointer_count = 1});
     CLAY({.id = (Clay_ElementId){.id = 0xDD0009U}, .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = 30.0F, .y = 30.0F}}}) {
-        if (nt_ui_combo_begin(s_fx.ctx, NT_UI_DATA_LAYER(1), 2, DD_A, "Select...", &st, &open)) {
+        if (nt_ui_combo_begin(s_fx.ctx, NT_UI_DATA_LAYER(1), 2, DD_A, "Select...", &st)) {
             for (int i = 0; i < 3; ++i) {
                 if (hide_first && i == 0) {
                     continue; /* the row set changes: ROW_KEY(0) is gone this frame -> ROW_KEY(2) shifts position */
@@ -677,7 +631,10 @@ static nt_ui_bbox_t combo_im_frame_skip_first(const nt_pointer_t *p, bool hide_f
  *      row. The probe id mix(combo_id,key) is row_idx-independent, and the live row registers at exactly
  *      that id whether or not an earlier sibling row is hidden (so press/release identity never shifts). ---- */
 static void test_dropdown_combo_row_id_stable_across_reorder(void) {
-    nt_pointer_t f = pointer_at(0.0F, 0.0F, false, false, false);
+    nt_ui_dropdown_style_t st = nt_ui_dropdown_style_defaults();
+    int selected = -1;
+    combo_open_by_click(30.0F, 30.0F, s_short, 3, &selected, &st);
+    nt_pointer_t f = ui_fx_pointer(0.0F, 0.0F, false, false, false);
     /* Frame with all 3 rows, then a frame with row 0 hidden: ROW_KEY(2) goes from position 2 to position 1,
      * but its interactive row must register at the SAME id (bbox found at the key-stable id both frames). */
     combo_im_frame_skip_first(&f, false);
@@ -692,8 +649,9 @@ static void test_dropdown_combo_row_id_stable_across_reorder(void) {
 #if NT_UI_CHECKS
 static void test_dropdown_combo_duplicate_key_asserts(void) {
     nt_ui_dropdown_style_t st = nt_ui_dropdown_style_defaults();
-    bool open = true;
-    nt_pointer_t p = pointer_at(0.0F, 0.0F, false, false, false);
+    int selected = -1;
+    combo_open_by_click(30.0F, 30.0F, s_short, 3, &selected, &st);
+    nt_pointer_t p = ui_fx_pointer(0.0F, 0.0F, false, false, false);
 
     bool tripped = false;
     nt_test_assert_armed = true;
@@ -701,7 +659,7 @@ static void test_dropdown_combo_duplicate_key_asserts(void) {
         nt_arena_reset(&g_nt_mem_scratch);
         nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = &p, .pointer_count = 1});
         CLAY({.id = (Clay_ElementId){.id = 0xDD000AU}, .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = 30.0F, .y = 30.0F}}}) {
-            if (nt_ui_combo_begin(s_fx.ctx, NT_UI_DATA_LAYER(1), 2, DD_A, "Select...", &st, &open)) {
+            if (nt_ui_combo_begin(s_fx.ctx, NT_UI_DATA_LAYER(1), 2, DD_A, "Select...", &st)) {
                 (void)nt_ui_combo_selectable(s_fx.ctx, ROW_KEY(0), "Alpha", false);
                 (void)nt_ui_combo_selectable(s_fx.ctx, ROW_KEY(0), "Dup", false); /* same key -> aliased id */
                 nt_ui_combo_end(s_fx.ctx);
@@ -718,17 +676,17 @@ static void test_dropdown_combo_duplicate_key_asserts(void) {
 
 /* One combo frame with a single CUSTOM row: combo_selectable_begin opens the row (void), game content
  * fills it (an interactive 20x16 child when with_child), combo_selectable_end closes it and returns
- * clicked. `*out_clicked` carries that click; the combo clears *open on the click. Returns the child's click. */
+ * clicked. `*out_clicked` carries that click; the click closes the list. Returns the child's click. */
 #define DD_ROW_CHILD_ID 0xDD000CU
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static bool combo_im_frame_custom(const nt_pointer_t *p, bool *open, bool *out_clicked, bool with_child) {
+static bool combo_im_frame_custom(const nt_pointer_t *p, bool *out_clicked, bool with_child) {
     nt_ui_dropdown_style_t st = nt_ui_dropdown_style_defaults();
     bool clicked = false;
     bool child_clicked = false;
     nt_arena_reset(&g_nt_mem_scratch);
     nt_ui_begin(s_fx.ctx, &(nt_ui_frame_desc_t){.layout_w = VIEW_W, .layout_h = VIEW_H, .dt = 1.0F / 60.0F, .pointers = p, .pointer_count = 1});
     CLAY({.id = (Clay_ElementId){.id = 0xDD000BU}, .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = 30.0F, .y = 30.0F}}}) {
-        if (nt_ui_combo_begin(s_fx.ctx, NT_UI_DATA_LAYER(1), 2, DD_A, "Select...", &st, open)) {
+        if (nt_ui_combo_begin(s_fx.ctx, NT_UI_DATA_LAYER(1), 2, DD_A, "Select...", &st)) {
             nt_ui_combo_selectable_begin(s_fx.ctx, ROW_KEY(0), false);
             if (with_child) {
                 CLAY({.id = (Clay_ElementId){.id = DD_ROW_CHILD_ID}, .layout = {.sizing = {CLAY_SIZING_FIXED(20), CLAY_SIZING_FIXED(16)}}}) {
@@ -751,29 +709,31 @@ static bool combo_im_frame_custom(const nt_pointer_t *p, bool *open, bool *out_c
 }
 
 /* ---- A custom-content row (combo_selectable_begin/end) reports its click via _end (the fixed polarity:
- *      begin=void, end=clicked) and the combo clears *open on that click. ---- */
+ *      begin=void, end=clicked) and that click closes the list. ---- */
 static void test_dropdown_custom_selectable_click_selects(void) {
-    bool open = true; /* list already open */
+    nt_ui_dropdown_style_t st = nt_ui_dropdown_style_defaults();
+    int selected = -1;
+    combo_open_by_click(30.0F, 30.0F, s_short, 3, &selected, &st);
     const uint32_t row_id = nt_ui_dropdown_test_combo_row_id(DD_A, ROW_KEY(0));
 
     /* Two warm frames bake the custom row's bbox (1-frame IM lag on the trigger anchor + the row geometry). */
-    nt_pointer_t w = pointer_at(0.0F, 0.0F, false, false, false);
-    combo_im_frame_custom(&w, &open, NULL, false);
-    combo_im_frame_custom(&w, &open, NULL, false);
+    nt_pointer_t w = ui_fx_pointer(0.0F, 0.0F, false, false, false);
+    combo_im_frame_custom(&w, NULL, false);
+    combo_im_frame_custom(&w, NULL, false);
 
     const nt_ui_bbox_t bb = nt_ui_get_bbox(s_fx.ctx, row_id);
     TEST_ASSERT_TRUE_MESSAGE(bb.found, "the custom row must register its interactive id");
     const float cx = bb.x + (bb.width * 0.5F);
     const float cy = bb.y + (bb.height * 0.5F);
 
-    /* Press over the row, then release over it -> combo_selectable_end returns clicked, *open cleared. */
-    nt_pointer_t pr = pointer_at(cx, cy, true, true, false);
-    combo_im_frame_custom(&pr, &open, NULL, false);
+    /* Press over the row, then release over it -> combo_selectable_end returns clicked, the list closes. */
+    nt_pointer_t pr = ui_fx_pointer(cx, cy, true, true, false);
+    combo_im_frame_custom(&pr, NULL, false);
     bool clicked = false;
-    nt_pointer_t rl = pointer_at(cx, cy, false, false, true);
-    combo_im_frame_custom(&rl, &open, &clicked, false);
+    nt_pointer_t rl = ui_fx_pointer(cx, cy, false, false, true);
+    combo_im_frame_custom(&rl, &clicked, false);
     TEST_ASSERT_TRUE_MESSAGE(clicked, "combo_selectable_end must return true on the click frame");
-    TEST_ASSERT_FALSE_MESSAGE(open, "a custom-row click must clear *open (the combo closes the list)");
+    TEST_ASSERT_FALSE_MESSAGE(nt_ui_is_open(s_fx.ctx, DD_A), "a custom-row click must close the list");
 }
 
 /* The custom row's fill in the last frame is its hover fill; idle rows draw no fill. */
@@ -795,39 +755,40 @@ static bool combo_custom_row_hover_lit(void) {
  * declared later, so a press over the child is the child's, not the row's. The row is hovered within
  * over its child, so it shows its hover fill there. */
 static void test_dropdown_custom_row_interactive_child_takes_the_press(void) {
-    bool open = true;
+    nt_ui_dropdown_style_t st = nt_ui_dropdown_style_defaults();
+    int selected = -1;
+    combo_open_by_click(30.0F, 30.0F, s_short, 3, &selected, &st);
     bool clicked = false;
-    nt_pointer_t w = pointer_at(0.0F, 0.0F, false, false, false);
-    combo_im_frame_custom(&w, &open, &clicked, true);
-    combo_im_frame_custom(&w, &open, &clicked, true);
+    nt_pointer_t w = ui_fx_pointer(0.0F, 0.0F, false, false, false);
+    combo_im_frame_custom(&w, &clicked, true);
+    combo_im_frame_custom(&w, &clicked, true);
     const nt_ui_bbox_t bb = nt_ui_get_bbox(s_fx.ctx, DD_ROW_CHILD_ID);
     TEST_ASSERT_TRUE(bb.found);
     const float cx = bb.x + (bb.width * 0.5F);
     const float cy = bb.y + (bb.height * 0.5F);
     TEST_ASSERT_FALSE(combo_custom_row_hover_lit());
-    nt_pointer_t pr = pointer_at(cx, cy, true, true, false);
-    combo_im_frame_custom(&pr, &open, &clicked, true);
+    nt_pointer_t pr = ui_fx_pointer(cx, cy, true, true, false);
+    combo_im_frame_custom(&pr, &clicked, true);
     TEST_ASSERT_TRUE(combo_custom_row_hover_lit());
-    nt_pointer_t rl = pointer_at(cx, cy, false, false, true);
-    TEST_ASSERT_TRUE(combo_im_frame_custom(&rl, &open, &clicked, true));
+    nt_pointer_t rl = ui_fx_pointer(cx, cy, false, false, true);
+    TEST_ASSERT_TRUE(combo_im_frame_custom(&rl, &clicked, true));
     TEST_ASSERT_FALSE(clicked);
-    TEST_ASSERT_TRUE(open);
+    TEST_ASSERT_TRUE(nt_ui_is_open(s_fx.ctx, DD_A));
 }
 
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_dropdown_abi_size);
     RUN_TEST(test_dropdown_defaults_valid);
-    RUN_TEST(test_dropdown_trigger_toggles_open);
-    RUN_TEST(test_dropdown_combo_keyboard_inert);
-    RUN_TEST(test_dropdown_preview_trigger_toggles_open);
+    RUN_TEST(test_dropdown_trigger_click_opens);
+    RUN_TEST(test_dropdown_combo_keyboard);
+    RUN_TEST(test_dropdown_preview_trigger_click_opens);
     RUN_TEST(test_dropdown_row_select_sets_int_and_closes);
     RUN_TEST(test_dropdown_long_list_scroll_no_leak);
     RUN_TEST(test_dropdown_long_list_shows_scrollbar);
     RUN_TEST(test_dropdown_long_list_scrollbar_showcase_fidelity);
     RUN_TEST(test_dropdown_long_list_scrollbar_inherits_popup_band);
     RUN_TEST(test_dropdown_eased_open_no_flicker);
-    RUN_TEST(test_dropdown_eased_open_no_reseed_under_churn);
     RUN_TEST(test_dropdown_eased_reclick_closes_once);
     RUN_TEST(test_dropdown_edge_flip_up_near_bottom);
     RUN_TEST(test_dropdown_icon_size_gutter_shifts_label);

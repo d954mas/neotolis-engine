@@ -24,6 +24,7 @@
 #include "test_helpers/nt_assert_trap.h"
 #include "test_helpers/nt_gfx_fake.h"
 #include "test_helpers/nt_sprite_test_emit.h"
+#include "test_helpers/ui_fx_frame.h"
 #include "test_helpers/ui_walker_fixture.h"
 #include "ui/nt_ui.h"
 #include "ui/nt_ui_internal.h"
@@ -1232,17 +1233,6 @@ static void test_fx_fade_in_skips_image(void) {
 
 /* ===== Links ===== */
 
-static nt_pointer_t make_ptr(float x, float y, bool down, bool pressed, bool released) {
-    nt_pointer_t p = {0};
-    p.x = x;
-    p.y = y;
-    p.active = true;
-    p.buttons[NT_BUTTON_LEFT].is_down = down;
-    p.buttons[NT_BUTTON_LEFT].is_pressed = pressed;
-    p.buttons[NT_BUTTON_LEFT].is_released = released;
-    return p;
-}
-
 #define LINK_ID 0xABCD1234U
 #define LINK_ROOT_X 50.0F
 #define LINK_ROOT_Y 40.0F
@@ -1401,24 +1391,24 @@ static nt_ui_rich_result_t frame_link_in_scroll(const nt_pointer_t *p, bool moda
 static void test_link_in_scroll_drag_cancels_click(void) {
     const float x = link_hit_x();
     const float y = LINK_ROOT_Y + 8.0F;
-    nt_pointer_t p = make_ptr(x, y, false, false, false);
+    nt_pointer_t p = ui_fx_pointer(x, y, false, false, false);
     (void)frame_link_in_scroll(&p, false);
     (void)frame_link_in_scroll(&p, false);
-    p = make_ptr(x, y, true, true, false);
+    p = ui_fx_pointer(x, y, true, true, false);
     (void)frame_link_in_scroll(&p, false);
-    p = make_ptr(x, y, false, false, true);
+    p = ui_fx_pointer(x, y, false, false, true);
     TEST_ASSERT_EQUAL_UINT32(LINK_ID, frame_link_in_scroll(&p, false).clicked_link);
 
-    p = make_ptr(x, y, false, false, false);
+    p = ui_fx_pointer(x, y, false, false, false);
     (void)frame_link_in_scroll(&p, false);
-    p = make_ptr(x, y, true, true, false);
+    p = ui_fx_pointer(x, y, true, true, false);
     (void)frame_link_in_scroll(&p, false);
-    p = make_ptr(x, y + 40.0F, true, false, false);
+    p = ui_fx_pointer(x, y + 40.0F, true, false, false);
     (void)frame_link_in_scroll(&p, false);
     TEST_ASSERT_EQUAL_UINT32(CLAY_ID("links_list").id, s_fx.ctx->captures[0].active_id);
-    p = make_ptr(x, y, true, false, false);
+    p = ui_fx_pointer(x, y, true, false, false);
     (void)frame_link_in_scroll(&p, false);
-    p = make_ptr(x, y, false, false, true);
+    p = ui_fx_pointer(x, y, false, false, true);
     TEST_ASSERT_EQUAL_UINT32(0U, frame_link_in_scroll(&p, false).clicked_link);
 }
 
@@ -1426,12 +1416,12 @@ static void test_link_in_scroll_drag_cancels_click(void) {
 static void test_link_under_modal_is_inert(void) {
     const float x = link_hit_x();
     const float y = LINK_ROOT_Y + 8.0F;
-    nt_pointer_t p = make_ptr(x, y, false, false, false);
+    nt_pointer_t p = ui_fx_pointer(x, y, false, false, false);
     (void)frame_link_in_scroll(&p, true);
     TEST_ASSERT_EQUAL_UINT32(0U, frame_link_in_scroll(&p, true).hovered_link);
-    p = make_ptr(x, y, true, true, false);
+    p = ui_fx_pointer(x, y, true, true, false);
     (void)frame_link_in_scroll(&p, true);
-    p = make_ptr(x, y, false, false, true);
+    p = ui_fx_pointer(x, y, false, false, true);
     TEST_ASSERT_EQUAL_UINT32(0U, frame_link_in_scroll(&p, true).clicked_link);
 }
 
@@ -1447,7 +1437,7 @@ static void test_link_hover_and_click(void) {
 
     /* Warm-up frame: the link rects exist this frame, but the block's bbox is resolved from the
      * PREV frame (two-pass), so hovering needs the block solved at least once. */
-    nt_pointer_t over = make_ptr(hx, hy, false, false, false);
+    nt_pointer_t over = ui_fx_pointer(hx, hy, false, false, false);
     (void)frame_link(&over);
 
     /* (a) hover without any press -> hovered == id, no click. */
@@ -1457,32 +1447,32 @@ static void test_link_hover_and_click(void) {
     TEST_ASSERT_TRUE_MESSAGE(nt_ui_rich_test_link_rect_count(s_fx.ctx) >= 1U, "solver recorded >=1 link rect");
 
     /* (b) press inside the link, then release inside the SAME link -> real click. */
-    nt_pointer_t press_in = make_ptr(hx, hy, true, true, false);
+    nt_pointer_t press_in = ui_fx_pointer(hx, hy, true, true, false);
     nt_ui_rich_result_t pr = frame_link(&press_in);
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, pr.clicked_link, "press alone is not a click");
-    nt_pointer_t rel_in = make_ptr(hx, hy, false, false, true);
+    nt_pointer_t rel_in = ui_fx_pointer(hx, hy, false, false, true);
     nt_ui_rich_result_t clk = frame_link(&rel_in);
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(LINK_ID, clk.hovered_link, "release over link still hovers");
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(LINK_ID, clk.clicked_link, "press+release on the SAME link -> clicked == id");
 
     /* (c) press OUTSIDE all links, then release INSIDE a link -> NO false click. */
-    nt_pointer_t press_out = make_ptr(mx, hy, true, true, false);
+    nt_pointer_t press_out = ui_fx_pointer(mx, hy, true, true, false);
     (void)frame_link(&press_out);
-    nt_pointer_t rel_in2 = make_ptr(hx, hy, false, false, true);
+    nt_pointer_t rel_in2 = ui_fx_pointer(hx, hy, false, false, true);
     nt_ui_rich_result_t false_clk = frame_link(&rel_in2);
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(LINK_ID, false_clk.hovered_link, "release-over still hovers");
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, false_clk.clicked_link, "press-outside + release-inside -> NO click");
 
     /* (d) press INSIDE the link, then release OUTSIDE -> no click. */
-    nt_pointer_t press_in2 = make_ptr(hx, hy, true, true, false);
+    nt_pointer_t press_in2 = ui_fx_pointer(hx, hy, true, true, false);
     (void)frame_link(&press_in2);
-    nt_pointer_t rel_out = make_ptr(mx, hy, false, false, true);
+    nt_pointer_t rel_out = ui_fx_pointer(mx, hy, false, false, true);
     nt_ui_rich_result_t drag_off = frame_link(&rel_out);
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, drag_off.hovered_link, "release outside hovers nothing");
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, drag_off.clicked_link, "press-inside + release-outside -> NO click");
 
     /* (e) hovering nothing at all -> both zero. */
-    nt_pointer_t idle_out = make_ptr(mx, hy, false, false, false);
+    nt_pointer_t idle_out = ui_fx_pointer(mx, hy, false, false, false);
     nt_ui_rich_result_t none = frame_link(&idle_out);
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, none.hovered_link, "pointer outside link rects -> hovered_link == 0");
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, none.clicked_link, "pointer outside link rects -> clicked_link == 0");
@@ -1501,20 +1491,20 @@ static void test_link_press_a_release_b_no_click(void) {
     const float hy = LINK_ROOT_Y + 8.0F;
 
     /* Warm-up so the prev-frame bbox the link hit-test needs is populated. */
-    nt_pointer_t idle = make_ptr(ax, hy, false, false, false);
+    nt_pointer_t idle = ui_fx_pointer(ax, hy, false, false, false);
     (void)frame_two_links(&idle);
 
     /* Sanity: the pointer really lands on A then on B (two distinct links solved). */
     nt_ui_rich_result_t hov_a = frame_two_links(&idle);
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(LINK_ID_A, hov_a.hovered_link, "pointer at A-mid hovers link A");
-    nt_pointer_t idle_b = make_ptr(bx, hy, false, false, false);
+    nt_pointer_t idle_b = ui_fx_pointer(bx, hy, false, false, false);
     nt_ui_rich_result_t hov_b = frame_two_links(&idle_b);
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(LINK_ID_B, hov_b.hovered_link, "pointer at B-mid hovers link B");
 
     /* Press on A, release on B -> no click anywhere. */
-    nt_pointer_t press_a = make_ptr(ax, hy, true, true, false);
+    nt_pointer_t press_a = ui_fx_pointer(ax, hy, true, true, false);
     (void)frame_two_links(&press_a);
-    nt_pointer_t rel_b = make_ptr(bx, hy, false, false, true);
+    nt_pointer_t rel_b = ui_fx_pointer(bx, hy, false, false, true);
     nt_ui_rich_result_t res = frame_two_links(&rel_b);
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(LINK_ID_B, res.hovered_link, "release-over-B still hovers B");
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, res.clicked_link, "press-A + release-B -> NO click");
@@ -1565,7 +1555,7 @@ static void test_link_no_union_across_gap(void) {
     const float a1_x = LINK_ROOT_X + 12.0F;
 
     /* Warm-up so the prev-frame bbox the hit-test needs is populated. */
-    nt_pointer_t idle = make_ptr(gap_x, hy, false, false, false);
+    nt_pointer_t idle = ui_fx_pointer(gap_x, hy, false, false, false);
     (void)frame_link_gap(&idle);
 
     /* Two disjoint rects for the same link (would be 1 if the union spanned the gap). */
@@ -1576,7 +1566,7 @@ static void test_link_no_union_across_gap(void) {
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, hov_gap.clicked_link, "pointer over the gap -> clicked == 0");
 
     /* Sanity: the pointer over the first link word still hovers the link (the rects are real). */
-    nt_pointer_t over_a = make_ptr(a1_x, hy, false, false, false);
+    nt_pointer_t over_a = ui_fx_pointer(a1_x, hy, false, false, false);
     nt_ui_rich_result_t hov_a = frame_link_gap(&over_a);
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(GAP_LINK_ID, hov_a.hovered_link, "pointer over link word 1 hovers the link");
 }
@@ -1597,7 +1587,7 @@ static void test_link_hover_honors_block_transform(void) {
     const float draw_hy = local_hy + LINK_XFORM_DY;
 
     /* Warm-up: the two-pass bbox needs the block solved once (first frame has no prev bbox). */
-    nt_pointer_t over_draw = make_ptr(draw_hx, draw_hy, false, false, false);
+    nt_pointer_t over_draw = ui_fx_pointer(draw_hx, draw_hy, false, false, false);
     (void)frame_link_xform(&over_draw);
 
     /* Positive: pointer at the TRANSFORMED draw position resolves the link. */
@@ -1606,14 +1596,14 @@ static void test_link_hover_honors_block_transform(void) {
 
     /* Negative: pointer at the OLD untransformed layout position now misses (it's no longer where
      * the link is drawn). A flat-rect hit-test would wrongly still hit here. */
-    nt_pointer_t over_flat = make_ptr(local_hx, local_hy, false, false, false);
+    nt_pointer_t over_flat = ui_fx_pointer(local_hx, local_hy, false, false, false);
     nt_ui_rich_result_t miss = frame_link_xform(&over_flat);
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, miss.hovered_link, "transformed block: pointer at the OLD flat-layout position misses (draw != flat-rect)");
 
     /* Click through the transform: press+release at the drawn position -> real click. */
-    nt_pointer_t press = make_ptr(draw_hx, draw_hy, true, true, false);
+    nt_pointer_t press = ui_fx_pointer(draw_hx, draw_hy, true, true, false);
     (void)frame_link_xform(&press);
-    nt_pointer_t release = make_ptr(draw_hx, draw_hy, false, false, true);
+    nt_pointer_t release = ui_fx_pointer(draw_hx, draw_hy, false, false, true);
     nt_ui_rich_result_t clk = frame_link_xform(&release);
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(LINK_ID, clk.clicked_link, "transformed block: press+release at the drawn link position -> click");
 }
@@ -1990,7 +1980,7 @@ static void test_markup_e2e_emit_and_link(void) {
     const uint32_t link_id = nt_hash32("here", 4).value;
 
     /* Warm-up frame so the prev-frame bbox the link hit-test needs is populated. */
-    nt_pointer_t idle = make_ptr(0.0F, 0.0F, false, false, false);
+    nt_pointer_t idle = ui_fx_pointer(0.0F, 0.0F, false, false, false);
     (void)frame_markup(&idle);
 
     TEST_ASSERT_TRUE_MESSAGE(nt_ui_rich_test_emit_span_count(s_fx.ctx) > 0U, "markup entry emits draw_n spans");
@@ -2001,9 +1991,9 @@ static void test_markup_e2e_emit_and_link(void) {
      * Click requires press+release on the SAME link, so press inside first, then release inside. */
     const float hx = MK_ROOT_X + (3.0F * 8.0F) + (2.0F * 8.0F);
     const float hy = MK_ROOT_Y + 8.0F;
-    nt_pointer_t press = make_ptr(hx, hy, true, true, false);
+    nt_pointer_t press = ui_fx_pointer(hx, hy, true, true, false);
     (void)frame_markup(&press);
-    nt_pointer_t rel = make_ptr(hx, hy, false, false, true);
+    nt_pointer_t rel = ui_fx_pointer(hx, hy, false, false, true);
     nt_ui_rich_result_t clk = frame_markup(&rel);
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(link_id, clk.hovered_link, "markup link hovered (hash of \"here\")");
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(link_id, clk.clicked_link, "markup link clicked on press+release over its rect");

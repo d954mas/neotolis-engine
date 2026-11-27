@@ -13,6 +13,7 @@
 #include "clay.h"
 #include "input/nt_input.h"
 #include "test_helpers/nt_assert_trap.h"
+#include "test_helpers/ui_fx_frame.h"
 #include "test_helpers/ui_test_arena.h"
 #include "test_helpers/ui_walker_fixture.h"
 #include "ui/nt_ui.h"
@@ -37,16 +38,6 @@ void setUp(void) {
 }
 
 void tearDown(void) { ui_walker_fixture_shutdown(&s_fx); }
-
-static nt_pointer_t make_pointer(float x, float y, bool is_down, bool is_pressed) {
-    nt_pointer_t p = {0};
-    p.x = x;
-    p.y = y;
-    p.active = true;
-    p.buttons[NT_BUTTON_LEFT].is_down = is_down;
-    p.buttons[NT_BUTTON_LEFT].is_pressed = is_pressed;
-    return p;
-}
 
 /* Two overlapping floating widgets; "top" declared last → drawn on top in 2D. */
 static void declare_two(void) {
@@ -75,7 +66,7 @@ static void step_two(const nt_pointer_t *p, nt_ui_interaction_t *bottom, nt_ui_i
 /* Registry empty (nothing stepped last frame) → hot==0 → skip: neither overlapping widget reacts
  * before it has registered (reliability over instant first-frame response). */
 void test_empty_registry_no_react(void) {
-    nt_pointer_t over = make_pointer(OVER_CX, OVER_CY, false, false);
+    nt_pointer_t over = ui_fx_pointer(OVER_CX, OVER_CY, false, false, false);
     nt_ui_interaction_t bottom;
     nt_ui_interaction_t top;
     declare_only(&over);            /* frame 1: bake bboxes, no registry */
@@ -87,7 +78,7 @@ void test_empty_registry_no_react(void) {
 /* Once both are in the registry, the resolve makes "top" (declared after "bottom", equal zIndex) hot;
  * "bottom" is gated off. */
 void test_overlap_top_wins_hover(void) {
-    nt_pointer_t over = make_pointer(OVER_CX, OVER_CY, false, false);
+    nt_pointer_t over = ui_fx_pointer(OVER_CX, OVER_CY, false, false, false);
     nt_ui_interaction_t bottom;
     nt_ui_interaction_t top;
     declare_only(&over);            /* frame 1: bake bboxes */
@@ -121,7 +112,7 @@ static void step_zindexed(const nt_pointer_t *p, nt_ui_interaction_t *hiz, nt_ui
 }
 
 void test_higher_zindex_wins_despite_earlier_declaration(void) {
-    nt_pointer_t over = make_pointer(OVER_CX, OVER_CY, false, false);
+    nt_pointer_t over = ui_fx_pointer(OVER_CX, OVER_CY, false, false, false);
     nt_ui_interaction_t hiz;
     nt_ui_interaction_t lowz;
     declare_zindexed_only(&over);      /* frame 1: bake */
@@ -133,13 +124,13 @@ void test_higher_zindex_wins_despite_earlier_declaration(void) {
 
 /* Press lands on the front-most widget only; the one behind never captures. */
 void test_overlap_top_wins_press(void) {
-    nt_pointer_t over = make_pointer(OVER_CX, OVER_CY, false, false);
+    nt_pointer_t over = ui_fx_pointer(OVER_CX, OVER_CY, false, false, false);
     nt_ui_interaction_t bottom;
     nt_ui_interaction_t top;
     declare_only(&over);            /* frame 1: bake bboxes */
     step_two(&over, &bottom, &top); /* frame 2: register both */
 
-    nt_pointer_t press = make_pointer(OVER_CX, OVER_CY, true, true);
+    nt_pointer_t press = ui_fx_pointer(OVER_CX, OVER_CY, true, true, false);
     step_two(&press, &bottom, &top); /* frame 3: press arbitrated */
     TEST_ASSERT_TRUE(top.pressed_now);
     TEST_ASSERT_FALSE(bottom.pressed_now);

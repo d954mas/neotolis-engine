@@ -136,7 +136,7 @@ typedef struct {
 
 typedef struct {
     uint32_t id;             /* touch/pen: the platform contact id; 0 for the mouse */
-    float x, y;              /* Framebuffer pixels, canvas-relative, fractional */
+    float x, y;              /* Framebuffer pixels, canvas-relative, fractional; in a frame with a button edge, where its first edge happened */
     float dx, dy;            /* Movement delta in framebuffer pixels */
     float wheel_dx;          /* Wheel delta in NOTCHES: 1.0 == one physical detent (platform edge
                                 normalizes; trackpads deliver fractional notches). Consumers scale
@@ -147,7 +147,8 @@ typedef struct {
     float pressure;          /* 0.0-1.0 */
     uint8_t type;            /* nt_pointer_type_t */
     bool active;             /* Pointer currently exists */
-    bool deactivate_pending; /* an up, a mouse leave or a focus loss defers deactivation by one frame */
+    bool deactivate_pending; /* an up, a contact cancel, a mouse leave or a focus loss defers deactivation by one frame */
+    bool cancelled;          /* this frame's releases did not happen (a platform cancel, a focus loss): no click, no drop */
     nt_button_state_t buttons[NT_BUTTON_MAX];
 } nt_pointer_t;
 

@@ -118,7 +118,8 @@ void test_focus_lost_then_press_same_button(void) {
 }
 
 /* Up at one point, a hover and down at another between two polls: the release is published where it
-   happened; the press, its position and the motion since the release one frame later. */
+   happened; the press where it happened and the motion up to it one frame later. Motion after the waiting
+   press is dropped (the next move reports the pointer), and motion in the press frame is published after it. */
 void test_release_then_press_takes_two_frames(void) {
     nt_input_feed(nt_test_mouse(5.0F, 5.0F, 1));
     nt_input_poll();
@@ -132,14 +133,51 @@ void test_release_then_press_takes_two_frames(void) {
     TEST_ASSERT_EQUAL_INT(6, (int)m->x);
     TEST_ASSERT_EQUAL_INT(5, (int)m->y);
     TEST_ASSERT_EQUAL_INT(1, (int)m->dx);
+    nt_input_feed(nt_test_mouse(95.0F, 40.0F, 1));
     nt_input_poll();
     TEST_ASSERT_TRUE(m->buttons[NT_BUTTON_LEFT].is_pressed && m->buttons[NT_BUTTON_LEFT].is_down && !m->buttons[NT_BUTTON_LEFT].is_released);
-    TEST_ASSERT_EQUAL_INT(92, (int)m->x);
+    TEST_ASSERT_EQUAL_INT(90, (int)m->x);
     TEST_ASSERT_EQUAL_INT(40, (int)m->y);
-    TEST_ASSERT_EQUAL_INT(86, (int)m->dx);
+    TEST_ASSERT_EQUAL_INT(84, (int)m->dx);
     TEST_ASSERT_EQUAL_INT(35, (int)m->dy);
     nt_input_poll();
     TEST_ASSERT_TRUE(m->buttons[NT_BUTTON_LEFT].is_down && !m->buttons[NT_BUTTON_LEFT].is_pressed);
+    TEST_ASSERT_EQUAL_INT(95, (int)m->x);
+    TEST_ASSERT_EQUAL_INT(5, (int)m->dx);
+}
+
+/* A press and a move before the poll: the press frame shows the pointer where it pressed; the move is
+   published the frame after, as motion. */
+void test_press_is_published_where_it_happened(void) {
+    nt_input_feed(nt_test_mouse(20.0F, 50.0F, 0));
+    nt_input_poll();
+    nt_input_feed(nt_test_mouse(20.0F, 50.0F, 1));
+    nt_input_feed(nt_test_mouse(180.0F, 60.0F, 1));
+    nt_input_poll();
+    const nt_pointer_t *m = &g_nt_input.pointers[0];
+    TEST_ASSERT_TRUE(m->buttons[NT_BUTTON_LEFT].is_pressed && m->buttons[NT_BUTTON_LEFT].is_down);
+    TEST_ASSERT_EQUAL_INT(20, (int)m->x);
+    TEST_ASSERT_EQUAL_INT(50, (int)m->y);
+    TEST_ASSERT_EQUAL_INT(0, (int)m->dx);
+    nt_input_poll();
+    TEST_ASSERT_TRUE(m->buttons[NT_BUTTON_LEFT].is_down && !m->buttons[NT_BUTTON_LEFT].is_pressed);
+    TEST_ASSERT_EQUAL_INT(180, (int)m->x);
+    TEST_ASSERT_EQUAL_INT(160, (int)m->dx);
+    TEST_ASSERT_EQUAL_INT(10, (int)m->dy);
+}
+
+/* A contact's down and its first move before the poll: the down is published where it landed. */
+void test_contact_down_is_published_where_it_landed(void) {
+    nt_input_feed(nt_test_contact_down(42, 20.0F, 50.0F, 0.5F, NT_POINTER_TOUCH, 1));
+    nt_input_feed(nt_test_contact_move(42, 180.0F, 50.0F, 0.5F, 1));
+    nt_input_poll();
+    const nt_pointer_t *c = &g_nt_input.pointers[1];
+    TEST_ASSERT_TRUE(c->buttons[NT_BUTTON_LEFT].is_pressed);
+    TEST_ASSERT_EQUAL_INT(20, (int)c->x);
+    TEST_ASSERT_EQUAL_INT(0, (int)c->dx);
+    nt_input_poll();
+    TEST_ASSERT_EQUAL_INT(180, (int)c->x);
+    TEST_ASSERT_EQUAL_INT(160, (int)c->dx);
 }
 
 /* A bot's button event has no position: a waiting press keeps the one it was made at. */
@@ -480,6 +518,114 @@ void test_mouse_convenience(void) {
     TEST_ASSERT_FALSE(nt_input_mouse_is_down(NT_BUTTON_LEFT)); /* reads the mouse, never a contact */
 }
 
+/* ---- Cancel: a release that did not happen ---- */
+
+void test_contact_cancel_releases_cancelled_and_ends_the_contact(void) {
+    nt_input_feed(nt_test_contact_down(7, 1.0F, 1.0F, 0.5F, NT_POINTER_TOUCH, 1));
+    nt_input_poll();
+    TEST_ASSERT_FALSE(g_nt_input.pointers[1].cancelled);
+    nt_input_feed(nt_test_contact_cancel(7));
+    nt_input_poll();
+    TEST_ASSERT_TRUE(g_nt_input.pointers[1].buttons[NT_BUTTON_LEFT].is_released);
+    TEST_ASSERT_TRUE(g_nt_input.pointers[1].cancelled);
+    nt_input_poll();
+    TEST_ASSERT_FALSE(g_nt_input.pointers[1].active);
+    TEST_ASSERT_FALSE(g_nt_input.pointers[1].cancelled);
+}
+
+/* An up and a cancel of one contact in one poll: the first ends it, the second finds no contact. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_contact_up_and_cancel_in_one_poll_end_it_once(void) {
+    nt_input_feed(nt_test_contact_down(7, 1.0F, 1.0F, 0.5F, NT_POINTER_TOUCH, 1));
+    nt_input_poll();
+    nt_input_feed(nt_test_contact_up(7));
+    nt_input_feed(nt_test_contact_cancel(7));
+    nt_input_poll();
+    TEST_ASSERT_TRUE(g_nt_input.pointers[1].buttons[NT_BUTTON_LEFT].is_released);
+    TEST_ASSERT_FALSE(g_nt_input.pointers[1].cancelled);
+    nt_input_poll();
+    TEST_ASSERT_FALSE(g_nt_input.pointers[1].active);
+
+    nt_input_feed(nt_test_contact_down(8, 1.0F, 1.0F, 0.5F, NT_POINTER_TOUCH, 1));
+    nt_input_poll();
+    nt_input_feed(nt_test_contact_cancel(8));
+    nt_input_feed(nt_test_contact_up(8));
+    nt_input_poll();
+    TEST_ASSERT_TRUE(g_nt_input.pointers[1].buttons[NT_BUTTON_LEFT].is_released);
+    TEST_ASSERT_TRUE(g_nt_input.pointers[1].cancelled);
+    nt_input_poll();
+    TEST_ASSERT_FALSE(g_nt_input.pointers[1].active);
+    TEST_ASSERT_FALSE(g_nt_input.pointers[1].buttons[NT_BUTTON_LEFT].is_released);
+
+    nt_input_feed(nt_test_contact_down(6, 1.0F, 1.0F, 0.5F, NT_POINTER_TOUCH, 1));
+    nt_input_poll();
+    nt_input_feed(nt_test_contact_up(6));
+    nt_input_feed(nt_test_contact_down(6, 9.0F, 9.0F, 0.5F, NT_POINTER_TOUCH, 1)); /* the platform reuses the id */
+    nt_input_feed(nt_test_contact_cancel(6));
+    nt_input_poll();
+    TEST_ASSERT_FALSE_MESSAGE(g_nt_input.pointers[1].cancelled, "the lifted contact's release is real");
+    TEST_ASSERT_TRUE_MESSAGE(g_nt_input.pointers[2].cancelled, "the cancel ends the new contact");
+    nt_input_poll();
+
+    nt_input_feed(nt_test_contact_down(9, 1.0F, 1.0F, 0.5F, NT_POINTER_TOUCH, 1));
+    nt_input_poll();
+    nt_input_feed(nt_test_contact_cancel(10)); /* not held: nothing to cancel */
+    nt_input_poll();
+    TEST_ASSERT_TRUE(g_nt_input.pointers[1].buttons[NT_BUTTON_LEFT].is_down);
+    TEST_ASSERT_FALSE(g_nt_input.pointers[1].cancelled);
+    TEST_ASSERT_FALSE(g_nt_input.pointers[2].active);
+}
+
+void test_mouse_cancel_releases_cancelled_and_keeps_the_mouse(void) {
+    nt_input_feed(nt_test_mouse(5.0F, 5.0F, 1));
+    nt_input_poll();
+    nt_input_feed(nt_test_mouse_cancel());
+    nt_input_poll();
+    TEST_ASSERT_TRUE(nt_input_mouse_is_released(NT_BUTTON_LEFT));
+    TEST_ASSERT_TRUE(g_nt_input.pointers[0].cancelled);
+    nt_input_poll();
+    TEST_ASSERT_TRUE(g_nt_input.pointers[0].active);
+    TEST_ASSERT_FALSE(g_nt_input.pointers[0].cancelled);
+    nt_input_feed(nt_test_mouse_cancel()); /* nothing held: nothing to cancel */
+    nt_input_poll();
+    TEST_ASSERT_FALSE(g_nt_input.pointers[0].cancelled);
+}
+
+/* Only a pointer with a button held or waiting has a release to cancel. */
+void test_focus_lost_cancels_only_held_pointers(void) {
+    nt_input_feed(nt_test_mouse(5.0F, 5.0F, 0));
+    nt_input_feed(nt_test_contact_down(7, 1.0F, 1.0F, 0.5F, NT_POINTER_TOUCH, 1));
+    nt_input_poll();
+    nt_input_feed(nt_test_focus_lost());
+    nt_input_poll();
+    TEST_ASSERT_FALSE(g_nt_input.pointers[0].cancelled);
+    TEST_ASSERT_TRUE(g_nt_input.pointers[1].cancelled);
+    nt_input_feed(nt_test_mouse(5.0F, 5.0F, 1)); /* Alt+Tab during a mouse drag */
+    nt_input_poll();
+    nt_input_feed(nt_test_focus_lost());
+    nt_input_poll();
+    TEST_ASSERT_TRUE(nt_input_mouse_is_released(NT_BUTTON_LEFT));
+    TEST_ASSERT_TRUE(g_nt_input.pointers[0].cancelled);
+}
+
+/* The real release keeps its frame; the waiting press the cancel lifted is published as a cancelled tap. */
+void test_cancel_of_a_waiting_press_cancels_its_tap(void) {
+    nt_input_feed(nt_test_mouse(5.0F, 5.0F, 1));
+    nt_input_poll();
+    nt_input_feed(nt_test_mouse(5.0F, 5.0F, 0));
+    nt_input_feed(nt_test_mouse(5.0F, 5.0F, 1));
+    nt_input_feed(nt_test_mouse_cancel());
+    nt_input_poll();
+    TEST_ASSERT_TRUE(nt_input_mouse_is_released(NT_BUTTON_LEFT));
+    TEST_ASSERT_FALSE(g_nt_input.pointers[0].cancelled);
+    nt_input_poll();
+    nt_button_state_t b = g_nt_input.pointers[0].buttons[NT_BUTTON_LEFT];
+    TEST_ASSERT_TRUE(b.is_pressed && b.is_released && !b.is_down);
+    TEST_ASSERT_TRUE(g_nt_input.pointers[0].cancelled);
+    nt_input_poll();
+    TEST_ASSERT_FALSE(g_nt_input.pointers[0].cancelled);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_event_invisible_until_poll);
@@ -493,6 +639,8 @@ int main(void) {
     RUN_TEST(test_focus_lost_then_press_same_key);
     RUN_TEST(test_focus_lost_then_press_same_button);
     RUN_TEST(test_release_then_press_takes_two_frames);
+    RUN_TEST(test_press_is_published_where_it_happened);
+    RUN_TEST(test_contact_down_is_published_where_it_landed);
     RUN_TEST(test_waiting_press_keeps_its_position_through_a_buttons_event);
     RUN_TEST(test_waiting_tap_survives_a_leave);
     RUN_TEST(test_waiting_tap_keeps_its_point);
@@ -520,5 +668,10 @@ int main(void) {
     RUN_TEST(test_contacts_fill_slots_1_to_7);
     RUN_TEST(test_contact_move_without_down_ignored);
     RUN_TEST(test_mouse_convenience);
+    RUN_TEST(test_contact_cancel_releases_cancelled_and_ends_the_contact);
+    RUN_TEST(test_contact_up_and_cancel_in_one_poll_end_it_once);
+    RUN_TEST(test_mouse_cancel_releases_cancelled_and_keeps_the_mouse);
+    RUN_TEST(test_focus_lost_cancels_only_held_pointers);
+    RUN_TEST(test_cancel_of_a_waiting_press_cancels_its_tap);
     return UNITY_END();
 }

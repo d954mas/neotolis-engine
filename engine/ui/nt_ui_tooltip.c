@@ -11,6 +11,7 @@
 #include "ui/nt_ui_internal.h"
 #include "ui/nt_ui_label.h"
 #include "ui/nt_ui_popup.h"
+#include "ui/nt_ui_popup_internal.h"
 #include "ui/nt_ui_state.h"
 
 const nt_ui_widget_def_t NT_UI_TOOLTIP_DEF = {
@@ -36,20 +37,18 @@ typedef struct {
 } nt_ui_tooltip_cell_t;
 
 nt_ui_tooltip_style_t nt_ui_tooltip_style_defaults(void) {
-    /* Polished flat baseline: no atlas art (panel_art / caret atlas.id stay 0), no border/shadow. Wire
-     * panel_art + caret + border/shadow to opt into the sprite look (parity with dropdown/menu). */
+    /* Polished flat baseline: no atlas art (panel_art / caret atlas.id stay 0), no border. Wire
+     * panel_art + caret + border to opt into the sprite look (parity with dropdown/menu). */
     return (nt_ui_tooltip_style_t){
         .panel_bg = 0xFF202020U,
         .text_color = 0xFFE8E8E8U,
         .panel_tint = 0xFFFFFFFFU,
         .caret_tint = 0xFFFFFFFFU,
         .border_color = 0U, /* no border by default */
-        .shadow_color = 0U, /* no shadow by default */
         .delay_secs = 0.5F,
         .font_size = 13.0F,
         .open_ease_speed = 0.0F, /* snap-open by default; the game opts into a tween */
         .slice9_scale = 1.0F,
-        .shadow_offset_px = 0,
         .max_width = 240U,
         .pad = 6U,
         .font_id = 0U,
@@ -57,27 +56,6 @@ nt_ui_tooltip_style_t nt_ui_tooltip_style_defaults(void) {
         .border_px = 0U,  /* drawn only when border_color set */
         .corner_radius = 4U,
     };
-}
-
-/* The drop-shadow: a translucent rect the panel's size, attached to the panel and pushed +offset, drawn
- * UNDER the panel (declared first inside the panel scope at a child-z below the panel body). Sized from
- * the panel's prev-frame bbox (A3: skipped the first frame until the bbox exists; cosmetic 1-frame lag). */
-static void tooltip_declare_shadow(nt_ui_context_t *ctx, uint8_t fill_layer, uint32_t panel_id, const nt_ui_tooltip_style_t *style) {
-    if (style->shadow_offset_px == 0 || style->shadow_color == 0U) {
-        return;
-    }
-    const nt_ui_bbox_t bb = nt_ui_get_bbox(ctx, panel_id);
-    if (!bb.found || bb.width <= 0.0F || bb.height <= 0.0F) {
-        return;
-    }
-    const float off = (float)style->shadow_offset_px;
-    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(bb.width), CLAY_SIZING_FIXED(bb.height)}},
-          .floating = {.attachTo = CLAY_ATTACH_TO_PARENT,
-                       .zIndex = -1, /* below the panel body so the panel paints over the shadow */
-                       .offset = {.x = off, .y = off},
-                       .attachPoints = {.element = CLAY_ATTACH_POINT_LEFT_TOP, .parent = CLAY_ATTACH_POINT_LEFT_TOP}},
-          .backgroundColor = nt_ui_unpack_abgr(style->shadow_color),
-          .userData = (void *)nt_ui_make_element_data(fill_layer, NULL)}) {}
 }
 
 /* The caret: a sprite on the panel edge facing the target, flipped per the popup side. The art points UP
@@ -148,18 +126,18 @@ bool nt_ui_tooltip(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8
 
     nt_ui_popup_style_t pst = nt_ui_popup_style_defaults();
     pst.ease_speed = style->open_ease_speed; /* game-controlled open tween (0 = snap) */
-    pst.flags = 0U;                          /* no light-dismiss catcher: hover-driven, must not gate base UI */
     pst.layer = fill_layer;                  /* widget-owned: the popup panel sits on the fill layer */
 
     /* Resolve the panel slice9 once: art-or-flat decides whether the panel can round (IMAGE bg can't). */
     nt_atlas_resolve_ref(&style->panel_art);
     const bool panel_art = (style->panel_art.atlas.id != 0U && style->panel_art.region != NT_ATLAS_INVALID_REGION);
 
-    bool shown = false;
-    /* Low-level begin/end (no one-bool wrapper): the open state is engine-derived from the hover timer,
-     * not a game bool, and there is no close_requested path to harvest. */
-    const nt_ui_popup_result_t r = nt_ui_popup_begin(ctx, tooltip_popup_id(target_id), &pst, &anc, open);
-    if (r.visible) {
+    /* No overlay: it shows while the hover timer says so, then fades, above every overlay and taking no input. */
+    nt_ui_popup_info_t info = {0};
+    const uint32_t popup_id = tooltip_popup_id(target_id);
+    /* Declared last frame: still fading out after the hover left. */
+    const bool shown = (open || nt_ui_internal_live_slot(ctx, popup_id) >= 0) && nt_ui_internal_tooltip_begin(ctx, popup_id, &pst, &anc, open, &info);
+    if (shown) {
         const uint32_t panel_id = tooltip_panel_id(target_id);
         const nt_ui_label_style_t lbl = {.font_id = style->font_id, .font_size = style->font_size, .color = style->text_color};
         Clay_SizingAxis w = (style->max_width > 0U) ? CLAY_SIZING_FIT(.max = (float)style->max_width) : CLAY_SIZING_FIT(0);
@@ -185,13 +163,11 @@ bool nt_ui_tooltip(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint8
 
         nt_ui_clay_priv_open_element();
         nt_ui_clay_priv_configure_open_element(panel);
-        tooltip_declare_shadow(ctx, fill_layer, panel_id, style); /* first child: drops UNDER the panel body */
-        tooltip_declare_caret(fill_layer, style, r.side);
+        tooltip_declare_caret(fill_layer, style, info.side);
         nt_ui_label(ctx, nt_ui_make_element_data(label_layer, NULL), content, &lbl);
         nt_ui_clay_priv_close_element();
-        shown = true;
+        nt_ui_clay_priv_close_element(); /* a tooltip is no overlay: no declaration depth to end */
     }
-    nt_ui_popup_end(ctx);
     return shown;
 }
 

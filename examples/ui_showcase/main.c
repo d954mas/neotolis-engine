@@ -345,25 +345,20 @@ typedef struct {
 /* Dropdown tab: game-owned selection + open flags. */
 typedef struct {
     int fruit_sel; /* short list selection */
-    bool fruit_open;
-    int city_sel; /* long (scrolling) list selection */
-    bool city_open;
+    int city_sel;  /* long (scrolling) list selection */
     int color_sel; /* custom swatch-trigger combo selection */
-    bool color_open;
 } dropdown_params_t;
 
 /* Menu tab: two independent game-owned menus to show the optional target binding — a GLOBAL menu
  * (right-click anywhere in the tab) and a ZONE menu bound to a panel (right-click only over it). */
 typedef struct {
-    nt_ui_menu_state_t global_state; /* target_id == 0: arms on a right-click anywhere */
-    nt_ui_menu_state_t zone_state;   /* target_id == panel: arms only over the bound panel */
-    /* Game-owned per-frame menu scratch (one per logical menu, reused every frame — holds the prev-frame
-     * nav record). Zero-init is valid; static storage needs no nt_ui_menu_init call. */
-    nt_ui_menu_ctx_t global_menu;
-    nt_ui_menu_ctx_t zone_menu;
-    const char *last_chosen; /* readout label of the last chosen row; points at the row's static literal (NULL = none) */
-    bool show_grid;          /* checkmark-toggle row state (global menu) */
-    uint8_t opacity_pct;     /* custom-row state the inner "reset" button restores to 100 */
+    /* One game-owned menu each, kept across frames; zero-init is the closed state. */
+    nt_ui_menu_t global_menu; /* opens on a right-click outside the panel */
+    nt_ui_menu_t zone_menu;   /* opens on a right-click or long-press over the panel */
+    bool right_armed;         /* a game right-click is in progress: armed by its press, fired by its release */
+    const char *last_chosen;  /* readout label of the last chosen row; points at the row's static literal (NULL = none) */
+    bool show_grid;           /* checkmark-toggle row state (global menu) */
+    uint8_t opacity_pct;      /* custom-row state the inner "reset" button restores to 100 */
 } menu_params_t;
 
 /* Input tab: four game-owned field buffers (ImGui-style). The widget edits these in place;
@@ -398,8 +393,6 @@ struct tab_state {
     progress_params_t prog;
     btn_xform_params_t btn_xform;
     /* Modals tab. */
-    bool confirm_open;
-    bool nested_open;
     modal_params_t modal;
     /* Stress tab. */
     stress_params_t stress;
@@ -431,16 +424,14 @@ static struct tab_state s_state = {
     .s9 = {.inset_l = 10, .inset_r = 10, .inset_t = 10, .inset_b = 10, .target_w = 300, .target_h = 150, .slice9_scale = 1.0F},
     .prog = {.value = 0.4F, .auto_anim = false, .ramp_up = true},
     .btn_xform = {.rotation_deg = 20.0F, .scale = 1.0F, .offset_x = 0.0F, .offset_y = 0.0F, .clicks = 0},
-    .confirm_open = false,
-    .nested_open = false,
     .modal = {.open_type = 2, .close_type = 1, .open_edge = 0, .close_edge = 0, .ease_speed = 14.0F, .scale_start = 0.92F, .slide_offset = 32.0F, .backdrop_alpha = 0.55F}, /* default demo: slide-in /
                                                                                                                                                                                fade-out */
     .stress = {.label_count = 3000},
     .input = {.plain = "Edit me", .numeric = "42", .password = "secret", .cyrillic = "Привет, мир"},
     .events = {.confirms = 0, .dbl_clicks = 0, .last_progress = 0.0F},
     .radial = {.cooldown = 0.0F, .cooldown_secs = 3.0F, .hold_fires = 0, .hold_progress = 0.0F},
-    .dropdown = {.fruit_sel = 0, .fruit_open = false, .city_sel = -1, .city_open = false, .color_sel = -1, .color_open = false},
-    .menu = {.global_state = {0}, .zone_state = {0}, .last_chosen = NULL, .show_grid = false, .opacity_pct = 60}, /* non-100 start so "reset" visibly changes it */
+    .dropdown = {.fruit_sel = 0, .city_sel = -1, .color_sel = -1},
+    .menu = {.global_menu = {0}, .zone_menu = {0}, .last_chosen = NULL, .show_grid = false, .opacity_pct = 60}, /* non-100 start so "reset" visibly changes it */
     .rich = {.time = 0.0F, .last_link = 0U, .link_clicks = 0U, .hover_a = 0U, .hover_b = 0U, .latch_a = 0.0F, .latch_b = 0.0F},
 };
 // #endregion
@@ -511,7 +502,7 @@ static uint32_t s_id_tip_a, s_id_tip_b, s_id_tip_c;         /* tooltip targets *
 static uint32_t s_id_menu_global;                           /* global context menu (right-click anywhere) */
 static uint32_t s_id_menu_zone;                             /* zone context menu (bound to a panel) */
 static uint32_t s_id_menu_panel;                            /* the zone panel the zone menu binds to (opens only over it) */
-static uint32_t s_id_menu_opacity_btn;                      /* inner button on the zone menu's non_activatable custom row */
+static uint32_t s_id_menu_opacity_btn;                      /* inner button on the zone menu's not-activatable custom row */
 static uint32_t s_id_tabs_demo_base;                        /* begin/end-core demo strip: tabs salt from this + index */
 static bool s_ids_ready;
 // #endregion
@@ -988,7 +979,7 @@ static void init_styles(void) {
     s_input_art.skin[NT_UI_INPUT_FOCUSED] = (nt_ui_input_skin_t){.bg_art = s_panel_blue_ref};
     s_input_art.border_width = 0.0F; /* frame lives in the art now, no vector border */
 
-    /* Modal: only backdrop_color flips per palette; the props panel owns backdrop_alpha. */
+    /* Modal: only backdrop_color flips per palette; the props panel sets its alpha. */
     nt_ui_modal_style_t modal_base = nt_ui_modal_style_defaults();
     modal_base.layer = LAYER_BG;
     s_modal_dark = modal_base;
@@ -1050,8 +1041,8 @@ static void init_styles(void) {
     s_dropdown_light.row_selected.fill = 0xFF3C8CC8U; /* warm amber accent for the pale theme */
 
     /* ---- Tooltip: a short reveal delay; dark uses the panel_blue slice9 frame + a caret pointing at the
-     * target (flips ABOVE near the bottom border) + a soft drop-shadow. Light flips to a pale flat panel +
-     * dark text, keeping the caret + a thin border + a subtle shadow. ---- */
+     * target (flips ABOVE near the bottom border). Light flips to a pale flat panel + dark text, keeping
+     * the caret + a thin border. ---- */
     s_tooltip_dark = nt_ui_tooltip_style_defaults();
     s_tooltip_dark.delay_secs = 0.5F;
     s_tooltip_dark.font_size = 16.0F;
@@ -1061,8 +1052,6 @@ static void init_styles(void) {
     s_tooltip_dark.caret = s_caret_ref;
     s_tooltip_dark.caret_tint = 0xFFCFE2FAU; /* pale blue caret matching the panel_blue frame */
     s_tooltip_dark.caret_size = 14U;
-    s_tooltip_dark.shadow_color = 0x60000000U; /* translucent black drop-shadow */
-    s_tooltip_dark.shadow_offset_px = 4;
     s_tooltip_light = s_tooltip_dark;
     s_tooltip_light.panel_art = (nt_atlas_region_ref_t){0}; /* flat pale panel on the light theme (no art) */
     s_tooltip_light.panel_bg = 0xFFF4F4F4U;
@@ -1070,7 +1059,6 @@ static void init_styles(void) {
     s_tooltip_light.caret_tint = 0xFFF4F4F4U;   /* caret matches the pale panel */
     s_tooltip_light.border_color = 0xFFB8C2CCU; /* thin cool-grey border around the pale panel */
     s_tooltip_light.border_px = 1U;
-    s_tooltip_light.shadow_color = 0x30000000U; /* lighter shadow on the pale theme */
 
     /* ---- Context menu (dogfood): panel_blue slice9 frame + arrow_right submenu marker + an icon gutter
      * (bunny on some rows, aligned-empty on the rest). Rows keep the eased flat hover highlight over the
@@ -1701,7 +1689,7 @@ static bool modal_action_btn(nt_ui_context_t *ctx, uint32_t id, const char *text
 }
 
 /* Tab body: description + the trigger only. The modal is declared at ROOT in render_modal_overlay
- * so its floating panel is never clipped by the stage scissor; this fn must NOT call nt_ui_modal_visible. */
+ * so its floating panel is never clipped by the stage scissor; this fn must NOT call nt_ui_modal_begin. */
 static void render_modals(nt_ui_context_t *ctx, tab_state_t *st) {
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Open a confirm dialog; the properties panel drives the transition + tween live.", g_current->caption);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Esc closes the TOP modal; clicking the backdrop closes; the backdrop blocks click-through.", g_current->caption);
@@ -1713,7 +1701,7 @@ static void render_modals(nt_ui_context_t *ctx, tab_state_t *st) {
         true);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Show confirm", g_current->body);
     if (nt_ui_button_end(ctx)) {
-        st->confirm_open = true;
+        nt_ui_modal_open(ctx, s_id_modal_confirm);
     }
 }
 
@@ -1724,12 +1712,12 @@ static void render_modal_overlay(nt_ui_context_t *ctx, tab_state_t *st) {
     /* Seed the runtime style from the active palette, then overlay the props-panel values. */
     s_modal_style_runtime = *g_current->modal;
     s_modal_style_runtime.ease_speed = st->modal.ease_speed;
-    s_modal_style_runtime.backdrop_alpha = st->modal.backdrop_alpha;
+    s_modal_style_runtime.backdrop_color = (s_modal_style_runtime.backdrop_color & 0x00FFFFFFU) | ((uint32_t)lroundf(st->modal.backdrop_alpha * 255.0F) << 24U);
     s_modal_style_runtime.flags |= (uint8_t)(NT_UI_MODAL_LISTEN_ESC | NT_UI_MODAL_CLOSE_ON_BACKDROP);
     s_modal_style_runtime.open = modal_param_anim(st->modal.open_type, st->modal.open_edge, st->modal.scale_start, st->modal.slide_offset);
     s_modal_style_runtime.close = modal_param_anim(st->modal.close_type, st->modal.close_edge, st->modal.scale_start, st->modal.slide_offset);
 
-    if (nt_ui_modal_visible(ctx, s_id_modal_confirm, &s_modal_style_runtime, &st->confirm_open)) {
+    if (nt_ui_modal_begin(ctx, s_id_modal_confirm, &s_modal_style_runtime, NULL)) {
         CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(520), CLAY_SIZING_FIT(0)},
                          .padding = CLAY_PADDING_ALL(22),
                          .layoutDirection = CLAY_TOP_TO_BOTTOM,
@@ -1742,35 +1730,31 @@ static void render_modal_overlay(nt_ui_context_t *ctx, tab_state_t *st) {
 
             CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 12}}) {
                 if (modal_action_btn(ctx, s_id_modal_ok_btn, "OK")) {
-                    st->confirm_open = false;
+                    nt_ui_close(ctx, s_id_modal_confirm);
                 }
                 if (modal_action_btn(ctx, s_id_modal_cancel_btn, "Cancel")) {
-                    st->confirm_open = false;
+                    nt_ui_close(ctx, s_id_modal_confirm);
                 }
                 if (modal_action_btn(ctx, s_id_modal_nested_btn, "Show nested")) {
-                    st->nested_open = true;
+                    nt_ui_modal_open(ctx, s_id_modal_nested);
                 }
             }
 
             /* Nested modal (depth 2): proves z-banding + top-only Esc targeting. */
-            if (nt_ui_modal_visible(ctx, s_id_modal_nested, &s_modal_style_runtime, &st->nested_open)) {
+            if (nt_ui_modal_begin(ctx, s_id_modal_nested, &s_modal_style_runtime, NULL)) {
                 CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(340), CLAY_SIZING_FIT(0)}, .padding = CLAY_PADDING_ALL(20), .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 14},
                       .backgroundColor = g_current->panel,
                       .cornerRadius = CLAY_CORNER_RADIUS(12)}) {
                     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Nested modal (depth 2)", g_current->h1);
                     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Esc closes only this top modal.", g_current->body);
                     if (modal_action_btn(ctx, s_id_modal_nested_close_btn, "Close")) {
-                        st->nested_open = false;
+                        nt_ui_close(ctx, s_id_modal_nested);
                     }
                 }
                 nt_ui_modal_end(ctx);
             }
         }
         nt_ui_modal_end(ctx);
-    }
-    /* Outer closed -> the nested child can't be declared; clear its bool so the stack stays balanced. */
-    if (!st->confirm_open) {
-        st->nested_open = false;
     }
 }
 
@@ -2964,7 +2948,7 @@ static void render_dropdown(nt_ui_context_t *ctx, tab_state_t *st) {
      * icon + name in the SAME icon-gutter idiom as the open rows (mirrors the engine row gutter); a couple of
      * rows draw an icon in the engine gutter (combo_selectable_icon) — all labels stay in one aligned column. */
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Fruit (short list, icon gutter)", g_current->caption);
-    nt_ui_combo_preview_begin(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_dd_fruit, g_current->dropdown, &st->dropdown.fruit_open);
+    nt_ui_combo_preview_begin(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_dd_fruit, g_current->dropdown);
     {
         const int sel = st->dropdown.fruit_sel;
         const float gut = (float)g_current->dropdown->icon_size; /* same gutter as the open rows so the label x matches */
@@ -2994,7 +2978,7 @@ static void render_dropdown(nt_ui_context_t *ctx, tab_state_t *st) {
      * bottom flips the list ABOVE the trigger. Plain selectables (no icon gutter). */
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "City (long scrolling list)", g_current->caption);
     const char *city_preview = (st->dropdown.city_sel >= 0) ? cities[st->dropdown.city_sel] : "Pick a city";
-    if (nt_ui_combo_begin(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_dd_city, city_preview, g_current->dropdown, &st->dropdown.city_open)) {
+    if (nt_ui_combo_begin(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_dd_city, city_preview, g_current->dropdown)) {
         for (int i = 0; i < city_count; ++i) {
             if (nt_ui_combo_selectable(ctx, (uint32_t)i, cities[i], i == st->dropdown.city_sel)) {
                 st->dropdown.city_sel = i;
@@ -3009,7 +2993,7 @@ static void render_dropdown(nt_ui_context_t *ctx, tab_state_t *st) {
     static const char *const colors[] = {"Crimson", "Emerald", "Azure", "Amber"};
     static const Clay_Color swatches[] = {{208, 48, 48, 255}, {48, 176, 80, 255}, {48, 128, 208, 255}, {224, 192, 48, 255}}; /* RGBA */
     static const int color_count = (int)(sizeof colors / sizeof colors[0]);
-    nt_ui_combo_preview_begin(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_dd_color, g_current->dropdown, &st->dropdown.color_open);
+    nt_ui_combo_preview_begin(ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_dd_color, g_current->dropdown);
     {
         const int sel = st->dropdown.color_sel;
         const Clay_Color sw = (sel >= 0 && sel < color_count) ? swatches[sel] : (Clay_Color){128, 128, 128, 255};
@@ -3042,8 +3026,8 @@ static void render_tooltip(nt_ui_context_t *ctx, tab_state_t *st) {
         .cornerRadius = CLAY_CORNER_RADIUS(8)};
 
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Hover a target and wait ~0.5s for its tooltip; move away to hide. The tooltip never blocks clicks underneath.", g_current->caption);
-    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT),
-                "The panel is a slice9 frame with a caret pointing at the target + a drop-shadow; near the bottom border the caret flips to the panel's bottom edge.", g_current->caption);
+    nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "The panel is a slice9 frame with a caret pointing at the target; near the bottom border the caret flips to the panel's bottom edge.",
+                g_current->caption);
 
     /* The targets are plain buttons so they are still clickable (proving the tooltip has no catcher).
      * The tooltip is declared AFTER each target so the target carries a queryable bbox this frame. */
@@ -3092,74 +3076,73 @@ enum {
 /* GLOBAL menu (app actions): a rich New row (icon + Ctrl+N shortcut), an "Open recent" submenu, a
  * separator, a checkmark toggle, a disabled-via-custom row, and Quit. Built in CODE every frame. */
 static void render_menu_global(nt_ui_context_t *ctx, tab_state_t *st) {
-    nt_ui_menu_ctx_t *menu = &st->menu.global_menu;
-    nt_ui_menu_begin(menu, ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_menu_global, &st->menu.global_state, g_current->menu);
-    nt_ui_menu_item_opts_t newo = {0};
-    newo.icon = s_icon_bunny_ref;
-    newo.shortcut = "Ctrl+N";
-    if (nt_ui_menu_item_ex(menu, MK_NEW, "New", newo)) {
-        st->menu.last_chosen = "New";
-    }
-    if (nt_ui_menu_submenu_begin(menu, MK_RECENT, "Open recent")) {
-        if (nt_ui_menu_item(menu, MK_RECENT_A, "level_01.ntpack")) {
-            st->menu.last_chosen = "Open recent > level_01.ntpack";
+    nt_ui_menu_t *menu = &st->menu.global_menu;
+    if (nt_ui_menu_begin(menu, ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, g_current->menu)) {
+        nt_ui_menu_item_opts_t newo = {0};
+        newo.icon = s_icon_bunny_ref;
+        newo.shortcut = "Ctrl+N";
+        if (nt_ui_menu_item_ex(menu, MK_NEW, "New", newo)) {
+            st->menu.last_chosen = "New";
         }
-        if (nt_ui_menu_item(menu, MK_RECENT_B, "ui_showcase.ntpack")) {
-            st->menu.last_chosen = "Open recent > ui_showcase.ntpack";
+        if (nt_ui_menu_submenu_begin(menu, MK_RECENT, "Open recent")) {
+            if (nt_ui_menu_item(menu, MK_RECENT_A, "level_01.ntpack")) {
+                st->menu.last_chosen = "Open recent > level_01.ntpack";
+            }
+            if (nt_ui_menu_item(menu, MK_RECENT_B, "ui_showcase.ntpack")) {
+                st->menu.last_chosen = "Open recent > ui_showcase.ntpack";
+            }
+            nt_ui_menu_item_opts_t clr = {.disabled = true}; /* greyed, not selectable */
+            (void)nt_ui_menu_item_ex(menu, MK_RECENT_CLEAR, "(clear list)", clr);
+            nt_ui_menu_submenu_end(menu);
         }
-        nt_ui_menu_item_opts_t clr = {.disabled = true}; /* greyed, not selectable */
-        (void)nt_ui_menu_item_ex(menu, MK_RECENT_CLEAR, "(clear list)", clr);
-        nt_ui_menu_submenu_end(menu);
+        nt_ui_menu_separator(menu);
+        /* Checkmark toggle row: `selected` draws the checkmark; clicking flips the game-owned bool. */
+        nt_ui_menu_item_opts_t grid = {.selected = st->menu.show_grid};
+        if (nt_ui_menu_item_ex(menu, MK_TOGGLE_GRID, "Show grid", grid)) {
+            st->menu.show_grid = !st->menu.show_grid;
+            st->menu.last_chosen = "Show grid";
+        }
+        if (nt_ui_menu_item(menu, MK_PREFS, "Preferences")) {
+            st->menu.last_chosen = "Preferences";
+            nt_ui_modal_open(ctx, s_id_modal_confirm); /* a modal opened from a menu item outlives the menu */
+        }
+        if (nt_ui_menu_item(menu, MK_QUIT, "Quit")) {
+            st->menu.last_chosen = "Quit";
+        }
+        nt_ui_menu_end(menu);
     }
-    nt_ui_menu_separator(menu);
-    /* Checkmark toggle row: `selected` draws the checkmark; clicking flips the game-owned bool. */
-    nt_ui_menu_item_opts_t grid = {.selected = st->menu.show_grid};
-    if (nt_ui_menu_item_ex(menu, MK_TOGGLE_GRID, "Show grid", grid)) {
-        st->menu.show_grid = !st->menu.show_grid;
-        st->menu.last_chosen = "Show grid";
-    }
-    if (nt_ui_menu_item(menu, MK_PREFS, "Preferences")) {
-        st->menu.last_chosen = "Preferences";
-    }
-    if (nt_ui_menu_item(menu, MK_QUIT, "Quit")) {
-        st->menu.last_chosen = "Quit";
-    }
-    nt_ui_menu_end(menu);
 }
 
 /* ZONE menu (panel actions): distinct rows + a "Move to" submenu so the bound menu is unmistakable, plus a
- * custom non_activatable row whose inner control owns the click while the row only highlights. */
+ * custom not-activatable row whose inner control owns the click while the row only highlights. */
 static void render_menu_zone(nt_ui_context_t *ctx, tab_state_t *st) {
-    nt_ui_menu_ctx_t *menu = &st->menu.zone_menu;
-    nt_ui_menu_begin(menu, ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, s_id_menu_zone, &st->menu.zone_state, g_current->menu);
-    nt_ui_menu_item_opts_t edit = {0};
-    edit.icon = s_icon_bunny_ref;
-    if (nt_ui_menu_item_ex(menu, MK_EDIT, "Edit panel", edit)) {
-        st->menu.last_chosen = "Edit panel";
-    }
-    if (nt_ui_menu_item(menu, MK_DUP, "Duplicate")) {
-        st->menu.last_chosen = "Duplicate";
-    }
-    nt_ui_menu_separator(menu);
-    nt_ui_menu_item_opts_t move = {0};
-    move.icon = s_icon_bunny_ref;
-    if (nt_ui_menu_submenu_begin_ex(menu, MK_MOVE, "Move to", move)) {
-        if (nt_ui_menu_item(menu, MK_MOVE_FRONT, "Front")) {
-            st->menu.last_chosen = "Move to > Front";
+    nt_ui_menu_t *menu = &st->menu.zone_menu;
+    if (nt_ui_menu_begin(menu, ctx, NT_UI_DATA_LAYER(LAYER_IMG), LAYER_TEXT, g_current->menu)) {
+        nt_ui_menu_item_opts_t edit = {0};
+        edit.icon = s_icon_bunny_ref;
+        if (nt_ui_menu_item_ex(menu, MK_EDIT, "Edit panel", edit)) {
+            st->menu.last_chosen = "Edit panel";
         }
-        if (nt_ui_menu_item(menu, MK_MOVE_BACK, "Back")) {
-            st->menu.last_chosen = "Move to > Back";
+        if (nt_ui_menu_item(menu, MK_DUP, "Duplicate")) {
+            st->menu.last_chosen = "Duplicate";
         }
-        nt_ui_menu_item_opts_t grp = {.disabled = true};
-        (void)nt_ui_menu_item_ex(menu, MK_MOVE_GROUP, "Group", grp);
-        nt_ui_menu_submenu_end(menu);
-    }
-    /* Custom-content row (non_activatable): the inner button owns the click; the row only
-     * highlights on hover. The game reads the inner button's own interaction. */
-    nt_ui_menu_item_opts_t op = {.non_activatable = true};
-    /* Guard the custom body with the return: a CLOSED (present-only) menu returns false and skips the body,
-     * so the inner control never leaks onto the scene. item_end is still called unconditionally to balance. */
-    if (nt_ui_menu_item_begin(menu, MK_CUSTOM_OPACITY, op)) {
+        nt_ui_menu_separator(menu);
+        nt_ui_menu_item_opts_t move = {0};
+        move.icon = s_icon_bunny_ref;
+        if (nt_ui_menu_submenu_begin_ex(menu, MK_MOVE, "Move to", move)) {
+            if (nt_ui_menu_item(menu, MK_MOVE_FRONT, "Front")) {
+                st->menu.last_chosen = "Move to > Front";
+            }
+            if (nt_ui_menu_item(menu, MK_MOVE_BACK, "Back")) {
+                st->menu.last_chosen = "Move to > Back";
+            }
+            nt_ui_menu_item_opts_t grp = {.disabled = true};
+            (void)nt_ui_menu_item_ex(menu, MK_MOVE_GROUP, "Group", grp);
+            nt_ui_menu_submenu_end(menu);
+        }
+        /* Custom-content row (not activatable): the inner button owns the click; the row only
+         * highlights on hover. The game reads the inner button's own interaction. */
+        nt_ui_menu_item_begin(menu, MK_CUSTOM_OPACITY, /*enabled=*/true, /*activatable=*/false);
         char opacity_buf[24];
         (void)snprintf(opacity_buf, sizeof opacity_buf, "Opacity %u%%", st->menu.opacity_pct);
         nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), opacity_buf, g_current->body);
@@ -3170,18 +3153,18 @@ static void render_menu_zone(nt_ui_context_t *ctx, tab_state_t *st) {
             st->menu.opacity_pct = 100; /* the inner control owns the click; a real state change, not a magic log */
             st->menu.last_chosen = "Opacity reset";
         }
+        nt_ui_menu_item_end(menu);
+        if (nt_ui_menu_item(menu, MK_DELETE, "Delete")) {
+            st->menu.last_chosen = "Delete";
+        }
+        nt_ui_menu_end(menu);
     }
-    nt_ui_menu_item_end(menu);
-    if (nt_ui_menu_item(menu, MK_DELETE, "Delete")) {
-        st->menu.last_chosen = "Delete";
-    }
-    nt_ui_menu_end(menu);
 }
 
 /* Menu tab: a right-click / long-press context menu with a nested submenu, exercising the mouse-aim
  * hover-intent, per-level edge-flip, nested dismiss, and keyboard nav. The immediate API builds the tree in
- * CODE every frame (no static items[]); the game owns the open flag; activation is reported inline. The
- * nt_ui_menu_open_trigger arms the menu at the cursor on a right-click / long-press. */
+ * CODE every frame (no static items[]); the game decides when nt_ui_menu_open opens a menu at the cursor;
+ * activation is reported inline. */
 static void render_menu(nt_ui_context_t *ctx, tab_state_t *st) {
     char buf[64];
 
@@ -3190,10 +3173,8 @@ static void render_menu(nt_ui_context_t *ctx, tab_state_t *st) {
                 g_current->caption);
     nt_ui_label(ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Opening one closes the other. Hover the submenu row to fly it out; arrows/Enter navigate.", g_current->caption);
 
-    /* ZONE menu: a visible panel the menu binds to, so a right-click / long-press arms it ONLY over this
-     * panel. The game owns the panel's single canonical events step (long-press gesture for touch); the
-     * trigger does only idempotent reads and binds the right-click to the panel via a bbox geometry hit-test
-     * (so a right-click over the panel RE-opens the menu at the cursor through its own occluder). */
+    /* ZONE menu: a visible panel the menu binds to, so a right-click / long-press opens it ONLY over this
+     * panel. The game owns the panel's step (long-press gesture for touch) and decides when each menu opens. */
     CLAY({.id = (Clay_ElementId){.id = s_id_menu_panel},
           .layout = {.sizing = {CLAY_SIZING_FIXED(520), CLAY_SIZING_FIXED(220)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
           .backgroundColor = g_current->panel_alt,
@@ -3203,26 +3184,33 @@ static void render_menu(nt_ui_context_t *ctx, tab_state_t *st) {
     }
     const nt_ui_interaction_t zone_ev = nt_ui_step(ctx, s_id_menu_panel, NULL);
 
-    /* Mutually exclusive arming: a right-click over the zone panel must arm ONLY the zone menu, anywhere
-     * else ONLY the global. Same cursor + bbox snapshot the trigger reads (prev-frame bbox vs this-frame
-     * pointer), so over_zone matches the zone trigger's own geometry hit-test. */
-    const nt_ui_bbox_t zone_bb = nt_ui_get_bbox(ctx, s_id_menu_panel);
-    const bool over_zone = zone_bb.found && zone_ev.pos[0] >= zone_bb.x && zone_ev.pos[0] <= zone_bb.x + zone_bb.width && zone_ev.pos[1] >= zone_bb.y && zone_ev.pos[1] <= zone_bb.y + zone_bb.height;
-
-    const bool zone_armed = nt_ui_menu_open_trigger(ctx, s_id_menu_zone, s_id_menu_panel, nt_ui_hold_crossed(&zone_ev, 0.5F), &st->menu.zone_state);
-    /* Global only when NOT over the zone, so a right-click on the panel never also arms the global. */
-    const bool global_armed = !over_zone && nt_ui_menu_open_trigger(ctx, s_id_menu_global, /*target_id=*/0U, /*long_pressed=*/false, &st->menu.global_state);
-
-    /* Opening one forces the other closed (open_trigger returns true only on the arming frame). */
-    if (zone_armed) {
-        st->menu.global_state.open = false;
-    } else if (global_armed) {
-        st->menu.zone_state.open = false;
+    /* A right-click on the panel opens the zone menu, also through an open menu's catcher (its press closes that
+     * menu, its release lands on the panel), but not through the confirm modal, whose backdrop press swallows the
+     * gesture. Opening one menu closes the other. */
+    const bool held = nt_ui_hold_crossed(&zone_ev, 0.5F);
+    /* The global menu is the game's own right-click, read from nt_input: a right press the UI does not take (no
+     * widget, overlay or inspector under it) and that joins no left drag arms it; its own release fires it unless
+     * the platform cancelled it. The frame passes the primary pointer alone, so it is frame slot 0. */
+    const nt_pointer_t *pointer = &g_nt_input.pointers[g_nt_input.primary];
+    const nt_button_state_t right = pointer->buttons[NT_BUTTON_RIGHT];
+    if (right.is_pressed) {
+        st->menu.right_armed = !pointer->buttons[NT_BUTTON_LEFT].is_down && !nt_ui_wants_pointer(ctx, 0U);
+    } else if (pointer->buttons[NT_BUTTON_LEFT].is_pressed) {
+        st->menu.right_armed = false; /* a left press joins the gesture: it is no right-click */
+    }
+    const bool game_right = st->menu.right_armed && right.is_released && !pointer->cancelled;
+    if (right.is_released) {
+        st->menu.right_armed = false;
+    }
+    float pos[2];
+    nt_ui_screen_to_layout(ctx, (const float[2]){pointer->x, pointer->y}, pos);
+    if (held || zone_ev.right_clicked) {
+        nt_ui_menu_open(&st->menu.zone_menu, ctx, s_id_menu_zone, zone_ev.pos[0], zone_ev.pos[1]); /* a hold opens under its finger */
+    } else if (game_right) {
+        nt_ui_menu_open(&st->menu.global_menu, ctx, s_id_menu_global, pos[0], pos[1]);
     }
 
-    /* Render both menus (independent state + ids); arming is gated so at most one is open. Each tree is
-     * built in CODE; every row reports activation via its inline bool (if (menu_item(...)) ...), writing
-     * last_chosen — the SINGLE idiom for both mouse and keyboard (no chosen_id sink). */
+    /* Render both menus; at most one is open. Rows report activation inline. */
     render_menu_global(ctx, st);
     render_menu_zone(ctx, st);
 
@@ -3669,34 +3657,6 @@ static void frame(void) {
     }
     nt_arena_reset(&g_nt_mem_scratch);
 
-    /* Gameplay/global hotkeys yield to an open modal so Esc closes the top modal first and the
-     * palette/inspector keys don't fire underneath it. nt_ui_modal_active reports last frame's
-     * presence (polled here before this frame's nt_ui_begin) -- the inherent IM 1-frame gate. */
-    const bool modal_was_active = nt_ui_modal_active(s_ctx);
-
-#ifndef NT_PLATFORM_WEB
-    /* Esc unfocuses a focused field first (the field consumes it in its own pass); only quit when
-     * no modal is up AND no field holds focus. focused_input_id is last frame's (read pre-begin). */
-    if (!modal_was_active && !nt_ui_input_any_focused(s_ctx) && nt_input_key_is_pressed(NT_KEY_ESCAPE)) {
-        nt_app_quit();
-    }
-#endif
-
-    /* Single-key [T]/[D] hotkeys yield while a field holds focus so typing 'd'/'t' edits the field
-     * instead of toggling the inspector/palette. any_focused reads last frame's focus, same as the
-     * modal gate above (both polled here before this frame's nt_ui_begin). */
-    if (!modal_was_active && !nt_ui_input_any_focused(s_ctx)) {
-        if (nt_input_key_is_pressed(NT_KEY_T)) {
-            g_current = (g_current == &g_dark) ? &g_light : &g_dark;
-            nt_log_info("ui_showcase: palette -> %s", g_current->name);
-        }
-        if (nt_input_key_is_pressed(NT_KEY_D)) {
-            const bool now_on = !nt_ui_inspector_is_active(s_ctx);
-            nt_ui_inspector_set_active(s_ctx, now_on);
-            nt_log_info("ui_showcase: inspector %s", now_on ? "ON" : "OFF");
-        }
-    }
-
     nt_resource_step();
     link_programs();
 
@@ -3813,10 +3773,8 @@ static void frame(void) {
         }
 
         /* Modal declared at ROOT (after the scene, before nt_ui_end): no scissor ancestor, so the
-         * floating panel renders unclipped. Self-gates on confirm_open; only the Modals tab drives it. */
-        if (g_tabs[s_active_tab].render == render_modals) {
-            render_modal_overlay(s_ctx, &s_state);
-        }
+         * floating panel renders unclipped. Shows while it is open: the Modals tab and the menu's Preferences open it. */
+        render_modal_overlay(s_ctx, &s_state);
 
         nt_ui_end(s_ctx);
 
@@ -3827,6 +3785,25 @@ static void frame(void) {
             memcpy(s_rich_obj_demo.cube_view.view_proj, vp, 64);
             s_rich_obj_demo.cube_view.fb_w = scale.fb_w;
             s_rich_obj_demo.cube_view.fb_h = scale.fb_h;
+        }
+    }
+
+    /* Global hotkeys yield to the UI's keyboard owner (a focused field, a modal, a menu) the last nt_ui_begin
+     * fixed: Esc never quits from under a menu and typing 'd'/'t' edits a field. */
+    if (!nt_ui_wants_keyboard(s_ctx)) {
+#ifndef NT_PLATFORM_WEB
+        if (nt_input_key_is_pressed(NT_KEY_ESCAPE)) {
+            nt_app_quit();
+        }
+#endif
+        if (nt_input_key_is_pressed(NT_KEY_T)) {
+            g_current = (g_current == &g_dark) ? &g_light : &g_dark;
+            nt_log_info("ui_showcase: palette -> %s", g_current->name);
+        }
+        if (nt_input_key_is_pressed(NT_KEY_D)) {
+            const bool now_on = !nt_ui_inspector_is_active(s_ctx);
+            nt_ui_inspector_set_active(s_ctx, now_on);
+            nt_log_info("ui_showcase: inspector %s", now_on ? "ON" : "OFF");
         }
     }
 

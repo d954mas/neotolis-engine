@@ -2521,7 +2521,7 @@ static void step_frame(int dir) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void handle_keys(void) {
-    if (s.file_count == 0 || nt_ui_input_any_focused(s_ctx)) {
+    if (s.file_count == 0) {
         return;
     }
     const bool shift = s_keys.shift;
@@ -2751,10 +2751,6 @@ static void frame(void) {
         monkey_input(s.fb_w > 0.0F ? s.fb_w : 1600.0F, (float)(g_nt_window.fb_height > 0 ? g_nt_window.fb_height : 900));
     }
     nt_arena_reset(&g_nt_mem_scratch);
-    if (s.dirty) {
-        rebuild_rows(); /* keys move over the rows the last click left */
-    }
-    handle_keys();
     nt_resource_step();
     try_bind();
     nt_font_step();
@@ -2799,8 +2795,19 @@ static void frame(void) {
             s_ctx,
             &(nt_ui_frame_desc_t){
                 .layout_w = scale.logical_w, .layout_h = scale.logical_h, .dt = g_nt_app.dt, .pointers = &pointer, .pointer_count = 1, .viewport = nt_ui_viewport_from_scale(&scale, g_nt_window.dpr)});
+        if (s.dirty) {
+            rebuild_rows(); /* keys move over the rows the last click left */
+        }
+        if (!nt_ui_wants_keyboard(s_ctx)) {
+            handle_keys(); /* after nt_ui_begin, which fixed this frame's key owner: a focused field's keys stay its */
+        }
+        if (s.dirty) {
+            rebuild_rows();
+        }
         declare_ui();
         nt_ui_end(s_ctx);
+    } else {
+        handle_keys(); /* no UI frame while assets load: last frame's key owner is stale and nothing else owns the keys */
     }
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {k_bg.r / 255.0F, k_bg.g / 255.0F, k_bg.b / 255.0F, 1.0F}, .clear_depth = 1.0F});
     if (can_render) {

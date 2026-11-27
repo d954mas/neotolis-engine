@@ -71,15 +71,10 @@
 #define NT_UI_DEFAULT_MAX_ELEMENT_COUNT 1024
 #endif
 
-/* Default modal z-band stride. A floating's zIndex is RELATIVE to the floating it is declared inside
- * (docs/spec/ui/nt-ui.md, "Floating zIndex is relative"), so an overlay sits one stride above whatever
- * encloses it — including a game floating's own zIndex, and there is no way out of that context: a
- * game floating that must stay under all UI belongs at the root level. Budget: that game zIndex plus
- * one stride per overlay level opened inside it must fit int16, or Clay clamps and reports it
- * (nt_ui asserts).
- * Per-context override via nt_ui_create_desc_t.modal_zband_stride (seeded from this in
- * nt_ui_create_desc_defaults; must be > 1 — an overlay's catcher needs the band below its panel). */
-#define NT_UI_MODAL_ZBAND_STRIDE 1000
+/* Default overlay z-band stride: overlay stack slot i sits at stride + i * NT_UI_OVERLAY_MAX, whatever
+ * floating encloses it (spec: "Floating zIndex is relative"). Per-context override via
+ * nt_ui_create_desc_t.overlay_zband_stride. */
+#define NT_UI_OVERLAY_ZBAND_STRIDE 1000
 
 /* Bare uint8_t[N] is 1-byte aligned; create_context asserts otherwise. */
 #define NT_UI_DECLARE_ARENA(name, size) alignas(NT_UI_ARENA_ALIGN) uint8_t name[(size)]
@@ -274,8 +269,8 @@ typedef struct {
      * slightly closer in NDC Z; hit-test keeps using the unbiased widget plane. Panels whose
      * backgrounds write depth need it above 0, or their children are coplanar with the background. */
     float element_depth_bias_ndc;
-    /* Band each overlay level declares above the floating enclosing it; 0 = NT_UI_MODAL_ZBAND_STRIDE. */
-    int16_t modal_zband_stride;
+    /* Absolute z-band of overlay stack slot 0 (> 0); default from nt_ui_create_desc_defaults. */
+    int16_t overlay_zband_stride;
     /* Per-id retained-state pool size; MUST be power-of-2. 0 = default NT_UI_STATE_SLOTS. */
     uint32_t state_slots;
     /* Linear-probe window for the state pool; 1..state_slots. 0 = default NT_UI_STATE_PROBE_MAX. */
@@ -293,7 +288,7 @@ static inline nt_ui_create_desc_t nt_ui_create_desc_defaults(void) {
         .max_elements = NT_UI_DEFAULT_MAX_ELEMENT_COUNT,
         .use_raycast_input = false,
         .element_depth_bias_ndc = 0.0F,
-        .modal_zband_stride = NT_UI_MODAL_ZBAND_STRIDE,
+        .overlay_zband_stride = NT_UI_OVERLAY_ZBAND_STRIDE,
         .state_slots = 0U,         /* 0 = compile-time NT_UI_STATE_SLOTS default */
         .state_probe_max = 0U,     /* 0 = compile-time NT_UI_STATE_PROBE_MAX default */
         .rich_max_runs = 0U,       /* 0 = compile-time NT_UI_RICH_MAX_RUNS default */
@@ -353,7 +348,8 @@ typedef struct {
     uint32_t primary;             /* anchors menus, the Clay feed and the inspector */
     nt_ui_viewport_t viewport;    /* device content rect (nt_ui_viewport_from_scale); zero size = identity (px_per_dp 0 = 1) */
     const float *view_proj;       /* 3D ctx: mat4 (above); 2D ctx: NULL */
-    const float *occlusion;       /* 3D ctx: per-pointer max ray distance, e.g. the nearest world hit; NULL = none */
+    const float *occlusion;       /* per pointer: 3D the max ray distance, e.g. the nearest world hit; 0 hides it (2D: 0 or +INFINITY); NULL = none */
+    bool no_keys;                 /* no key owner this frame: a context in front has the keys (its nt_ui_wants_keyboard) */
 } nt_ui_frame_desc_t;
 
 void nt_ui_begin(nt_ui_context_t *ctx, const nt_ui_frame_desc_t *frame);
@@ -552,23 +548,26 @@ nt_ui_bbox_t nt_ui_get_bbox(const nt_ui_context_t *ctx, uint32_t id);
  *   - additional fingers landing on a captured widget are silently ignored
  *   - a pointer bound to one widget is invisible to all other widgets
  * Aggregated interaction_t.hovered = any pointer over; pressed/released/clicked
- * track the single owner pidx. interaction_t.pointer_id holds the OS id of the
- * owning (or first hovering) pointer. */
+ * track the single owner pidx. pointer_id and the positions are the owning pointer's,
+ * else the right-clicking one's, else the first hovering one's, else the primary's;
+ * distance is the first hovering one's. */
 /* This-frame pointer vs PREVIOUS-frame bbox (1-frame IM lag). */
 typedef struct {
-    bool hovered;           /* pointer over bbox (transform-aware) */
+    bool hovered;           /* the pointer's target is this widget; for its holder, the target lies in it */
     bool pressed;           /* currently captured (held) */
     bool pressed_now;       /* press began this frame */
-    bool released_now;      /* released this frame (even off-widget = cancel) */
-    bool clicked;           /* released OVER the widget -> one-shot */
+    bool released_now;      /* the capture ended this frame on its real release (also off-widget), not cancelled */
+    bool lost;              /* the capture ended this frame any other way: a cancelled release, or nt_ui_begin dropped it */
+    bool clicked;           /* released_now while hovered -> one-shot */
     bool double_clicked;    /* step only: 2nd press within the dbl window+radius -> one-shot */
+    bool gesture_pending;   /* an enclosing scroll may still take this press: hold off value changes; a pending release is a tap */
+    bool right_clicked;     /* the release of a gesture whose first press was the right button, with this widget the target */
     float hold_secs;        /* seconds since the press while the capturing pointer stays over the widget; 0 otherwise */
     float hold_prev_secs;   /* hold_secs of the previous frame */
     float press_pos[2];     /* where press began (UI-space) */
     float pos[2];           /* current pointer pos (UI-space) */
     float drag_dx, drag_dy; /* = pos - press_pos (convenience) */
     uint32_t pointer_id;    /* which pointer captured (multitouch) */
-    bool gesture_pending;   /* an enclosing scroll may still take this press: hold off value changes; a pending release is a tap */
     float distance;         /* 3D ctx: world distance (near-plane-relative) to this widget; 0 in 2D */
 } nt_ui_interaction_t;
 
@@ -592,8 +591,7 @@ typedef struct {
     uint8_t drag_axes;       /* NT_UI_DRAG_X | NT_UI_DRAG_Y; 0 = taps only (a scroll may take the drag) */
 } nt_ui_step_desc_t;
 
-/* MUTATING — call ONCE per widget per frame from the widget's begin. desc NULL = unpadded, no drag axes.
- * Sidebar-consumed pointer returns zeroed struct (see nt_ui_inspector_pointer_consumed). */
+/* MUTATING — call ONCE per widget per frame from the widget's begin. desc NULL = unpadded, no drag axes. */
 nt_ui_interaction_t nt_ui_step(nt_ui_context_t *ctx, uint32_t id, const nt_ui_step_desc_t *desc);
 
 /* One-shot long press: true on the frame the hold crosses secs > 0. secs must stay constant for the
@@ -609,20 +607,46 @@ float nt_ui_hold_progress(const nt_ui_interaction_t *in, float secs);
 #define NT_UI_DRAG_SLOP_DP 8.0F
 #endif
 
+/* Wheel latch time (secs, UI time): a wheel tick within it of the previous one stays on the scroll that took that
+ * one (macOS and browsers latch a wheel transaction the same way). */
+#ifndef NT_UI_WHEEL_LATCH_SECS
+#define NT_UI_WHEEL_LATCH_SECS 0.5F
+#endif
+
 /* App-wide gesture constants: the double-click window (secs) and the move radius (dp) within which a
  * second press still counts as a double-click. Hold/long-press is NOT cancelled by movement — only by
- * leaving the widget's hitbox. Asserts each is finite and >= 0. Defaults: 0.5 s, 16 dp. */
+ * leaving the widget's hitbox. In UI time. Asserts each is finite and >= 0. Defaults: 0.5 s, 16 dp. */
 void nt_ui_set_gesture_constants(nt_ui_context_t *ctx, float dbl_window_secs, float move_radius_dp);
 
 /* Inert occluder: enters id into the interactive registry so it wins next-frame front-most
  * arbitration over widgets behind it (the pointer can't leak through), but never captures or
  * clicks; nt_ui_query_interaction on it reads like an unstepped widget (hover and the press edge while
- * front-most, unpadded). Disabled widgets call this so a modal/overlay blocks input to whatever sits
+ * it is the target, over the area pad_lrtb gives it). Disabled widgets call this so a modal/overlay blocks input to whatever sits
  * underneath. pad_lrtb inflates the block area (NULL = none, asserts >= 0). */
 void nt_ui_block_pointer(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lrtb[4]);
 
-/* True when a pointer of the last frame holds a capture or a pending scroll gesture, or is over a widget. */
-bool nt_ui_wants_pointer(const nt_ui_context_t *ctx);
+/* Pointer `pointer_index` of the frame desc is the UI's: its gesture's first press had a target (a widget, a blocker, a
+ * scroll, an open overlay's catcher), up to the release of its last button; a free pointer has a target or its wheel
+ * is latched. Decided at nt_ui_begin (an inert scroll may drop its wheel latch later in the frame): read it after begin. */
+bool nt_ui_wants_pointer(const nt_ui_context_t *ctx, uint32_t pointer_index);
+
+/* True when the UI owns this frame's keys: a focused text field, else last frame's live top overlay (a modal, a
+ * menu, a combo list); never in a context begun with no_keys. Fixed at nt_ui_begin, so read it after begin; the
+ * game gates its hotkeys on it, and passes it as no_keys to the contexts behind this one. */
+bool nt_ui_wants_keyboard(const nt_ui_context_t *ctx);
+
+/* Overlays (a popup, a modal, a menu; opened by nt_ui_popup_open, nt_ui_modal_open, nt_ui_menu_open): close starts
+ * the fade of `id` and of every overlay opened inside it, is_open asks. Callable anywhere, also between frames
+ * (spec: "Input ownership"). */
+void nt_ui_close(nt_ui_context_t *ctx, uint32_t id);
+bool nt_ui_is_open(const nt_ui_context_t *ctx, uint32_t id);
+
+/* The keys and typed chars of this frame, read by the widget `id`: answered only while `id` owns the keys
+ * (the focused field, else the top overlay, fixed at nt_ui_begin) outside an inert subtree, so a widget never
+ * reads another's key. */
+bool nt_ui_key_pressed(const nt_ui_context_t *ctx, uint32_t id, nt_key_t key);
+bool nt_ui_key_down(const nt_ui_context_t *ctx, uint32_t id, nt_key_t key);
+bool nt_ui_pop_char(const nt_ui_context_t *ctx, uint32_t id, uint32_t *out_codepoint);
 
 /* Front-most interactive record under the pointer this frame (3D: nearest within the occlusion
  * cutoff first; then the later tree root — band, then declaration; then the later-declared element

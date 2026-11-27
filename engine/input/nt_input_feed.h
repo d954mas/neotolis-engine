@@ -18,6 +18,7 @@ typedef enum {
     NT_INPUT_EV_CONTACT_UP,
     NT_INPUT_EV_WHEEL, /* notches, on the mouse */
     NT_INPUT_EV_FOCUS_LOST,
+    NT_INPUT_EV_POINTER_CANCEL, /* a platform cancel: the mouse when contact.type is NT_POINTER_MOUSE, else the contact contact.id */
 } nt_input_event_kind_t;
 
 typedef struct {
@@ -37,7 +38,7 @@ typedef struct {
             float x, y, pressure;
             uint8_t type; /* NT_POINTER_TOUCH or NT_POINTER_PEN */
             uint8_t buttons;
-        } contact; /* UP reads only id */
+        } contact; /* UP reads only id, POINTER_CANCEL id and type */
         struct {
             float dx, dy;
         } wheel;

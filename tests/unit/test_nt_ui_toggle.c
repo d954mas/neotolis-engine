@@ -21,6 +21,7 @@
 #include "renderers/nt_sprite_renderer.h"
 #include "test_helpers/nt_assert_trap.h"
 #include "test_helpers/nt_sprite_test_emit.h"
+#include "test_helpers/ui_fx_frame.h"
 #include "test_helpers/ui_test_arena.h"
 #include "test_helpers/ui_walker_fixture.h"
 #include "ui/nt_ui.h"
@@ -88,17 +89,6 @@ void setUp(void) {
 
 void tearDown(void) { ui_walker_fixture_shutdown(&s_fx); }
 
-static nt_pointer_t make_pointer(float x, float y, bool is_down, bool is_pressed, bool is_released) {
-    nt_pointer_t p = {0};
-    p.x = x;
-    p.y = y;
-    p.active = true;
-    p.buttons[NT_BUTTON_LEFT].is_down = is_down;
-    p.buttons[NT_BUTTON_LEFT].is_pressed = is_pressed;
-    p.buttons[NT_BUTTON_LEFT].is_released = is_released;
-    return p;
-}
-
 static uint32_t count_cmd_of_type(const nt_ui_context_t *ctx, Clay_RenderCommandType type) {
     uint32_t n = 0;
     for (int32_t i = 0; i < ctx->frozen_cmds.length; ++i) {
@@ -144,19 +134,19 @@ static float thumb_emit_x(bool value) {
 static void test_toggle_flip_release_edge(void) {
     bool value = false;
 
-    nt_pointer_t f1 = make_pointer(TG_CX, TG_CY, false, false, false); /* warm-up */
+    nt_pointer_t f1 = ui_fx_pointer(TG_CX, TG_CY, false, false, false); /* warm-up */
     TEST_ASSERT_FALSE(tg_frame(&f1, &value, true));
     TEST_ASSERT_FALSE(value);
 
-    nt_pointer_t f2 = make_pointer(TG_CX, TG_CY, true, true, false); /* press-down only */
+    nt_pointer_t f2 = ui_fx_pointer(TG_CX, TG_CY, true, true, false); /* press-down only */
     TEST_ASSERT_FALSE(tg_frame(&f2, &value, true));
     TEST_ASSERT_FALSE(value);
 
-    nt_pointer_t f3 = make_pointer(TG_CX, TG_CY, false, false, true); /* release -> flip */
+    nt_pointer_t f3 = ui_fx_pointer(TG_CX, TG_CY, false, false, true); /* release -> flip */
     TEST_ASSERT_TRUE(tg_frame(&f3, &value, true));
     TEST_ASSERT_TRUE(value);
 
-    nt_pointer_t f4 = make_pointer(TG_CX, TG_CY, false, false, false); /* idle -> no re-flip */
+    nt_pointer_t f4 = ui_fx_pointer(TG_CX, TG_CY, false, false, false); /* idle -> no re-flip */
     TEST_ASSERT_FALSE(tg_frame(&f4, &value, true));
     TEST_ASSERT_TRUE(value);
 }
@@ -211,13 +201,13 @@ static void test_thumb_visible_at_off(void) {
 static void test_disabled_toggle_balanced(void) {
     bool value = false;
 
-    nt_pointer_t f1 = make_pointer(TG_CX, TG_CY, false, false, false);
+    nt_pointer_t f1 = ui_fx_pointer(TG_CX, TG_CY, false, false, false);
     TEST_ASSERT_FALSE(tg_frame(&f1, &value, false));
 
-    nt_pointer_t f2 = make_pointer(TG_CX, TG_CY, true, true, false);
+    nt_pointer_t f2 = ui_fx_pointer(TG_CX, TG_CY, true, true, false);
     TEST_ASSERT_FALSE(tg_frame(&f2, &value, false));
 
-    nt_pointer_t f3 = make_pointer(TG_CX, TG_CY, false, false, true);
+    nt_pointer_t f3 = ui_fx_pointer(TG_CX, TG_CY, false, false, true);
     TEST_ASSERT_FALSE(tg_frame(&f3, &value, false)); /* disabled never clicks */
     TEST_ASSERT_FALSE(value);                        /* value untouched */
 

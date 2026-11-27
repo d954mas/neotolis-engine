@@ -18,6 +18,7 @@
 #include "clay.h"
 #include "sprite_comp/nt_sprite_comp.h" /* NT_SPRITE_FLAG_FLIP_Y */
 #include "test_helpers/nt_assert_trap.h"
+#include "test_helpers/ui_fx_frame.h"
 #include "test_helpers/ui_test_arena.h"
 #include "test_helpers/ui_walker_fixture.h"
 #include "ui/nt_ui.h"
@@ -49,16 +50,6 @@ void setUp(void) {
 
 void tearDown(void) { ui_walker_fixture_shutdown(&s_fx); }
 
-static bool float_near(float a, float b, float eps) { return fabsf(a - b) <= eps; }
-
-static nt_pointer_t pointer_at(float x, float y) {
-    nt_pointer_t p = {0};
-    p.x = x;
-    p.y = y;
-    p.active = true;
-    return p;
-}
-
 static nt_ui_tooltip_style_t test_style(void) {
     nt_ui_tooltip_style_t st = nt_ui_tooltip_style_defaults();
     st.delay_secs = DELAY;
@@ -88,10 +79,7 @@ static bool tooltip_frame_at(const nt_pointer_t *p, nt_ui_tooltip_style_t *st, b
 
 static bool tooltip_frame(const nt_pointer_t *p, nt_ui_tooltip_style_t *st) { return tooltip_frame_at(p, st, false); }
 
-/* ---- ABI sanity: the _Static_assert compiles; assert the runtime size too. ---- */
-static void test_tooltip_abi_size(void) { TEST_ASSERT_EQUAL_UINT(88U, (unsigned)sizeof(nt_ui_tooltip_style_t)); }
-
-/* ---- Defaults are a valid (non-zero) style; the flat baseline declares no art/caret/border/shadow. ---- */
+/* ---- Defaults are a valid (non-zero) style; the flat baseline declares no art/caret/border. ---- */
 static void test_tooltip_defaults_valid(void) {
     nt_ui_tooltip_style_t st = nt_ui_tooltip_style_defaults();
     TEST_ASSERT_TRUE(st.delay_secs >= 0.0F);
@@ -101,7 +89,6 @@ static void test_tooltip_defaults_valid(void) {
     TEST_ASSERT_EQUAL_UINT(0U, st.panel_art.atlas.id); /* flat fallback by default (no art) */
     TEST_ASSERT_EQUAL_UINT(0U, st.caret.atlas.id);
     TEST_ASSERT_EQUAL_UINT(0U, st.border_color);
-    TEST_ASSERT_EQUAL_UINT(0U, st.shadow_color);
 }
 
 /* ---- Delayed reveal: the tooltip is NOT declared before delay_secs of accumulated hover and IS
@@ -112,7 +99,7 @@ static void test_tooltip_delayed_reveal(void) {
 
     /* Frame 1: pointer over the target, but the arbitration registry is empty (warm frame) -> not
      * hovered yet -> no accrual, tooltip stays hidden. */
-    nt_pointer_t over = pointer_at(TGT_W * 0.5F, TGT_H * 0.5F);
+    nt_pointer_t over = ui_fx_pointer(TGT_W * 0.5F, TGT_H * 0.5F, false, false, false);
     bool shown = tooltip_frame(&over, &st);
     TEST_ASSERT_FALSE(shown);
 
@@ -150,9 +137,9 @@ static bool container_tooltip_frame(const nt_pointer_t *p, nt_ui_tooltip_style_t
 }
 
 static void test_tooltip_on_container_reveals_over_its_child(void) {
-    const nt_pointer_t on_child = pointer_at(10.0F, TGT_H * 0.5F);
-    const nt_pointer_t on_gap = pointer_at(TGT_W - 10.0F, TGT_H * 0.5F);
-    const nt_pointer_t away = pointer_at(VIEW_W - 10.0F, VIEW_H - 10.0F);
+    const nt_pointer_t on_child = ui_fx_pointer(10.0F, TGT_H * 0.5F, false, false, false);
+    const nt_pointer_t on_gap = ui_fx_pointer(TGT_W - 10.0F, TGT_H * 0.5F, false, false, false);
+    const nt_pointer_t away = ui_fx_pointer(VIEW_W - 10.0F, VIEW_H - 10.0F, false, false, false);
     for (int block = 0; block < 2; ++block) {
         nt_ui_tooltip_style_t st = test_style();
         bool shown = false;
@@ -170,7 +157,7 @@ static void test_tooltip_on_container_reveals_over_its_child(void) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_tooltip_hide_on_leave(void) {
     nt_ui_tooltip_style_t st = test_style();
-    nt_pointer_t over = pointer_at(TGT_W * 0.5F, TGT_H * 0.5F);
+    nt_pointer_t over = ui_fx_pointer(TGT_W * 0.5F, TGT_H * 0.5F, false, false, false);
 
     /* Warm + accrue past the delay until revealed. */
     tooltip_frame(&over, &st);
@@ -185,17 +172,17 @@ static void test_tooltip_hide_on_leave(void) {
     TEST_ASSERT_TRUE(nt_ui_tooltip_test_hover_secs(s_fx.ctx, TGT_ID) >= DELAY);
 
     /* Move the cursor far away: the timer resets to 0 and the tooltip hides this same frame. */
-    nt_pointer_t away = pointer_at(VIEW_W - 10.0F, VIEW_H - 10.0F);
+    nt_pointer_t away = ui_fx_pointer(VIEW_W - 10.0F, VIEW_H - 10.0F, false, false, false);
     bool shown_after = tooltip_frame(&away, &st);
     TEST_ASSERT_FALSE(shown_after);
-    TEST_ASSERT_TRUE(float_near(nt_ui_tooltip_test_hover_secs(s_fx.ctx, TGT_ID), 0.0F, 0.0001F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(nt_ui_tooltip_test_hover_secs(s_fx.ctx, TGT_ID), 0.0F, 0.0001F));
 }
 
-/* ---- No catcher: even while the tooltip is shown, popup-core declares NO light-dismiss
+/* ---- No catcher: even while the tooltip is shown, popup-core declares NO
  *      catcher, so base UI stays clickable. ---- */
 static void test_tooltip_declares_no_catcher(void) {
     nt_ui_tooltip_style_t st = test_style();
-    nt_pointer_t over = pointer_at(TGT_W * 0.5F, TGT_H * 0.5F);
+    nt_pointer_t over = ui_fx_pointer(TGT_W * 0.5F, TGT_H * 0.5F, false, false, false);
 
     tooltip_frame(&over, &st);
     bool shown = false;
@@ -206,7 +193,8 @@ static void test_tooltip_declares_no_catcher(void) {
         }
     }
     TEST_ASSERT_TRUE(shown);
-    TEST_ASSERT_FALSE(nt_ui_popup_test_last_catcher_present());
+    TEST_ASSERT_TRUE(tooltip_frame(&over, &st)); /* the next begin reads the top the shown frame claimed */
+    TEST_ASSERT_FALSE_MESSAGE(nt_ui_wants_keyboard(s_fx.ctx), "a catcher-less tooltip claims no top");
 }
 
 /* ---- No double-mutation: the tooltip reads the target via an IDEMPOTENT query, so the game's own
@@ -229,18 +217,18 @@ static void test_tooltip_no_double_mutation(void) {
     const float cy = TGT_H * 0.5F;
 
     /* Frame 1: hover only (bake bbox + warm registry). */
-    nt_pointer_t f1 = pointer_at(cx, cy);
+    nt_pointer_t f1 = ui_fx_pointer(cx, cy, false, false, false);
     target_frame_with_tooltip(&f1, &st);
 
     /* Frame 2: press over the target -> pressed_now (capture latched once, not twice). */
-    nt_pointer_t f2 = pointer_at(cx, cy);
+    nt_pointer_t f2 = ui_fx_pointer(cx, cy, false, false, false);
     f2.buttons[NT_BUTTON_LEFT].is_down = true;
     f2.buttons[NT_BUTTON_LEFT].is_pressed = true;
     nt_ui_interaction_t in2 = target_frame_with_tooltip(&f2, &st);
     TEST_ASSERT_TRUE(in2.pressed_now);
 
     /* Frame 3: release over the target -> clicked exactly once. */
-    nt_pointer_t f3 = pointer_at(cx, cy);
+    nt_pointer_t f3 = ui_fx_pointer(cx, cy, false, false, false);
     f3.buttons[NT_BUTTON_LEFT].is_released = true;
     nt_ui_interaction_t in3 = target_frame_with_tooltip(&f3, &st);
     TEST_ASSERT_TRUE(in3.clicked);
@@ -273,8 +261,7 @@ static void reveal_at(nt_pointer_t *over, nt_ui_tooltip_style_t *st, bool at_bot
 }
 
 /* The tooltip panel is the HIGHEST-band rectangle in the frame: the target and its label sit in the
- * base band, and the panel's own drop-shadow floats one band UNDER it, so "first lifted rectangle"
- * would pick the shadow. Returns false under panel art, where the panel emits an IMAGE and no
+ * base band. Returns false under panel art, where the panel emits an IMAGE and no
  * rectangle exists to carry a cornerRadius. */
 static bool tooltip_panel_rect(Clay_BoundingBox *out_box, float *out_radius) {
     int32_t best = 0;
@@ -295,7 +282,7 @@ static bool tooltip_panel_rect(Clay_BoundingBox *out_box, float *out_radius) {
 static bool tooltip_image_of_width(float width, Clay_BoundingBox *out_box) {
     for (int32_t i = 0; i < s_fx.ctx->frozen_cmds.length; ++i) {
         const Clay_RenderCommand *c = &s_fx.ctx->frozen_cmds.internalArray[i];
-        if (c->commandType == CLAY_RENDER_COMMAND_TYPE_IMAGE && float_near(c->boundingBox.width, width, 0.5F)) {
+        if (c->commandType == CLAY_RENDER_COMMAND_TYPE_IMAGE && ui_fx_float_near(c->boundingBox.width, width, 0.5F)) {
             *out_box = c->boundingBox;
             return true;
         }
@@ -312,7 +299,7 @@ static bool caret_paints_after_panel(float caret_size) {
         const Clay_RenderCommand *c = &s_fx.ctx->frozen_cmds.internalArray[i];
         if (c->commandType == CLAY_RENDER_COMMAND_TYPE_RECTANGLE && c->zIndex > 0) {
             panel_at = i;
-        } else if (c->commandType == CLAY_RENDER_COMMAND_TYPE_IMAGE && float_near(c->boundingBox.width, caret_size, 0.5F)) {
+        } else if (c->commandType == CLAY_RENDER_COMMAND_TYPE_IMAGE && ui_fx_float_near(c->boundingBox.width, caret_size, 0.5F)) {
             caret_at = i;
         }
     }
@@ -323,7 +310,7 @@ static bool caret_paints_after_panel(float caret_size) {
 static bool tooltip_caret(float caret_size, Clay_BoundingBox *out_box, uint8_t *out_flip) {
     for (int32_t i = 0; i < s_fx.ctx->frozen_cmds.length; ++i) {
         const Clay_RenderCommand *c = &s_fx.ctx->frozen_cmds.internalArray[i];
-        if (c->commandType != CLAY_RENDER_COMMAND_TYPE_IMAGE || !float_near(c->boundingBox.width, caret_size, 0.5F) || !float_near(c->boundingBox.height, caret_size, 0.5F)) {
+        if (c->commandType != CLAY_RENDER_COMMAND_TYPE_IMAGE || !ui_fx_float_near(c->boundingBox.width, caret_size, 0.5F) || !ui_fx_float_near(c->boundingBox.height, caret_size, 0.5F)) {
             continue;
         }
         const nt_ui_image_payload_t *p = (const nt_ui_image_payload_t *)c->renderData.image.imageData;
@@ -338,7 +325,7 @@ static bool tooltip_caret(float caret_size, Clay_BoundingBox *out_box, uint8_t *
  *      caret on the TOP edge, unflipped (the art points up natively). ---- */
 static void test_tooltip_caret_below(void) {
     nt_ui_tooltip_style_t below = caret_style();
-    nt_pointer_t over_top = pointer_at(TGT_W * 0.5F, TGT_H * 0.5F);
+    nt_pointer_t over_top = ui_fx_pointer(TGT_W * 0.5F, TGT_H * 0.5F, false, false, false);
     reveal_at(&over_top, &below, false);
 
     Clay_BoundingBox panel = {0};
@@ -348,7 +335,7 @@ static void test_tooltip_caret_below(void) {
     const nt_ui_bbox_t target = nt_ui_get_bbox(s_fx.ctx, TGT_ID);
     TEST_ASSERT_TRUE(target.found);
     TEST_ASSERT_TRUE(tooltip_panel_rect(&panel, &radius));
-    TEST_ASSERT_TRUE_MESSAGE(float_near(panel.y, target.y + target.height, 0.5F), "BELOW attaches the panel's top edge to the target's bottom edge (CENTER would land elsewhere)");
+    TEST_ASSERT_TRUE_MESSAGE(ui_fx_float_near(panel.y, target.y + target.height, 0.5F), "BELOW attaches the panel's top edge to the target's bottom edge (CENTER would land elsewhere)");
     TEST_ASSERT_TRUE_MESSAGE(tooltip_caret((float)below.caret_size, &caret, &flip), "a resolvable caret ref must emit the caret");
     TEST_ASSERT_TRUE_MESSAGE(caret.y + caret.height <= panel.y + 0.5F, "a BELOW panel wears its caret on the TOP edge");
     TEST_ASSERT_TRUE_MESSAGE(caret_paints_after_panel((float)below.caret_size), "the caret must paint AFTER its panel");
@@ -358,7 +345,7 @@ static void test_tooltip_caret_below(void) {
 /* The caret floats on a panel declared in the same frame, so it appears with the panel's first frame. */
 static void test_tooltip_caret_on_first_frame(void) {
     nt_ui_tooltip_style_t st = caret_style();
-    nt_pointer_t over = pointer_at(TGT_W * 0.5F, TGT_H * 0.5F);
+    nt_pointer_t over = ui_fx_pointer(TGT_W * 0.5F, TGT_H * 0.5F, false, false, false);
     bool shown = false;
     for (int i = 0; i < 64 && !shown; ++i) {
         shown = tooltip_frame_at(&over, &st, false);
@@ -373,7 +360,7 @@ static void test_tooltip_caret_on_first_frame(void) {
  *      moves to the BOTTOM edge pointing down (FLIP_Y). ---- */
 static void test_tooltip_caret_above_on_flip(void) {
     nt_ui_tooltip_style_t above = caret_style();
-    nt_pointer_t over_bottom = pointer_at(TGT_W * 0.5F, TGT_BOTTOM_Y + (TGT_H * 0.5F));
+    nt_pointer_t over_bottom = ui_fx_pointer(TGT_W * 0.5F, TGT_BOTTOM_Y + (TGT_H * 0.5F), false, false, false);
     reveal_at(&over_bottom, &above, true);
 
     Clay_BoundingBox panel = {0};
@@ -383,7 +370,7 @@ static void test_tooltip_caret_above_on_flip(void) {
     const nt_ui_bbox_t target = nt_ui_get_bbox(s_fx.ctx, TGT_ID);
     TEST_ASSERT_TRUE(target.found);
     TEST_ASSERT_TRUE(tooltip_panel_rect(&panel, &radius));
-    TEST_ASSERT_TRUE_MESSAGE(float_near(panel.y + panel.height, target.y, 0.5F), "ABOVE attaches the panel's bottom edge to the target's top edge");
+    TEST_ASSERT_TRUE_MESSAGE(ui_fx_float_near(panel.y + panel.height, target.y, 0.5F), "ABOVE attaches the panel's bottom edge to the target's top edge");
     TEST_ASSERT_TRUE(tooltip_caret((float)above.caret_size, &caret, &flip));
     TEST_ASSERT_TRUE_MESSAGE(caret.y >= panel.y + panel.height - 0.5F, "an ABOVE panel wears its caret on the BOTTOM edge");
     TEST_ASSERT_EQUAL_UINT8((uint8_t)NT_SPRITE_FLAG_FLIP_Y, flip);
@@ -398,10 +385,10 @@ static void test_tooltip_panel_art_no_corner_radius(void) {
     float radius = 0.0F;
     nt_ui_tooltip_style_t flat = test_style();
     flat.corner_radius = 8U;
-    nt_pointer_t over_flat = pointer_at(TGT_W * 0.5F, TGT_H * 0.5F);
+    nt_pointer_t over_flat = ui_fx_pointer(TGT_W * 0.5F, TGT_H * 0.5F, false, false, false);
     reveal_at(&over_flat, &flat, false);
     TEST_ASSERT_TRUE_MESSAGE(tooltip_panel_rect(&panel, &radius), "the flat panel must emit its rounded rectangle");
-    TEST_ASSERT_TRUE(float_near(radius, 8.0F, 0.0001F));
+    TEST_ASSERT_TRUE(ui_fx_float_near(radius, 8.0F, 0.0001F));
     const float panel_w = panel.width;
 
     /* Art path, same text and padding: the panel becomes an IMAGE of the same width, and an image has no
@@ -409,7 +396,7 @@ static void test_tooltip_panel_art_no_corner_radius(void) {
     nt_ui_tooltip_style_t art = test_style();
     art.panel_art = nt_atlas_ref_idx(s_fx.atlas.handle, 0U, s_fx.atlas.white_region_idx);
     art.corner_radius = 8U; /* set but MUST be ignored under art */
-    nt_pointer_t over_art = pointer_at(TGT_W * 0.5F, TGT_H * 0.5F);
+    nt_pointer_t over_art = ui_fx_pointer(TGT_W * 0.5F, TGT_H * 0.5F, false, false, false);
     reveal_at(&over_art, &art, false);
     Clay_BoundingBox art_panel = {0};
     TEST_ASSERT_TRUE_MESSAGE(tooltip_image_of_width(panel_w, &art_panel), "the art panel must ship as an image of the panel's size");
@@ -425,7 +412,6 @@ static void test_tooltip_timer_id_salted(void) {
 
 int main(void) {
     UNITY_BEGIN();
-    RUN_TEST(test_tooltip_abi_size);
     RUN_TEST(test_tooltip_defaults_valid);
     RUN_TEST(test_tooltip_delayed_reveal);
     RUN_TEST(test_tooltip_hide_on_leave);

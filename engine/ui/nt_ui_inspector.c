@@ -67,8 +67,17 @@ bool nt_ui_inspector_is_active(const nt_ui_context_t *ctx) {
 
 bool nt_ui_inspector_pointer_consumed(const nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL && "nt_ui_inspector_pointer_consumed: ctx must be non-NULL");
-    /* Combined check guards against stale state when toggle flips. */
-    return ctx->inspector_active && ctx->inspector_pointer_consumed;
+    if (!ctx->inspector_active) {
+        return false;
+    }
+    /* The primary pointer's target is the sidebar or a pane inside it. */
+    const int32_t root = nt_ui_internal_live_slot(ctx, nt_ui_internal_inspector_root_id());
+    const int32_t hot = nt_ui_internal_live_slot(ctx, nt_ui_pointer_hot(ctx, ctx->frame_primary).id);
+    if (root < 0 || hot < 0) {
+        return false;
+    }
+    const uint32_t at = ctx->hit_baked[hot].order & 0xFFFFU;
+    return at >= (ctx->hit_baked[root].order & 0xFFFFU) && at <= ctx->hit_baked[root].last_inside;
 }
 // #endregion
 

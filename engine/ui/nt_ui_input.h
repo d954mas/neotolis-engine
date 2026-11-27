@@ -2,7 +2,7 @@
 #define NT_UI_INPUT_H
 
 /* Single-line text field over a game-owned UTF-8 buffer (char* + capacity). Editing is codepoint-aware;
- * typed chars come from nt_input_pop_char, physical keys drive editing and focus. */
+ * typed chars come from nt_ui_pop_char, physical keys (nt_ui_key_*) drive editing and focus. */
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -90,10 +90,6 @@ bool nt_ui_input_text(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, ui
 
 /* True if `id` currently holds keyboard focus. */
 bool nt_ui_input_focused(const nt_ui_context_t *ctx, uint32_t id);
-
-/* True if ANY text field currently holds keyboard focus. Lets the host gate a global Esc=quit so
- * Esc unfocuses a field first (the focus state is the previous frame's, read before nt_ui_begin). */
-bool nt_ui_input_any_focused(const nt_ui_context_t *ctx);
 
 /* Stock allow-predicates. numeric = [0-9.+-]; email = alnum + @._%+-; url = alnum +
  * a small URL-safe punctuation set. */

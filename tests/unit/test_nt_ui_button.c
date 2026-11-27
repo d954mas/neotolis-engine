@@ -12,6 +12,7 @@
 #include "input/nt_input.h"
 #include "material/nt_material.h"
 #include "test_helpers/nt_assert_trap.h"
+#include "test_helpers/ui_fx_frame.h"
 #include "test_helpers/ui_test_arena.h"
 #include "test_helpers/ui_walker_fixture.h"
 #include "ui/nt_ui.h"
@@ -194,17 +195,6 @@ static void test_button_disabled_path_balanced(void) {
 static bool float_eq_eps(float a, float b, float eps) { return fabsf(a - b) <= eps; }
 
 /* Primary pointer at (x,y) with the LEFT button edges set. */
-static nt_pointer_t make_pointer_at(float x, float y, bool is_down, bool is_pressed, bool is_released) {
-    nt_pointer_t p = {0};
-    p.x = x;
-    p.y = y;
-    p.active = true;
-    p.buttons[NT_BUTTON_LEFT].is_down = is_down;
-    p.buttons[NT_BUTTON_LEFT].is_pressed = is_pressed;
-    p.buttons[NT_BUTTON_LEFT].is_released = is_released;
-    return p;
-}
-
 /* ---- Pressed visual un-presses when the held pointer drags OFF the widget, and re-presses
  *      when it returns. Click/capture semantics are untouched (no click off-widget). The bg
  *      IMAGE width tracks the active scale: idle/hover 1.0, pressed 0.95. ---- */
@@ -246,27 +236,27 @@ static void test_button_pressed_visual_unpresses_off_widget(void) {
     const float far_y = PB_Y + PB_H + 200.0F;
 
     /* Frame 1: warm (declare + step so bbox is baked AND it registers for arbitration). */
-    nt_pointer_t f1 = make_pointer_at(PB_CX, PB_CY, false, false, false);
+    nt_pointer_t f1 = ui_fx_pointer(PB_CX, PB_CY, false, false, false);
     (void)press_btn_frame(&f1);
 
     /* Frame 2: press inside -> pressed visual (scale 0.95). */
-    nt_pointer_t f2 = make_pointer_at(PB_CX, PB_CY, true, true, false);
+    nt_pointer_t f2 = ui_fx_pointer(PB_CX, PB_CY, true, true, false);
     (void)press_btn_frame(&f2);
     TEST_ASSERT_TRUE(float_eq_eps(s_pb_last_scale, 0.95F, 0.001F)); /* pressed cell active */
 
     /* Frame 3: drag OFF, still held. Capture holds but the VISUAL un-presses (idle scale 1.0). */
-    nt_pointer_t f3 = make_pointer_at(far_x, far_y, true, false, false);
+    nt_pointer_t f3 = ui_fx_pointer(far_x, far_y, true, false, false);
     const bool clicked_off = press_btn_frame(&f3);
     TEST_ASSERT_FALSE(clicked_off);
     TEST_ASSERT_TRUE(float_eq_eps(s_pb_last_scale, 1.0F, 0.001F)); /* un-pressed -> idle scale */
 
     /* Frame 4: drag BACK over the widget, still held -> re-presses (scale 0.95 again). */
-    nt_pointer_t f4 = make_pointer_at(PB_CX, PB_CY, true, false, false);
+    nt_pointer_t f4 = ui_fx_pointer(PB_CX, PB_CY, true, false, false);
     (void)press_btn_frame(&f4);
     TEST_ASSERT_TRUE(float_eq_eps(s_pb_last_scale, 0.95F, 0.001F));
 
     /* Frame 5: release OUTSIDE -> no click (capture cancels). */
-    nt_pointer_t f5 = make_pointer_at(far_x, far_y, false, false, true);
+    nt_pointer_t f5 = ui_fx_pointer(far_x, far_y, false, false, true);
     const bool clicked_out = press_btn_frame(&f5);
     TEST_ASSERT_FALSE(clicked_out);
 }
@@ -530,15 +520,15 @@ static nt_ui_interaction_t hold_btn_frame(const nt_pointer_t *p, float dt, bool 
 
 static void test_button_begin_returns_interaction(void) {
     bool clicked = false;
-    nt_pointer_t idle = make_pointer_at(CFG_CX, CFG_CY, false, false, false);
+    nt_pointer_t idle = ui_fx_pointer(CFG_CX, CFG_CY, false, false, false);
     (void)hold_btn_frame(&idle, 0.0F, true, &clicked);
-    nt_pointer_t press = make_pointer_at(CFG_CX, CFG_CY, true, true, false);
+    nt_pointer_t press = ui_fx_pointer(CFG_CX, CFG_CY, true, true, false);
     TEST_ASSERT_TRUE(hold_btn_frame(&press, 0.0F, true, &clicked).pressed_now);
 
-    nt_pointer_t hold = make_pointer_at(CFG_CX, CFG_CY, true, false, false);
+    nt_pointer_t hold = ui_fx_pointer(CFG_CX, CFG_CY, true, false, false);
     TEST_ASSERT_TRUE(float_near(hold_btn_frame(&hold, 0.25F, true, &clicked).hold_secs, 0.25F));
 
-    nt_pointer_t rel = make_pointer_at(CFG_CX, CFG_CY, false, false, true);
+    nt_pointer_t rel = ui_fx_pointer(CFG_CX, CFG_CY, false, false, true);
     const nt_ui_interaction_t e = hold_btn_frame(&rel, 0.0F, true, &clicked);
     TEST_ASSERT_TRUE(e.clicked);
     TEST_ASSERT_TRUE(clicked);
@@ -547,11 +537,11 @@ static void test_button_begin_returns_interaction(void) {
 /* ---- a disabled frame returns zero and drops the hold; only a new press restarts it ---- */
 static void test_button_disabled_frame_ends_hold(void) {
     bool clicked = false;
-    nt_pointer_t idle = make_pointer_at(CFG_CX, CFG_CY, false, false, false);
+    nt_pointer_t idle = ui_fx_pointer(CFG_CX, CFG_CY, false, false, false);
     (void)hold_btn_frame(&idle, 0.0F, true, &clicked);
-    nt_pointer_t press = make_pointer_at(CFG_CX, CFG_CY, true, true, false);
+    nt_pointer_t press = ui_fx_pointer(CFG_CX, CFG_CY, true, true, false);
     (void)hold_btn_frame(&press, 0.0F, true, &clicked);
-    nt_pointer_t hold = make_pointer_at(CFG_CX, CFG_CY, true, false, false);
+    nt_pointer_t hold = ui_fx_pointer(CFG_CX, CFG_CY, true, false, false);
     TEST_ASSERT_TRUE(hold_btn_frame(&hold, 0.25F, true, &clicked).pressed);
 
     const nt_ui_interaction_t off = hold_btn_frame(&hold, 0.25F, false, &clicked);

@@ -18,6 +18,7 @@ from ..client import DevApiResultError
 
 
 MODES = ("Crossfade", "Blend space", "Partial body", "Override", "Interruption")
+SCENES = ("Skeleton & Pose", "Skinned Meshes", "Order & Instancing", "Mixing & Crossfades")
 
 
 def _texts(client):
@@ -34,7 +35,9 @@ def _click_text(client, text):
 def _select_scene(client):
     if "Mixing & Crossfades v" in _texts(client):
         return
-    client.ui_click("shell/scene_combo")
+    # A combo's id is its list; its trigger shows the preview text.
+    texts = _texts(client)
+    _click_text(client, next(f"{scene} v" for scene in SCENES if f"{scene} v" in texts))
     client.wait_frames(3)
     _click_text(client, "Mixing & Crossfades")
 
@@ -42,7 +45,8 @@ def _select_scene(client):
 def _select_mode(client, mode):
     if mode in _texts(client) and mode == next((candidate for candidate in MODES if candidate in _texts(client)), None):
         return
-    client.ui_click("mixing/mode")
+    texts = _texts(client)
+    _click_text(client, next(candidate for candidate in MODES if candidate in texts))
     client.wait_frames(3)
     _click_text(client, mode)
 

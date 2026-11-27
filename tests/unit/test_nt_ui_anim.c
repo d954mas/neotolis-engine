@@ -88,8 +88,23 @@ static void test_anim_first_touch_no_flash(void) {
     TEST_ASSERT_TRUE(float_near(r->off_y, 9.0F, 1e-6F));
     TEST_ASSERT_TRUE(float_near(r->opacity, 0.5F, 1e-6F));
     TEST_ASSERT_TRUE(float_near(r->tint_t, 0.75F, 1e-6F));
-    TEST_ASSERT_TRUE(r->valid);
+    TEST_ASSERT_TRUE(r->id != 0U);
     TEST_ASSERT_EQUAL_UINT32(id, r->id);
+}
+
+/* ---- A slot untouched last frame is stale: the next eased step snaps to its target instead of easing from
+ *      the old value. ---- */
+static void test_anim_slot_untouched_last_frame_snaps(void) {
+    s_fx.ctx->frame_dt = 1.0F / 60.0F;
+    const uint32_t id = 0x7777U;
+    const nt_ui_anim_target_t small = {.scale_x = 0.5F, .scale_y = 0.5F, .scale_z = 1.0F, .opacity = 1.0F};
+    const nt_ui_anim_target_t full = {.scale_x = 1.0F, .scale_y = 1.0F, .scale_z = 1.0F, .opacity = 1.0F};
+    const uint32_t gaps[] = {2U, 1U << 16}; /* the second is no gap for a 16-bit stamp */
+    for (int g = 0; g < 2; ++g) {
+        (void)nt_ui_anim_seed(s_fx.ctx, id, &small);
+        s_fx.ctx->current_generation += gaps[g];
+        TEST_ASSERT_TRUE(float_near(nt_ui_anim(s_fx.ctx, id, &full, 10.0F, 0.0F)->scale_x, 1.0F, 1e-6F));
+    }
 }
 
 /* ---- Test 4: open addressing coexists two ids that hash to same base ---- */
@@ -359,5 +374,6 @@ int main(void) {
     RUN_TEST(test_anim_value_t_snaps_when_value_speed_zero);
     RUN_TEST(test_anim_value_t_independent_of_state_speed);
     RUN_TEST(test_anim_button_value_t_zero_regression);
+    RUN_TEST(test_anim_slot_untouched_last_frame_snaps);
     return UNITY_END();
 }

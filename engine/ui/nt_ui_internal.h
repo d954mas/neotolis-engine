@@ -156,12 +156,26 @@ typedef struct {
     int16_t pad[4]; /* hit padding L/R/T/B */
 } nt_ui_interactive_t;
 
-/* Nested-modal cap (fail-early assert on overflow; depth is a counter, no heap). Depth is the
- * overflow guard only — bands come from Clay's relative zIndex, top-targeting from modal_top_z_cur.
- * Build-overridable; raising it requires stride*depth to still fit int16 (see _Static_assert). */
-#ifndef NT_UI_MODAL_MAX_DEPTH
-#define NT_UI_MODAL_MAX_DEPTH 16
+/* Live overlays at once: the overlay stack's capacity (fail-early assert, no heap; nt_ui_begin keeps at most half of it fading).
+ * Each stack slot also spans this many z-bands. Build-overridable. */
+#ifndef NT_UI_OVERLAY_MAX
+#define NT_UI_OVERLAY_MAX 16
 #endif
+_Static_assert(NT_UI_OVERLAY_MAX >= 1 && NT_UI_OVERLAY_MAX * NT_UI_OVERLAY_MAX < INT16_MAX, "NT_UI_OVERLAY_MAX: the tooltip band (stride + MAX * MAX) must fit int16");
+
+/* One overlay stack entry: the stack is the open state (spec: "Input ownership"). Within a frame entries are
+ * only appended (a reopened one leaves a dead entry, id 0), so a slot's band never moves before nt_ui_begin. */
+typedef struct {
+    uint32_t id;       /* 0 = dead (reopened this frame), dropped by the next nt_ui_begin */
+    uint32_t parent;   /* the overlay it was opened inside (a menu level: the level under it), else 0 */
+    uint32_t opener;   /* the row that opened a menu level, else 0 */
+    int16_t close_pad; /* px around the panel where a press is not outside, for its own close */
+    bool open;         /* false while it fades out after a close */
+    bool seen;         /* declared or opened since the last nt_ui_begin: kept by the next prune */
+    bool live;         /* last declared open: its next declaration is OPEN, and it can be the top */
+    uint8_t flags;     /* NT_UI_OVERLAY_*: its kind from the open, its own closes from the declaration */
+    uint8_t reason;    /* nt_ui_popup_close_t not yet reported to its begin */
+} nt_ui_overlay_t;
 
 /* Bound the storage and per-row work of NT_UI_CHECKS duplicate detection. */
 #ifndef NT_UI_COMBO_DUP_KEY_WINDOW
@@ -178,9 +192,23 @@ typedef struct {
      * none). Lives from the press edge to the release, independent of active_id (an empty-area press
      * has none). */
     uint32_t pending_scroll;
-    bool hold_live;    /* false once the pointer left the hitbox; only a new press restarts the hold */
-    uint8_t drag_axes; /* NT_UI_DRAG_* the capturing widget drags along itself (from its step desc) */
+    uint32_t lost_id;      /* the holder whose capture nt_ui_begin ended without its release: its step reads lost once */
+    float wheel_idle;      /* UI time since this pointer's last wheel tick: a latch older than the latch time drops */
+    float wheel_anchor[2]; /* where the wheel latch started: moving past the drag slop drops it */
+    bool hold_live;        /* false once the pointer left the hitbox; only a new press restarts the hold */
+    bool ui_gesture;       /* the gesture's first press had a target: it is the UI's until every button is up */
+    bool right_press;      /* the gesture's first press was the right button */
+    uint8_t drag_axes;     /* NT_UI_DRAG_* the capturing widget drags along itself (from its step desc) */
 } nt_ui_capture_t;
+
+/* Ends a capture without its release (an overlay, a scroll claim, a widget that did not step, a swallowed release):
+ * the holder's step reports lost once. The first drop of a begin keeps its holder. */
+static inline void nt_ui_internal_capture_drop(nt_ui_capture_t *cap) {
+    if (cap->active_id != 0U && cap->lost_id == 0U) {
+        cap->lost_id = cap->active_id;
+    }
+    cap->active_id = 0U;
+}
 
 /* Lives at arena head; hot fields first. Per-ctx — no module globals. Field order is deliberately
  * hot-first for cache locality, not padding-optimal; a context is per-UI (not a dense array), so the
@@ -211,19 +239,16 @@ struct nt_ui_context {
      * here by alignment (after the 4B-aligned captures) to avoid adding struct padding. */
     nt_ui_hot_t pointer_hot[NT_INPUT_MAX_POINTERS];
     float pointer_occlusion[NT_INPUT_MAX_POINTERS]; /* max world ray distance; default +inf = no cutoff */
-    /* Per pointer and axis (0 = x, 1 = y): the scroll allowed to consume this frame's wheel. */
+    /* Per pointer and axis (0 = x, 1 = y): the scroll the wheel is latched to, which consumes this frame's wheel. */
     uint32_t wheel_owner[NT_INPUT_MAX_POINTERS][2];
-    /* Top-modal targeting with the standard 1-frame IM lag: _cur tracks the DEEPEST modal id seen
-     * this frame; nt_ui_begin commits it into _prev, which the Esc/backdrop close-scan targets so
-     * only the genuinely-topmost modal consumes the event (same-frame nesting can't be known at
-     * the inner begin's return, so we use last frame's resolved top). */
-    uint32_t modal_top_id_prev;
-    uint32_t modal_top_id_cur;
-    /* Highest band claimed this frame; ties go to the last declared, matching the pointer arbiter that
-     * delivers the dismiss click. INT32_MIN until the first claim. */
-    int32_t modal_top_z_cur;
-    /* Keyboard-focus arbiter (0 = none): a press sets it; Esc or a disabled declaration clears it.
-     * Survives frames; begin only drops an orphan and applies a pending Tab. */
+    /* The top overlay read at nt_ui_begin from the stack: the highest live entry with a catcher (0 = none). */
+    uint32_t overlay_top;
+    /* The overlay stack in open order, which is also its paint and hit order (slot i takes band
+     * stride + i * NT_UI_OVERLAY_MAX), and the ids of the overlays open in the declaration. */
+    nt_ui_overlay_t overlays[NT_UI_OVERLAY_MAX];
+    uint32_t overlay_decl[NT_UI_OVERLAY_MAX];
+    /* Keyboard-focus arbiter (0 = none): a press on a field sets it; Esc, a disabled declaration, a press off it,
+     * a drag that takes its press or an overlay opening above it clears it. Survives frames. */
     uint32_t focused_input_id;
     /* Tab bookkeeping for one frame: the focused field seeing Tab sets _seek and points _pending at
      * _first_id (the earliest enabled field, for wrap); the next enabled field declared after it
@@ -231,21 +256,24 @@ struct nt_ui_context {
     uint32_t focus_tab_seek;
     uint32_t focus_tab_pending;
     uint32_t focus_first_id;
+    /* The frame's one keyboard owner, fixed at nt_ui_begin: the focused field, else last frame's top overlay
+     * (0 = the game's). A field a press focuses mid-frame reads keys from the next frame. */
+    uint32_t keys_owner;
     /* Raw rich-text per-block caps (0 = compile-time NT_UI_RICH_MAX_* default); resolved in
      * nt_ui_rich_begin, which owns the rich #defines. Raw here so this widget-agnostic header stays
      * rich-text-agnostic. Slotted into the uint32 run so they add no struct padding. */
     uint32_t rich_max_runs;
     uint32_t rich_max_styles;
     uint32_t rich_max_text_bytes;
-    /* Band each overlay level declares above the floating enclosing it; validated in create_context (> 1). */
-    int16_t modal_zband_stride;
-    uint8_t active_modal_depth;
+    /* Absolute band of overlay stack slot 0. Validated in create_context. */
+    int16_t overlay_zband_stride;
+    uint8_t overlay_count; /* entries in overlays[] */
+    uint8_t overlay_depth; /* overlays open in the declaration (begin..end) */
+    /* Overlay depth of the popup whose body is inert, OPENING or CLOSING (0 = none); cleared by its nt_ui_popup_end. */
+    uint8_t inert_from;
+    /* Overlay depth of the closed popup whose subtree is CLOSING (0 = none): nothing in it is live. */
+    uint8_t closing_from;
     uint8_t capture_seen[NT_INPUT_MAX_POINTERS];
-    /* Modal-presence across frames: _cur set when any modal declares a backdrop this frame;
-     * nt_ui_begin commits it into _prev. nt_ui_modal_active reads _prev so the game can gate its
-     * next-frame hotkeys (the live depth is always 0 by nt_ui_end, can't be queried after). */
-    bool modal_present_cur;
-    bool modal_present_prev;
 
     /* Buttons do not nest (asserted). */
     struct {
@@ -283,22 +311,17 @@ struct nt_ui_context {
         bool active;      /* between vlist_begin/vlist_end */
     } pending_vlist;
 
-    /* The immediate-menu scratch lives in the game-owned nt_ui_menu_ctx_t (engine/ui/nt_ui_menu.h): it is
-     * heavy (~4.2 KB) and would otherwise drag that header into this one. tabbar/combo scratch are
-     * void*-decoupled and cheap, so they stay below. */
-
     /* Immediate-combo begin/selectable/end. Combos do NOT nest (single level, asserted). combo_begin
-     * stashes the per-call style ptr + the game-owned open ptr + the combo id + layers; each
+     * stashes the per-call style ptr + the combo id + layers; each
      * combo_selectable derives its INTERACTIVE row id via mix(id, key) only (KEY-STABLE — reorder/hide a
      * row mid-press never shifts a fixed-key row's identity); row_idx is kept only for the positional LABEL
      * cell id + the test probe. The GAME owns int *selected and writes it on the selectable's clicked return;
-     * the combo only clears *open on a row click. trigger_open marks a custom preview element
+     * a row click closes the list. trigger_open marks a custom preview element
      * open between combo_preview_begin/end; row_open marks a custom selectable open between
      * selectable_begin/end (its id + click latch deferred to selectable_end). */
     struct {
         const void *style;    /* nt_ui_dropdown_style_t* (void to keep the internal header widget-agnostic) */
         uint32_t id;          /* the combo id (scope for the row fmix) */
-        bool *open;           /* game-owned open flag; a selectable click clears it */
         uint32_t row_id;      /* the open custom selectable's row id (for selectable_end's step + click latch) */
         float trigger_open_t; /* eased open amount stashed by the custom trigger; combo_preview_end's chevron rotation */
         uint16_t row_idx;     /* per-frame running row index (positional LABEL cell id + test probe only, NOT the interactive id) */
@@ -426,8 +449,6 @@ struct nt_ui_context {
     bool inspector_active;
     uint32_t inspector_highlight_id;
     uint32_t inspector_selected_id;
-    /* Pointer inside sidebar footprint — gates nt_ui_step to zeroed return. */
-    bool inspector_pointer_consumed;
     /* Prev-frame tree truncation state — warn only on the OFF->ON edge, not every frame. */
     bool inspector_was_truncated;
 
@@ -540,6 +561,11 @@ int32_t nt_ui_internal_test_get_tree_root_for_elem(const nt_ui_context_t *ctx, i
 /* The hit-snapshot slot of an element declared last frame, else -1 (id 0 included). */
 int32_t nt_ui_internal_live_slot(const nt_ui_context_t *ctx, uint32_t id);
 
+/* A popup's catcher id derives from the popup id (salted) so the catcher's own interaction cell never
+ * aliases the panel id in the registry / capture table. */
+#define NT_UI_POPUP_CATCHER_SALT 0x500CA7C0U
+static inline uint32_t nt_ui_internal_popup_catcher_id(uint32_t id) { return nt_ui_derived_id(id, NT_UI_POPUP_CATCHER_SALT); }
+
 /* Shared overlay helpers — single source of truth for the Y-flip + per-level accum convention. */
 const nt_ui_debug_zone_t *nt_ui_internal_find_debug_zone(const nt_ui_context_t *ctx, uint32_t id);
 
@@ -575,12 +601,68 @@ Clay_Vector2 nt_ui_internal_scroll_pane_offset(nt_ui_context_t *ctx, uint32_t id
 /* How a hit on a registry record counts in the front-most resolve. */
 typedef enum { NT_UI_HIT_NONE = 0, NT_UI_HIT, NT_UI_HIT_PANE } nt_ui_hit_kind_t;
 
+/* A pointer's buttons as bit masks (bit = nt_button_t), in one scan. */
+typedef struct {
+    uint8_t down;
+    uint8_t released;
+    uint8_t pressed;
+} nt_ui_buttons_t;
+static inline nt_ui_buttons_t nt_ui_internal_buttons(const nt_pointer_t *p) {
+    nt_ui_buttons_t m = {0};
+    for (int b = 0; b < NT_BUTTON_MAX; ++b) {
+        m.down |= p->buttons[b].is_down ? (uint8_t)(1U << b) : 0U;
+        m.released |= p->buttons[b].is_released ? (uint8_t)(1U << b) : 0U;
+        m.pressed |= p->buttons[b].is_pressed ? (uint8_t)(1U << b) : 0U;
+    }
+    return m;
+}
+
+/* Pointer i is in a gesture the game owns: the UI reads no target, no press and no wheel for it. */
+static inline bool nt_ui_internal_game_gesture(const nt_ui_context_t *ctx, uint32_t i) {
+    const nt_ui_buttons_t m = nt_ui_internal_buttons(&ctx->frame_pointers[i]);
+    return (m.down | m.released) != 0U && !ctx->captures[i].ui_gesture;
+}
+
 /* nt_ui_begin's gesture arbiter (nt_ui_scroll.c): starts press records, decides slop crossings,
- * routes the wheel. Reads last frame's layout and this frame's front-most records. */
+ * routes and latches the wheel. Reads last frame's layout and this frame's front-most records. */
 void nt_ui_internal_scroll_arbitrate(nt_ui_context_t *ctx);
+
+#if NT_UI_DEBUG_TOOLS
+/* The inspector sidebar's element id: a record above every game record, under its own panes. */
+uint32_t nt_ui_internal_inspector_root_id(void);
+#endif
 
 /* How a hit on record `id` counts in the front-most resolve: a scroll's own id is its surface. */
 nt_ui_hit_kind_t nt_ui_internal_record_kind(nt_ui_context_t *ctx, uint32_t id);
+
+/* True when `id` lies at or above last frame's top overlay catcher in the stacking order, in 2D and 3D (no top,
+ * an inspector pane and id 0 always belong): the top overlay owns gestures, text focus and Tab stops. */
+bool nt_ui_internal_owned_by_top(nt_ui_context_t *ctx, uint32_t id);
+
+/* Router reads for overlays and fields (spec: "Input ownership"): `id` is the top overlay fixed at begin, owns
+ * this frame's keys, or gets the primary pointer (an idle one unless it is the top and the primary is in no
+ * game gesture); outside an inert subtree. */
+static inline bool nt_ui_internal_is_top(const nt_ui_context_t *ctx, uint32_t id) { return id == ctx->overlay_top && ctx->inert_from == 0U; }
+static inline bool nt_ui_internal_owns_keys(const nt_ui_context_t *ctx, uint32_t id) { return id == ctx->keys_owner && ctx->inert_from == 0U; }
+const nt_pointer_t *nt_ui_internal_top_pointer(const nt_ui_context_t *ctx, uint32_t id);
+/* nt_ui_hovered_within for the primary pointer only: menu rows follow the pointer their aim corridor reads. */
+bool nt_ui_internal_primary_within(const nt_ui_context_t *ctx, uint32_t id);
+/* `id` is live: outside an inert subtree, at or above the top's catcher (spec: "Input ownership"). */
+static inline bool nt_ui_internal_live(nt_ui_context_t *ctx, uint32_t id) { return ctx->inert_from == 0U && nt_ui_internal_owned_by_top(ctx, id); }
+
+/* The overlay stack (spec: "Input ownership"). open pushes or reopens `id` inside `parent` (opened by
+ * `opener`, a menu row, or 0) and closes the light overlays that are not its ancestors; close starts the fade of
+ * `id` and of the overlays opened inside it; index returns its slot or -1; here is the innermost open overlay
+ * declared at the call without a `skip` flag (0 = none); last_open is the last opened one still open (0 = none). */
+#define NT_UI_OVERLAY_LIGHT ((uint8_t)(1U << 0))   /* light dismiss: an opening overlay that is not its descendant closes it */
+#define NT_UI_OVERLAY_CATCHER ((uint8_t)(1U << 1)) /* gates the UI under it: it can be the top */
+#define NT_UI_OVERLAY_ESC ((uint8_t)(1U << 2))     /* its own close on the Esc it owns */
+#define NT_UI_OVERLAY_OUTSIDE ((uint8_t)(1U << 3)) /* its own close on a press outside its panel */
+void nt_ui_internal_overlay_open(nt_ui_context_t *ctx, uint32_t id, uint32_t parent, uint32_t opener, uint8_t flags);
+void nt_ui_internal_overlay_close(nt_ui_context_t *ctx, uint32_t id, uint8_t reason);
+int32_t nt_ui_internal_overlay_index(const nt_ui_context_t *ctx, uint32_t id);
+uint32_t nt_ui_internal_overlay_here(const nt_ui_context_t *ctx, uint8_t skip);
+uint32_t nt_ui_internal_overlay_last_open(const nt_ui_context_t *ctx);
 
 /* Adds a registry record for the front-most resolve. */
 void nt_ui_internal_register_interactive(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lrtb[4]);

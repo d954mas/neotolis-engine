@@ -36,9 +36,9 @@ EM_JS(void, nt_window_js_set_backing_size, (int w, int h), {
 
 /* The JS listeners below write these enum values as numbers. */
 _Static_assert(NT_INPUT_EV_KEY == 0 && NT_INPUT_EV_CHAR == 1 && NT_INPUT_EV_MOUSE_MOVE == 2 && NT_INPUT_EV_MOUSE_LEAVE == 4 && NT_INPUT_EV_CONTACT_DOWN == 5 && NT_INPUT_EV_CONTACT_MOVE == 6 &&
-                   NT_INPUT_EV_CONTACT_UP == 7 && NT_INPUT_EV_WHEEL == 8 && NT_INPUT_EV_FOCUS_LOST == 9,
+                   NT_INPUT_EV_CONTACT_UP == 7 && NT_INPUT_EV_WHEEL == 8 && NT_INPUT_EV_FOCUS_LOST == 9 && NT_INPUT_EV_POINTER_CANCEL == 10,
                "EV_* in nt_window_web_register_input");
-_Static_assert(NT_POINTER_TOUCH == 1 && NT_POINTER_PEN == 2, "the contact type in nt_window_web_register_input");
+_Static_assert(NT_POINTER_MOUSE == 0 && NT_POINTER_TOUCH == 1 && NT_POINTER_PEN == 2, "the contact type in nt_window_web_register_input");
 _Static_assert(NT_TEXT_INPUT_URL == 3 && NT_TEXT_INPUT_PASSWORD == 4, "modes in nt_window_js_set_text_input_mode");
 
 /* One DOM event: kind = nt_input_event_kind_t, a..f its fields. CSS coordinates map with the last
@@ -62,6 +62,7 @@ EMSCRIPTEN_KEEPALIVE void nt_window_web_on_input(int kind, double a, double b, d
     case NT_INPUT_EV_CONTACT_DOWN:
     case NT_INPUT_EV_CONTACT_MOVE:
     case NT_INPUT_EV_CONTACT_UP:
+    case NT_INPUT_EV_POINTER_CANCEL:
         ev.contact.id = (uint32_t)(int32_t)a; /* pointerId is a signed long */
         ev.contact.x = (float)b * scale;
         ev.contact.y = (float)c * scale;
@@ -217,7 +218,7 @@ EM_JS(void, nt_window_web_register_input, (const char *const *codes, int count),
     var onInput = Module['_nt_window_web_on_input'];
     /* nt_input_event_kind_t (input/nt_input_feed.h) */
     var EV_KEY = 0, EV_CHAR = 1, EV_MOUSE_MOVE = 2, EV_MOUSE_LEAVE = 4, EV_CONTACT_DOWN = 5, EV_CONTACT_MOVE = 6,
-        EV_CONTACT_UP = 7, EV_WHEEL = 8, EV_FOCUS_LOST = 9;
+        EV_CONTACT_UP = 7, EV_WHEEL = 8, EV_FOCUS_LOST = 9, EV_POINTER_CANCEL = 10;
     function ev(t, a, b, c, d, e, f) {
         onInput(t, a || 0, b || 0, c || 0, d || 0, e || 0, f || 0);
     }
@@ -324,9 +325,10 @@ EM_JS(void, nt_window_web_register_input, (const char *const *codes, int count),
 
     canvas.addEventListener("pointercancel", function(e) {
         if (isContact(e)) {
-            contact(EV_CONTACT_UP, e);
+            contact(EV_POINTER_CANCEL, e);
         } else {
-            mouseMove(e, 0);
+            mouseOwned = false;
+            ev(EV_POINTER_CANCEL); /* type 0: the mouse */
         }
         e.preventDefault();
     });
